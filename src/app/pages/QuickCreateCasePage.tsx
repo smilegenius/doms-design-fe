@@ -230,7 +230,6 @@ type SavedDraft = {
   // IMPRESSION_COURIERS or free-text under "Other". Empty otherwise.
   caseSourceCourier: string;
   selections: ServiceSelection[];
-  caseInstructions: string;
   caseInstructionsFiles: string[];
   savedAt: string;
 };
@@ -852,7 +851,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       labId: labMatch?.id ?? '',
       dentistId: dentistMatch?.id ?? '',
       selections,
-      caseInstructions: prefillDraft.emailPrescription?.bodyPreview ?? '',
       // Email-sourced cases default to the Email case source so the lab
       // sees how the data arrived. Manual cases leave it blank for the
       // user to pick.
@@ -888,7 +886,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
 
   // Optional extras kept behind drawers / collapsibles.
   const [patientExtras, setPatientExtras] = useState<PatientExtras>(draft?.patientExtras ?? EMPTY_EXTRAS);
-  const [caseInstructions, setCaseInstructions] = useState(draft?.caseInstructions ?? prefillDraftSeed?.caseInstructions ?? '');
   // Files attached to the Case Instructions — separate from Case Source
   // uploads. These are general supporting docs (photos, x-rays, refs).
   const [caseInstructionsFiles, setCaseInstructionsFiles] = useState<string[]>(draft?.caseInstructionsFiles ?? []);
@@ -937,6 +934,15 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // Validation gate
   const canSubmit = patientName.trim().length > 0 && !!labId && selections.length > 0;
 
+  // Per-service instructions flattened for the order-form previews — one
+  // "Service: note" line per service that has any. Captured in each
+  // service's details drawer; the Case Instructions card shows the same
+  // content as clickable bullets.
+  const combinedInstructions = selections
+    .filter(s => s.additional?.trim())
+    .map(s => `${getServiceDisplayName(s)}: ${s.additional!.trim()}`)
+    .join('\n');
+
   function toggleService(itemId: string) {
     setSelections(prev => {
       const exists = prev.find(s => s.itemId === itemId);
@@ -980,7 +986,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       caseSourceScanner,
       caseSourceCourier,
       selections,
-      caseInstructions,
       caseInstructionsFiles,
       savedAt,
     });
@@ -1173,7 +1178,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
               caseSourceScanner={caseSourceScanner}
               caseSourceCourier={caseSourceCourier}
               selections={selections}
-              notes={caseInstructions}
+              notes={combinedInstructions}
             />
           ) : prefillDraft?.source === 'email' && prefillDraft.emailPrescription ? (
           <EmailPreviewPane caseData={prefillDraft} />
@@ -1181,7 +1186,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           <PrescriptionUploadPane
             onApply={(p) => {
               setPatientName(p.patientName);
-              setCaseInstructions(p.instructions);
               // Find a matching service in the catalogue and seed the
               // selection with the detected teeth + material + shade so
               // the right column lights up just like an email-prefilled
@@ -1685,7 +1689,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             )}
           </div>
 
-          {/* ── Case Instructions — textarea + file uploads, all optional ── */}
+          {/* ── Case Instructions — read-only roll-up of the per-service
+              notes (captured in each service's details drawer) + general
+              file uploads. Each bullet navigates to its service drawer so
+              edits happen in one place. ── */}
           <div className="bg-white border border-[#E0E0E6] rounded-2xl p-4 order-4">
             <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
               <div className="flex items-center gap-1.5">
@@ -1693,22 +1700,48 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                   <FileText className="w-3 h-3" />
                 </span>
                 <h3 className="text-xs font-bold text-[#030213] uppercase tracking-wider">Case Instructions</h3>
-                <span className="text-[10px] text-[#A0A0B0] italic">— optional</span>
+                <span className="text-[10px] text-[#A0A0B0] italic">— per service, captured in its details</span>
               </div>
-              {(caseInstructions.trim().length > 0 || caseInstructionsFiles.length > 0) && (
+              {(selections.some(s => s.additional?.trim()) || caseInstructionsFiles.length > 0) && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#16A34A] uppercase tracking-wider">
                   <Check className="w-3 h-3" strokeWidth={3} />
                   Added
                 </span>
               )}
             </div>
-            <textarea
-              value={caseInstructions}
-              onChange={(e) => setCaseInstructions(e.target.value)}
-              rows={2}
-              placeholder="Write here… (Anything the lab should know)"
-              className="w-full px-3 py-2 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] resize-none mb-2"
-            />
+            {selections.length === 0 ? (
+              <div className="mb-2 px-3 py-3 rounded-lg border border-dashed border-[#D4CEE1] text-[11px] text-[#A0A0B0] text-center">
+                Instructions live on each service — add a service first, then write its notes in the details drawer.
+              </div>
+            ) : (
+              <div className="space-y-1.5 mb-2">
+                {selections.map((sel, idx) => {
+                  const name = getServiceDisplayName(sel);
+                  const note = sel.additional?.trim();
+                  const color = SERVICE_PALETTE[idx % SERVICE_PALETTE.length];
+                  return (
+                    <button
+                      key={sel.itemId}
+                      type="button"
+                      onClick={() => setActiveDetailsId(sel.itemId)}
+                      title={`Edit ${name} instructions`}
+                      className="w-full group flex items-start gap-2 px-2.5 py-2 rounded-lg border border-[#E8EAF6] bg-[#FAFBFF] hover:border-[#BFDBFE] hover:bg-[#F5F8FF] text-left transition-colors"
+                    >
+                      <span className="w-2 h-2 rounded-full mt-1 flex-shrink-0" style={{ background: color }} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[11px] font-bold text-[#030213] leading-tight">{name}</span>
+                        {note ? (
+                          <span className="block text-[11px] text-[#5A5568] leading-snug mt-0.5 whitespace-pre-line">{note}</span>
+                        ) : (
+                          <span className="block text-[10px] italic text-[#A0A0B0] mt-0.5">No instructions yet — tap to add</span>
+                        )}
+                      </span>
+                      <Pencil className="w-3 h-3 text-[#A0A0B0] group-hover:text-[#4D8EF7] flex-shrink-0 mt-0.5 transition-colors" />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             {/* Upload zone — clicking adds a fake attachment for the demo.
                 In production this would open the OS file picker. */}
             <button
@@ -1890,7 +1923,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           caseSourceScanner={caseSourceScanner}
           caseSourceCourier={caseSourceCourier}
           selections={selections}
-          notes={caseInstructions}
+          notes={combinedInstructions}
           onClose={() => setOrderFormOpen(false)}
         />
       )}
@@ -2509,6 +2542,19 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove }: {
             </Mini>
           </CategoryBlock>
         )}
+
+        {/* ── Instructions — per-service notes for the lab. Rolled up as
+            clickable bullets on the page's Case Instructions card and as
+            "Service: note" lines on the order-form preview. ── */}
+        <Mini label="Instructions for the lab">
+          <textarea
+            value={selection.additional || ''}
+            onChange={(e) => onUpdate({ additional: e.target.value })}
+            rows={3}
+            placeholder="e.g. shade matching, fit notes, patient sensitivities…"
+            className="w-full px-3 py-2 text-sm text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] resize-none"
+          />
+        </Mini>
 
       </div>
       </div>
