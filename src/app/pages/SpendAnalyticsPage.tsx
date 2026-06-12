@@ -51,21 +51,31 @@ const SCORE_DIST: { range: string; count: number; suppliers?: string[] }[] = [
 ];
 const SCORE_MAX = Math.max(...SCORE_DIST.map(s => s.count));
 
-// Flag breakdown
-const FLAGS = [
-  { label: 'Amount Above Norm',      severity: 'High',     count: 11 },
-  { label: 'Due Date Already Passed', severity: 'Critical', count: 8  },
-  { label: 'VAT Number Missing',     severity: 'Medium',   count: 6  },
-  { label: 'Dentist Mismatch',       severity: 'Medium',   count: 4  },
-  { label: 'Supplier Not Approved',  severity: 'High',     count: 3  },
-  { label: 'Duplicate Invoice',      severity: 'Critical', count: 2  },
-];
+// Payment funnel — this cycle's invoices from received through paid. The
+// drop at each stage is the story: 500 received, 450 paid, 50 left unpaid —
+// 18 of those approved too late for the cut-off, so they roll into the next
+// payment cycle. `dropNote` explains the loss versus the previous stage.
+const PAYMENT_FUNNEL = {
+  total: 500,
+  stages: [
+    { label: 'Received', count: 500, color: '#34D399' },
+    { label: 'Approved', count: 468, color: '#4D8EF7', dropNote: 'awaiting approval / disputed' },
+    { label: 'Paid',     count: 450, color: '#A59DFF', dropNote: 'approved late — moved to next cycle' },
+  ] as { label: string; count: number; color: string; dropNote?: string }[],
+  unpaid: 50,
+  awaitingApproval: 32,
+  movedToNextCycle: 18,
+};
 
-// Critical invoices
-const CRITICAL_INVOICES = [
-  { number: 'INV-20250509-001', supplier: 'FreshSmile Supplies',  score: 34, flags: ['Duplicate Invoice', 'Supplier Not Approved', 'Domain Not Allow-listed'] },
-  { number: 'DL-9003-B',        supplier: 'Eurodontic Ltd',        score: 61, flags: ['Amount Above Norm', 'PO Number Missing'] },
-  { number: 'NLAB-0044',        supplier: 'Dentsply Sirona',       score: 82, flags: ['High-value — dual sign-off required'] },
+// Suppliers whose invoices carry active flags — grouped by source so the
+// team chases the supplier, not individual documents. `flagged` of `total`
+// invoices this period; `worst` is the highest severity among the flags.
+const SUPPLIER_ISSUES = [
+  { supplier: 'FreshSmile Supplies', flagged: 5, total: 12, worst: 'Critical', flags: ['Duplicate Invoice', 'Supplier Not Approved'] },
+  { supplier: 'Eurodontic Ltd',      flagged: 3, total: 18, worst: 'High',     flags: ['Amount Above Norm', 'PO Number Missing'] },
+  { supplier: 'Dentsply Sirona',     flagged: 2, total: 31, worst: 'High',     flags: ['High-value — dual sign-off'] },
+  { supplier: 'Medit Ireland',       flagged: 2, total: 9,  worst: 'Medium',   flags: ['VAT Number Missing'] },
+  { supplier: 'New Dental Co',       flagged: 1, total: 4,  worst: 'Medium',   flags: ['Dentist Mismatch'] },
 ];
 
 // Monthly spend by category (last 6 months)
@@ -474,45 +484,143 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
               </Card>
             </div>
 
-            {/* Flag Breakdown + Critical Invoices */}
+            {/* Payment Funnel + Suppliers With Issues */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-              {/* Flag Breakdown */}
-              <Card title="Flag Breakdown" subtitle="Sorted by frequency">
-                <div className="space-y-0">
-                  <div className="grid grid-cols-[1fr_auto_auto] text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest pb-2 border-b border-[#F0EFF6] mb-2">
-                    <span>Flag</span>
-                    <span className="text-right pr-4">Severity</span>
-                    <span className="text-right">Count</span>
+              {/* Payment Funnel — received → approved → paid, with the
+                  unpaid remainder split into "can still make it" vs
+                  "moved to next cycle". Bar widths are visually scaled
+                  (not strictly proportional) so the funnel shape reads;
+                  the true counts + % of total are printed on each bar. */}
+              <Card
+                title="Payment Funnel"
+                subtitle={`${PAYMENT_FUNNEL.total} invoices this cycle — ${PAYMENT_FUNNEL.unpaid} not paid yet`}
+                action={
+                  <button
+                    onClick={() => onNavigateToInvoices?.('left_over')}
+                    className="text-[11px] font-semibold text-[#4D8EF7] hover:text-[#1565C0] inline-flex items-center gap-0.5"
+                  >
+                    View unpaid <ChevronRight className="w-3 h-3" />
+                  </button>
+                }
+              >
+                <div>
+                  {/* Funnel — label | shape | count rails. The bars carry no
+                      text; stage names sit left, counts right, and the drop
+                      notes ride the tapered connectors between bars. */}
+                  <div className="space-y-0">
+                    {PAYMENT_FUNNEL.stages.map((s, i) => {
+                      const counts = PAYMENT_FUNNEL.stages.map(x => x.count);
+                      const max = Math.max(...counts), min = Math.min(...counts);
+                      const widthOf = (c: number) => (max === min ? 100 : 58 + 42 * ((c - min) / (max - min)));
+                      const w = widthOf(s.count);
+                      const prev = i > 0 ? PAYMENT_FUNNEL.stages[i - 1] : null;
+                      const pct = Math.round((s.count / PAYMENT_FUNNEL.total) * 100);
+                      return (
+                        <div key={s.label}>
+                          {/* Tapered connector — narrows from the previous
+                              bar's width to this one's; the drop note is
+                              overlaid, never inside a bar. */}
+                          {prev && (
+                            <div className="grid grid-cols-[80px_1fr_56px] gap-x-3 items-center">
+                              <span />
+                              <div className="relative h-8">
+                                <div
+                                  className="absolute inset-0"
+                                  style={{
+                                    background: `linear-gradient(180deg, ${prev.color}30, ${s.color}1C)`,
+                                    clipPath: `polygon(${50 - widthOf(prev.count) / 2}% 0, ${50 + widthOf(prev.count) / 2}% 0, ${50 + w / 2}% 100%, ${50 - w / 2}% 100%)`,
+                                  }}
+                                />
+                                <div className="relative h-full flex items-center justify-center gap-1 text-[10px] text-[#717182]">
+                                  <TrendingDown className="w-3 h-3 text-[#E65100] flex-shrink-0" />
+                                  <span className="font-bold text-[#E65100]">−{prev.count - s.count}</span>
+                                  <span className="truncate">{s.dropNote}</span>
+                                </div>
+                              </div>
+                              <span />
+                            </div>
+                          )}
+                          {/* Stage row — clean bar, words on the rails */}
+                          <div className="grid grid-cols-[80px_1fr_56px] gap-x-3 items-center">
+                            <span className="text-[11px] font-semibold text-[#5A5568] text-right leading-tight">{s.label}</span>
+                            <div className="flex justify-center">
+                              <div
+                                className="h-7 rounded-md transition-all duration-500"
+                                style={{
+                                  width: `${w}%`,
+                                  background: `linear-gradient(90deg, ${s.color}, ${s.color}B8)`,
+                                  boxShadow: `0 2px 8px ${s.color}50`,
+                                }}
+                              />
+                            </div>
+                            <div className="leading-tight">
+                              <span className="block text-sm font-bold text-[#030213] tabular-nums">{s.count}</span>
+                              <span className="block text-[10px] text-[#A0A0B0] tabular-nums">{pct}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  {FLAGS.map((f, i) => (
-                    <div key={i} className="grid grid-cols-[1fr_auto_auto] items-center py-2.5 border-b border-[#F8F8F8] last:border-b-0">
-                      <span className="text-xs text-[#030213]">{f.label}</span>
-                      <div className="pr-4"><SeverityBadge s={f.severity} /></div>
-                      <span className="text-sm font-bold text-[#030213] text-right">{f.count}</span>
+                  {/* Unpaid remainder — where the 50 stand */}
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <div className="px-3 py-2.5 rounded-lg bg-[#FFF7ED] border border-[#FED7AA] flex items-start gap-2.5">
+                      <span className="w-7 h-7 rounded-md bg-white border border-[#FED7AA] flex items-center justify-center flex-shrink-0">
+                        <AlertTriangle className="w-3.5 h-3.5 text-[#E65100]" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-lg font-bold text-[#E65100] leading-none">{PAYMENT_FUNNEL.awaitingApproval}</p>
+                        <p className="text-[10px] text-[#9A3412] mt-1 leading-tight">Awaiting approval — can still make this cycle</p>
+                      </div>
                     </div>
-                  ))}
+                    <div className="px-3 py-2.5 rounded-lg bg-[#FFF1F2] border border-[#FECACA] flex items-start gap-2.5">
+                      <span className="w-7 h-7 rounded-md bg-white border border-[#FECACA] flex items-center justify-center flex-shrink-0">
+                        <RefreshCw className="w-3.5 h-3.5 text-[#D4183D]" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-lg font-bold text-[#D4183D] leading-none">{PAYMENT_FUNNEL.movedToNextCycle}</p>
+                        <p className="text-[10px] text-[#9F1239] mt-1 leading-tight">Moved to next payment cycle</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </Card>
 
-              {/* Recent Critical Invoices */}
-              <Card title="Recent Critical Invoices" subtitle="Critical or high severity flags">
-                <div className="space-y-3">
-                  {CRITICAL_INVOICES.map((inv, i) => (
-                    <div key={i} className="flex items-start gap-3 p-3 bg-[#FFF1F2] border border-[#FECACA] rounded-xl">
+              {/* Suppliers With Issues — flagged invoices grouped by the
+                  supplier they came from, worst severity first. */}
+              <Card title="Suppliers With Issues" subtitle="Invoices from these suppliers have active flags">
+                <div className="space-y-0">
+                  {SUPPLIER_ISSUES.map((s, i) => (
+                    <div key={i} className="flex items-center gap-3 py-2.5 border-b border-[#F8F8F8] last:border-b-0">
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-[11px] font-bold ${
+                        s.worst === 'Critical' ? 'bg-[#FFF1F2] text-[#D4183D]'
+                        : s.worst === 'High'   ? 'bg-[#FFF7ED] text-[#E65100]'
+                                               : 'bg-[#F3F3F5] text-[#5A5568]'
+                      }`}>
+                        {s.supplier.split(' ').map(p => p[0]).slice(0, 2).join('')}
+                      </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <p className="text-xs font-bold text-[#030213]">{inv.number}</p>
-                          <span className={`text-sm font-bold ${inv.score < 50 ? 'text-[#D4183D]' : inv.score < 80 ? 'text-[#E65100]' : 'text-[#2E7D32]'}`}>
-                            {inv.score}<span className="text-[10px] text-[#A0A0B0] font-normal"> /100</span>
-                          </span>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-bold text-[#030213] truncate">{s.supplier}</p>
+                          <SeverityBadge s={s.worst} />
                         </div>
-                        <p className="text-[11px] text-[#717182] mb-2">{inv.supplier}</p>
-                        <div className="flex flex-wrap gap-1">
-                          {inv.flags.map((f, j) => (
-                            <span key={j} className="text-[9px] font-medium bg-[#FFF1F2] text-[#D4183D] px-1.5 py-0.5 rounded-full">{f}</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {s.flags.map((f, j) => (
+                            <span
+                              key={j}
+                              className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
+                                s.worst === 'Critical' ? 'bg-[#FFF1F2] text-[#D4183D]' : 'bg-[#FFF7ED] text-[#9A3412]'
+                              }`}
+                            >
+                              {f}
+                            </span>
                           ))}
                         </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-bold text-[#030213] leading-none">{s.flagged}</p>
+                        <p className="text-[9px] text-[#A0A0B0] mt-0.5">of {s.total} invoices</p>
                       </div>
                     </div>
                   ))}

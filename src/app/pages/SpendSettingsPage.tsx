@@ -16,6 +16,7 @@ import { GL_ACCOUNTS } from '../data/suppliersData';
 type Tab = 'fields' | 'workflows' | 'extraction' | 'integrations';
 type InvoiceTab = 'inbox' | 'rag' | 'rules' | 'approval' | 'po';
 type SupplierTab = 'fields' | 'email';
+type ExtractionTab = 'setup' | 'email';
 
 const TABS: { id: Tab; label: string; description: string; icon: any }[] = [
   { id: 'fields',       label: 'Supplier',               description: 'Onboarding fields & email templates', icon: Sliders },
@@ -45,6 +46,13 @@ const INVOICE_TABS: { id: InvoiceTab; label: string; icon: React.ReactNode }[] =
   { id: 'rules',    label: 'Rules Engine',      icon: <Shield className="w-3.5 h-3.5" /> },
   { id: 'approval', label: 'Approval Workflow', icon: <GitMerge className="w-3.5 h-3.5" /> },
   { id: 'po',       label: 'PO Matching',       icon: <Link2 className="w-3.5 h-3.5" /> },
+];
+
+// Inner tabs for Schedule Monthly Payment Extraction — Setup (schedule +
+// share list) and Email (the dental-group reminder + its template).
+const EXTRACTION_TABS: { id: ExtractionTab; label: string; icon: React.ReactNode }[] = [
+  { id: 'setup', label: 'Setup', icon: <CalendarClock className="w-3.5 h-3.5" /> },
+  { id: 'email', label: 'Email', icon: <Mail className="w-3.5 h-3.5" /> },
 ];
 
 // ── Toggle component ──────────────────────────────────────────────────────────
@@ -2550,6 +2558,7 @@ export default function SpendSettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('fields');
   const [invoiceTab, setInvoiceTab] = useState<InvoiceTab>('inbox');
   const [supplierTab, setSupplierTab] = useState<SupplierTab>('fields');
+  const [extractionTab, setExtractionTab] = useState<ExtractionTab>('setup');
   const [saved, setSaved] = useState(false);
 
   // Pay Period Extraction state — two dates now:
@@ -2562,8 +2571,6 @@ export default function SpendSettingsPage() {
   const [extractionDay, setExtractionDay] = useState('25th');
   const [cutoffMonth, setCutoffMonth] = useState<'same' | 'next'>('same');
   const [cutoffDay, setCutoffDay]     = useState('28th');
-  const [shareEmails, setShareEmails] = useState<string[]>(['finance@smilegenius.com']);
-  const [emailInput, setEmailInput] = useState('');
 
   // Numeric rank for any EXTRACTION_DAYS value — 'Last day of month' sorts
   // after every numbered day so comparisons stay correct.
@@ -2581,12 +2588,6 @@ export default function SpendSettingsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extractionDay, cutoffMonth]);
-  const addShareEmail = () => {
-    if (emailInput && !shareEmails.includes(emailInput)) {
-      setShareEmails([...shareEmails, emailInput]);
-      setEmailInput('');
-    }
-  };
   const [completedTabs, setCompletedTabs] = useState<Set<Tab>>(
     () => new Set(fields.length > 0 ? (['fields'] as Tab[]) : [])
   );
@@ -2764,8 +2765,40 @@ export default function SpendSettingsPage() {
             <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
               <div className="px-6 py-4 border-b border-[#F0EFF6]">
                 <h2 className="text-base font-semibold text-[#030213]">Schedule Monthly Payment Extraction</h2>
-                <p className="text-xs text-[#717182] mt-0.5">Configure when invoice extraction reports are generated and who receives them.</p>
+                <p className="text-xs text-[#717182] mt-0.5">Configure when invoice extraction reports are generated, who receives them, and the reminder email sent to the dental group.</p>
               </div>
+              {/* Inner tabs — Setup holds the schedule + share list; Email
+                  holds the dental-group reminder (recipient, lead time and
+                  the editable template). */}
+              <div className="px-6 pt-4">
+                <div className="p-1 bg-[#F3F3F5] rounded-xl flex gap-1">
+                  {EXTRACTION_TABS.map(({ id, label, icon }) => (
+                    <button
+                      key={id}
+                      onClick={() => setExtractionTab(id)}
+                      className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                        extractionTab === id
+                          ? 'bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white shadow-sm'
+                          : 'text-[#717182] hover:text-[#030213] hover:bg-white/60'
+                      }`}
+                    >
+                      {icon}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {extractionTab === 'email' && (
+                <ExtractionEmailTab
+                  extractionDay={extractionDay}
+                  cutoffDay={cutoffDay}
+                  cutoffMonth={cutoffMonth}
+                />
+              )}
+
+              {extractionTab === 'setup' && (
+              <>
               <div className="p-6 space-y-5">
                 {/* Two-column layout — extraction date on the left,
                     cut-off date on the right. The cut-off day options are
@@ -2774,7 +2807,7 @@ export default function SpendSettingsPage() {
                     date (cut-off before extraction). */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div>
-                    <label className="block text-sm font-medium text-[#030213] mb-1.5">Invoice Extraction Date</label>
+                    <label className="block text-sm font-medium text-[#030213] mb-1.5">Payment Extraction</label>
                     <div className="relative">
                       <select
                         value={extractionDay}
@@ -2794,7 +2827,7 @@ export default function SpendSettingsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-[#030213] mb-1.5">Payment Processing Cut-off</label>
+                    <label className="block text-sm font-medium text-[#030213] mb-1.5">Payment Processing</label>
                     {/* Month toggle — same-month vs next-month. Cut-off
                         day options re-filter when this changes. */}
                     <div className="grid grid-cols-2 gap-1 p-1 bg-[#F3F3F5] rounded-lg mb-2">
@@ -2831,48 +2864,16 @@ export default function SpendSettingsPage() {
                     </div>
                   </div>
                 </div>
-
-                <div className="pt-5 border-t border-[#F0EFF6]">
-                  <label className="block text-sm font-medium text-[#030213] mb-1.5">Share Extraction With</label>
-                  <div className="flex items-center gap-2 max-w-2xl">
-                    <div className="relative flex-1">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#717182]" />
-                      <input
-                        type="email"
-                        placeholder="Enter email"
-                        value={emailInput}
-                        onChange={(e) => setEmailInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addShareEmail(); } }}
-                        className="w-full pl-9 pr-4 py-2.5 border border-[#E0E0E6] rounded-lg text-sm text-[#030213] bg-white placeholder-[#B0B0C0] focus:outline-none focus:ring-2 focus:ring-[#4D8EF7]/20 focus:border-[#4D8EF7]"
-                      />
-                    </div>
-                    <button
-                      onClick={addShareEmail}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity whitespace-nowrap"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Add Member
-                    </button>
-                  </div>
-
-                  {shareEmails.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-3">
-                      {shareEmails.map((email) => (
-                        <span key={email} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-[#F3F3F5] text-[#5A5568] border border-[#E0E0E6]">
-                          <Mail className="w-3 h-3 text-[#717182]" />
-                          {email}
-                          <button
-                            onClick={() => setShareEmails(shareEmails.filter((e) => e !== email))}
-                            className="hover:text-[#D4183D] transition-colors"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
               </div>
+              {/* Footer — mirrors the Email tab so Save is always in reach */}
+              <div className="px-6 py-4 border-t border-[#F0EFF6] flex items-center justify-between bg-[#FAFBFC]">
+                <p className="text-xs text-[#A0A0B0]">
+                  Extraction on the <span className="font-semibold text-[#030213]">{extractionDay}</span> · processing by <span className="font-semibold text-[#030213]">{cutoffDay} {cutoffMonth === 'next' ? '(next month)' : '(same month)'}</span>
+                </p>
+                <Button variant="primary" size="sm" onClick={() => toast.success('Payment schedule saved')}>Save changes</Button>
+              </div>
+              </>
+              )}
             </div>
           )}
 
@@ -2880,6 +2881,252 @@ export default function SpendSettingsPage() {
           {activeTab === 'integrations' && <AccountingIntegrationTab />}
 
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Extraction email tab ────────────────────────────────────────────────────
+// "Email" tab inside Schedule Monthly Payment Extraction. Two concerns:
+//   1. Share Extraction With — who receives the monthly extraction report.
+//   2. Payment Reminder — an automatic email to the dental group ahead of
+//      payment processing so pending approvals don't slip a month.
+// Kept deliberately minimal: the reminder leads with a single toggle row,
+// and the template editor stays collapsed until the user asks for it.
+const EXTRACTION_REMINDER_DEFAULT = {
+  subject: 'Reminder: approve invoices before payment processing on {{processingDate}}',
+  body: `Hi {{groupName}} team,
+
+This is an automated reminder from your spend management schedule.
+
+Your monthly payment extraction report was generated on {{extractionDate}}. All invoices must be approved by **{{processingDate}}** to make this month's payment run.
+
+{{pendingCount}} invoices are still awaiting approval — anything not approved by then rolls into next month's run, and the affected suppliers are notified automatically.
+
+Review pending invoices: {{portalLink}}
+
+Kind regards,
+
+SmileGenius Spend Management`,
+};
+const EXTRACTION_REMINDER_PLACEHOLDERS = ['groupName', 'extractionDate', 'processingDate', 'pendingCount', 'portalLink'];
+
+function ExtractionEmailTab({ extractionDay, cutoffDay, cutoffMonth }: {
+  extractionDay: string;
+  cutoffDay: string;
+  cutoffMonth: 'same' | 'next';
+}) {
+  const { toast } = useToast();
+  // Extraction report recipients (moved here from the Setup tab).
+  const [shareEmails, setShareEmails] = useState<string[]>(['finance@smilegenius.com']);
+  const [emailInput, setEmailInput]   = useState('');
+  const addShareEmail = () => {
+    if (emailInput && !shareEmails.includes(emailInput)) {
+      setShareEmails([...shareEmails, emailInput]);
+      setEmailInput('');
+    }
+  };
+  // Payment reminder settings.
+  const [groupEmail, setGroupEmail]     = useState('accounts@smilegenius.co.uk');
+  const [leadDays, setLeadDays]         = useState('3');
+  const [enabled, setEnabled]           = useState(true);
+  const [subject, setSubject]           = useState(EXTRACTION_REMINDER_DEFAULT.subject);
+  const [body, setBody]                 = useState(EXTRACTION_REMINDER_DEFAULT.body);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const isDefaultTemplate =
+    subject === EXTRACTION_REMINDER_DEFAULT.subject && body === EXTRACTION_REMINDER_DEFAULT.body;
+  const processingLabel = `${cutoffDay} (${cutoffMonth === 'next' ? 'next month' : 'same month'})`;
+  return (
+    <div>
+      <div className="p-6 space-y-5">
+        {/* Share Extraction With — these addresses receive the monthly
+            extraction report generated on the Setup date. */}
+        <div>
+          <label className="block text-sm font-medium text-[#030213] mb-1.5">Share Extraction With</label>
+          <div className="flex items-center gap-2 max-w-2xl">
+            <div className="relative flex-1">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#717182]" />
+              <input
+                type="email"
+                placeholder="Enter email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addShareEmail(); } }}
+                className="w-full pl-9 pr-4 py-2.5 border border-[#E0E0E6] rounded-lg text-sm text-[#030213] bg-white placeholder-[#B0B0C0] focus:outline-none focus:ring-2 focus:ring-[#4D8EF7]/20 focus:border-[#4D8EF7]"
+              />
+            </div>
+            <button
+              onClick={addShareEmail}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4" />
+              Add Member
+            </button>
+          </div>
+
+          {shareEmails.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {shareEmails.map((email) => (
+                <span key={email} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-[#F3F3F5] text-[#5A5568] border border-[#E0E0E6]">
+                  <Mail className="w-3 h-3 text-[#717182]" />
+                  {email}
+                  <button
+                    onClick={() => setShareEmails(shareEmails.filter((e) => e !== email))}
+                    className="hover:text-[#D4183D] transition-colors"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Payment reminder — one toggle row up top; the fields and the
+            template only surface when the reminder is on. */}
+        <div className="pt-5 border-t border-[#F0EFF6] space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-[#030213]">Payment Reminder Email</p>
+              <p className="text-xs text-[#717182] mt-0.5 leading-relaxed">
+                {enabled ? (
+                  <>
+                    Sent automatically <span className="font-medium text-[#030213]">{leadDays} day{leadDays === '1' ? '' : 's'} before payment processing</span> — {processingLabel} — to the dental group.
+                  </>
+                ) : (
+                  'Paused — the dental group will not receive this reminder.'
+                )}
+              </p>
+            </div>
+            <Toggle on={enabled} onChange={(v) => {
+              setEnabled(v);
+              toast.success(`Payment reminder ${v ? 'enabled' : 'paused'}`);
+            }} />
+          </div>
+
+          {enabled && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-sm font-medium text-[#030213] mb-1.5">Dental Group Email</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#717182]" />
+                    <input
+                      type="email"
+                      placeholder="Enter dental group email"
+                      value={groupEmail}
+                      onChange={(e) => setGroupEmail(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2.5 border border-[#E0E0E6] rounded-lg text-sm text-[#030213] bg-white placeholder-[#B0B0C0] focus:outline-none focus:ring-2 focus:ring-[#4D8EF7]/20 focus:border-[#4D8EF7]"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#030213] mb-1.5">Send Reminder</label>
+                  <div className="relative">
+                    <select
+                      value={leadDays}
+                      onChange={(e) => setLeadDays(e.target.value)}
+                      className="w-full appearance-none pl-4 pr-10 py-2.5 border border-[#E0E0E6] rounded-lg text-sm text-[#030213] bg-white hover:bg-[#F8F9FC] focus:outline-none focus:ring-2 focus:ring-[#4D8EF7]/20 focus:border-[#4D8EF7]"
+                    >
+                      {['1', '2', '3', '5', '7'].map(d => (
+                        <option key={d} value={d}>{d} day{d === '1' ? '' : 's'} before payment processing</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-[#717182] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Template — collapsed by default to keep the tab light.
+                  Expanding reveals subject + body + merge placeholders. */}
+              <div className="border border-[#E0E0E6] rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setTemplateOpen(o => !o)}
+                  className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 bg-[#FAFBFC] hover:bg-[#F3F4F8] transition-colors"
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <Mail className="w-3.5 h-3.5 text-[#717182] flex-shrink-0" />
+                    <span className="text-sm font-medium text-[#030213]">Email template</span>
+                    {!isDefaultTemplate && (
+                      <span className="inline-flex items-center px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#BFDBFE]">
+                        Customised
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex items-center gap-1 text-xs text-[#717182] flex-shrink-0">
+                    {templateOpen ? 'Hide' : 'Edit'}
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${templateOpen ? 'rotate-180' : ''}`} />
+                  </span>
+                </button>
+                {templateOpen && (
+                  <div className="p-3.5 space-y-3 border-t border-[#F0EFF6]">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-1">Subject</label>
+                      <input
+                        type="text"
+                        value={subject}
+                        onChange={(e) => setSubject(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/15"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-1">Body</label>
+                      <textarea
+                        value={body}
+                        onChange={(e) => setBody(e.target.value)}
+                        rows={10}
+                        className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/15 font-mono leading-relaxed resize-y"
+                      />
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex flex-wrap gap-1">
+                        {EXTRACTION_REMINDER_PLACEHOLDERS.map(p => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(`{{${p}}}`);
+                              toast.success(`Copied {{${p}}}`);
+                            }}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white border border-[#BFDBFE] text-[10px] font-mono font-semibold text-[#1565C0] hover:bg-[#EEF4FF]"
+                            title="Click to copy"
+                          >
+                            {`{{${p}}}`}
+                            <Copy className="w-2.5 h-2.5" />
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isDefaultTemplate}
+                        onClick={() => {
+                          setSubject(EXTRACTION_REMINDER_DEFAULT.subject);
+                          setBody(EXTRACTION_REMINDER_DEFAULT.body);
+                          toast.info('Template reset to default');
+                        }}
+                        className="text-[11px] font-medium text-[#717182] hover:text-[#030213] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap flex-shrink-0"
+                      >
+                        Reset to default
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="px-6 py-4 border-t border-[#F0EFF6] flex items-center justify-between bg-[#FAFBFC]">
+        <p className="text-xs text-[#A0A0B0]">
+          {shareEmails.length} report recipient{shareEmails.length === 1 ? '' : 's'}
+          {enabled && ` · reminder to ${groupEmail.trim() || 'the dental group'}`}
+        </p>
+        <Button variant="primary" size="sm" onClick={() => toast.success('Email settings saved')}>
+          Save changes
+        </Button>
       </div>
     </div>
   );

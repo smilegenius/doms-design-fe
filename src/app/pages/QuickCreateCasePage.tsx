@@ -3,7 +3,7 @@ import {
   User, FlaskConical, Stethoscope, Calendar, FileText, Search,
   Plus, X, Check, ChevronDown, ChevronRight,
   Pencil, Zap, Star, Upload, UploadCloud, Box, Image as ImageIcon,
-  AlertCircle, Mail, Paperclip, ArrowLeft,
+  AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import ModalPortal from '../components/ModalPortal';
@@ -311,10 +311,16 @@ function fdiNumberToCode(fdi: number): string {
   return `${prefix}${position}`;
 }
 
+// Which view the left preview pane is showing. 'primary' = the flow-specific
+// first tab — source email for email drafts, live order form for scanner
+// cases, Add-Prescription upload for manual entry — only ever ONE of those.
+// 'model' = the 3D scan viewer, which is always available alongside.
+type PreviewPaneTab = 'primary' | 'model';
+
 // ─── Prescription upload pane ───────────────────────────────────────────────
-// Left column shown on every non-email Quick Create flow. Mirrors the
-// width + scrolling behaviour of EmailPreviewPane so the form on the
-// right stays the same regardless of source. Empty state nudges the
+// "Source" tab of the left preview pane on every non-email Quick Create
+// flow. Mirrors the scrolling behaviour of EmailPreviewPane so the form on
+// the right stays the same regardless of source. Empty state nudges the
 // user to drop a prescription file (WhatsApp screenshot, posted scan,
 // PDF e-mail attachment — anything that landed outside the auto-fetch).
 // After "upload" (mocked — no real file picker in the prototype) the
@@ -363,16 +369,16 @@ function PrescriptionUploadPane({ onApply }: {
   };
 
   return (
-    <aside className="hidden md:flex w-[380px] flex-shrink-0 bg-white border-r border-[#E0E0E6] flex-col overflow-hidden">
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
       {/* Pane title */}
       <div className="flex-shrink-0 px-4 py-2.5 border-b border-[#F0EFF6] bg-[#F8F9FC] flex items-center gap-2">
         <span className="w-6 h-6 rounded-lg bg-[#F3EEFF] flex items-center justify-center">
           <UploadCloud className="w-3.5 h-3.5 text-[#7C3AED]" />
         </span>
         <div className="min-w-0">
-          <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider leading-tight">Prescription</p>
+          <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider leading-tight">Add Prescription / Order Form</p>
           <p className="text-[10px] text-[#717182] leading-tight truncate">
-            {uploaded ? 'Detected — review and apply' : 'Got an Rx via WhatsApp / post / hand-off?'}
+            {uploaded ? 'Detected — review and apply' : 'Upload manually — details auto-fetch into the form'}
           </p>
         </div>
       </div>
@@ -550,13 +556,13 @@ function PrescriptionUploadPane({ onApply }: {
           </>
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 
 // ─── Email preview pane ─────────────────────────────────────────────────────
-// Left column shown when the case was opened from an inbox-fetched email
-// draft. Surfaces the original message + the attached prescription so the
+// "Source" tab of the left preview pane when the case was opened from an
+// inbox-fetched email draft. Surfaces the original message + the attached prescription so the
 // user can sanity-check the auto-populated form against the source content.
 // The prescription is rendered as a stylized HTML mock modelled on the S4S
 // London prescription pad (the sample the user provided): green brand bar,
@@ -593,7 +599,7 @@ function EmailPreviewPane({ caseData }: { caseData: Case }) {
     .join(', ');
 
   return (
-    <aside className="hidden md:flex w-[380px] flex-shrink-0 bg-white border-r border-[#E0E0E6] flex-col overflow-hidden">
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
       {/* Pane title */}
       <div className="flex-shrink-0 px-4 py-2.5 border-b border-[#F0EFF6] bg-[#F8F9FC] flex items-center gap-2">
         <span className="w-6 h-6 rounded-lg bg-[#EEF4FF] flex items-center justify-center">
@@ -787,7 +793,7 @@ function EmailPreviewPane({ caseData }: { caseData: Case }) {
           Review and edit any field before submitting.
         </div>
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -891,9 +897,21 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   const [patientDrawerOpen, setPatientDrawerOpen] = useState(false);
   const [pickerOpen, setPickerOpen]               = useState(false);
   const [activeDetailsId, setActiveDetailsId]     = useState<string | null>(null);
-  // Header preview modals
+  // Header preview modals — small screens only; on md+ the same previews
+  // live in the left pane tabs.
   const [model3DOpen, setModel3DOpen]             = useState(false);
   const [orderFormOpen, setOrderFormOpen]         = useState(false);
+  // Left preview pane tab (md+). The primary tab's content adapts to the
+  // flow (see PreviewPaneTab); picking "Via Scanner" mid-flow pulls the pane
+  // back to it so the order form is front-and-centre for scanner cases.
+  const [previewTab, setPreviewTab] = useState<PreviewPaneTab>('primary');
+  useEffect(() => {
+    if (caseSource === 'Via Scanner') setPreviewTab('primary');
+  }, [caseSource]);
+  // Collapse the left preview pane to a slim icon rail pinned at the left
+  // edge — gives the form the full width while keeping the previews one
+  // click away. Clicking a rail icon expands the pane on that tab.
+  const [paneCollapsed, setPaneCollapsed] = useState(false);
   // Removing a service is destructive — drops the user-entered material,
   // shade, teeth, brand, notes, etc. We gate it behind a small confirm
   // modal owned at the page so both the service card X and the drawer
@@ -1002,6 +1020,25 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
     : prefillDraft?.source === 'manual' ? Pencil
     : Zap;
 
+  // Shared by the header action buttons (small screens) and the left pane
+  // tabs (md+): how many Case Source slot files are attached, and whether
+  // this is an email-fetched draft.
+  const isEmailFlow = prefillDraft?.source === 'email' && !!prefillDraft.emailPrescription;
+  const scanFileCount = Object.values(caseSourceFiles).filter(Boolean).length;
+  const has3DFiles = scanFileCount > 0;
+
+  // Left-pane primary tab — exactly ONE of Order Form / Email / Add
+  // Prescription, depending on how the case data arrives:
+  //   • Case Source "Via Scanner" → live Order Form preview (no email here)
+  //   • email-fetched draft       → the source email + prescription
+  //   • manual / everything else  → upload card to auto-fetch the details
+  // The 3D Model tab is always available next to it.
+  const primaryTab = caseSource === 'Via Scanner'
+    ? { label: 'Order Form',       icon: FileText,    hint: 'Preview the order form the lab will receive' }
+    : isEmailFlow
+      ? { label: 'Email',            icon: Mail,        hint: 'View the source email + prescription' }
+      : { label: 'Add Prescription', icon: UploadCloud, hint: 'Add a prescription / order form manually to auto-fetch the details' };
+
   return (
     <div className="h-screen flex flex-col bg-[#F8F9FC] overflow-hidden">
       {/* ── Full-screen top bar ───────────────────────────────────────────
@@ -1037,12 +1074,108 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       </header>
 
       {/* ── Main split — same 380px left pane on every flow so the right
-          column has a stable width. Email drafts surface the source
-          message + Rx mock; everything else surfaces an upload card so
-          a posted / WhatsApp / hand-off prescription can still feed
-          the form. ──────────────────────────────────────────────────── */}
+          column has a stable width. The pane is tabbed: the primary tab is
+          flow-specific (source email for email drafts, live order form for
+          scanner cases, an Add-Prescription upload card for manual entry —
+          never more than one of those at a time) and "3D Model" is always
+          available next to it. Hidden below md — small screens keep the
+          header buttons + modals instead. ───────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
-        {prefillDraft?.source === 'email' && prefillDraft.emailPrescription ? (
+        {/* Collapsed rail — slim icon strip pinned at the left edge. Each
+            icon expands the pane straight onto that tab. */}
+        {paneCollapsed && (
+          <aside className="hidden md:flex w-12 flex-shrink-0 bg-white border-r border-[#E0E0E6] flex-col items-center pt-2 pb-3 gap-1">
+            <button
+              onClick={() => setPaneCollapsed(false)}
+              title="Expand preview panel"
+              className="w-8 h-8 rounded-lg text-[#717182] hover:bg-[#F0EFF6] hover:text-[#030213] flex items-center justify-center transition-colors"
+            >
+              <PanelLeftOpen className="w-4 h-4" />
+            </button>
+            <div className="w-6 h-px bg-[#E0E0E6] my-1" />
+            <button
+              onClick={() => { setPreviewTab('primary'); setPaneCollapsed(false); }}
+              title={primaryTab.hint}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                previewTab === 'primary' ? 'bg-[#EEF4FF] text-[#1565C0]' : 'text-[#5A5568] hover:bg-[#F8F9FC]'
+              }`}
+            >
+              <primaryTab.icon className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => { setPreviewTab('model'); setPaneCollapsed(false); }}
+              title="View attached scan files in 3D"
+              className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                previewTab === 'model' ? 'bg-[#EEF4FF] text-[#1565C0]' : 'text-[#5A5568] hover:bg-[#F8F9FC]'
+              }`}
+            >
+              <Box className="w-4 h-4" />
+              {scanFileCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-[#4D8EF7] text-white text-[8px] font-bold flex items-center justify-center">
+                  {scanFileCount}
+                </span>
+              )}
+            </button>
+          </aside>
+        )}
+        {!paneCollapsed && (
+        <aside className="hidden md:flex w-[380px] flex-shrink-0 bg-white border-r border-[#E0E0E6] flex-col overflow-hidden">
+          {/* Tab strip */}
+          <div className="flex-shrink-0 flex items-center gap-1 p-1.5 border-b border-[#E0E0E6]">
+            {([
+              { id: 'primary', label: primaryTab.label, icon: primaryTab.icon, hint: primaryTab.hint },
+              { id: 'model',   label: '3D Model',       icon: Box,             hint: 'View attached scan files in 3D' },
+            ] as const).map(t => {
+              const TabIcon = t.icon;
+              const active = previewTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setPreviewTab(t.id)}
+                  title={t.hint}
+                  className={`flex-1 inline-flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors min-w-0 ${
+                    active
+                      ? 'bg-[#EEF4FF] text-[#1565C0] border-[#BFDBFE]'
+                      : 'text-[#5A5568] border-transparent hover:bg-[#F8F9FC] hover:text-[#030213]'
+                  }`}
+                >
+                  <TabIcon className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="truncate">{t.label}</span>
+                  {t.id === 'model' && scanFileCount > 0 && (
+                    <span className={`inline-flex items-center justify-center min-w-[15px] h-[15px] px-0.5 rounded-full text-[9px] font-bold flex-shrink-0 ${
+                      active ? 'bg-white text-[#1565C0] border border-[#BFDBFE]' : 'bg-[#F3EEFF] text-[#5B21B6]'
+                    }`}>
+                      {scanFileCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setPaneCollapsed(true)}
+              title="Collapse preview panel"
+              className="w-7 h-7 rounded-lg text-[#717182] hover:bg-[#F8F9FC] hover:text-[#030213] flex items-center justify-center flex-shrink-0 transition-colors"
+            >
+              <PanelLeftClose className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          {previewTab === 'primary' && (caseSource === 'Via Scanner' ? (
+            <OrderFormPane
+              patientName={patientName}
+              patientExtras={patientExtras}
+              lab={selectedLab}
+              dentist={selectedDentist}
+              orderType={orderType}
+              deliveryDate={deliveryDate}
+              caseSource={caseSource}
+              caseSourceFiles={caseSourceFiles}
+              caseSourceExtraFiles={caseSourceExtraFiles}
+              caseSourceScanner={caseSourceScanner}
+              caseSourceCourier={caseSourceCourier}
+              selections={selections}
+              notes={caseInstructions}
+            />
+          ) : prefillDraft?.source === 'email' && prefillDraft.emailPrescription ? (
           <EmailPreviewPane caseData={prefillDraft} />
         ) : (
           <PrescriptionUploadPane
@@ -1070,18 +1203,24 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
               toast.success(`Form auto-filled from ${p.patientName}'s prescription`);
             }}
           />
+        ))}
+          {previewTab === 'model' && (
+            <Model3DPane
+              files={caseSourceFiles}
+              onUploadScans={() => setCaseSourceOpen(true)}
+            />
+          )}
+        </aside>
         )}
         <div className="flex-1 flex flex-col overflow-y-auto">
       <div className="flex-1 p-4 sm:p-6 lg:p-8 pb-28">
         {/* ── Page header ── compact title row with action buttons on the right.
-            • View 3D Model is always available. When scan files are attached
-              it opens the 3D viewer; when no scans yet it opens the Case
-              Source popup so the user can upload first.
-            • View Order Form is always available — shows the prefilled order
-              form preview the lab would receive. */}
+            • Case Source picks the delivery method + attaches files.
+            • View 3D Model / View Order Form only render below md — on md+
+              those previews live in the left pane tabs. When scan files are
+              attached the 3D button opens the viewer; when no scans yet it
+              opens the Case Source popup so the user can upload first. */}
         {(() => {
-          const scanFileCount = Object.values(caseSourceFiles).filter(Boolean).length;
-          const has3DFiles = scanFileCount > 0;
           return (
             <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
               <div className="min-w-0">
@@ -1133,7 +1272,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 })()}
                 <button
                   onClick={() => has3DFiles ? setModel3DOpen(true) : setCaseSourceOpen(true)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                  className={`md:hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                     has3DFiles
                       ? 'text-[#5B21B6] border-[#DDD6FE] bg-[#F3EEFF] hover:bg-[#E9D5FF] hover:border-[#A78BFA]'
                       : 'text-[#7C3AED] border-dashed border-[#C8D8FC] bg-white hover:border-[#4D8EF7] hover:bg-[#F5F8FF]'
@@ -1156,7 +1295,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </button>
                 <button
                   onClick={() => setOrderFormOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#1565C0] border border-[#BFDBFE] bg-[#EEF4FF] hover:bg-[#DBEAFE] hover:border-[#60A5FA] transition-colors"
+                  className="md:hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#1565C0] border border-[#BFDBFE] bg-[#EEF4FF] hover:bg-[#DBEAFE] hover:border-[#60A5FA] transition-colors"
                   title="Preview the order form the lab will receive"
                 >
                   <FileText className="w-3.5 h-3.5" />
@@ -3537,7 +3676,7 @@ function AggregatedTeethChart({ selections }: { selections: ServiceSelection[] }
         /* Disabled / dimmed FDI chart with a clear "pick a service" prompt
            overlaid so the user knows the chart is here, just inactive. */
         <div className="flex flex-col items-center">
-          <div className="relative select-none opacity-40 pointer-events-none" style={{ width: '210px', aspectRatio: '327 / 555' }}>
+          <div className="relative select-none opacity-40 pointer-events-none w-full max-w-xs" style={{ aspectRatio: '327 / 555' }}>
             <img
               src="/FDI.svg"
               alt="FDI dental chart"
@@ -3558,8 +3697,8 @@ function AggregatedTeethChart({ selections }: { selections: ServiceSelection[] }
           {/* Tooth chart — FDI SVG with per-tooth coloured ellipses overlaid */}
           <div className="flex justify-center">
             <div
-              className="relative select-none"
-              style={{ width: '210px', aspectRatio: '327 / 555' }}
+              className="relative select-none w-full max-w-xs"
+              style={{ aspectRatio: '327 / 555' }}
             >
               {/* Static FDI background */}
               <img
@@ -4102,8 +4241,6 @@ function Model3DPreview({ files, onClose }: {
   onClose: () => void;
 }) {
   const filled = Object.entries(files).filter(([, v]) => !!v) as [string, string][];
-  const [activeFormat, setActiveFormat] = useState<'3D' | 'PLY' | 'STL' | 'OBJ'>('3D');
-  const [activeTool, setActiveTool] = useState<'view' | 'measure' | 'paint'>('view');
   return (
     <ModalPortal>
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -4127,78 +4264,13 @@ function Model3DPreview({ files, onClose }: {
           </button>
         </div>
 
-        {/* Viewer canvas — grey background, format tabs top-left, tool dock top-right */}
-        <div className="relative bg-[#BFC4CC] aspect-[4/3] sm:aspect-[16/9]">
-          {/* Format tabs (top-left) */}
-          <div className="absolute top-3 left-3 flex items-center gap-0.5 bg-white rounded-lg shadow-sm p-1 z-10">
-            {(['3D', 'PLY', 'STL', 'OBJ'] as const).map(fmt => (
-              <button
-                key={fmt}
-                onClick={() => setActiveFormat(fmt)}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${
-                  activeFormat === fmt
-                    ? 'text-[#4D8EF7]'
-                    : 'text-[#5A5568] hover:bg-[#F8F9FC]'
-                }`}
-              >
-                {fmt}
-              </button>
-            ))}
-          </div>
-          {/* Tool dock (top-right) */}
-          <div className="absolute top-3 right-3 flex items-center gap-0 bg-[#1F2937] rounded-lg shadow-lg p-1 z-10">
-            {(
-              [
-                { id: 'view',    label: 'Orbit',   icon: <Box className="w-3.5 h-3.5" /> },
-                { id: 'measure', label: 'Measure', icon: <Pencil className="w-3.5 h-3.5" /> },
-                { id: 'paint',   label: 'Paint',   icon: <FlaskConical className="w-3.5 h-3.5" /> },
-              ] as const
-            ).map((tool, i) => (
-              <button
-                key={tool.id}
-                onClick={() => setActiveTool(tool.id)}
-                title={tool.label}
-                className={`relative w-8 h-8 rounded-md flex items-center justify-center text-white transition-colors ${
-                  activeTool === tool.id
-                    ? 'bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF]'
-                    : 'hover:bg-white/10'
-                } ${i > 0 ? 'border-l border-white/10' : ''}`}
-              >
-                {tool.icon}
-              </button>
-            ))}
-          </div>
-          {/* Model render */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <img
-              src="/teeth-3d.png"
-              alt="3D dental model"
-              className="max-w-[70%] max-h-[80%] object-contain drop-shadow-lg"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-            />
-          </div>
-          {/* Bottom hint */}
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/40 backdrop-blur-sm text-[10px] font-medium text-white">
-            <Box className="w-3 h-3" />
-            Drag to orbit · scroll to zoom · right-click to pan
-          </div>
-        </div>
+        {/* Viewer canvas — shared with the left-pane 3D tab */}
+        <Model3DCanvas className="aspect-[4/3] sm:aspect-[16/9]" />
 
         {/* File list strip */}
         <div className="px-6 py-3 bg-[#F8F9FC] border-t border-[#F0EFF6] flex-shrink-0">
           <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-1.5">Attached scans</p>
-          <div className="flex flex-wrap gap-1.5">
-            {filled.length === 0 ? (
-              <span className="text-[11px] italic text-[#A0A0B0]">No scan files attached yet.</span>
-            ) : filled.map(([slot, name]) => (
-              <span key={slot} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white border border-[#BBF7D0] text-[10px]">
-                <Check className="w-2.5 h-2.5 text-[#16A34A]" strokeWidth={3} />
-                <span className="font-semibold text-[#030213]">{slot}</span>
-                <span className="text-[#717182] font-mono">·</span>
-                <span className="text-[#717182] font-mono">{name}</span>
-              </span>
-            ))}
-          </div>
+          <ScanFileChips filled={filled} />
         </div>
 
         {/* Footer */}
@@ -4216,17 +4288,171 @@ function Model3DPreview({ files, onClose }: {
   );
 }
 
-// ─── Order Form preview modal ────────────────────────────────────────────────
-// Read-only printable snapshot of every field the user has filled in. Mirrors
-// what the lab will see in the order form once the case is submitted.
-function OrderFormPreview({
-  patientName, patientExtras,
-  lab, dentist,
-  orderType, deliveryDate,
-  caseSource, caseSourceFiles, caseSourceExtraFiles, caseSourceScanner, caseSourceCourier,
-  selections, notes,
-  onClose,
-}: {
+// ─── 3D viewer canvas ────────────────────────────────────────────────────────
+// Grey stage with format tabs (top-left), tool dock (top-right), the mock
+// model render and an orbit hint. Shared between the full-size Model3DPreview
+// modal and the compact left-pane "3D Model" tab — the caller controls the
+// aspect ratio / framing via className.
+function Model3DCanvas({ className }: { className: string }) {
+  const [activeFormat, setActiveFormat] = useState<'3D' | 'PLY' | 'STL' | 'OBJ'>('3D');
+  const [activeTool, setActiveTool] = useState<'view' | 'measure' | 'paint'>('view');
+  return (
+    <div className={`relative bg-[#BFC4CC] ${className}`}>
+      {/* Format tabs (top-left) */}
+      <div className="absolute top-3 left-3 flex items-center gap-0.5 bg-white rounded-lg shadow-sm p-1 z-10">
+        {(['3D', 'PLY', 'STL', 'OBJ'] as const).map(fmt => (
+          <button
+            key={fmt}
+            onClick={() => setActiveFormat(fmt)}
+            className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${
+              activeFormat === fmt
+                ? 'text-[#4D8EF7]'
+                : 'text-[#5A5568] hover:bg-[#F8F9FC]'
+            }`}
+          >
+            {fmt}
+          </button>
+        ))}
+      </div>
+      {/* Tool dock (top-right) */}
+      <div className="absolute top-3 right-3 flex items-center gap-0 bg-[#1F2937] rounded-lg shadow-lg p-1 z-10">
+        {(
+          [
+            { id: 'view',    label: 'Orbit',   icon: <Box className="w-3.5 h-3.5" /> },
+            { id: 'measure', label: 'Measure', icon: <Pencil className="w-3.5 h-3.5" /> },
+            { id: 'paint',   label: 'Paint',   icon: <FlaskConical className="w-3.5 h-3.5" /> },
+          ] as const
+        ).map((tool, i) => (
+          <button
+            key={tool.id}
+            onClick={() => setActiveTool(tool.id)}
+            title={tool.label}
+            className={`relative w-8 h-8 rounded-md flex items-center justify-center text-white transition-colors ${
+              activeTool === tool.id
+                ? 'bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF]'
+                : 'hover:bg-white/10'
+            } ${i > 0 ? 'border-l border-white/10' : ''}`}
+          >
+            {tool.icon}
+          </button>
+        ))}
+      </div>
+      {/* Model render */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <img
+          src="/teeth-3d.png"
+          alt="3D dental model"
+          className="max-w-[70%] max-h-[80%] object-contain drop-shadow-lg"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+        />
+      </div>
+      {/* Bottom hint */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/40 backdrop-blur-sm text-[10px] font-medium text-white whitespace-nowrap">
+        <Box className="w-3 h-3" />
+        Drag to orbit · scroll to zoom
+      </div>
+    </div>
+  );
+}
+
+// Attached-scan chips list — shared by the 3D modal's file strip and the
+// left-pane 3D tab.
+function ScanFileChips({ filled }: { filled: [string, string][] }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {filled.length === 0 ? (
+        <span className="text-[11px] italic text-[#A0A0B0]">No scan files attached yet.</span>
+      ) : filled.map(([slot, name]) => (
+        <span key={slot} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white border border-[#BBF7D0] text-[10px]">
+          <Check className="w-2.5 h-2.5 text-[#16A34A]" strokeWidth={3} />
+          <span className="font-semibold text-[#030213]">{slot}</span>
+          <span className="text-[#717182] font-mono">·</span>
+          <span className="text-[#717182] font-mono">{name}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ─── 3D model pane ───────────────────────────────────────────────────────────
+// "3D Model" tab of the left preview pane. With scan files attached it shows
+// the shared viewer canvas + the file list; with none it nudges the user to
+// upload via the Case Source popup (onUploadScans opens it).
+function Model3DPane({ files, onUploadScans }: {
+  files: Record<string, string | null>;
+  onUploadScans: () => void;
+}) {
+  const filled = Object.entries(files).filter(([, v]) => !!v) as [string, string][];
+  return (
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* Pane title */}
+      <div className="flex-shrink-0 px-4 py-2.5 border-b border-[#F0EFF6] bg-[#F8F9FC] flex items-center gap-2">
+        <span className="w-6 h-6 rounded-lg bg-[#F3EEFF] flex items-center justify-center">
+          <Box className="w-3.5 h-3.5 text-[#7C3AED]" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider leading-tight">3D Model</p>
+          <p className="text-[10px] text-[#717182] leading-tight truncate">
+            {filled.length > 0
+              ? `${filled.length} scan file${filled.length === 1 ? '' : 's'} attached`
+              : 'No scan files yet'}
+          </p>
+        </div>
+      </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {filled.length === 0 ? (
+          <>
+            {/* Empty state — same dashed-CTA chrome as the Rx upload pane */}
+            <button
+              type="button"
+              onClick={onUploadScans}
+              className="w-full bg-gradient-to-br from-[#F5F8FF] to-[#F3EEFF] border-2 border-dashed border-[#C8D8FC] hover:border-[#7C3AED] hover:bg-[#EEF4FF] rounded-xl p-5 text-center transition-all"
+            >
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-white shadow-sm border border-[#E0E0E6] flex items-center justify-center mb-3">
+                <Box className="w-6 h-6 text-[#7C3AED]" />
+              </div>
+              <p className="text-sm font-bold text-[#030213] leading-tight">No scans to render yet</p>
+              <p className="text-[11px] text-[#5A5568] leading-snug mt-1">
+                Attach Upper / Lower arch and bite scans via Case Source and the 3D model shows up here.
+              </p>
+              <span className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-white bg-gradient-to-r from-[#7C3AED] to-[#4D8EF7]">
+                <Upload className="w-3 h-3" />
+                Upload scan files
+              </span>
+            </button>
+            <div className="text-[10px] text-[#717182] text-center leading-relaxed px-2 py-1">
+              Sent from a scanner? Files land here automatically
+              <br />
+              once the case source is connected.
+            </div>
+          </>
+        ) : (
+          <>
+            <Model3DCanvas className="aspect-square rounded-xl overflow-hidden border border-[#E0E0E6]" />
+            <div>
+              <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-1.5">Attached scans</p>
+              <ScanFileChips filled={filled} />
+            </div>
+            <button
+              type="button"
+              onClick={onUploadScans}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-semibold text-[#7C3AED] border border-dashed border-[#C8D8FC] bg-white hover:border-[#7C3AED] hover:bg-[#F5F8FF] transition-colors"
+            >
+              <Upload className="w-3 h-3" />
+              Manage scan files
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Every field the lab order form snapshot needs — shared by the modal
+// (small screens) and the left pane's "Order Form" tab (md+).
+type OrderFormData = {
   patientName: string;
   patientExtras: PatientExtras;
   lab: typeof mockSuppliers[number] | null;
@@ -4240,9 +4466,41 @@ function OrderFormPreview({
   caseSourceCourier: string;
   selections: ServiceSelection[];
   notes: string;
-  onClose: () => void;
-}) {
-  const fileCount = Object.values(caseSourceFiles).filter(Boolean).length + caseSourceExtraFiles.length;
+};
+
+// ─── Order form pane ─────────────────────────────────────────────────────────
+// "Order Form" tab of the left preview pane — the same compiled snapshot the
+// OrderFormPreview modal shows, rendered compact. Reads straight from form
+// state so it updates live as the user types.
+function OrderFormPane(props: OrderFormData) {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* Pane title */}
+      <div className="flex-shrink-0 px-4 py-2.5 border-b border-[#F0EFF6] bg-[#F8F9FC] flex items-center gap-2">
+        <span className="w-6 h-6 rounded-lg bg-[#EEF4FF] flex items-center justify-center">
+          <FileText className="w-3.5 h-3.5 text-[#1565C0]" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider leading-tight">Order form</p>
+          <p className="text-[10px] text-[#717182] leading-tight truncate">What the lab will receive</p>
+        </div>
+      </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <OrderFormSheet {...props} compact />
+        <div className="text-[10px] text-[#717182] text-center leading-relaxed px-2 py-1">
+          Updates live as you fill the form on the right.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Order Form preview modal ────────────────────────────────────────────────
+// Read-only printable snapshot of every field the user has filled in. Mirrors
+// what the lab will see in the order form once the case is submitted.
+function OrderFormPreview({ onClose, ...data }: OrderFormData & { onClose: () => void }) {
   return (
     <ModalPortal>
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -4263,12 +4521,42 @@ function OrderFormPreview({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-6 bg-[#F8F9FC]">
-          <div className="bg-white border border-[#E0E0E6] rounded-2xl p-6 space-y-5 shadow-sm">
+          <OrderFormSheet {...data} />
+        </div>
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#F0EFF6] flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 rounded-xl text-sm font-semibold text-[#5A5568] bg-[#F0EFF6] hover:bg-[#E5E3ED] transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+    </ModalPortal>
+  );
+}
+
+// ─── Order form sheet ────────────────────────────────────────────────────────
+// The white "Lab Order Form" card itself — compiled from live form state and
+// shared by the modal (full-size) and the left pane tab (`compact`, which
+// tightens padding + collapses the grids for the 380px column).
+function OrderFormSheet({
+  patientName, patientExtras,
+  lab, dentist,
+  orderType, deliveryDate,
+  caseSource, caseSourceFiles, caseSourceExtraFiles, caseSourceScanner, caseSourceCourier,
+  selections, notes,
+  compact = false,
+}: OrderFormData & { compact?: boolean }) {
+  const fileCount = Object.values(caseSourceFiles).filter(Boolean).length + caseSourceExtraFiles.length;
+  return (
+          <div className={`bg-white border border-[#E0E0E6] rounded-2xl shadow-sm ${compact ? 'p-4 space-y-4' : 'p-6 space-y-5'}`}>
             {/* Header row */}
             <div className="flex items-center justify-between gap-3 pb-4 border-b border-[#F0EFF6]">
               <div>
                 <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">Smile Genius</p>
-                <h4 className="text-lg font-bold text-[#030213] mt-0.5">Lab Order Form</h4>
+                <h4 className={`${compact ? 'text-base' : 'text-lg'} font-bold text-[#030213] mt-0.5`}>Lab Order Form</h4>
               </div>
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                 orderType === 'NHS' ? 'bg-[#EEF4FF] text-[#1565C0] border border-[#BFDBFE]' : 'bg-[#F0FDF4] text-[#1A5C2A] border border-[#BBF7D0]'
@@ -4278,7 +4566,7 @@ function OrderFormPreview({
             </div>
 
             {/* Patient + Lab + Dentist grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+            <div className={compact ? 'grid grid-cols-2 gap-3 text-sm' : 'grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm'}>
               <FormField label="Patient" value={patientName || '—'} />
               <FormField label="Lab" value={lab?.name || '—'} />
               <FormField label="Dentist" value={dentist?.name || '—'} />
@@ -4301,7 +4589,7 @@ function OrderFormPreview({
             {(patientExtras.email || patientExtras.phoneNumber || patientExtras.dob || patientExtras.patientId) && (
               <div className="pt-2">
                 <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-2">Patient Details</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-[#5A5568]">
+                <div className={`${compact ? 'grid grid-cols-1 gap-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-3'} text-xs text-[#5A5568]`}>
                   {patientExtras.patientId && <div><span className="font-semibold text-[#030213]">ID:</span> {patientExtras.patientId}</div>}
                   {patientExtras.email && <div><span className="font-semibold text-[#030213]">Email:</span> {patientExtras.email}</div>}
                   {patientExtras.phoneNumber && <div><span className="font-semibold text-[#030213]">Phone:</span> {patientExtras.phoneCountry} {patientExtras.phoneNumber}</div>}
@@ -4331,7 +4619,7 @@ function OrderFormPreview({
                           <p className="text-xs font-bold text-[#030213] truncate">{displayName}</p>
                           <span className="text-[9px] text-[#A0A0B0] uppercase tracking-wider font-semibold">{cat}</span>
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px] text-[#5A5568]">
+                        <div className={`${compact ? 'grid grid-cols-2' : 'grid grid-cols-2 sm:grid-cols-3'} gap-1.5 text-[10px] text-[#5A5568]`}>
                           {sel.material && <span><span className="text-[#A0A0B0]">Material:</span> {sel.material}</span>}
                           {sel.shade && <span><span className="text-[#A0A0B0]">Shade:</span> {sel.shade}</span>}
                           {teethCount > 0 && <span><span className="text-[#A0A0B0]">Teeth:</span> {teethCount}</span>}
@@ -4356,18 +4644,6 @@ function OrderFormPreview({
               </div>
             )}
           </div>
-        </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#F0EFF6] flex-shrink-0">
-          <button
-            onClick={onClose}
-            className="px-5 py-2 rounded-xl text-sm font-semibold text-[#5A5568] bg-[#F0EFF6] hover:bg-[#E5E3ED] transition-colors"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-    </ModalPortal>
   );
 }
 
