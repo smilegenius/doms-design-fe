@@ -1,0 +1,12 @@
+[build]
+  publish = "dist"
+  command = "npm run build"
+
+# SPA fallback — every URL serves index.html so React Router can resolve
+# the route on the client. Without this, refreshing on /supplier/cases (or
+# any other nested route) hits a 404 because Netlify looks for a static file
+# at that path.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

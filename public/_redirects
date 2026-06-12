@@ -1,0 +1,3 @@
+# SPA fallback — every path is handled by React Router at runtime, so the
+# server should always return index.html and let the client take over.
+/*    /index.html   200
