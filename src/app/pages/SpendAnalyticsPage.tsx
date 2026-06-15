@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  FileText, Zap, BarChart3, ShieldCheck, RefreshCw,
+  FileText, Zap, BarChart3, ShieldCheck,
   AlertTriangle, TrendingUp, TrendingDown, Building2,
   Users, UserCheck, ChevronRight, ArrowUpRight, Calendar, X,
   CheckCircle2, Send, XCircle, Download,
@@ -29,15 +29,15 @@ const KPI = {
   extractionDay:  '25th',
 };
 
-// Invoice pipeline by status
-// Pipeline status — shared 5-color dashboard palette, green leads.
-// Order: Green · Blue · Purple · Orange · Red.
+// Invoice pipeline by status — sorted high → low by count so the chart reads
+// as a clean descending ranking. Palette stays green-leads (green for the
+// biggest bar, down to red) regardless of which status that is.
 const PIPELINE = [
-  { label: 'Awaiting Approval', count: 18, color: '#34D399' },  // green-400
-  { label: 'Disputed',          count: 6,  color: '#4D8EF7' },  // brand blue
-  { label: 'Approved',          count: 89, color: '#A59DFF' },  // brand purple
-  { label: 'Exported for Payment', count: 14, color: '#FB923C' }, // orange-400
-  { label: 'Payment Processed', count: 21, color: '#F87171' },  // red-400
+  { label: 'Approved',             count: 89, color: '#34D399' },  // green-400
+  { label: 'Payment Processed',    count: 21, color: '#4D8EF7' },  // brand blue
+  { label: 'Awaiting Approval',    count: 18, color: '#A59DFF' },  // brand purple
+  { label: 'Exported for Payment', count: 14, color: '#FB923C' },  // orange-400
+  { label: 'Disputed',             count: 6,  color: '#F87171' },  // red-400
 ];
 const PIPELINE_MAX = Math.max(...PIPELINE.map(p => p.count));
 
@@ -51,21 +51,21 @@ const SCORE_DIST: { range: string; count: number; suppliers?: string[] }[] = [
 ];
 const SCORE_MAX = Math.max(...SCORE_DIST.map(s => s.count));
 
-// Payment funnel — this cycle's invoices from received through paid. The
-// drop at each stage is the story: 500 received, 450 paid, 50 left unpaid —
-// 18 of those approved too late for the cut-off, so they roll into the next
-// payment cycle. `dropNote` explains the loss versus the previous stage.
-const PAYMENT_FUNNEL = {
-  total: 500,
-  stages: [
-    { label: 'Received', count: 500, color: '#34D399' },
-    { label: 'Approved', count: 468, color: '#4D8EF7', dropNote: 'awaiting approval / disputed' },
-    { label: 'Paid',     count: 450, color: '#A59DFF', dropNote: 'approved late — moved to next cycle' },
-  ] as { label: string; count: number; color: string; dropNote?: string }[],
-  unpaid: 50,
-  awaitingApproval: 32,
-  movedToNextCycle: 18,
-};
+// Invoices needing attention, grouped by supplier. Counts roll up to the
+// "Not Approved" (6) and "Deferred to Next Cycle" (18) KPIs above — so the
+// team can see which suppliers the stuck invoices belong to.
+const NOT_APPROVED_BY_SUPPLIER: { supplier: string; count: number }[] = [
+  { supplier: 'FreshSmile Supplies', count: 3 },
+  { supplier: 'Eurodontic Ltd',      count: 2 },
+  { supplier: 'New Dental Co',       count: 1 },
+];
+const DEFERRED_BY_SUPPLIER: { supplier: string; count: number }[] = [
+  { supplier: 'Dentsply Sirona',     count: 6 },
+  { supplier: 'Eurodontic Ltd',      count: 5 },
+  { supplier: 'Medit Ireland',       count: 4 },
+  { supplier: 'FreshSmile Supplies', count: 2 },
+  { supplier: 'New Dental Co',       count: 1 },
+];
 
 // Suppliers whose invoices carry active flags — grouped by source so the
 // team chases the supplier, not individual documents. `flagged` of `total`
@@ -162,6 +162,47 @@ function SeverityBadge({ s }: { s: string }) {
     s === 'High'     ? 'bg-[#FFF7ED] text-[#E65100]' :
                        'bg-[#FFF7ED] text-[#E65100]';
   return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{s}</span>;
+}
+
+// ─── Per-supplier count list ──────────────────────────────────────────────────
+// Lists suppliers with a count badge each (e.g. how many of their invoices are
+// not-approved / deferred). When the list is empty (count 0) it shows a green
+// "all clear" state instead of a blank section.
+function SupplierCountSection({ title, total, items, tone }: {
+  title: string;
+  total: number;
+  items: { supplier: string; count: number }[];
+  tone: 'red' | 'amber';
+}) {
+  const t = tone === 'red'
+    ? { badge: 'bg-[#FFF1F2] text-[#D4183D] border-[#FECACA]', avatar: 'bg-[#FFF1F2] text-[#D4183D]' }
+    : { badge: 'bg-[#FFF7ED] text-[#C2410C] border-[#FED7AA]', avatar: 'bg-[#FFF7ED] text-[#C2410C]' };
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] font-bold text-[#5A5568] uppercase tracking-wider">{title}</p>
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${t.badge}`}>{total}</span>
+      </div>
+      {items.length === 0 || total === 0 ? (
+        <div className="flex items-center gap-2 px-3 py-3 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0]">
+          <CheckCircle2 className="w-4 h-4 text-[#15803D] flex-shrink-0" />
+          <span className="text-xs text-[#15803D] font-medium">All clear — none right now</span>
+        </div>
+      ) : (
+        <div className="space-y-0">
+          {items.map((s, i) => (
+            <div key={i} className="flex items-center gap-3 py-2 border-b border-[#F8F8F8] last:border-b-0">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${t.avatar}`}>
+                {s.supplier.split(' ').map(p => p[0]).slice(0, 2).join('')}
+              </div>
+              <p className="flex-1 min-w-0 text-xs font-semibold text-[#030213] truncate">{s.supplier}</p>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${t.badge} flex-shrink-0 tabular-nums`}>{s.count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── KPI card ─────────────────────────────────────────────────────────────────
@@ -412,7 +453,7 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
               <KpiCard accent="#2E7D32" icon={<CheckCircle2 className="w-5 h-5 text-[#2E7D32]" />}  label="Approved"                value={KPI.approved}      sub={`${Math.round((KPI.approved / KPI.totalInvoices) * 100)}% of received`} />
               <KpiCard accent="#1565C0" icon={<Send className="w-5 h-5 text-[#1565C0]" />}          label="Extracted for Payment"   value={KPI.extracted}     sub="moved to AP queue" />
               <KpiCard alert            icon={<XCircle className="w-5 h-5 text-[#D4183D]" />}      label="Not Approved"            value={KPI.notApproved}   sub="rejected or disputed" />
-              <KpiCard alert            icon={<AlertTriangle className="w-5 h-5 text-[#E65100]" />} label="Left Over"               value={KPI.leftOver}      sub={`${fmt(KPI.leftOverAmount)} past ${KPI.extractionDay} extraction`} onClick={() => onNavigateToInvoices?.('left_over')} />
+              <KpiCard alert            icon={<AlertTriangle className="w-5 h-5 text-[#E65100]" />} label="Deferred to Next Cycle"  value={KPI.leftOver}      sub={`${fmt(KPI.leftOverAmount)} past ${KPI.extractionDay} extraction`} onClick={() => onNavigateToInvoices?.('left_over')} />
             </div>
 
             {/* Pipeline + Score distribution */}
@@ -484,17 +525,15 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
               </Card>
             </div>
 
-            {/* Payment Funnel + Suppliers With Issues */}
+            {/* Needs-attention-by-supplier + Suppliers With Issues */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-              {/* Payment Funnel — received → approved → paid, with the
-                  unpaid remainder split into "can still make it" vs
-                  "moved to next cycle". Bar widths are visually scaled
-                  (not strictly proportional) so the funnel shape reads;
-                  the true counts + % of total are printed on each bar. */}
+              {/* Not Approved + Deferred, grouped by supplier — each row is a
+                  supplier with a count of stuck invoices. Counts roll up to the
+                  Not Approved / Deferred KPIs above. */}
               <Card
-                title="Payment Funnel"
-                subtitle={`${PAYMENT_FUNNEL.total} invoices this cycle — ${PAYMENT_FUNNEL.unpaid} not paid yet`}
+                title="By Supplier — Action Needed"
+                subtitle="Not-approved and deferred invoices, grouped by supplier"
                 action={
                   <button
                     onClick={() => onNavigateToInvoices?.('left_over')}
@@ -504,86 +543,20 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
                   </button>
                 }
               >
-                <div>
-                  {/* Funnel — label | shape | count rails. The bars carry no
-                      text; stage names sit left, counts right, and the drop
-                      notes ride the tapered connectors between bars. */}
-                  <div className="space-y-0">
-                    {PAYMENT_FUNNEL.stages.map((s, i) => {
-                      const counts = PAYMENT_FUNNEL.stages.map(x => x.count);
-                      const max = Math.max(...counts), min = Math.min(...counts);
-                      const widthOf = (c: number) => (max === min ? 100 : 58 + 42 * ((c - min) / (max - min)));
-                      const w = widthOf(s.count);
-                      const prev = i > 0 ? PAYMENT_FUNNEL.stages[i - 1] : null;
-                      const pct = Math.round((s.count / PAYMENT_FUNNEL.total) * 100);
-                      return (
-                        <div key={s.label}>
-                          {/* Tapered connector — narrows from the previous
-                              bar's width to this one's; the drop note is
-                              overlaid, never inside a bar. */}
-                          {prev && (
-                            <div className="grid grid-cols-[80px_1fr_56px] gap-x-3 items-center">
-                              <span />
-                              <div className="relative h-8">
-                                <div
-                                  className="absolute inset-0"
-                                  style={{
-                                    background: `linear-gradient(180deg, ${prev.color}30, ${s.color}1C)`,
-                                    clipPath: `polygon(${50 - widthOf(prev.count) / 2}% 0, ${50 + widthOf(prev.count) / 2}% 0, ${50 + w / 2}% 100%, ${50 - w / 2}% 100%)`,
-                                  }}
-                                />
-                                <div className="relative h-full flex items-center justify-center gap-1 text-[10px] text-[#717182]">
-                                  <TrendingDown className="w-3 h-3 text-[#E65100] flex-shrink-0" />
-                                  <span className="font-bold text-[#E65100]">−{prev.count - s.count}</span>
-                                  <span className="truncate">{s.dropNote}</span>
-                                </div>
-                              </div>
-                              <span />
-                            </div>
-                          )}
-                          {/* Stage row — clean bar, words on the rails */}
-                          <div className="grid grid-cols-[80px_1fr_56px] gap-x-3 items-center">
-                            <span className="text-[11px] font-semibold text-[#5A5568] text-right leading-tight">{s.label}</span>
-                            <div className="flex justify-center">
-                              <div
-                                className="h-7 rounded-md transition-all duration-500"
-                                style={{
-                                  width: `${w}%`,
-                                  background: `linear-gradient(90deg, ${s.color}, ${s.color}B8)`,
-                                  boxShadow: `0 2px 8px ${s.color}50`,
-                                }}
-                              />
-                            </div>
-                            <div className="leading-tight">
-                              <span className="block text-sm font-bold text-[#030213] tabular-nums">{s.count}</span>
-                              <span className="block text-[10px] text-[#A0A0B0] tabular-nums">{pct}%</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {/* Unpaid remainder — where the 50 stand */}
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    <div className="px-3 py-2.5 rounded-lg bg-[#FFF7ED] border border-[#FED7AA] flex items-start gap-2.5">
-                      <span className="w-7 h-7 rounded-md bg-white border border-[#FED7AA] flex items-center justify-center flex-shrink-0">
-                        <AlertTriangle className="w-3.5 h-3.5 text-[#E65100]" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-lg font-bold text-[#E65100] leading-none">{PAYMENT_FUNNEL.awaitingApproval}</p>
-                        <p className="text-[10px] text-[#9A3412] mt-1 leading-tight">Awaiting approval — can still make this cycle</p>
-                      </div>
-                    </div>
-                    <div className="px-3 py-2.5 rounded-lg bg-[#FFF1F2] border border-[#FECACA] flex items-start gap-2.5">
-                      <span className="w-7 h-7 rounded-md bg-white border border-[#FECACA] flex items-center justify-center flex-shrink-0">
-                        <RefreshCw className="w-3.5 h-3.5 text-[#D4183D]" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-lg font-bold text-[#D4183D] leading-none">{PAYMENT_FUNNEL.movedToNextCycle}</p>
-                        <p className="text-[10px] text-[#9F1239] mt-1 leading-tight">Moved to next payment cycle</p>
-                      </div>
-                    </div>
-                  </div>
+                <div className="space-y-4">
+                  <SupplierCountSection
+                    title="Not Approved"
+                    total={KPI.notApproved}
+                    items={NOT_APPROVED_BY_SUPPLIER}
+                    tone="red"
+                  />
+                  <div className="border-t border-[#F0EFF6]" />
+                  <SupplierCountSection
+                    title="Deferred to Next Cycle"
+                    total={KPI.leftOver}
+                    items={DEFERRED_BY_SUPPLIER}
+                    tone="amber"
+                  />
                 </div>
               </Card>
 

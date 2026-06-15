@@ -175,6 +175,48 @@ export const IMPLANT_BRANDS = [
   'Z-systems', 'Zuga Medical',
 ];
 
+// ── Nested implant brand catalog (DUMMY DATA) ────────────────────────────────
+// Brand → System → Platform drill-down for the implant-abutment brand picker.
+// Real implant catalogs nest this way (e.g. Adin → Touareg → UNP/NP/RP/WP).
+// This is a small hand-seeded sample for the prototype — swap for the real
+// catalogue when available. A brand with an empty `systems` array (e.g.
+// "Other") falls back to flat selection (picking the brand IS the choice).
+export type ImplantSystem = { name: string; platforms: string[] };
+export type ImplantBrandNode = { brand: string; systems: ImplantSystem[] };
+export const IMPLANT_BRAND_CATALOG: ImplantBrandNode[] = [
+  { brand: 'Adin', systems: [
+    { name: 'Touareg', platforms: ['UNP', 'NP', 'RP', 'WP'] },
+    { name: 'CloseFit', platforms: ['NP', 'RP'] },
+  ]},
+  { brand: 'Alfa Gate', systems: [
+    { name: 'Spiral', platforms: ['NP', 'RP', 'WP'] },
+    { name: 'Conical', platforms: ['Standard', 'Wide'] },
+  ]},
+  { brand: 'Alliance', systems: [
+    { name: 'In-Kone', platforms: ['Universal'] },
+  ]},
+  { brand: 'Straumann', systems: [
+    { name: 'Bone Level', platforms: ['NC', 'RC'] },
+    { name: 'Tissue Level', platforms: ['RN', 'WN'] },
+    { name: 'BLX', platforms: ['RB', 'WB'] },
+  ]},
+  { brand: 'Nobel Biocare', systems: [
+    { name: 'NobelActive', platforms: ['NP', 'RP'] },
+    { name: 'Brånemark', platforms: ['RP', 'WP'] },
+    { name: 'NobelReplace', platforms: ['NP', 'RP', 'WP'] },
+  ]},
+  { brand: 'MIS', systems: [
+    { name: 'C1', platforms: ['Standard'] },
+    { name: 'Seven', platforms: ['Standard'] },
+  ]},
+  { brand: 'Dentium', systems: [
+    { name: 'Implantium', platforms: ['Regular'] },
+    { name: 'SuperLine', platforms: ['Regular', 'Wide'] },
+  ]},
+  // Flat fallback example — no systems, so picking the brand is the leaf.
+  { brand: 'Other', systems: [] },
+];
+
 // Implant abutment material — Bridge-specific. Different palette from the
 // generic crown materials (MATERIAL_TYPES) because the abutment is the
 // titanium / zirconia core under the prosthesis.
@@ -196,6 +238,25 @@ export const OCCLUSION_CLASSES = ['Class I', 'Class II', 'Class III'];
 
 // Side the occlusion finding applies to.
 export const OCCLUSION_SIDES = ['Left', 'Right', 'Both', 'N/A'];
+
+// ── Clear Aligners ───────────────────────────────────────────────────────────
+// Full aligner prescription. Retainers keep the simpler Retainer Type +
+// Occlusion block; Clear Aligners get this richer set. Option lists for
+// Phasing / IPR / Attachment / Incisal Edge / Crowding / Midline come straight
+// from the reference prescription; the remaining movement fields use the
+// standard improve / maintain / as-needed pattern and can be tuned later.
+export const YES_NO = ['Yes', 'No'];
+export const ALIGNER_DURATIONS = ['7 days / aligner', '10 days / aligner', '14 days / aligner', '21 days / aligner'];
+export const ALIGNER_INCISAL_EDGE = ['Gingival', 'Incisal', 'As Needed', 'N/A'];
+export const ALIGNER_CROWDING = ['Expand', 'Procline', 'As Needed', 'N/A'];
+export const ALIGNER_SPACING = ['Close', 'Maintain', 'As Needed', 'N/A'];
+export const ALIGNER_OVERJET = ['Improve', 'Maintain', 'As Needed', 'N/A'];
+export const ALIGNER_OVERBITE = ['Improve', 'Maintain', 'As Needed', 'N/A'];
+export const ALIGNER_OPENBITE = ['Close', 'Maintain', 'As Needed', 'N/A'];
+export const ALIGNER_CROSSBITE = ['Correct', 'Maintain', 'As Needed', 'N/A'];
+export const ALIGNER_MIDLINE = ['Between Centrals', 'Distal to laterals', 'Distal to Canines', 'Equally around laterals', 'As Needed', 'N/A'];
+export const ALIGNER_BIOTYPE = ['Thin', 'Normal', 'Thick', 'N/A'];
+export const MILLERS_CLASS = ['Class I', 'Class II', 'Class III', 'Class IV', 'N/A'];
 
 // ── Denture ─────────────────────────────────────────────────────────────────
 // Stage of fabrication this case sits at. Multi-select because a single case
@@ -261,6 +322,23 @@ export interface ServiceSelection {
   skeletalSide?: string;
   dentalClass?: string;
   dentalSide?: string;
+  // Clear Aligners-specific (orthodontics → or-clear-aligners). Retainers
+  // ignore these; aligners ignore retainerType.
+  alignerDuration?: string;    // wear interval per aligner
+  phasing?: string;            // Yes / No — drives the phase-order tabs in the case detail
+  ipr?: string;                // Yes / No
+  attachment?: string;         // Yes / No
+  incisalEdge?: string;        // Gingival / Incisal / As Needed / N/A
+  crowding?: string;           // Expand / Procline / As Needed / N/A
+  spacing?: string;
+  overjet?: string;
+  overbite?: string;
+  openbite?: string;
+  crossbite?: string;
+  midline?: string;
+  biotype?: string;            // Thin / Normal / Thick / N/A
+  millersClass?: string;       // Miller's recession Class I–IV / N/A
+  alignerItems?: string;       // Additional Items — free text
   // Denture-specific
   stages?: string[];           // multi-select: Special Tray, Bite Reg., Try In, Finish
   // Appliances — per item:

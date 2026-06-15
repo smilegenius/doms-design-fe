@@ -2888,20 +2888,20 @@ export default function SpendSettingsPage() {
 
 // ─── Extraction email tab ────────────────────────────────────────────────────
 // "Email" tab inside Schedule Monthly Payment Extraction. Two concerns:
-//   1. Share Extraction With — who receives the monthly extraction report.
-//   2. Payment Reminder — an automatic email to the dental group ahead of
-//      payment processing so pending approvals don't slip a month.
+//   1. Share Extraction With — who has access / receives the monthly report.
+//   2. Payment Reminder — an automatic email sent ahead of the EXTRACTION
+//      date to everyone with access, so pending invoices get approved in time.
 // Kept deliberately minimal: the reminder leads with a single toggle row,
 // and the template editor stays collapsed until the user asks for it.
 const EXTRACTION_REMINDER_DEFAULT = {
-  subject: 'Reminder: approve invoices before payment processing on {{processingDate}}',
-  body: `Hi {{groupName}} team,
+  subject: 'Reminder: review invoices before the {{extractionDate}} payment extraction',
+  body: `Hi team,
 
 This is an automated reminder from your spend management schedule.
 
-Your monthly payment extraction report was generated on {{extractionDate}}. All invoices must be approved by **{{processingDate}}** to make this month's payment run.
+The monthly payment extraction runs on **{{extractionDate}}**. Please review and approve any pending invoices before then so they're included in this run.
 
-{{pendingCount}} invoices are still awaiting approval — anything not approved by then rolls into next month's run, and the affected suppliers are notified automatically.
+{{pendingCount}} invoices are still awaiting approval — anything not approved before the extraction rolls into next month's run.
 
 Review pending invoices: {{portalLink}}
 
@@ -2909,15 +2909,16 @@ Kind regards,
 
 SmileGenius Spend Management`,
 };
-const EXTRACTION_REMINDER_PLACEHOLDERS = ['groupName', 'extractionDate', 'processingDate', 'pendingCount', 'portalLink'];
+const EXTRACTION_REMINDER_PLACEHOLDERS = ['extractionDate', 'pendingCount', 'portalLink'];
 
-function ExtractionEmailTab({ extractionDay, cutoffDay, cutoffMonth }: {
+function ExtractionEmailTab({ extractionDay }: {
   extractionDay: string;
   cutoffDay: string;
   cutoffMonth: 'same' | 'next';
 }) {
   const { toast } = useToast();
-  // Extraction report recipients (moved here from the Setup tab).
+  // Extraction report recipients — everyone with access. The reminder below
+  // goes to this same list (people with access to the extraction).
   const [shareEmails, setShareEmails] = useState<string[]>(['finance@smilegenius.com']);
   const [emailInput, setEmailInput]   = useState('');
   const addShareEmail = () => {
@@ -2926,8 +2927,8 @@ function ExtractionEmailTab({ extractionDay, cutoffDay, cutoffMonth }: {
       setEmailInput('');
     }
   };
-  // Payment reminder settings.
-  const [groupEmail, setGroupEmail]     = useState('accounts@smilegenius.co.uk');
+  // Payment reminder settings. The reminder fires ahead of the EXTRACTION
+  // date (not the processing cut-off) and is sent to everyone with access.
   const [leadDays, setLeadDays]         = useState('3');
   const [enabled, setEnabled]           = useState(true);
   const [subject, setSubject]           = useState(EXTRACTION_REMINDER_DEFAULT.subject);
@@ -2935,7 +2936,6 @@ function ExtractionEmailTab({ extractionDay, cutoffDay, cutoffMonth }: {
   const [templateOpen, setTemplateOpen] = useState(false);
   const isDefaultTemplate =
     subject === EXTRACTION_REMINDER_DEFAULT.subject && body === EXTRACTION_REMINDER_DEFAULT.body;
-  const processingLabel = `${cutoffDay} (${cutoffMonth === 'next' ? 'next month' : 'same month'})`;
   return (
     <div>
       <div className="p-6 space-y-5">
@@ -2991,10 +2991,10 @@ function ExtractionEmailTab({ extractionDay, cutoffDay, cutoffMonth }: {
               <p className="text-xs text-[#717182] mt-0.5 leading-relaxed">
                 {enabled ? (
                   <>
-                    Sent automatically <span className="font-medium text-[#030213]">{leadDays} day{leadDays === '1' ? '' : 's'} before payment processing</span> — {processingLabel} — to the dental group.
+                    Sent automatically <span className="font-medium text-[#030213]">{leadDays} day{leadDays === '1' ? '' : 's'} before the payment extraction</span> — {extractionDay} — to everyone with access.
                   </>
                 ) : (
-                  'Paused — the dental group will not receive this reminder.'
+                  'Paused — recipients with access will not get this reminder.'
                 )}
               </p>
             </div>
@@ -3006,35 +3006,30 @@ function ExtractionEmailTab({ extractionDay, cutoffDay, cutoffMonth }: {
 
           {enabled && (
             <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div>
-                  <label className="block text-sm font-medium text-[#030213] mb-1.5">Dental Group Email</label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#717182]" />
-                    <input
-                      type="email"
-                      placeholder="Enter dental group email"
-                      value={groupEmail}
-                      onChange={(e) => setGroupEmail(e.target.value)}
-                      className="w-full pl-9 pr-4 py-2.5 border border-[#E0E0E6] rounded-lg text-sm text-[#030213] bg-white placeholder-[#B0B0C0] focus:outline-none focus:ring-2 focus:ring-[#4D8EF7]/20 focus:border-[#4D8EF7]"
-                    />
-                  </div>
+              {/* Recipients note — the reminder goes to everyone with access
+                  (the Share Extraction With list above), not a single inbox. */}
+              <div className="rounded-lg border border-[#BFDBFE] bg-[#EEF4FF] px-3 py-2.5 flex items-start gap-2">
+                <Users className="w-4 h-4 text-[#1565C0] flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-[#1E3A8A] leading-snug">
+                  This reminder is sent to <span className="font-semibold">everyone with access to the extraction</span> — the {shareEmails.length} recipient{shareEmails.length === 1 ? '' : 's'} listed under <span className="font-semibold">Share Extraction With</span> above.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#030213] mb-1.5">Send Reminder</label>
+                <div className="relative max-w-xs">
+                  <select
+                    value={leadDays}
+                    onChange={(e) => setLeadDays(e.target.value)}
+                    className="w-full appearance-none pl-4 pr-10 py-2.5 border border-[#E0E0E6] rounded-lg text-sm text-[#030213] bg-white hover:bg-[#F8F9FC] focus:outline-none focus:ring-2 focus:ring-[#4D8EF7]/20 focus:border-[#4D8EF7]"
+                  >
+                    {['1', '2', '3', '5', '7'].map(d => (
+                      <option key={d} value={d}>{d} day{d === '1' ? '' : 's'} before extraction</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-4 h-4 text-[#717182] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-[#030213] mb-1.5">Send Reminder</label>
-                  <div className="relative">
-                    <select
-                      value={leadDays}
-                      onChange={(e) => setLeadDays(e.target.value)}
-                      className="w-full appearance-none pl-4 pr-10 py-2.5 border border-[#E0E0E6] rounded-lg text-sm text-[#030213] bg-white hover:bg-[#F8F9FC] focus:outline-none focus:ring-2 focus:ring-[#4D8EF7]/20 focus:border-[#4D8EF7]"
-                    >
-                      {['1', '2', '3', '5', '7'].map(d => (
-                        <option key={d} value={d}>{d} day{d === '1' ? '' : 's'} before payment processing</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="w-4 h-4 text-[#717182] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  </div>
-                </div>
+                <p className="text-xs text-[#717182] mt-1.5">Counted back from the extraction date ({extractionDay}).</p>
               </div>
 
               {/* Template — collapsed by default to keep the tab light.
@@ -3121,8 +3116,8 @@ function ExtractionEmailTab({ extractionDay, cutoffDay, cutoffMonth }: {
       {/* Footer */}
       <div className="px-6 py-4 border-t border-[#F0EFF6] flex items-center justify-between bg-[#FAFBFC]">
         <p className="text-xs text-[#A0A0B0]">
-          {shareEmails.length} report recipient{shareEmails.length === 1 ? '' : 's'}
-          {enabled && ` · reminder to ${groupEmail.trim() || 'the dental group'}`}
+          {shareEmails.length} recipient{shareEmails.length === 1 ? '' : 's'} with access
+          {enabled && ' · reminder on'}
         </p>
         <Button variant="primary" size="sm" onClick={() => toast.success('Email settings saved')}>
           Save changes

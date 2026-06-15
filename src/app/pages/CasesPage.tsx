@@ -23,12 +23,15 @@ import {
   Check,
   Mail,
   PenLine,
+  Archive,
+  ArchiveRestore,
 } from 'lucide-react';
 import Button from '../components/Button';
 import SearchInput from '../components/SearchInput';
 import SortDropdown from '../components/SortDropdown';
 import Pagination from '../components/Pagination';
 import FilterDrawer from '../components/FilterDrawer';
+import { useToast } from '../context/ToastContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,6 +85,10 @@ export interface Case {
   // email) the prescription preview pane shown during case creation.
   source: CaseSource;
   emailPrescription?: EmailPrescription;
+  // Archived cases are hidden from the main list and surfaced only under the
+  // "View Archived" toggle. Orthogonal to lifecycle `status`, so any case
+  // (draft, in-production, completed…) can be archived and later restored.
+  archived?: boolean;
 }
 
 type ViewMode = 'table' | 'grid';
@@ -147,6 +154,15 @@ function SourceIcon({ source, scanner, size = 32 }: { source: CaseSource; scanne
       <PenLine className="w-4 h-4 text-[#5A5568]" />
     </span>
   );
+}
+
+// Short text label for a case's origin. Email cases that also carry a scanner
+// export read "Email · iTero" so the row shows it arrived by email AND has
+// scanner scans; scanner cases show the brand; manual shows "Manual".
+export function sourceLabel(source: CaseSource, scanner: Scanner, hasScanFiles = false): string {
+  if (source === 'scanner') return scanner;
+  if (source === 'email')   return hasScanFiles ? `Email · ${scanner}` : 'Email';
+  return 'Manual';
 }
 
 function pick<T>(arr: T[], i: number): T { return arr[i % arr.length]; }
@@ -408,6 +424,45 @@ export const draftCases: Case[] = [
     scanner: 'iTero',
     source: 'manual',
   },
+  {
+    // Email-received case whose attached files are iTero scans — surfaces the
+    // combined "Email · iTero" source label so the lab can see it arrived by
+    // email AND carries a scanner export, not just a paper Rx.
+    id: 'CASE-DRAFT-005',
+    patientName: 'Grace Mitchell',
+    practice: 'Smile Genius Leeds',
+    dentist: 'Dr. Foster',
+    lab: 'Smile Genius Lab',
+    services: ['Crown'],
+    serviceItems: [{
+      id: 'd5-s1',
+      name: 'Crown',
+      status: 'new',
+      deliveryDate: null,
+      fdi: [36],
+      material: 'E.max',
+      shade: 'A1',
+      orderType: 'Private',
+      instructions: 'Single crown LL6. iTero scans attached — upper, lower and bite.',
+      scanFileCount: 3,
+      attachmentCount: 1,
+    }],
+    status: 'draft',
+    createdAt: '13-Jun-2026',
+    updatedAt: '13-Jun-2026',
+    requestedDelivery: '27-Jun-2026',
+    hasAlert: false,
+    scanner: 'iTero',
+    source: 'email',
+    emailPrescription: {
+      fromName: 'Dr. Foster',
+      fromEmail: 'dr.foster@smilegenius.co.uk',
+      subject: 'Crown Rx — Grace Mitchell (LL6) — iTero scans attached',
+      receivedAt: '40 min ago',
+      attachmentName: 'Mitchell_G_iTero_Export.zip',
+      bodyPreview: 'Hi team, exporting straight from iTero — upper, lower and bite scans attached for Grace Mitchell. E.max crown on LL6, shade A1.',
+    },
+  },
 ];
 
 mockCases.unshift(...draftCases);
@@ -476,7 +531,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
   // opening the read-only Case Detail page.
   onOpenDraft?: (caseData: Case) => void;
 } = {}) {
-  const [cases] = useState<Case[]>(mockCases);
+  const { toast } = useToast();
+  const [cases, setCases] = useState<Case[]>(mockCases);
+  const [showArchived, setShowArchived] = useState(false);
   const [selectedCase, setSelectedCase] = useState<Case | null>(() => {
     if (initialCaseId) return mockCases.find(c => c.id === initialCaseId) ?? null;
     return null;
@@ -590,6 +647,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
     })();
 
     return cases.filter(c => {
+      // Archive view shows ONLY archived; the main list excludes archived.
+      if (showArchived) { if (!c.archived) return false; }
+      else if (c.archived) return false;
       const q = searchQuery.toLowerCase();
       const matchSearch = !q || c.patientName.toLowerCase().includes(q) || c.practice.toLowerCase().includes(q) || c.dentist.toLowerCase().includes(q) || c.id.toLowerCase().includes(q);
       const matchStatus  = statusFilter   === 'all' || c.status === statusFilter;
@@ -606,7 +666,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
       const matchTime = !cutoff || parseDate(c.updatedAt) >= cutoff;
       return matchSearch && matchStatus && matchService && matchPractice && matchDentist && matchScanner && matchAlert && matchDelivery && matchTime;
     });
-  }, [cases, searchQuery, statusFilter, serviceFilter, practiceFilter, dentistFilter, scannerFilter, alertFilter, deliveryFilter, timeFilter]);
+  }, [cases, showArchived, searchQuery, statusFilter, serviceFilter, practiceFilter, dentistFilter, scannerFilter, alertFilter, deliveryFilter, timeFilter]);
+
+  // Archived count for the toggle label.
+  const archivedCount = useMemo(() => cases.filter(c => c.archived).length, [cases]);
 
   // Sort
   const sorted = useMemo(() => {
@@ -697,10 +760,20 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
     }
   }
 
+  // Archive / unarchive a case. Updates the list AND the open detail snapshot
+  // so the detail page reflects the new state immediately.
+  function toggleArchive(c: Case) {
+    const nextArchived = !c.archived;
+    setCases(prev => prev.map(x => x.id === c.id ? { ...x, archived: nextArchived } : x));
+    setSelectedCase(prev => prev && prev.id === c.id ? { ...prev, archived: nextArchived } : prev);
+    setGridMenuOpen(null);
+    toast.success(`${c.id} ${nextArchived ? 'archived' : 'restored'}`);
+  }
+
   if (selectedCase && selectedCase.status !== 'draft') {
     // Narrowed away from 'draft' above so the case is structurally
     // compatible with CaseDetailPage's CaseForDetail interface.
-    return <CaseDetailPage caseData={selectedCase as any} onBack={() => setSelectedCase(null)} />;
+    return <CaseDetailPage caseData={selectedCase as any} onBack={() => setSelectedCase(null)} onArchiveToggle={() => toggleArchive(selectedCase)} />;
   }
 
   function ColSortIcon({ col }: { col: SortColumn }) {
@@ -781,6 +854,19 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
                 {activeFilters.length}
               </span>
             )}
+          </button>
+          {/* View Archived toggle — matches the Suppliers / Practices pattern */}
+          <button
+            onClick={() => { setShowArchived(s => !s); setCurrentPage(1); }}
+            className={`inline-flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium border transition-colors flex-shrink-0 whitespace-nowrap ${
+              showArchived
+                ? 'bg-[#F3F3F5] text-[#030213] border-[#BDBDBD]'
+                : 'bg-white text-[#5A5568] border-[#E0E0E6] hover:bg-[#F8F9FC]'
+            }`}
+            title={showArchived ? 'Back to active cases' : 'View archived cases'}
+          >
+            <Archive className="w-4 h-4" />
+            {showArchived ? 'Hide Archived' : `View Archived (${archivedCount})`}
           </button>
         </div>
 
@@ -917,7 +1003,15 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
                     {/* ── Parent row ── */}
                     <tr onClick={() => openCase(c)} className="bg-white hover:bg-[#F8F9FC] transition-colors cursor-pointer relative [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]">
                       <td className="pl-3 pr-2 py-3 relative">
-                        <SourceIcon source={c.source} scanner={c.scanner} />
+                        {(() => {
+                          const hasScans = (c.serviceItems[0]?.scanFileCount ?? 0) > 0;
+                          // Email cases carrying scanner scans (e.g. iTero) show
+                          // the scanner brand logo — no mail icon, no text label.
+                          if (c.source === 'email' && hasScans) {
+                            return <ScannerIcon scanner={c.scanner} />;
+                          }
+                          return <SourceIcon source={c.source} scanner={c.scanner} />;
+                        })()}
                       </td>
                       {visibleCols.status && (
                         <td className="px-4 py-3 whitespace-nowrap">
@@ -1001,6 +1095,17 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
                               <Eye className="w-4 h-4" />
                             </button>
                           )}
+                          <button
+                            title={c.archived ? 'Unarchive case' : 'Archive case'}
+                            onClick={() => toggleArchive(c)}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              c.archived
+                                ? 'text-[#4D8EF7] hover:bg-[#EEF4FF]'
+                                : 'text-[#717182] hover:text-[#030213] hover:bg-[#F3F3F5]'
+                            }`}
+                          >
+                            {c.archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1100,14 +1205,25 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
                         <MoreHorizontal className="w-4 h-4" />
                       </button>
                       {gridMenuOpen === c.id && (
-                        <div className="absolute right-0 top-full mt-1 w-36 bg-white rounded-xl border border-[#E0E0E6] shadow-lg py-1 z-20">
+                        <div className="absolute right-0 top-full mt-1 w-40 bg-white rounded-xl border border-[#E0E0E6] shadow-lg py-1 z-20">
                           <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#030213] hover:bg-[#F8F9FC]">
                             <Download className="w-3.5 h-3.5 text-[#717182]" />
                             Download
                           </button>
-                          <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#030213] hover:bg-[#F8F9FC]">
+                          <button
+                            onClick={() => { setGridMenuOpen(null); openCase(c); }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#030213] hover:bg-[#F8F9FC]"
+                          >
                             <Eye className="w-3.5 h-3.5 text-[#717182]" />
                             View Case
+                          </button>
+                          <button
+                            onClick={() => toggleArchive(c)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#030213] hover:bg-[#F8F9FC]"
+                          >
+                            {c.archived
+                              ? <><ArchiveRestore className="w-3.5 h-3.5 text-[#4D8EF7]" /> Unarchive</>
+                              : <><Archive className="w-3.5 h-3.5 text-[#717182]" /> Archive</>}
                           </button>
                         </div>
                       )}

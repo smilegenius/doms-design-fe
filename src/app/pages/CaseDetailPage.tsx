@@ -5,7 +5,7 @@ import {
   StickyNote, X, Bold, Italic, Underline, Strikethrough, Code as CodeIcon,
   Superscript, Subscript, Undo2, Redo2, Paperclip, Eye, Plus, Minus,
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
-  Check, Clock, CheckCircle2,
+  Check, Clock, CheckCircle2, Archive, ArchiveRestore,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
 
@@ -14,6 +14,27 @@ import ModalPortal from '../components/ModalPortal';
 type CaseStatus = 'new' | 'submitted' | 'in-production' | 'quality-check' | 'shipped' | 'delivered' | 'refinement' | 'on-hold' | 'completed';
 type Tab = 'prescription' | 'timeline' | 'invoice' | 'shipping';
 type ViewerFormat = '3D' | 'PLY' | 'STL' | 'OBJ';
+
+// ─── Stage order — one fabrication-stage sub-order on a staged service ─────────
+// Denture (and later aligner) cases are ordered in stages. The clinic picks a
+// set of stages at creation (the "initial" order, which bundles whatever was
+// selected — e.g. Special Tray + Bite Registration + Try In into one order),
+// then can place further stage orders over time for the remaining stages.
+export interface StageOrder {
+  id: string;
+  stages: string[];               // the stage names this order covers
+  status: CaseStatus;
+  deliveryDate: string | null;
+  createdAt: string;
+}
+
+// Catalog of fabrication stages per staged service. A service whose name is a
+// key here renders the stage-order tab strip + "New Stage Order" flow instead
+// of the plain single-phase layout. Aligners follow after denture.
+export const STAGE_CATALOGS: Record<string, string[]> = {
+  'Full Denture':    ['Special Tray', 'Bite Registration', 'Try In', 'Finish'],
+  'Partial Denture': ['Special Tray', 'Bite Registration', 'Try In', 'Finish'],
+};
 
 // ─── Service Item — one row per service inside a multi-service case ────────────
 export interface ServiceItem {
@@ -27,6 +48,15 @@ export interface ServiceItem {
     status: 'pending' | 'in-progress' | 'completed' | 'received';
     deliveryDate?: string;
   }[];
+  /** Staged services (denture/aligner) — the stages selected at creation and
+      the stage orders placed so far. When absent for a service that has a
+      STAGE_CATALOGS entry, CaseDetailPage seeds a sensible initial order. */
+  stages?: string[];
+  stageOrders?: StageOrder[];
+  /** Clear Aligners only — set when the case's "Phasing" field is Yes. Drives
+      the open-ended, auto-named Phase 1 / Phase 2 … phase-order tab strip.
+      Undefined is treated as enabled for aligners (prototype default). */
+  phasing?: boolean;
   /** Per-service prescription data — surfaces in the per-service Details tab and summary cards. */
   fdi?: number[];                  // selected teeth FDI numbers
   material?: string;               // e.g. 'Zirconia', 'PFM', 'E.max'
@@ -50,11 +80,15 @@ interface CaseForDetail {
   hasAlert: boolean;
   /** Service-level detail — one entry per service on this case */
   serviceItems?: ServiceItem[];
+  /** Whether this case is archived (hidden from the main Cases list). */
+  archived?: boolean;
 }
 
 interface CaseDetailPageProps {
   caseData: CaseForDetail;
   onBack: () => void;
+  /** Toggle this case's archived state — wired from the Cases list. */
+  onArchiveToggle?: () => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1172,7 +1206,12 @@ function CaseSummaryOverview({
                 <div>
                   <p className="text-sm font-semibold text-[#030213]">{si.name}</p>
                   <p className="text-[11px] text-[#717182]">
-                    {si.phases ? `${si.phases.length} phases` : 'Single phase'}
+                    {(() => {
+                      const st = getStaging(si);
+                      if (st?.mode === 'catalog') return `${(si.stages ?? st.catalog.slice(0, -1)).length} stages`;
+                      if (st?.mode === 'phased')  return 'Phasing enabled';
+                      return si.phases ? `${si.phases.length} phases` : 'Single phase';
+                    })()}
                   </p>
                 </div>
               </div>
@@ -1244,8 +1283,9 @@ function CaseSummaryOverview({
               </span>
             </div>
 
-            {/* ── Phase progress (multi-phase services only) ── */}
-            {si.phases && si.phases.length > 0 && (
+            {/* ── Phase progress (multi-phase services only) — hidden for
+                staged services, which use the phase-order strip instead. ── */}
+            {si.phases && si.phases.length > 0 && !getStaging(si) && (
               <div className="space-y-1.5">
                 {si.phases.map((phase, idx) => {
                   const ps = PHASE_STATUS_MAP[phase.status] ?? PHASE_STATUS_MAP.pending;
@@ -1339,6 +1379,177 @@ const PHASE_STATUS_MAP: Record<string, { label: string; bg: string; color: strin
   received:     { label: 'Received',    bg: '#E0F7FA', color: '#00838F', border: '#B2EBF2', dot: '#0097A7' },
 };
 
+// Combine a stage order's stage names into the tab / banner label. The
+// initial order usually bundles several ("Special Tray, Bite Registration,
+// Try In"); later orders are often a single remaining stage.
+function stageOrderLabel(o: StageOrder): string {
+  return o.stages.length ? o.stages.join(', ') : 'Stage order';
+}
+
+// ── Staging model ────────────────────────────────────────────────────────────
+// Two flavours of staged service share the same tab strip:
+//   • 'catalog' (denture) — a FIXED set of named stages; each order picks from
+//     the remaining ones; runs out when all are ordered.
+//   • 'phased'  (aligner, when Phasing = Yes) — OPEN-ENDED, auto-named
+//     "Phase 1", "Phase 2", … ; never runs out.
+type Staging = { mode: 'catalog'; catalog: string[] } | { mode: 'phased' } | null;
+function getStaging(service: ServiceItem): Staging {
+  if (STAGE_CATALOGS[service.name]) return { mode: 'catalog', catalog: STAGE_CATALOGS[service.name] };
+  // Aligners default to phasing-enabled in the prototype; an explicit
+  // phasing === false (the "Phasing: No" answer) opts out.
+  if (service.name === 'Clear Aligners' && service.phasing !== false) return { mode: 'phased' };
+  return null;
+}
+
+// Tab caption for a stage order. Catalog orders read "Initial" / "Order N";
+// phased orders ARE a phase, so the caption is the phase name itself.
+function stageTabCaption(o: StageOrder, idx: number, mode: 'catalog' | 'phased'): string {
+  if (mode === 'phased') return o.stages[0] ?? `Phase ${idx + 1}`;
+  return idx === 0 ? 'Initial' : `Order ${idx + 1}`;
+}
+
+// Seed the initial stage orders for a staged service when the data doesn't
+// carry them yet. Denture uses the service's own `stages` selection (or the
+// catalog minus its last stage, leaving one to demo "New Stage Order");
+// aligner phasing starts at a single auto-named "Phase 1".
+function seedStageOrders(service: ServiceItem, createdAt: string): StageOrder[] {
+  if (service.stageOrders && service.stageOrders.length) return service.stageOrders;
+  const staging = getStaging(service);
+  if (!staging) return [];
+  const base = { id: 'so-1', status: service.status, deliveryDate: service.deliveryDate, createdAt };
+  if (staging.mode === 'phased') {
+    return [{ ...base, stages: ['Phase 1'] }];
+  }
+  const initial = service.stages && service.stages.length
+    ? service.stages
+    : staging.catalog.slice(0, Math.max(1, staging.catalog.length - 1));
+  return [{ ...base, stages: initial }];
+}
+
+// ─── New Stage / Phase Order modal ────────────────────────────────────────────
+// Lets the user place a follow-up order. Every prescription detail is inherited
+// from the service (read-only "auto-filled" summary). Two modes:
+//   • catalog (denture) — choose from the REMAINING named stages (already
+//     ordered ones never appear).
+//   • phased (aligner)  — nothing to choose; the next phase is auto-named
+//     ("Phase N") and shown read-only, so it's a one-confirm action.
+function StageOrderPickerModal({ service, mode, remaining, nextPhaseName, onCancel, onConfirm }: {
+  service: ServiceItem;
+  mode: 'catalog' | 'phased';
+  remaining: string[];
+  nextPhaseName: string;
+  onCancel: () => void;
+  onConfirm: (stages: string[]) => void;
+}) {
+  // Catalog mode pre-selects the first remaining stage so the common
+  // "next stage" path is one click. Phased mode has no selection.
+  const [picked, setPicked] = useState<string[]>(remaining.length ? [remaining[0]] : []);
+  const toggle = (stage: string) =>
+    setPicked(prev => prev.includes(stage) ? prev.filter(s => s !== stage) : [...prev, stage]);
+  const isPhased = mode === 'phased';
+  const canCreate = isPhased ? true : picked.length > 0;
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onCancel} />
+        <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          {/* Header */}
+          <div className="px-5 pt-5 pb-3 border-b border-[#F0EFF6]">
+            <h3 className="text-sm font-bold text-[#030213]">{isPhased ? 'New Phase Order' : 'New Stage Order'}</h3>
+            <p className="text-xs text-[#717182] mt-0.5">
+              {service.name} · {isPhased ? `adds ${nextPhaseName}, auto-filled from the case` : 'pick the stage(s) to order next'}
+            </p>
+          </div>
+          {/* Auto-filled prescription summary — inherited from the service */}
+          <div className="px-5 py-3 bg-[#FAFBFF] border-b border-[#F0EFF6]">
+            <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+              <Check className="w-3 h-3 text-[#16A34A]" strokeWidth={3} />
+              Auto-filled from the case
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                service.material && `Material: ${service.material}`,
+                service.shade && `Shade: ${service.shade}`,
+                service.orderType && service.orderType,
+                (service.fdi?.length ?? 0) > 0 && `${service.fdi!.length} teeth`,
+              ].filter(Boolean).map((chip, i) => (
+                <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-white text-[#5A5568] border border-[#E0E0E6]">
+                  {chip as string}
+                </span>
+              ))}
+            </div>
+          </div>
+          {/* Selection — phased shows the auto-named phase; catalog shows the
+              remaining-stage picker. */}
+          <div className="px-5 py-4">
+            {isPhased ? (
+              <>
+                <p className="text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-2">New phase</p>
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#DDD6FE] bg-[#F5F3FF]">
+                  <span className="w-6 h-6 rounded-full bg-gradient-to-br from-[#7C3AED] to-[#A59DFF] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                    {nextPhaseName.replace(/\D/g, '') || '+'}
+                  </span>
+                  <span className="text-sm font-semibold text-[#5B21B6]">{nextPhaseName}</span>
+                  <span className="ml-auto text-[10px] text-[#A0A0B0]">auto-named</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-2">Select stage(s)</p>
+                {remaining.length === 0 ? (
+                  <p className="text-xs text-[#A0A0B0] italic">All stages have already been ordered.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {remaining.map(stage => {
+                      const active = picked.includes(stage);
+                      return (
+                        <button
+                          key={stage}
+                          type="button"
+                          onClick={() => toggle(stage)}
+                          className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border text-sm text-left transition-colors ${
+                            active
+                              ? 'border-[#4D8EF7] bg-[#EEF4FF] text-[#1565C0] font-semibold'
+                              : 'border-[#E0E0E6] bg-white text-[#5A5568] hover:border-[#BFDBFE] hover:bg-[#F5F8FF]'
+                          }`}
+                        >
+                          <span className="truncate">{stage}</span>
+                          <span className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                            active ? 'border-[#4D8EF7] bg-[#4D8EF7]' : 'border-[#D1D5DB] bg-white'
+                          }`}>
+                            {active && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {/* Footer */}
+          <div className="px-5 py-4 border-t border-[#F0EFF6] flex items-center justify-end gap-2 bg-[#FAFBFC]">
+            <button
+              onClick={onCancel}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-[#5A5568] bg-[#F0EFF6] hover:bg-[#E5E3ED] transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={!canCreate}
+              onClick={() => onConfirm(isPhased ? [nextPhaseName] : picked)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+            >
+              <Plus className="w-4 h-4" />
+              {isPhased ? 'Create phase order' : 'Create stage order'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
 function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
   service: ServiceItem;
   caseData: CaseForDetail;
@@ -1346,13 +1557,38 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
   onOpenFullView: () => void;
 }) {
   const [subTab, setSubTab] = useState<ServiceSubTab>('details');
+  // ── Stage / phase orders (denture catalog · aligner phasing) ────────────
+  // Staged services render a tab strip under the service name. Denture bundles
+  // the stages picked at creation into the "Initial" order, then "New Stage
+  // Order" picks from the remaining catalog. Aligners (Phasing = Yes) start at
+  // "Phase 1" and "New Phase Order" appends auto-named Phase 2, Phase 3, …
+  const staging = getStaging(service);
+  const stageMode = staging?.mode ?? null;            // 'catalog' | 'phased' | null
+  const stageCatalog = staging?.mode === 'catalog' ? staging.catalog : null;
+  const isPhased = staging?.mode === 'phased';
+  const [stageOrders, setStageOrders] = useState<StageOrder[]>(
+    () => seedStageOrders(service, caseData.createdAt)
+  );
+  const [activeStageId, setActiveStageId] = useState<string>(() => seedStageOrders(service, caseData.createdAt)[0]?.id ?? '');
+  const [stagePickerOpen, setStagePickerOpen] = useState(false);
+  const orderedStages = new Set(stageOrders.flatMap(o => o.stages));
+  // Catalog services run out of stages; phased services never do.
+  const remainingStages = stageCatalog ? stageCatalog.filter(s => !orderedStages.has(s)) : [];
+  const canAddOrder = isPhased || remainingStages.length > 0;
+  const nextPhaseName = `Phase ${stageOrders.length + 1}`;
+  const activeStageOrder = stageOrders.find(o => o.id === activeStageId) ?? stageOrders[0] ?? null;
   // Per-service viewer + order panel state — scoped to this view so each
   // service tab keeps its own viewer format and accordion state.
   const [viewerFormat, setViewerFormat] = useState<ViewerFormat>('3D');
   const [orderTab, setOrderTab] = useState<'order-form' | 'lab-documents'>('order-form');
   const [orderOpen, setOrderOpen] = useState(true);
 
-  const s = STATUS_MAP[service.status];
+  // When the service is staged, the active stage order drives the status +
+  // delivery shown in the identity card so each stage-order tab reads as its
+  // own order. Non-staged services fall back to the service-level values.
+  const effectiveStatus = (staging && activeStageOrder) ? activeStageOrder.status : service.status;
+  const effectiveDelivery = (staging && activeStageOrder) ? activeStageOrder.deliveryDate : service.deliveryDate;
+  const s = STATUS_MAP[effectiveStatus];
   const iStyle = SERVICE_ICON_COLOR[service.name] ?? { bg: '#FFF7ED', color: '#F59E0B' };
 
   const SERVICE_SUB_TABS: { id: ServiceSubTab; label: string; icon: React.ReactNode }[] = [
@@ -1370,7 +1606,68 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
   const attachCount = service.attachmentCount ?? 0;
 
   return (
-    <div className="flex flex-1 overflow-hidden mt-3 mx-6 mb-6 gap-4">
+    <div className="flex flex-col flex-1 overflow-hidden mt-3 mx-6 mb-6 gap-3 min-h-0">
+      {/* ── Stage / phase order strip (denture catalog · aligner phasing) ────
+          One tab per order. Denture: first tab "Initial" bundles the stages
+          picked at creation, "New Stage Order" picks from remaining stages.
+          Aligner phasing: tabs are auto-named Phase 1, Phase 2, … and
+          "New Phase Order" is always available. ── */}
+      {staging && (
+        <div className="bg-white border border-[#E0E0E6] rounded-xl flex-shrink-0 overflow-hidden">
+          <div className="flex items-center gap-1 px-1.5 pt-1.5 overflow-x-auto">
+            {stageOrders.map((o, idx) => (
+              <button
+                key={o.id}
+                onClick={() => setActiveStageId(o.id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-xs font-semibold border-b-2 transition-colors whitespace-nowrap flex-shrink-0 max-w-[260px] ${
+                  activeStageId === o.id
+                    ? 'border-[#7C3AED] text-[#5B21B6] bg-[#F5F3FF]'
+                    : 'border-transparent text-[#717182] hover:text-[#030213] hover:bg-[#F8F9FC]'
+                }`}
+                title={stageOrderLabel(o)}
+              >
+                <span className="w-4 h-4 rounded-full bg-gradient-to-br from-[#7C3AED] to-[#A59DFF] text-white text-[8px] font-bold flex items-center justify-center flex-shrink-0">
+                  {idx + 1}
+                </span>
+                <span className="truncate">{stageTabCaption(o, idx, stageMode!)}</span>
+              </button>
+            ))}
+            <button
+              onClick={() => setStagePickerOpen(true)}
+              disabled={!canAddOrder}
+              title={
+                isPhased ? 'Add the next phase'
+                : remainingStages.length === 0 ? 'All stages have been ordered'
+                : 'Order another stage'
+              }
+              className="ml-auto mr-1 mb-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#7C3AED] to-[#A59DFF] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity flex-shrink-0 self-center"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              {isPhased ? 'New Phase Order' : 'New Stage Order'}
+            </button>
+          </div>
+          {/* Active order's stages */}
+          <div className="px-4 py-2.5 border-t border-[#F0EFF6] bg-[#FAFBFF] flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">{isPhased ? 'Phase:' : 'Stages:'}</span>
+            {(activeStageOrder?.stages ?? []).map(stage => (
+              <span key={stage} className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#F5F3FF] text-[#5B21B6] border border-[#DDD6FE]">
+                {stage}
+              </span>
+            ))}
+            {isPhased ? (
+              <span className="ml-auto text-[10px] text-[#A0A0B0]">
+                {stageOrders.length} phase{stageOrders.length === 1 ? '' : 's'} ordered
+              </span>
+            ) : remainingStages.length > 0 && (
+              <span className="ml-auto text-[10px] text-[#A0A0B0]">
+                {remainingStages.length} stage{remainingStages.length === 1 ? '' : 's'} not yet ordered
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-1 overflow-hidden gap-4 min-h-0">
       {/* Sidebar */}
       <div className="w-56 flex-shrink-0 bg-white border border-[#E0E0E6] rounded-xl py-3 px-2.5 self-start space-y-1">
         {SERVICE_SUB_TABS.map((tab) => (
@@ -1440,11 +1737,17 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
               <div className="grid grid-cols-2 gap-4 text-xs">
                 <div>
                   <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">Delivery Date</p>
-                  <p className="font-medium text-[#030213]">{service.deliveryDate ?? '—'}</p>
+                  <p className="font-medium text-[#030213]">{effectiveDelivery ?? '—'}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">Phases</p>
-                  <p className="font-medium text-[#030213]">{service.phases ? service.phases.length : 1}</p>
+                  <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">{isPhased ? 'Phase' : stageCatalog ? 'Stages' : 'Phases'}</p>
+                  <p className="font-medium text-[#030213]">
+                    {isPhased
+                      ? (activeStageOrder?.stages[0] ?? '—')
+                      : stageCatalog
+                        ? (activeStageOrder?.stages.length ?? 0)
+                        : (service.phases ? service.phases.length : 1)}
+                  </p>
                 </div>
               </div>
             </div>
@@ -1578,7 +1881,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
                   </div>
 
                   {/* Phase cards — kept inline within the accordion for multi-phase services. */}
-                  {service.phases && service.phases.length > 0 && (
+                  {service.phases && service.phases.length > 0 && !staging && (
                     <div className="mt-6 pt-5 border-t border-[#F0EFF6] space-y-3">
                       <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider font-semibold">Phases</p>
                       {service.phases.map((phase, idx) => {
@@ -1686,6 +1989,30 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
         {subTab === 'invoice'  && <InvoiceTab  caseId={caseData.id} />}
         {subTab === 'shipping' && <ShippingTab />}
       </div>
+      </div>
+
+      {/* New Stage / Phase Order modal */}
+      {stagePickerOpen && staging && (
+        <StageOrderPickerModal
+          service={service}
+          mode={staging.mode}
+          remaining={remainingStages}
+          nextPhaseName={nextPhaseName}
+          onCancel={() => setStagePickerOpen(false)}
+          onConfirm={(stages) => {
+            const newOrder: StageOrder = {
+              id: `so-${stageOrders.length + 1}`,
+              stages,
+              status: 'new',
+              deliveryDate: null,
+              createdAt: caseData.updatedAt,
+            };
+            setStageOrders(prev => [...prev, newOrder]);
+            setActiveStageId(newOrder.id);
+            setStagePickerOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1912,7 +2239,7 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
-export default function CaseDetailPage({ caseData, onBack }: CaseDetailPageProps) {
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState(caseData.requestedDelivery ?? '');
@@ -1973,18 +2300,48 @@ export default function CaseDetailPage({ caseData, onBack }: CaseDetailPageProps
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to Cases
         </button>
-        {missingDeliveryDate && (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FFEBEE] border border-[#FECDD3] text-[11px] font-medium text-[#BE123C]">
-            <AlertTriangle className="w-3.5 h-3.5" />
-            Warning — Please enter requested delivery date
-          </span>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {missingDeliveryDate && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FFEBEE] border border-[#FECDD3] text-[11px] font-medium text-[#BE123C]">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              Warning — Please enter requested delivery date
+            </span>
+          )}
+          {onArchiveToggle && (
+            caseData.archived ? (
+              <button
+                onClick={onArchiveToggle}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#4D8EF7] border border-[#C8D8FC] bg-[#EEF4FF] hover:bg-[#DBEAFE] transition-colors"
+                title="Restore this case to the active list"
+              >
+                <ArchiveRestore className="w-3.5 h-3.5" />
+                Unarchive
+              </button>
+            ) : (
+              <button
+                onClick={onArchiveToggle}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] bg-white hover:bg-[#F8F9FC] hover:text-[#030213] transition-colors"
+                title="Archive this case (hidden from the active list, restorable later)"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                Archive
+              </button>
+            )
+          )}
+        </div>
       </div>
 
       {/* ── Identity card (with compact timeline pill in the header row) ── */}
       <div className="mx-6 mt-2 bg-white border border-[#E0E0E6] rounded-xl">
         <div className="px-5 py-4 border-b border-[#F0EFF6] flex items-center gap-3 flex-wrap">
           <h1 className="text-base font-bold text-[#030213] tracking-tight">{caseData.id}</h1>
+
+          {caseData.archived && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#F3F3F5] text-[#616161] border border-[#BDBDBD]">
+              <Archive className="w-3 h-3" />
+              Archived
+            </span>
+          )}
 
           {/* AI suggestion chip */}
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-[#FFF7ED] text-[#B45309] border border-[#FED7AA]">

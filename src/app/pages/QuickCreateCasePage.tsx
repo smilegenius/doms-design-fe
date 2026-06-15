@@ -19,11 +19,23 @@ import {
   CASE_SOURCE_UPLOAD_SLOTS,
   SCANNER_BRANDS,
   IMPRESSION_COURIERS,
-  IMPLANT_BRANDS,
+  IMPLANT_BRAND_CATALOG,
   IMPLANT_ABUTMENT_MATERIALS,
   RETAINER_TYPES,
   OCCLUSION_CLASSES,
   OCCLUSION_SIDES,
+  YES_NO,
+  ALIGNER_DURATIONS,
+  ALIGNER_INCISAL_EDGE,
+  ALIGNER_CROWDING,
+  ALIGNER_SPACING,
+  ALIGNER_OVERJET,
+  ALIGNER_OVERBITE,
+  ALIGNER_OPENBITE,
+  ALIGNER_CROSSBITE,
+  ALIGNER_MIDLINE,
+  ALIGNER_BIOTYPE,
+  MILLERS_CLASS,
   DENTURE_STAGES,
   ServiceSelection,
   ServicePickerModal,
@@ -69,7 +81,11 @@ function isSelectionComplete(sel: ServiceSelection): boolean {
     return baseOk && !!sel.brand && !!sel.abutmentMaterial;
   }
   if (cat === 'orthodontics') {
-    return !!sel.retainerType;       // teethOk already checked
+    // Clear Aligners don't use Retainer Type — selecting teeth is enough to
+    // count as configured (every aligner detail is optional). Retainers still
+    // require a Retainer Type.
+    if (sel.itemId === 'or-clear-aligners') return true;  // teeth already checked
+    return !!sel.retainerType;
   }
   if (cat === 'denture') {
     return baseOk && (sel.stages?.length ?? 0) > 0;
@@ -109,6 +125,10 @@ function hasAnyData(sel: ServiceSelection): boolean {
   if (sel.material || sel.shade) return true;
   if (sel.brand || sel.abutmentMaterial) return true;
   if (sel.retainerType || sel.applianceOption) return true;
+  if (sel.alignerDuration || sel.phasing || sel.ipr || sel.attachment || sel.incisalEdge ||
+      sel.crowding || sel.spacing || sel.overjet || sel.overbite || sel.openbite ||
+      sel.crossbite || sel.midline || sel.biotype || sel.millersClass || sel.alignerItems?.trim()) return true;
+  if (sel.anglesClass || sel.skeletalClass || sel.dentalClass) return true;
   if ((sel.stages?.length ?? 0) > 0) return true;
   if (sel.customServiceName?.trim()) return true;
   if (sel.perTooth && Object.values(sel.perTooth).some(pt => pt?.material || pt?.shade)) return true;
@@ -122,7 +142,10 @@ function selectionSummary(sel: ServiceSelection): string {
   const cat = getCategoryForItem(sel.itemId);
   const parts: string[] = [];
   if (cat === 'orthodontics') {
-    if (sel.retainerType) parts.push(sel.retainerType);
+    if (sel.itemId === 'or-clear-aligners') {
+      if (sel.alignerDuration) parts.push(sel.alignerDuration);
+      if (sel.phasing === 'Yes') parts.push('Phased');
+    } else if (sel.retainerType) parts.push(sel.retainerType);
   } else if (cat === 'appliances') {
     if (sel.applianceOption) parts.push(sel.applianceOption);
   } else if (cat === 'denture') {
@@ -230,6 +253,7 @@ type SavedDraft = {
   // IMPRESSION_COURIERS or free-text under "Other". Empty otherwise.
   caseSourceCourier: string;
   selections: ServiceSelection[];
+  caseInstructions: string;
   caseInstructionsFiles: string[];
   savedAt: string;
 };
@@ -796,6 +820,143 @@ function EmailPreviewPane({ caseData }: { caseData: Case }) {
   );
 }
 
+// Small iTero brand mark — reuses the scanner logo asset. Sized via className
+// so it can sit in the pane tab (w-4) or the pane header (w-5).
+function IteroLogo({ className = '' }: { className?: string }) {
+  return <img src="/scanner-itero.png.png" alt="iTero" className={`${className} rounded object-contain`} draggable={false} />;
+}
+
+// ─── iTero email pane ────────────────────────────────────────────────────────
+// "Primary" left-pane tab when an email case came from an iTero scanner. We
+// deliberately DON'T surface the source email here — for iTero the email is
+// just the delivery channel, so we show the iTero brand, a "how to upload the
+// zip" helper, and the Upload Zip File action. Once the zip is "uploaded"
+// (mocked — fills the scan slots) it flips to a success state with a jump to
+// the 3D Model tab.
+function IteroUploadPane({ attachmentName, uploadedCount, onUploadZip, onView3D }: {
+  attachmentName?: string;
+  uploadedCount: number;
+  onUploadZip: () => void;
+  onView3D: () => void;
+}) {
+  const [helpOpen, setHelpOpen] = useState(false);
+  const uploaded = uploadedCount > 0;
+  return (
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* Pane title — iTero brand, no email address */}
+      <div className="flex-shrink-0 px-4 py-2.5 border-b border-[#F0EFF6] bg-[#F8F9FC] flex items-center gap-2">
+        <span className="w-6 h-6 rounded-lg bg-white border border-[#E0E0E6] flex items-center justify-center overflow-hidden">
+          <IteroLogo className="w-4 h-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider leading-tight">iTero</p>
+          <p className="text-[10px] text-[#717182] leading-tight truncate">Scans received by email</p>
+        </div>
+      </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* Email received from iTero */}
+        <div className="bg-white border border-[#E0E0E6] rounded-xl p-3 flex items-center gap-2.5">
+          <span className="w-9 h-9 rounded-lg bg-[#EEF4FF] border border-[#C8D8FC] flex items-center justify-center flex-shrink-0">
+            <Mail className="w-4 h-4 text-[#1565C0]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-bold text-[#030213] leading-tight">Email received from <span className="text-[#1565C0]">iTero</span></p>
+            <p className="text-[10px] text-[#717182] leading-tight truncate">
+              {attachmentName ? attachmentName : 'iTero scan export attached'}
+            </p>
+          </div>
+          <IteroLogo className="w-6 h-6 flex-shrink-0" />
+        </div>
+
+        {/* How to upload iTero zip? — toggles the step list */}
+        <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setHelpOpen(o => !o)}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-[#F8F9FC] transition-colors"
+          >
+            <span className="flex items-center gap-1.5 min-w-0">
+              <AlertCircle className="w-3.5 h-3.5 text-[#1565C0] flex-shrink-0" />
+              <span className="text-xs font-semibold text-[#1565C0] truncate">How to upload iTero zip?</span>
+            </span>
+            <ChevronDown className={`w-3.5 h-3.5 text-[#A0A0B0] flex-shrink-0 transition-transform ${helpOpen ? '' : '-rotate-90'}`} />
+          </button>
+          {helpOpen && (
+            <div className="px-4 pb-3 pt-1 border-t border-[#F0EFF6]">
+              <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-1.5">Steps to upload your iTero scan</p>
+              <ol className="space-y-1.5">
+                {[
+                  <>Open iTero and download the scan zip file.</>,
+                  <>Come back to this page.</>,
+                  <>Click <span className="font-semibold text-[#030213]">Upload Zip File</span> and upload the downloaded zip file.</>,
+                ].map((step, i) => (
+                  <li key={i} className="flex items-start gap-2 text-[11px] text-[#5A5568] leading-snug">
+                    <span className="w-4 h-4 rounded-full bg-[#EEF4FF] text-[#1565C0] text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </div>
+
+        {/* Upload Zip File — or the uploaded success state */}
+        {uploaded ? (
+          <>
+            <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-3 flex items-center gap-2.5">
+              <span className="w-9 h-9 rounded-lg bg-white border border-[#BBF7D0] flex items-center justify-center flex-shrink-0">
+                <Check className="w-4 h-4 text-[#15803D]" strokeWidth={3} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold text-[#030213] leading-tight">iTero zip uploaded</p>
+                <p className="text-[10px] text-[#15803D] leading-tight">{uploadedCount} scan{uploadedCount === 1 ? '' : 's'} extracted</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onView3D}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-semibold text-[#5B21B6] border border-[#DDD6FE] bg-[#F5F3FF] hover:bg-[#E9D5FF] transition-colors"
+            >
+              <Box className="w-3.5 h-3.5" />
+              View in 3D
+            </button>
+            <button
+              type="button"
+              onClick={onUploadZip}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-semibold text-[#717182] border border-dashed border-[#C8D8FC] bg-white hover:border-[#4D8EF7] hover:text-[#1565C0] transition-colors"
+            >
+              <UploadCloud className="w-3.5 h-3.5" />
+              Re-upload zip
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onUploadZip}
+              className="w-full bg-gradient-to-br from-[#F5F8FF] to-[#EEF4FF] border-2 border-dashed border-[#C8D8FC] hover:border-[#4D8EF7] rounded-xl p-5 text-center transition-all"
+            >
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-white shadow-sm border border-[#E0E0E6] flex items-center justify-center mb-3">
+                <UploadCloud className="w-6 h-6 text-[#1565C0]" />
+              </div>
+              <p className="text-sm font-bold text-[#030213] leading-tight">Upload Zip File</p>
+              <p className="text-[11px] text-[#5A5568] leading-snug mt-1">
+                Upload the iTero scan zip you downloaded — we'll extract the arches + bite.
+              </p>
+              <p className="text-[10px] text-[#A0A0B0] mt-2 font-medium">.zip · iTero export</p>
+            </button>
+            <div className="text-[10px] text-[#717182] text-center leading-relaxed px-2">
+              Not sure how? Tap <span className="font-semibold text-[#1565C0]">How to upload iTero zip?</span> above.
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraft }: {
   onCancel: () => void;
   onSubmitted: () => void;
@@ -841,7 +1002,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           teeth,
           material: si.material,
           shade: si.shade,
-          additional: si.instructions,
           sameForAllTeeth: true,
         } as ServiceSelection;
       })
@@ -851,6 +1011,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       labId: labMatch?.id ?? '',
       dentistId: dentistMatch?.id ?? '',
       selections,
+      // One shared instructions note — seed from the first service that
+      // carried any, falling back to the email body preview.
+      caseInstructions: prefillDraft.serviceItems.find(si => si.instructions)?.instructions
+        ?? prefillDraft.emailPrescription?.bodyPreview ?? '',
       // Email-sourced cases default to the Email case source so the lab
       // sees how the data arrived. Manual cases leave it blank for the
       // user to pick.
@@ -886,6 +1050,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
 
   // Optional extras kept behind drawers / collapsibles.
   const [patientExtras, setPatientExtras] = useState<PatientExtras>(draft?.patientExtras ?? EMPTY_EXTRAS);
+  // Case Instructions — ONE shared note for the whole case (not per service).
+  // Editable both on the page card and inside any service's details drawer;
+  // switching services keeps the same text.
+  const [caseInstructions, setCaseInstructions] = useState(draft?.caseInstructions ?? prefillDraftSeed?.caseInstructions ?? '');
   // Files attached to the Case Instructions — separate from Case Source
   // uploads. These are general supporting docs (photos, x-rays, refs).
   const [caseInstructionsFiles, setCaseInstructionsFiles] = useState<string[]>(draft?.caseInstructionsFiles ?? []);
@@ -934,15 +1102,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // Validation gate
   const canSubmit = patientName.trim().length > 0 && !!labId && selections.length > 0;
 
-  // Per-service instructions flattened for the order-form previews — one
-  // "Service: note" line per service that has any. Captured in each
-  // service's details drawer; the Case Instructions card shows the same
-  // content as clickable bullets.
-  const combinedInstructions = selections
-    .filter(s => s.additional?.trim())
-    .map(s => `${getServiceDisplayName(s)}: ${s.additional!.trim()}`)
-    .join('\n');
-
   function toggleService(itemId: string) {
     setSelections(prev => {
       const exists = prev.find(s => s.itemId === itemId);
@@ -986,6 +1145,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       caseSourceScanner,
       caseSourceCourier,
       selections,
+      caseInstructions,
       caseInstructionsFiles,
       savedAt,
     });
@@ -1016,8 +1176,13 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       : prefillDraft?.source === 'manual'
         ? 'bg-[#F3F3F5] text-[#5A5568] border-[#E0E0E6]'
         : 'bg-[#ECFEFF] text-[#0F766E] border-[#A5F3FC]';
+  // Email cases that arrived with scanner exports surface the scanner brand
+  // too — "Email · iTero" — so the origin reads at a glance.
+  const emailHasScans = prefillDraft?.source === 'email'
+    && (prefillDraft.serviceItems?.[0]?.scanFileCount ?? 0) > 0
+    && !!prefillDraft.scanner;
   const sourcePillLabel =
-    prefillDraft?.source === 'email' ? 'Email draft'
+    prefillDraft?.source === 'email' ? (emailHasScans ? `Email · ${prefillDraft.scanner}` : 'Email draft')
     : prefillDraft?.source === 'manual' ? 'Manual entry'
     : 'Quick create';
   const SourcePillIcon =
@@ -1028,18 +1193,25 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // Shared by the header action buttons (small screens) and the left pane
   // tabs (md+): how many Case Source slot files are attached, and whether
   // this is an email-fetched draft.
-  const isEmailFlow = prefillDraft?.source === 'email' && !!prefillDraft.emailPrescription;
+  // iTero email cases are a special flow: the email is just the delivery
+  // channel, so we never show the sender email — instead the pane shows the
+  // iTero brand + "upload the scan zip" helper. Generic email flow excludes it.
+  const isIteroEmail = prefillDraft?.source === 'email' && prefillDraft.scanner === 'iTero';
+  const isEmailFlow = prefillDraft?.source === 'email' && !!prefillDraft.emailPrescription && !isIteroEmail;
   const scanFileCount = Object.values(caseSourceFiles).filter(Boolean).length;
   const has3DFiles = scanFileCount > 0;
 
-  // Left-pane primary tab — exactly ONE of Order Form / Email / Add
+  // Left-pane primary tab — exactly ONE of Order Form / iTero / Email / Add
   // Prescription, depending on how the case data arrives:
   //   • Case Source "Via Scanner" → live Order Form preview (no email here)
-  //   • email-fetched draft       → the source email + prescription
+  //   • iTero email               → iTero brand + Upload Zip File (no email)
+  //   • other email-fetched draft → the source email + prescription
   //   • manual / everything else  → upload card to auto-fetch the details
   // The 3D Model tab is always available next to it.
   const primaryTab = caseSource === 'Via Scanner'
     ? { label: 'Order Form',       icon: FileText,    hint: 'Preview the order form the lab will receive' }
+    : isIteroEmail
+      ? { label: 'iTero',            icon: IteroLogo,   hint: 'iTero scans received by email — upload the zip' }
     : isEmailFlow
       ? { label: 'Email',            icon: Mail,        hint: 'View the source email + prescription' }
       : { label: 'Add Prescription', icon: UploadCloud, hint: 'Add a prescription / order form manually to auto-fetch the details' };
@@ -1178,14 +1350,31 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
               caseSourceScanner={caseSourceScanner}
               caseSourceCourier={caseSourceCourier}
               selections={selections}
-              notes={combinedInstructions}
+              notes={caseInstructions}
             />
-          ) : prefillDraft?.source === 'email' && prefillDraft.emailPrescription ? (
+          ) : isIteroEmail ? (
+          <IteroUploadPane
+            attachmentName={prefillDraft?.emailPrescription?.attachmentName}
+            uploadedCount={scanFileCount}
+            onView3D={() => setPreviewTab('model')}
+            onUploadZip={() => {
+              // Mock the zip extraction — fill the scan slots so the 3D Model
+              // tab and order form light up just like a real iTero import.
+              setCaseSourceFiles({
+                'Upper Arch': 'iTero_upper.stl',
+                'Lower Arch': 'iTero_lower.stl',
+                'Bite Scan':  'iTero_bite.stl',
+              });
+              toast.success('iTero zip uploaded — 3 scans extracted');
+            }}
+          />
+        ) : prefillDraft?.source === 'email' && prefillDraft.emailPrescription ? (
           <EmailPreviewPane caseData={prefillDraft} />
         ) : (
           <PrescriptionUploadPane
             onApply={(p) => {
               setPatientName(p.patientName);
+              setCaseInstructions(p.instructions);
               // Find a matching service in the catalogue and seed the
               // selection with the detected teeth + material + shade so
               // the right column lights up just like an email-prefilled
@@ -1200,7 +1389,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                   teeth,
                   material: p.material,
                   shade: p.shade,
-                  additional: p.instructions,
                   sameForAllTeeth: true,
                 }]);
               }
@@ -1689,13 +1877,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             )}
           </div>
 
-          {/* ── Case Instructions — read-only roll-up of the per-service
-              notes (captured in each service's details drawer) + general
-              file uploads. Each bullet navigates to its service drawer so
-              edits happen in one place. The whole card is hidden until a
-              service actually has instructions (added inside its drawer) —
-              nothing about Case Instructions shows on the page before then. ── */}
-          {(selections.some(s => s.additional?.trim()) || caseInstructionsFiles.length > 0) && (
+          {/* ── Case Instructions — ONE shared note for the whole case.
+              The same text is editable here and inside any service's details
+              drawer ("Instructions for the lab"); switching services keeps it
+              filled. File uploads are general supporting docs. ── */}
           <div className="bg-white border border-[#E0E0E6] rounded-2xl p-4 order-4">
             <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
               <div className="flex items-center gap-1.5">
@@ -1703,45 +1888,22 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                   <FileText className="w-3 h-3" />
                 </span>
                 <h3 className="text-xs font-bold text-[#030213] uppercase tracking-wider">Case Instructions</h3>
-                <span className="text-[10px] text-[#A0A0B0] italic">— per service, captured in its details</span>
+                <span className="text-[10px] text-[#A0A0B0] italic">— optional</span>
               </div>
-              {(selections.some(s => s.additional?.trim()) || caseInstructionsFiles.length > 0) && (
+              {(caseInstructions.trim().length > 0 || caseInstructionsFiles.length > 0) && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#16A34A] uppercase tracking-wider">
                   <Check className="w-3 h-3" strokeWidth={3} />
                   Added
                 </span>
               )}
             </div>
-            {/* Bullets appear only once a service actually HAS instructions
-                (written inside its details drawer) — services without notes
-                contribute nothing here. The map keeps the selections index
-                so the colour dot matches the service card / legend. */}
-            {selections.some(s => s.additional?.trim()) && (
-              <div className="space-y-1.5 mb-2">
-                {selections.map((sel, idx) => {
-                  const note = sel.additional?.trim();
-                  if (!note) return null;
-                  const name = getServiceDisplayName(sel);
-                  const color = SERVICE_PALETTE[idx % SERVICE_PALETTE.length];
-                  return (
-                    <button
-                      key={sel.itemId}
-                      type="button"
-                      onClick={() => setActiveDetailsId(sel.itemId)}
-                      title={`Edit ${name} instructions`}
-                      className="w-full group flex items-start gap-2 px-2.5 py-2 rounded-lg border border-[#E8EAF6] bg-[#FAFBFF] hover:border-[#BFDBFE] hover:bg-[#F5F8FF] text-left transition-colors"
-                    >
-                      <span className="w-2 h-2 rounded-full mt-1 flex-shrink-0" style={{ background: color }} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[11px] font-bold text-[#030213] leading-tight">{name}</span>
-                        <span className="block text-[11px] text-[#5A5568] leading-snug mt-0.5 whitespace-pre-line">{note}</span>
-                      </span>
-                      <Pencil className="w-3 h-3 text-[#A0A0B0] group-hover:text-[#4D8EF7] flex-shrink-0 mt-0.5 transition-colors" />
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <textarea
+              value={caseInstructions}
+              onChange={(e) => setCaseInstructions(e.target.value)}
+              rows={2}
+              placeholder="Anything the lab should know — shade matching, fit notes, patient sensitivities…"
+              className="w-full px-3 py-2 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] resize-none mb-2"
+            />
             {/* Upload zone — clicking adds a fake attachment for the demo.
                 In production this would open the OS file picker. */}
             <button
@@ -1773,7 +1935,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
               </div>
             )}
           </div>
-          )}
           </div>
           {/* ── RIGHT COLUMN — aggregated teeth map across all services ── */}
           <aside className="lg:order-2 lg:sticky lg:top-4 lg:self-start">
@@ -1864,6 +2025,8 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         <ServicePickerWithDetails
           selections={selections}
           initialActiveId={activeDetailsId}
+          caseInstructions={caseInstructions}
+          onCaseInstructionsChange={setCaseInstructions}
           onToggle={toggleService}
           onUpdate={updateService}
           onRemove={(itemId) => setConfirmRemoveId(itemId)}
@@ -1924,7 +2087,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           caseSourceScanner={caseSourceScanner}
           caseSourceCourier={caseSourceCourier}
           selections={selections}
-          notes={combinedInstructions}
+          notes={caseInstructions}
           onClose={() => setOrderFormOpen(false)}
         />
       )}
@@ -2145,10 +2308,14 @@ function PatientExtrasDrawer({ value, onChange, onClose }: {
 //           standalone ServiceDetailsDrawer.
 function ServicePickerWithDetails({
   selections, initialActiveId,
+  caseInstructions, onCaseInstructionsChange,
   onToggle, onUpdate, onRemove, onClose,
 }: {
   selections: ServiceSelection[];
   initialActiveId: string | null;
+  /** Shared case-level instructions — same text across every service. */
+  caseInstructions: string;
+  onCaseInstructionsChange: (v: string) => void;
   /** Add a service (or remove it if already added). */
   onToggle: (itemId: string) => void;
   /** Patch a selection's fields. */
@@ -2279,6 +2446,8 @@ function ServicePickerWithDetails({
             {activeSel ? (
               <ServiceDetailsBody
                 selection={activeSel}
+                caseInstructions={caseInstructions}
+                onCaseInstructionsChange={onCaseInstructionsChange}
                 onUpdate={(patch) => onUpdate(activeSel.itemId, patch)}
                 onRemove={() => onRemove(activeSel.itemId)}
               />
@@ -2315,20 +2484,297 @@ function ServicePickerWithDetails({
   );
 }
 
+// ─── Nested implant brand picker ─────────────────────────────────────────────
+// Drill-down accordion for the implant-abutment brand: Brand → System →
+// Platform, one level at a time (e.g. Adin → Touareg → RP). Replaces the flat
+// brand dropdown. The chosen leaf is stored on `selection.brand` as a single
+// " · "-joined path string ("Adin · Touareg · RP") so every existing surface
+// (chip summary, order-form preview) shows the full selection unchanged.
+// Brands with no systems (catalog "Other") are a one-tap flat choice.
+const BRAND_PATH_SEP = ' · ';
+function NestedBrandPicker({ value, onChange }: {
+  value?: string;
+  onChange: (v: string) => void;
+}) {
+  const selectedPath = value ? value.split(BRAND_PATH_SEP) : [];
+  // Auto-expand to the saved selection so re-opening lands on the chosen leaf.
+  const [openBrand, setOpenBrand]   = useState<string | null>(selectedPath[0] ?? null);
+  const [openSystem, setOpenSystem] = useState<string | null>(
+    selectedPath[0] && selectedPath[1] ? `${selectedPath[0]}/${selectedPath[1]}` : null
+  );
+  // Dropdown open + floating-panel position. The panel renders in a portal at
+  // <body> with `fixed` positioning anchored to the trigger, so it floats over
+  // everything instead of being clipped by the drawer's overflow scroll.
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; width: number; maxH: number } | null>(null);
+
+  const openPanel = () => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom;
+    const spaceAbove = r.top;
+    const desired = 340;
+    // Drop below unless there's clearly more room above (e.g. trigger near the
+    // bottom of the viewport) — then flip up.
+    if (spaceBelow >= 220 || spaceBelow >= spaceAbove) {
+      setPos({ top: r.bottom + 4, left: r.left, width: r.width, maxH: Math.min(desired, spaceBelow - 12) });
+    } else {
+      setPos({ bottom: window.innerHeight - r.top + 4, left: r.left, width: r.width, maxH: Math.min(desired, spaceAbove - 12) });
+    }
+    setOpen(true);
+  };
+
+  // Close on scroll (capture, so it catches the drawer's inner scroll) or
+  // resize — the panel is anchored to a snapshot of the trigger's position, so
+  // rather than chase it we just close, like a native <select>.
+  useEffect(() => {
+    if (!open) return;
+    // Ignore scrolls that originate inside the panel's own list (it scrolls
+    // internally when long) — only outer scrolls should dismiss it.
+    const onScroll = (e: Event) => {
+      if (panelRef.current && e.target instanceof Node && panelRef.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [open]);
+
+  const select = (path: string[]) => { onChange(path.join(BRAND_PATH_SEP)); setOpen(false); };
+  const isSelected = (path: string[]) => value === path.join(BRAND_PATH_SEP);
+
+  return (
+    <>
+      {/* Trigger — looks like a select; shows the chosen path or a placeholder */}
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => (open ? setOpen(false) : openPanel())}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg bg-white hover:border-[#4D8EF7] focus:border-[#4D8EF7] outline-none transition-colors text-left"
+      >
+        <span className={`truncate ${value ? 'text-[#030213] font-medium' : 'text-[#A0A0B0]'}`}>
+          {value || 'Select brand'}
+        </span>
+        <span className="flex items-center gap-1 flex-shrink-0">
+          {value && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); onChange(''); }}
+              className="text-[#A0A0B0] hover:text-[#C62828]"
+              title="Clear brand"
+            >
+              <X className="w-3.5 h-3.5" />
+            </span>
+          )}
+          <ChevronDown className={`w-4 h-4 text-[#A0A0B0] transition-transform ${open ? 'rotate-180' : ''}`} />
+        </span>
+      </button>
+
+      {/* Floating panel — portalled to <body>, fixed-positioned, above the modal */}
+      {open && pos && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[300]" onClick={() => setOpen(false)}>
+            <div
+              ref={panelRef}
+              onClick={(e) => e.stopPropagation()}
+              style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxH }}
+              className="bg-white border border-[#E0E0E6] rounded-lg shadow-[0_12px_32px_rgba(77,142,247,0.22)] overflow-y-auto divide-y divide-[#F0EFF6]"
+            >
+              {IMPLANT_BRAND_CATALOG.map(b => {
+                const hasSystems = b.systems.length > 0;
+                const brandOpen = openBrand === b.brand;
+                const brandSelected = isSelected([b.brand]);
+                return (
+                  <div key={b.brand}>
+                    {/* Level 1 — Brand */}
+                    <button
+                      type="button"
+                      onClick={() => hasSystems ? setOpenBrand(brandOpen ? null : b.brand) : select([b.brand])}
+                      className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
+                        brandSelected ? 'bg-[#F5F3FF] text-[#5B21B6]' : 'text-[#030213] hover:bg-[#F8F9FC]'
+                      }`}
+                    >
+                      <span className="truncate">{b.brand}</span>
+                      {hasSystems
+                        ? <ChevronDown className={`w-4 h-4 text-[#A0A0B0] flex-shrink-0 transition-transform ${brandOpen ? '' : '-rotate-90'}`} />
+                        : <ChevronRight className="w-4 h-4 text-[#A0A0B0] flex-shrink-0" />}
+                    </button>
+                    {/* Level 2 — System */}
+                    {brandOpen && b.systems.map(sys => {
+                      const hasPlatforms = sys.platforms.length > 0;
+                      const sysKey = `${b.brand}/${sys.name}`;
+                      const sysOpen = openSystem === sysKey;
+                      const sysSelected = isSelected([b.brand, sys.name]);
+                      return (
+                        <div key={sys.name} className="bg-[#FAFBFF]">
+                          <button
+                            type="button"
+                            onClick={() => hasPlatforms ? setOpenSystem(sysOpen ? null : sysKey) : select([b.brand, sys.name])}
+                            className={`w-full flex items-center justify-between gap-2 pl-7 pr-3 py-2 text-left text-[13px] transition-colors ${
+                              sysSelected ? 'text-[#5B21B6] font-semibold bg-[#F0EBFF]' : 'text-[#1565C0] hover:bg-[#EEF4FF]'
+                            }`}
+                          >
+                            <span className="truncate">{sys.name}</span>
+                            {hasPlatforms
+                              ? <ChevronDown className={`w-3.5 h-3.5 text-[#A0A0B0] flex-shrink-0 transition-transform ${sysOpen ? '' : '-rotate-90'}`} />
+                              : <ChevronRight className="w-3.5 h-3.5 text-[#A0A0B0] flex-shrink-0" />}
+                          </button>
+                          {/* Level 3 — Platform (leaf) */}
+                          {sysOpen && sys.platforms.map(p => {
+                            const leafSelected = isSelected([b.brand, sys.name, p]);
+                            return (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => select([b.brand, sys.name, p])}
+                                className={`w-full flex items-center justify-between gap-2 pl-12 pr-3 py-2 text-left text-[13px] transition-colors ${
+                                  leafSelected ? 'bg-[#EEF4FF] text-[#1565C0] font-semibold' : 'text-[#5A5568] hover:bg-[#EEF4FF]'
+                                }`}
+                              >
+                                <span className="truncate">{p}</span>
+                                {leafSelected
+                                  ? <Check className="w-3.5 h-3.5 text-[#4D8EF7] flex-shrink-0" strokeWidth={3} />
+                                  : <ChevronRight className="w-3.5 h-3.5 text-[#D1D5DB] flex-shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+    </>
+  );
+}
+
+// Compact labelled dropdown used across the aligner prescription. Mirrors the
+// Occlusion Class/Side selects so the whole aligner block reads consistently.
+function AlignerSelect({ label, value, options, placeholder = 'Select', onChange }: {
+  label: string;
+  value?: string;
+  options: string[];
+  placeholder?: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="min-w-0">
+      <label className="block text-[11px] font-semibold text-[#5A5568] mb-1">{label}</label>
+      <div className="relative">
+        <select
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full appearance-none px-2.5 py-1.5 pr-7 text-xs border border-[#E0E0E6] rounded-md bg-white outline-none focus:border-[#4D8EF7] cursor-pointer"
+        >
+          <option value="">{placeholder}</option>
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <ChevronDown className="w-3 h-3 text-[#A0A0B0] absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+      </div>
+    </div>
+  );
+}
+
+// ─── Clear Aligners prescription block ───────────────────────────────────────
+// Replaces the generic Retainer-Type block when the orthodontics service is
+// Clear Aligners. Captures the full aligner Rx: treatment setup, the per-issue
+// corrections, soft-tissue assessment, occlusion, and free-text items. Shared
+// by both the picker drawer and the standalone details drawer.
+function AlignerSpecifics({ selection, onUpdate }: {
+  selection: ServiceSelection;
+  onUpdate: (patch: Partial<ServiceSelection>) => void;
+}) {
+  return (
+    <CategoryBlock label="Aligner specifics" tint="blue" icon={<Stethoscope className="w-3 h-3" />}>
+      {/* Treatment setup */}
+      <div className="space-y-2.5">
+        <AlignerSelect label="Aligner Duration" value={selection.alignerDuration} options={ALIGNER_DURATIONS} placeholder="Wear interval" onChange={(v) => onUpdate({ alignerDuration: v })} />
+        <div className="grid grid-cols-3 gap-2">
+          <AlignerSelect label="Phasing"    value={selection.phasing}    options={YES_NO} onChange={(v) => onUpdate({ phasing: v })} />
+          <AlignerSelect label="IPR"        value={selection.ipr}        options={YES_NO} onChange={(v) => onUpdate({ ipr: v })} />
+          <AlignerSelect label="Attachment" value={selection.attachment} options={YES_NO} onChange={(v) => onUpdate({ attachment: v })} />
+        </div>
+      </div>
+
+      {/* Corrections */}
+      <div>
+        <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-2">Corrections</p>
+        <div className="grid grid-cols-2 gap-2">
+          <AlignerSelect label="Incisal Edge Alignment" value={selection.incisalEdge} options={ALIGNER_INCISAL_EDGE} onChange={(v) => onUpdate({ incisalEdge: v })} />
+          <AlignerSelect label="Crowding"  value={selection.crowding}  options={ALIGNER_CROWDING}  onChange={(v) => onUpdate({ crowding: v })} />
+          <AlignerSelect label="Spacing"   value={selection.spacing}   options={ALIGNER_SPACING}   onChange={(v) => onUpdate({ spacing: v })} />
+          <AlignerSelect label="Overjet"   value={selection.overjet}   options={ALIGNER_OVERJET}   onChange={(v) => onUpdate({ overjet: v })} />
+          <AlignerSelect label="Overbite"  value={selection.overbite}  options={ALIGNER_OVERBITE}  onChange={(v) => onUpdate({ overbite: v })} />
+          <AlignerSelect label="Openbite"  value={selection.openbite}  options={ALIGNER_OPENBITE}  onChange={(v) => onUpdate({ openbite: v })} />
+          <AlignerSelect label="Crossbite" value={selection.crossbite} options={ALIGNER_CROSSBITE} onChange={(v) => onUpdate({ crossbite: v })} />
+          <AlignerSelect label="Midline"   value={selection.midline}   options={ALIGNER_MIDLINE}   onChange={(v) => onUpdate({ midline: v })} />
+        </div>
+      </div>
+
+      {/* Assessment */}
+      <div>
+        <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-2">Assessment</p>
+        <div className="grid grid-cols-2 gap-2">
+          <AlignerSelect label="Biotype"        value={selection.biotype}      options={ALIGNER_BIOTYPE} onChange={(v) => onUpdate({ biotype: v })} />
+          <AlignerSelect label="Miller's Class" value={selection.millersClass} options={MILLERS_CLASS}   onChange={(v) => onUpdate({ millersClass: v })} />
+        </div>
+      </div>
+
+      {/* Occlusion — shared Angle's / Skeletal / Dental rows */}
+      <div>
+        <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-2">Occlusion</p>
+        <div className="space-y-3">
+          <OcclusionRow label="Angle's Class" classValue={selection.anglesClass}  sideValue={selection.anglesSide}  onClassChange={(v) => onUpdate({ anglesClass: v })}  onSideChange={(v) => onUpdate({ anglesSide: v })} />
+          <OcclusionRow label="Skeletal"      classValue={selection.skeletalClass} sideValue={selection.skeletalSide} onClassChange={(v) => onUpdate({ skeletalClass: v })} onSideChange={(v) => onUpdate({ skeletalSide: v })} />
+          <OcclusionRow label="Dental"        classValue={selection.dentalClass}   sideValue={selection.dentalSide}   onClassChange={(v) => onUpdate({ dentalClass: v })}   onSideChange={(v) => onUpdate({ dentalSide: v })} />
+        </div>
+      </div>
+
+      {/* Additional items */}
+      <div>
+        <label className="block text-[11px] font-semibold text-[#5A5568] mb-1">Additional Items</label>
+        <textarea
+          value={selection.alignerItems || ''}
+          onChange={(e) => onUpdate({ alignerItems: e.target.value })}
+          rows={2}
+          placeholder="e.g. buttons, elastics, power ridges, bite ramps…"
+          className="w-full px-2.5 py-2 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-md outline-none focus:border-[#4D8EF7] resize-none"
+        />
+      </div>
+    </CategoryBlock>
+  );
+}
+
 // ─── Service details body — shared by both drawers ───────────────────────────
 // The set of form fields that render for a single service selection. Used by
 // the standalone ServiceDetailsDrawer + the right pane of
 // ServicePickerWithDetails.
-function ServiceDetailsBody({ selection, onUpdate, onRemove }: {
+function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, onCaseInstructionsChange }: {
   selection: ServiceSelection;
   onUpdate: (patch: Partial<ServiceSelection>) => void;
   onRemove?: () => void;
+  /** Shared case-level instructions — same value across all services. */
+  caseInstructions: string;
+  onCaseInstructionsChange: (v: string) => void;
 }) {
   const item = SERVICE_CATEGORIES.flatMap(c => c.items).find(i => i.id === selection.itemId);
   const teeth = selection.teeth ?? [];
   const category    = getCategoryForItem(selection.itemId);
   const isBridge    = category === 'bridge';
   const isOrtho     = category === 'orthodontics';
+  const isAligner   = selection.itemId === 'or-clear-aligners';
   const isDenture   = category === 'denture';
   const isAppliance = category === 'appliances';
   const isOther     = category === 'others';
@@ -2464,17 +2910,7 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove }: {
         {isBridge && (
           <CategoryBlock label="Bridge specifics" tint="purple" icon={<FlaskConical className="w-3 h-3" />}>
             <Mini label="Brand">
-              <div className="relative">
-                <select
-                  value={selection.brand || ''}
-                  onChange={(e) => onUpdate({ brand: e.target.value })}
-                  className="w-full appearance-none px-3 py-2 pr-9 text-sm border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7] cursor-pointer"
-                >
-                  <option value="">Select brand</option>
-                  {IMPLANT_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-                <ChevronDown className="w-4 h-4 text-[#A0A0B0] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
+              <NestedBrandPicker value={selection.brand} onChange={(v) => onUpdate({ brand: v })} />
             </Mini>
             <Mini label="Implant Abutment Material">
               <RadioGrid value={selection.abutmentMaterial} options={IMPLANT_ABUTMENT_MATERIALS} onChange={(v) => onUpdate({ abutmentMaterial: v })} />
@@ -2482,8 +2918,11 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove }: {
           </CategoryBlock>
         )}
 
-        {/* Orthodontics specifics */}
-        {isOrtho && (
+        {/* Orthodontics specifics — Clear Aligners get the full aligner Rx;
+            retainers keep the simpler Retainer Type + Occlusion block. */}
+        {isOrtho && (isAligner ? (
+          <AlignerSpecifics selection={selection} onUpdate={onUpdate} />
+        ) : (
           <CategoryBlock label="Orthodontics specifics" tint="blue" icon={<Stethoscope className="w-3 h-3" />}>
             <Mini label="Retainer Type">
               <RadioGrid value={selection.retainerType} options={RETAINER_TYPES} onChange={(v) => onUpdate({ retainerType: v })} />
@@ -2497,7 +2936,7 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove }: {
               </div>
             </div>
           </CategoryBlock>
-        )}
+        ))}
 
         {/* Denture specifics */}
         {isDenture && (
@@ -2544,17 +2983,18 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove }: {
           </CategoryBlock>
         )}
 
-        {/* ── Instructions — per-service notes for the lab. Rolled up as
-            clickable bullets on the page's Case Instructions card and as
-            "Service: note" lines on the order-form preview. ── */}
+        {/* ── Instructions — ONE shared note for the whole case. Bound to the
+            page-level Case Instructions, so it stays filled when switching
+            between services and mirrors the card outside the drawer. ── */}
         <Mini label="Instructions for the lab">
           <textarea
-            value={selection.additional || ''}
-            onChange={(e) => onUpdate({ additional: e.target.value })}
+            value={caseInstructions}
+            onChange={(e) => onCaseInstructionsChange(e.target.value)}
             rows={3}
             placeholder="e.g. shade matching, fit notes, patient sensitivities…"
             className="w-full px-3 py-2 text-sm text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] resize-none"
           />
+          <p className="text-[10px] text-[#A0A0B0] mt-1">Shared across all services in this case.</p>
         </Mini>
 
       </div>
@@ -2582,6 +3022,7 @@ function ServiceDetailsDrawer({ selection, onUpdate, onClose }: {
   const category    = getCategoryForItem(selection.itemId);
   const isBridge    = category === 'bridge';
   const isOrtho     = category === 'orthodontics';
+  const isAligner   = selection.itemId === 'or-clear-aligners';
   const isDenture   = category === 'denture';
   const isAppliance = category === 'appliances';
   const isOther     = category === 'others';
@@ -2687,17 +3128,7 @@ function ServiceDetailsDrawer({ selection, onUpdate, onClose }: {
           {isBridge && (
             <CategoryBlock label="Bridge specifics" tint="purple" icon={<FlaskConical className="w-3 h-3" />}>
               <Mini label="Brand">
-                <div className="relative">
-                  <select
-                    value={selection.brand || ''}
-                    onChange={(e) => onUpdate({ brand: e.target.value })}
-                    className="w-full appearance-none px-3 py-2 pr-9 text-sm border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7] cursor-pointer"
-                  >
-                    <option value="">Select brand</option>
-                    {IMPLANT_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                  <ChevronDown className="w-4 h-4 text-[#A0A0B0] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+                <NestedBrandPicker value={selection.brand} onChange={(v) => onUpdate({ brand: v })} />
               </Mini>
               <Mini label="Implant Abutment Material">
                 <RadioGrid
@@ -2709,8 +3140,10 @@ function ServiceDetailsDrawer({ selection, onUpdate, onClose }: {
             </CategoryBlock>
           )}
 
-          {/* ── Orthodontics specifics ── */}
-          {isOrtho && (
+          {/* ── Orthodontics specifics — aligner Rx vs retainer ── */}
+          {isOrtho && (isAligner ? (
+            <AlignerSpecifics selection={selection} onUpdate={onUpdate} />
+          ) : (
             <CategoryBlock label="Orthodontics specifics" tint="blue" icon={<Stethoscope className="w-3 h-3" />}>
               <Mini label="Retainer Type">
                 <RadioGrid
@@ -2746,7 +3179,7 @@ function ServiceDetailsDrawer({ selection, onUpdate, onClose }: {
                 </div>
               </div>
             </CategoryBlock>
-          )}
+          ))}
 
           {/* ── Denture specifics ── multi-select Stage ── */}
           {isDenture && (
