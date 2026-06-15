@@ -1692,7 +1692,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           {/* ── Case Instructions — read-only roll-up of the per-service
               notes (captured in each service's details drawer) + general
               file uploads. Each bullet navigates to its service drawer so
-              edits happen in one place. ── */}
+              edits happen in one place. The whole card is hidden until a
+              service actually has instructions (added inside its drawer) —
+              nothing about Case Instructions shows on the page before then. ── */}
+          {(selections.some(s => s.additional?.trim()) || caseInstructionsFiles.length > 0) && (
           <div className="bg-white border border-[#E0E0E6] rounded-2xl p-4 order-4">
             <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
               <div className="flex items-center gap-1.5">
@@ -1709,15 +1712,16 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </span>
               )}
             </div>
-            {selections.length === 0 ? (
-              <div className="mb-2 px-3 py-3 rounded-lg border border-dashed border-[#D4CEE1] text-[11px] text-[#A0A0B0] text-center">
-                Instructions live on each service — add a service first, then write its notes in the details drawer.
-              </div>
-            ) : (
+            {/* Bullets appear only once a service actually HAS instructions
+                (written inside its details drawer) — services without notes
+                contribute nothing here. The map keeps the selections index
+                so the colour dot matches the service card / legend. */}
+            {selections.some(s => s.additional?.trim()) && (
               <div className="space-y-1.5 mb-2">
                 {selections.map((sel, idx) => {
-                  const name = getServiceDisplayName(sel);
                   const note = sel.additional?.trim();
+                  if (!note) return null;
+                  const name = getServiceDisplayName(sel);
                   const color = SERVICE_PALETTE[idx % SERVICE_PALETTE.length];
                   return (
                     <button
@@ -1730,11 +1734,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                       <span className="w-2 h-2 rounded-full mt-1 flex-shrink-0" style={{ background: color }} />
                       <span className="min-w-0 flex-1">
                         <span className="block text-[11px] font-bold text-[#030213] leading-tight">{name}</span>
-                        {note ? (
-                          <span className="block text-[11px] text-[#5A5568] leading-snug mt-0.5 whitespace-pre-line">{note}</span>
-                        ) : (
-                          <span className="block text-[10px] italic text-[#A0A0B0] mt-0.5">No instructions yet — tap to add</span>
-                        )}
+                        <span className="block text-[11px] text-[#5A5568] leading-snug mt-0.5 whitespace-pre-line">{note}</span>
                       </span>
                       <Pencil className="w-3 h-3 text-[#A0A0B0] group-hover:text-[#4D8EF7] flex-shrink-0 mt-0.5 transition-colors" />
                     </button>
@@ -1773,6 +1773,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
               </div>
             )}
           </div>
+          )}
           </div>
           {/* ── RIGHT COLUMN — aggregated teeth map across all services ── */}
           <aside className="lg:order-2 lg:sticky lg:top-4 lg:self-start">
