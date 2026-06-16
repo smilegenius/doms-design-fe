@@ -165,40 +165,70 @@ function SeverityBadge({ s }: { s: string }) {
 }
 
 // ─── Per-supplier count list ──────────────────────────────────────────────────
-// Lists suppliers with a count badge each (e.g. how many of their invoices are
-// not-approved / deferred). When the list is empty (count 0) it shows a green
-// "all clear" state instead of a blank section.
-function SupplierCountSection({ title, total, items, tone }: {
+// A mini horizontal-bar ranking: suppliers sorted by how many of their invoices
+// are not-approved / deferred, each with a proportional tinted bar so the
+// relative size reads at a glance. Empty (count 0) → a green "all clear" state.
+function SupplierCountSection({ title, total, items, tone, icon }: {
   title: string;
   total: number;
   items: { supplier: string; count: number }[];
   tone: 'red' | 'amber';
+  icon: React.ReactNode;
 }) {
-  const t = tone === 'red'
-    ? { badge: 'bg-[#FFF1F2] text-[#D4183D] border-[#FECACA]', avatar: 'bg-[#FFF1F2] text-[#D4183D]' }
-    : { badge: 'bg-[#FFF7ED] text-[#C2410C] border-[#FED7AA]', avatar: 'bg-[#FFF7ED] text-[#C2410C]' };
+  const p = tone === 'red'
+    ? { text: '#D4183D', soft: '#FFF1F2', border: '#FECACA', track: '#FEE2E2', barFrom: '#F87171', barTo: '#FB7185' }
+    : { text: '#C2410C', soft: '#FFF7ED', border: '#FED7AA', track: '#FFEDD5', barFrom: '#FB923C', barTo: '#F59E0B' };
+  const max = Math.max(1, ...items.map(i => i.count));
+  const ranked = [...items].sort((a, b) => b.count - a.count);
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[11px] font-bold text-[#5A5568] uppercase tracking-wider">{title}</p>
-        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${t.badge}`}>{total}</span>
+      {/* Section header — icon chip + title + total */}
+      <div className="flex items-center justify-between mb-2.5">
+        <div className="flex items-center gap-2">
+          <span className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: p.soft, color: p.text }}>
+            {icon}
+          </span>
+          <p className="text-xs font-bold text-[#030213]">{title}</p>
+        </div>
+        <span
+          className="text-[10px] font-bold px-2 py-0.5 rounded-full border tabular-nums"
+          style={{ background: p.soft, color: p.text, borderColor: p.border }}
+        >
+          {total} invoice{total === 1 ? '' : 's'}
+        </span>
       </div>
-      {items.length === 0 || total === 0 ? (
+      {ranked.length === 0 || total === 0 ? (
         <div className="flex items-center gap-2 px-3 py-3 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0]">
           <CheckCircle2 className="w-4 h-4 text-[#15803D] flex-shrink-0" />
           <span className="text-xs text-[#15803D] font-medium">All clear — none right now</span>
         </div>
       ) : (
-        <div className="space-y-0">
-          {items.map((s, i) => (
-            <div key={i} className="flex items-center gap-3 py-2 border-b border-[#F8F8F8] last:border-b-0">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${t.avatar}`}>
-                {s.supplier.split(' ').map(p => p[0]).slice(0, 2).join('')}
+        <div className="space-y-1">
+          {ranked.map((s, i) => {
+            const pct = Math.round((s.count / max) * 100);
+            return (
+              <div key={i} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-[#FAFBFD] transition-colors">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold"
+                  style={{ background: p.soft, color: p.text }}
+                >
+                  {s.supplier.split(' ').map(w => w[0]).slice(0, 2).join('')}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-xs font-semibold text-[#030213] truncate">{s.supplier}</span>
+                    <span className="text-sm font-bold tabular-nums flex-shrink-0" style={{ color: p.text }}>{s.count}</span>
+                  </div>
+                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: p.track }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${p.barFrom}, ${p.barTo})` }}
+                    />
+                  </div>
+                </div>
               </div>
-              <p className="flex-1 min-w-0 text-xs font-semibold text-[#030213] truncate">{s.supplier}</p>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${t.badge} flex-shrink-0 tabular-nums`}>{s.count}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -549,6 +579,7 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
                     total={KPI.notApproved}
                     items={NOT_APPROVED_BY_SUPPLIER}
                     tone="red"
+                    icon={<XCircle className="w-3.5 h-3.5" />}
                   />
                   <div className="border-t border-[#F0EFF6]" />
                   <SupplierCountSection
@@ -556,6 +587,7 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
                     total={KPI.leftOver}
                     items={DEFERRED_BY_SUPPLIER}
                     tone="amber"
+                    icon={<Calendar className="w-3.5 h-3.5" />}
                   />
                 </div>
               </Card>

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   FileText, Upload, Download, Search, Mail, Plus,
   CheckCircle2, Clock, AlertTriangle, XCircle, Archive,
@@ -7,6 +8,7 @@ import {
   UserCheck, Filter, RefreshCw, MessageSquare, Zap,
   SlidersHorizontal, Grid3x3, List, Trash2,
   Send, CheckCheck, Pencil, Save, Check, FolderOpen, Star, FileSpreadsheet,
+  ExternalLink, ArrowLeft,
 } from 'lucide-react';
 import { EXPENSE_CATEGORIES, mockSuppliers, GL_ACCOUNTS, Supplier } from '../data/suppliersData';
 import ModalPortal from '../components/ModalPortal';
@@ -4314,6 +4316,25 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [paymentDownloadOpen, setPaymentDownloadOpen] = useState(false);
 
+  // Deep link — `?paymentFolder=YYYY-MM` opens the Monthly Payment Exports
+  // modal with that folder expanded. This is the URL the Dental Group's
+  // email "View export" button points at. We seed the modal's initial folder
+  // from the param and auto-open on load.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const paymentFolderParam = searchParams.get('paymentFolder');
+  useEffect(() => {
+    if (paymentFolderParam) setPaymentDownloadOpen(true);
+  }, [paymentFolderParam]);
+  const closePaymentFolder = () => {
+    setPaymentDownloadOpen(false);
+    // Drop the deep-link param so a later manual open starts clean.
+    if (searchParams.has('paymentFolder')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('paymentFolder');
+      setSearchParams(next, { replace: true });
+    }
+  };
+
   function downloadPaymentCsv(from: string, to: string, label: string) {
     const start = new Date(from);
     const end = new Date(to);
@@ -5295,9 +5316,10 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
 
       {paymentDownloadOpen && (
         <PaymentDataFolderModal
-          onClose={() => setPaymentDownloadOpen(false)}
+          onClose={closePaymentFolder}
           invoices={invoices}
           onDownload={downloadPaymentCsv}
+          initialFolder={paymentFolderParam}
         />
       )}
     </>
@@ -5445,12 +5467,20 @@ function PaymentDataDownloadModal({ onClose, onDownload }: {
 // Shows ALL months in past years and Jan→current month for the current year,
 // regardless of whether invoices exist (a real archive lists every period).
 // Each month has a folder icon; clicking Download builds a CSV for that window.
-function PaymentDataFolderModal({ onClose, invoices, onDownload }: {
+function PaymentDataFolderModal({ onClose, invoices, onDownload, initialFolder }: {
   onClose: () => void;
   invoices: Invoice[];
   onDownload: (from: string, to: string, label: string) => void;
+  /** Deep-link target `YYYY-MM` — opens with this folder's year active and the
+      month expanded (the Dental Group email's "View export" link lands here). */
+  initialFolder?: string | null;
 }) {
   useLockBodyScroll();
+  const { toast } = useToast();
+  // Parse the deep-link folder into year + month-key once.
+  const [linkYear, linkMonth] = (initialFolder ?? '').split('-');
+  // Which folder's mock "group email" is being previewed (month-key) or null.
+  const [emailPreview, setEmailPreview] = useState<string | null>(null);
 
   // Index payment-related invoices by year/month for quick lookup.
   const buckets = useMemo(() => {
@@ -5485,11 +5515,32 @@ function PaymentDataFolderModal({ onClose, invoices, onDownload }: {
     return out;
   }, [currentYear, earliestYear]);
 
-  const [activeYear, setActiveYear] = useState<string>(years[0]);
-  // Which month folder is currently expanded showing its 2 Excel files.
-  // Initialise to the latest month with data for the active year so the user
-  // sees the files immediately on open.
-  const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
+  // Seed the active year + expanded month from the deep link when present, so
+  // arriving from the email's "View export" button lands on the right folder.
+  const [activeYear, setActiveYear] = useState<string>(
+    linkYear && years.includes(linkYear) ? linkYear : years[0]
+  );
+  const [expandedMonth, setExpandedMonth] = useState<string | null>(
+    linkYear && linkMonth ? `${linkYear}-${linkMonth}` : null
+  );
+
+  // Shareable deep link for a folder — this is exactly what the View button
+  // in the Dental Group's email points to.
+  const folderLink = (year: string, month: string) =>
+    `${window.location.origin}/supplier/invoices?paymentFolder=${year}-${month}`;
+
+  // Most recent month that actually has data — the footer demo previews the
+  // email for this folder (the latest export the group would have received).
+  const latestFolderWithData = useMemo(() => {
+    let best: string | null = null;
+    for (const [y, yearMap] of buckets) {
+      for (const m of yearMap.keys()) {
+        const key = `${y}-${m}`;
+        if (!best || key > best) best = key; // "YYYY-MM" sorts lexicographically
+      }
+    }
+    return best;
+  }, [buckets]);
 
   const monthLabel = (m: string) => {
     const idx = Number(m) - 1;
@@ -5690,16 +5741,110 @@ function PaymentDataFolderModal({ onClose, invoices, onDownload }: {
           </div>
 
           {/* Footer */}
-          <div className="px-6 py-3 border-t border-[#F0EFF6] flex items-center justify-between bg-white">
-            <p className="text-[11px] text-[#A0A0B0]">
-              Tip: extraction day can be changed in{' '}
-              <span className="text-[#4D8EF7] font-medium">Spend Settings → Schedule Monthly Payment Extraction</span>.
-            </p>
+          <div className="px-6 py-3 border-t border-[#F0EFF6] flex items-center justify-between gap-3 bg-white">
+            <button
+              onClick={() => latestFolderWithData && setEmailPreview(latestFolderWithData)}
+              disabled={!latestFolderWithData}
+              title="See the email the Dental Group receives when an export is ready"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-[#7C3AED] to-[#A59DFF] rounded-lg hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Mail className="w-4 h-4" />
+              Preview group email
+            </button>
             <button onClick={onClose} className="px-4 py-2 text-sm font-medium border border-[#E0E0E6] text-[#717182] rounded-lg hover:bg-[#F8F9FC] transition-colors">
               Close
             </button>
           </div>
         </div>
+
+        {/* ── Full-page group-email preview ── a demo of the message the Dental
+            Group receives in their inbox. The "View export" button redirects
+            back to this popup with the folder expanded. */}
+        {emailPreview && (() => {
+          const [ey, em] = emailPreview.split('-');
+          const rows = monthRows(ey, em);
+          const viewExport = () => { setActiveYear(ey); setExpandedMonth(emailPreview); setEmailPreview(null); };
+          return (
+            <div className="fixed inset-0 z-[120] bg-[#EEF0F4] flex flex-col">
+              {/* Inbox-style top bar */}
+              <div className="flex-shrink-0 bg-white border-b border-[#E0E0E6] px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+                <button
+                  onClick={() => setEmailPreview(null)}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-[#5A5568] hover:text-[#030213] transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Back to exports
+                </button>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#F5F3FF] text-[#7C3AED] border border-[#E9D5FF]">
+                  <Mail className="w-3 h-3" />
+                  Dental Group inbox · demo
+                </span>
+                <button onClick={() => setEmailPreview(null)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182]">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Opened email — centred on a full-page canvas */}
+              <div className="flex-1 overflow-y-auto py-6 sm:py-10 px-4">
+                <div className="max-w-2xl mx-auto bg-white rounded-2xl border border-[#E0E0E6] shadow-sm overflow-hidden">
+                  {/* Subject + sender */}
+                  <div className="px-6 sm:px-8 pt-6 pb-4 border-b border-[#F0EFF6]">
+                    <h2 className="text-xl font-bold text-[#030213] leading-snug">Your {monthLabel(em)} {ey} payment export is ready</h2>
+                    <div className="flex items-center gap-3 mt-4">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] flex items-center justify-center text-white text-sm font-bold flex-shrink-0">SG</div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-[#030213]">SmileGenius Spend Management <span className="text-[#A0A0B0] font-normal">&lt;noreply@smilegenius.co.uk&gt;</span></p>
+                        <p className="text-xs text-[#717182]">to accounts@smilegenius.co.uk</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Body */}
+                  <div className="px-6 sm:px-8 py-6 space-y-4">
+                    <p className="text-sm text-[#5A5568] leading-relaxed">Hi team,</p>
+                    <p className="text-sm text-[#5A5568] leading-relaxed">
+                      Your monthly payment export for <span className="font-semibold text-[#030213]">{monthLabel(em)} {ey}</span> has been generated and is ready to view. It includes the Monthly Payment Export and the Pay Period Data report for the period.
+                    </p>
+
+                    {/* Export summary card */}
+                    <div className="rounded-xl border border-[#C8D8FC] bg-[#F8FBFF] p-4 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-white border border-[#C8D8FC] flex items-center justify-center flex-shrink-0">
+                        <FolderOpen className="w-5 h-5 text-[#4D8EF7]" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[#030213]">{monthLabel(em)} {ey} — Payment Export</p>
+                        <p className="text-xs text-[#1565C0] mt-0.5">
+                          {rows.length} payment-related {rows.length === 1 ? 'invoice' : 'invoices'} · {totalAmountFor(rows)} · 2 reports
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* View export — redirects to the folder popup, expanded */}
+                    <button
+                      onClick={viewExport}
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity shadow-sm"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      View export
+                    </button>
+                    <p className="text-[11px] text-[#A0A0B0] break-all leading-snug">
+                      Button links to: {folderLink(ey, em)}
+                    </p>
+
+                    <div className="pt-3 border-t border-[#F0EFF6] text-sm text-[#717182] leading-relaxed">
+                      <p>Kind regards,</p>
+                      <p className="font-medium text-[#5A5568]">SmileGenius Spend Management</p>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-xs text-[#A0A0B0] text-center mt-4">
+                  Demo — clicking <span className="font-semibold text-[#5A5568]">View export</span> opens the {monthLabel(em)} {ey} folder expanded.
+                </p>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </ModalPortal>
   );
