@@ -56,8 +56,8 @@ const SCORE_MAX = Math.max(...SCORE_DIST.map(s => s.count));
 // team can see which suppliers the stuck invoices belong to.
 const NOT_APPROVED_BY_SUPPLIER: { supplier: string; count: number }[] = [
   { supplier: 'FreshSmile Supplies', count: 3 },
-  { supplier: 'Eurodontic Ltd',      count: 2 },
-  { supplier: 'New Dental Co',       count: 1 },
+  { supplier: 'DD Group',            count: 2 },
+  { supplier: 'Eurodontic Ltd',      count: 1 },
 ];
 const DEFERRED_BY_SUPPLIER: { supplier: string; count: number }[] = [
   { supplier: 'Dentsply Sirona',     count: 6 },
@@ -166,70 +166,97 @@ function SeverityBadge({ s }: { s: string }) {
 
 // ─── Per-supplier count list ──────────────────────────────────────────────────
 // A mini horizontal-bar ranking: suppliers sorted by how many of their invoices
-// are not-approved / deferred, each with a proportional tinted bar so the
-// relative size reads at a glance. Empty (count 0) → a green "all clear" state.
-function SupplierCountSection({ title, total, items, tone, icon }: {
+// are not-approved / deferred, each row a proportional tinted bar. Rows are
+// clickable (→ that supplier's filtered invoices); the list caps at `maxVisible`
+// with a "View all" footer that opens the full filtered list. Empty → "all clear".
+function SupplierCountSection({ title, total, items, tone, icon, maxVisible = 4, onSelect, onViewAll }: {
   title: string;
   total: number;
   items: { supplier: string; count: number }[];
   tone: 'red' | 'amber';
   icon: React.ReactNode;
+  maxVisible?: number;
+  onSelect: (supplier: string) => void;
+  onViewAll: () => void;
 }) {
   const p = tone === 'red'
     ? { text: '#D4183D', soft: '#FFF1F2', border: '#FECACA', track: '#FEE2E2', barFrom: '#F87171', barTo: '#FB7185' }
     : { text: '#C2410C', soft: '#FFF7ED', border: '#FED7AA', track: '#FFEDD5', barFrom: '#FB923C', barTo: '#F59E0B' };
   const max = Math.max(1, ...items.map(i => i.count));
   const ranked = [...items].sort((a, b) => b.count - a.count);
+  const visible = ranked.slice(0, maxVisible);
+  const hiddenCount = ranked.length - visible.length;
+  const empty = ranked.length === 0 || total === 0;
   return (
     <div>
       {/* Section header — icon chip + title + total */}
-      <div className="flex items-center justify-between mb-2.5">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <div className="flex items-center gap-2 min-w-0">
           <span className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: p.soft, color: p.text }}>
             {icon}
           </span>
-          <p className="text-xs font-bold text-[#030213]">{title}</p>
+          <p className="text-xs font-bold text-[#030213] truncate">{title}</p>
         </div>
         <span
-          className="text-[10px] font-bold px-2 py-0.5 rounded-full border tabular-nums"
+          className="text-[10px] font-bold px-2 py-0.5 rounded-full border tabular-nums whitespace-nowrap flex-shrink-0"
           style={{ background: p.soft, color: p.text, borderColor: p.border }}
         >
           {total} invoice{total === 1 ? '' : 's'}
         </span>
       </div>
-      {ranked.length === 0 || total === 0 ? (
+      {empty ? (
         <div className="flex items-center gap-2 px-3 py-3 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0]">
           <CheckCircle2 className="w-4 h-4 text-[#15803D] flex-shrink-0" />
           <span className="text-xs text-[#15803D] font-medium">All clear — none right now</span>
         </div>
       ) : (
-        <div className="space-y-1">
-          {ranked.map((s, i) => {
-            const pct = Math.round((s.count / max) * 100);
-            return (
-              <div key={i} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-[#FAFBFD] transition-colors">
-                <div
-                  className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold"
-                  style={{ background: p.soft, color: p.text }}
+        <>
+          <div className="space-y-0.5">
+            {visible.map((s, i) => {
+              const pct = Math.round((s.count / max) * 100);
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => onSelect(s.supplier)}
+                  title={`View ${s.supplier}'s ${title.toLowerCase()} invoices`}
+                  className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-[#FAFBFD] transition-colors text-left"
                 >
-                  {s.supplier.split(' ').map(w => w[0]).slice(0, 2).join('')}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="text-xs font-semibold text-[#030213] truncate">{s.supplier}</span>
-                    <span className="text-sm font-bold tabular-nums flex-shrink-0" style={{ color: p.text }}>{s.count}</span>
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold"
+                    style={{ background: p.soft, color: p.text }}
+                  >
+                    {s.supplier.split(' ').map(w => w[0]).slice(0, 2).join('')}
                   </div>
-                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: p.track }}>
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${p.barFrom}, ${p.barTo})` }}
-                    />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-xs font-semibold text-[#030213] truncate group-hover:text-[#1565C0] transition-colors">{s.supplier}</span>
+                      <span className="flex items-center gap-1 flex-shrink-0">
+                        <span className="text-sm font-bold tabular-nums" style={{ color: p.text }}>{s.count}</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-[#C8C8D0] group-hover:text-[#4D8EF7] transition-colors" />
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: p.track }}>
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${p.barFrom}, ${p.barTo})` }}
+                      />
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                </button>
+              );
+            })}
+          </div>
+          {/* View-all — opens the full filtered list (covers overflow too) */}
+          <button
+            type="button"
+            onClick={onViewAll}
+            className="w-full mt-1.5 inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-[#4D8EF7] hover:text-[#1565C0] hover:bg-[#EEF4FF] transition-colors"
+          >
+            {hiddenCount > 0 ? `View all ${ranked.length} suppliers` : 'View all in Invoices'}
+            <ChevronRight className="w-3 h-3" />
+          </button>
+        </>
       )}
     </div>
   );
@@ -327,7 +354,7 @@ const TABS: { id: AnalyticsTab; label: string }[] = [
 const PERIODS = ['Month', 'Quarter', 'Year'];
 
 // ─── Main component ────────────────────────────────────────────────────────────
-export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigateToInvoices?: (filter: string) => void } = {}) {
+export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigateToInvoices?: (filter?: string, supplier?: string) => void } = {}) {
   const [tab, setTab] = useState<AnalyticsTab>('intelligence');
   const [period, setPeriod] = useState('Month');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
@@ -573,31 +600,58 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
                   </button>
                 }
               >
-                <div className="space-y-4">
-                  <SupplierCountSection
-                    title="Not Approved"
-                    total={KPI.notApproved}
-                    items={NOT_APPROVED_BY_SUPPLIER}
-                    tone="red"
-                    icon={<XCircle className="w-3.5 h-3.5" />}
-                  />
-                  <div className="border-t border-[#F0EFF6]" />
-                  <SupplierCountSection
-                    title="Deferred to Next Cycle"
-                    total={KPI.leftOver}
-                    items={DEFERRED_BY_SUPPLIER}
-                    tone="amber"
-                    icon={<Calendar className="w-3.5 h-3.5" />}
-                  />
+                {/* Two sections side-by-side so the card stays compact instead
+                    of stacking into a tall column. Divider between on sm+. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-0 sm:divide-x sm:divide-[#F0EFF6]">
+                  <div className="sm:pr-4">
+                    <SupplierCountSection
+                      title="Not Approved"
+                      total={KPI.notApproved}
+                      items={NOT_APPROVED_BY_SUPPLIER}
+                      tone="red"
+                      icon={<XCircle className="w-3.5 h-3.5" />}
+                      onSelect={(supplier) => onNavigateToInvoices?.('not_approved', supplier)}
+                      onViewAll={() => onNavigateToInvoices?.('not_approved')}
+                    />
+                  </div>
+                  <div className="sm:pl-4 pt-4 sm:pt-0 border-t sm:border-t-0 border-[#F0EFF6]">
+                    <SupplierCountSection
+                      title="Deferred to Next Cycle"
+                      total={KPI.leftOver}
+                      items={DEFERRED_BY_SUPPLIER}
+                      tone="amber"
+                      icon={<Calendar className="w-3.5 h-3.5" />}
+                      onSelect={(supplier) => onNavigateToInvoices?.('left_over', supplier)}
+                      onViewAll={() => onNavigateToInvoices?.('left_over')}
+                    />
+                  </div>
                 </div>
               </Card>
 
               {/* Suppliers With Issues — flagged invoices grouped by the
-                  supplier they came from, worst severity first. */}
-              <Card title="Suppliers With Issues" subtitle="Invoices from these suppliers have active flags">
-                <div className="space-y-0">
-                  {SUPPLIER_ISSUES.map((s, i) => (
-                    <div key={i} className="flex items-center gap-3 py-2.5 border-b border-[#F8F8F8] last:border-b-0">
+                  supplier they came from, worst severity first. Each row opens
+                  that supplier's invoices; footer opens the full flagged queue. */}
+              <Card
+                title="Suppliers With Issues"
+                subtitle="Invoices from these suppliers have active flags"
+                action={
+                  <button
+                    onClick={() => onNavigateToInvoices?.('low_confidence')}
+                    className="text-[11px] font-semibold text-[#4D8EF7] hover:text-[#1565C0] inline-flex items-center gap-0.5"
+                  >
+                    View all <ChevronRight className="w-3 h-3" />
+                  </button>
+                }
+              >
+                <div className="space-y-0.5">
+                  {SUPPLIER_ISSUES.slice(0, 4).map((s, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => onNavigateToInvoices?.(undefined, s.supplier)}
+                      title={`View ${s.supplier}'s invoices`}
+                      className="group w-full flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-[#FAFBFD] transition-colors text-left"
+                    >
                       <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-[11px] font-bold ${
                         s.worst === 'Critical' ? 'bg-[#FFF1F2] text-[#D4183D]'
                         : s.worst === 'High'   ? 'bg-[#FFF7ED] text-[#E65100]'
@@ -607,7 +661,7 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-xs font-bold text-[#030213] truncate">{s.supplier}</p>
+                          <p className="text-xs font-bold text-[#030213] truncate group-hover:text-[#1565C0] transition-colors">{s.supplier}</p>
                           <SeverityBadge s={s.worst} />
                         </div>
                         <div className="flex flex-wrap gap-1 mt-1">
@@ -623,13 +677,26 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
                           ))}
                         </div>
                       </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-bold text-[#030213] leading-none">{s.flagged}</p>
-                        <p className="text-[9px] text-[#A0A0B0] mt-0.5">of {s.total} invoices</p>
+                      <div className="text-right flex-shrink-0 flex items-center gap-1.5">
+                        <div>
+                          <p className="text-sm font-bold text-[#030213] leading-none">{s.flagged}</p>
+                          <p className="text-[9px] text-[#A0A0B0] mt-0.5">of {s.total}</p>
+                        </div>
+                        <ChevronRight className="w-3.5 h-3.5 text-[#C8C8D0] group-hover:text-[#4D8EF7] transition-colors" />
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
+                {SUPPLIER_ISSUES.length > 4 && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToInvoices?.('low_confidence')}
+                    className="w-full mt-1.5 inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-[#4D8EF7] hover:text-[#1565C0] hover:bg-[#EEF4FF] transition-colors"
+                  >
+                    View all {SUPPLIER_ISSUES.length} flagged suppliers
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                )}
               </Card>
             </div>
           </>

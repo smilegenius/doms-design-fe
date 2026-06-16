@@ -310,8 +310,9 @@ function SupplierApp() {
         )}
         {activePage === 'spend-analytics' && (
           <SpendAnalyticsPage
-            onNavigateToInvoices={(filter) => {
+            onNavigateToInvoices={(filter, supplier) => {
               setInvoiceInitialFilter(filter);
+              setInvoiceInitialSupplier(supplier);
               setActivePage('invoices');
             }}
           />

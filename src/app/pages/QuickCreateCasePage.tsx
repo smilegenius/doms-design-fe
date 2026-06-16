@@ -448,34 +448,6 @@ function PrescriptionUploadPane({ onApply }: {
               </p>
             </button>
 
-            {/* Source-of-Rx quick picks — same idea as Case Source but
-                surfaced as one-click "we've got it from X" buttons. */}
-            <div className="bg-white border border-[#E0E0E6] rounded-xl p-3">
-              <p className="text-[10px] font-bold text-[#717182] uppercase tracking-wider mb-2">Or quick-add from</p>
-              <div className="grid grid-cols-2 gap-1.5">
-                {[
-                  { label: 'WhatsApp', file: 'whatsapp_rx_240612.jpg', icon: ImageIcon, tint: 'text-[#25D366]' },
-                  { label: 'Posted scan', file: 'post_rx_240612.pdf', icon: FileText, tint: 'text-[#5A5568]' },
-                  { label: 'SMS / MMS', file: 'sms_rx_240612.jpg', icon: ImageIcon, tint: 'text-[#1565C0]' },
-                  { label: 'Hand-off', file: 'manual_rx_240612.pdf', icon: FileText, tint: 'text-[#7C3AED]' },
-                ].map(s => {
-                  const Icon = s.icon;
-                  return (
-                    <button
-                      key={s.label}
-                      type="button"
-                      onClick={() => handleFakeUpload(s.file, s.label)}
-                      disabled={processing}
-                      className="inline-flex items-center gap-1.5 px-2 py-2 rounded-lg border border-[#E0E0E6] hover:border-[#7C3AED] hover:bg-[#FAFBFD] transition-colors text-left disabled:opacity-60"
-                    >
-                      <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${s.tint}`} />
-                      <span className="text-[11px] font-semibold text-[#030213] truncate">{s.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             {/* Footer hint */}
             <div className="text-[10px] text-[#717182] text-center leading-relaxed px-2 py-1">
               No prescription handy?
