@@ -4202,18 +4202,25 @@ function UploadInvoiceModal({ onClose, onComplete }: {
 }
 
 // ─── Main page ─────────────────────────────────────────────────────────────────
-export default function InvoicesPage({ initialFilter, initialInvoiceId, initialSupplier, onOpenCase, onInvoiceSelected, onUpdateSupplier }: { initialFilter?: InvoiceStatus | 'low_confidence' | 'left_over' | 'not_approved'; initialInvoiceId?: string; initialSupplier?: string; onOpenCase?: (caseId: string) => void; onInvoiceSelected?: (id: string | null) => void; onUpdateSupplier?: (supplierId: string, patch: Partial<Supplier>) => void }) {
+export default function InvoicesPage({ initialFilter, initialInvoiceId, initialSupplier, onOpenCase, onInvoiceSelected, onUpdateSupplier }: { initialFilter?: InvoiceStatus | 'low_confidence' | 'left_over' | 'not_approved' | 'unpaid' | 'overdue'; initialInvoiceId?: string; initialSupplier?: string; onOpenCase?: (caseId: string) => void; onInvoiceSelected?: (id: string | null) => void; onUpdateSupplier?: (supplierId: string, patch: Partial<Supplier>) => void }) {
   const [invoices, setInvoices] = useState<Invoice[]>(INVOICES);
   const isLowConfFilter = initialFilter === 'low_confidence';
   const isLeftOverFilter = initialFilter === 'left_over';
   const isNotApprovedFilter = initialFilter === 'not_approved';
+  // Clinic AP filters: unpaid = anything the practice still owes on;
+  // overdue = unpaid AND past its due date.
+  const isUnpaidFilter = initialFilter === 'unpaid';
+  const isOverdueFilter = initialFilter === 'overdue';
+  const isPseudoFilter = isLowConfFilter || isLeftOverFilter || isNotApprovedFilter || isUnpaidFilter || isOverdueFilter;
   const [activeTab, setActiveTab] = useState<'all' | InvoiceStatus>(
-    isLowConfFilter || isLeftOverFilter || isNotApprovedFilter ? 'all' : (initialFilter ?? 'all')
+    isPseudoFilter ? 'all' : (initialFilter ?? 'all')
   );
   const [lowConfOnly, setLowConfOnly] = useState(isLowConfFilter);
   const [leftOverOnly, setLeftOverOnly] = useState(isLeftOverFilter);
   // Not-approved = rejected OR disputed. Drives the analytics "Not Approved" nav.
   const [notApprovedOnly, setNotApprovedOnly] = useState(isNotApprovedFilter);
+  const [unpaidOnly, setUnpaidOnly] = useState(isUnpaidFilter);
+  const [overdueOnly, setOverdueOnly] = useState(isOverdueFilter);
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
   const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'supplier-asc' | 'status' | 'confidence-asc'>('date-desc');
   const [search, setSearch] = useState('');
@@ -4276,6 +4283,11 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
       }
       // Not approved = rejected or disputed.
       if (notApprovedOnly && !(inv.status === 'rejected' || inv.status === 'disputed')) return false;
+      // Unpaid = the practice still owes on it (anything not paid/archived/rejected).
+      const isUnpaid = !(inv.status === 'payment_processed' || inv.status === 'archived' || inv.status === 'rejected');
+      if (unpaidOnly && !isUnpaid) return false;
+      // Overdue = unpaid AND past its due date.
+      if (overdueOnly && (!isUnpaid || new Date(inv.dueDate) >= new Date())) return false;
       if (sourceFilter !== 'all' && inv.source !== sourceFilter) return false;
       if (billedTo !== 'all' && inv.billedTo !== billedTo) return false;
       if (billedToEntity !== 'all' && inv.billedToName !== billedToEntity) return false;
@@ -4299,7 +4311,7 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
       case 'status':          sorted.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) || tsOf(b) - tsOf(a)); break;
     }
     return sorted;
-  }, [invoices, activeTab, lowConfOnly, leftOverOnly, notApprovedOnly, sourceFilter, search, billedTo, billedToEntity, supplierFilter, showArchived, sortBy]);
+  }, [invoices, activeTab, lowConfOnly, leftOverOnly, notApprovedOnly, unpaidOnly, overdueOnly, sourceFilter, search, billedTo, billedToEntity, supplierFilter, showArchived, sortBy]);
 
   const supplierOptions = useMemo(() => {
     const names = Array.from(new Set(invoices.map(i => i.supplier))).sort();
@@ -4803,9 +4815,27 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
           </div>
 
           {/* Active filter chips */}
-          {(sourceFilter !== 'all' || billedTo !== 'all' || billedToEntity !== 'all' || supplierFilter !== 'all' || lowConfOnly || leftOverOnly || notApprovedOnly) && (
+          {(sourceFilter !== 'all' || billedTo !== 'all' || billedToEntity !== 'all' || supplierFilter !== 'all' || lowConfOnly || leftOverOnly || notApprovedOnly || unpaidOnly || overdueOnly) && (
             <div className="flex flex-wrap items-center gap-2 mt-3">
               <span className="text-sm text-[#717182]">Active Filters:</span>
+              {overdueOnly && (
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#FFEBEE] text-[#D4183D] rounded-full text-sm">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Overdue · past due date</span>
+                  <button onClick={() => { setOverdueOnly(false); setCurrentPage(1); }} className="hover:text-[#B71C1C] transition-colors">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+              {unpaidOnly && (
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#EEF4FF] text-[#1565C0] rounded-full text-sm">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Outstanding · not yet paid</span>
+                  <button onClick={() => { setUnpaidOnly(false); setCurrentPage(1); }} className="hover:text-[#0D47A1] transition-colors">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
               {leftOverOnly && (
                 <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#FFEBEE] text-[#D4183D] rounded-full text-sm">
                   <AlertTriangle className="w-3.5 h-3.5" />
@@ -4866,7 +4896,7 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
                 </div>
               )}
               <button
-                onClick={() => { setSourceFilter('all'); setBilledTo('all'); setBilledToEntity('all'); setSupplierFilter('all'); setLowConfOnly(false); setLeftOverOnly(false); setNotApprovedOnly(false); setCurrentPage(1); }}
+                onClick={() => { setSourceFilter('all'); setBilledTo('all'); setBilledToEntity('all'); setSupplierFilter('all'); setLowConfOnly(false); setLeftOverOnly(false); setNotApprovedOnly(false); setUnpaidOnly(false); setOverdueOnly(false); setCurrentPage(1); }}
                 className="text-sm text-[#717182] hover:text-[#030213] font-medium px-2 py-1 transition-colors"
               >
                 Clear All

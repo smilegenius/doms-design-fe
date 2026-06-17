@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from './context/ToastContext';
 import Layout from './components/Layout';
 import ClinicOverviewPage from './pages/ClinicOverviewPage';
+import ClinicAnalyticsPage from './pages/ClinicAnalyticsPage';
 import CasesPage, { draftCases } from './pages/CasesPage';
 import CreateCasePage from './pages/CreateCasePage';
 import QuickCreateCasePage from './pages/QuickCreateCasePage';
@@ -30,7 +31,7 @@ import ClinicSuppliersPage from './pages/ClinicSuppliersPage';
 //                user menu items don't 404.
 // Adding a page in future = add it to the type + route maps + render block.
 
-type ClinicPage = 'overview' | 'cases' | 'create-case' | 'quick-create-case' | 'invoices' | 'suppliers' | 'spend-settings' | 'settings' | 'messages' | 'notifications';
+type ClinicPage = 'overview' | 'cases' | 'create-case' | 'quick-create-case' | 'invoices' | 'analytics' | 'suppliers' | 'spend-settings' | 'settings' | 'messages' | 'notifications';
 
 const PAGE_TO_PATH: Record<ClinicPage, string> = {
   overview: '',
@@ -38,6 +39,7 @@ const PAGE_TO_PATH: Record<ClinicPage, string> = {
   'create-case': 'cases/new',
   'quick-create-case': 'cases/quick-new',
   invoices: 'invoices',
+  analytics: 'analytics',
   suppliers: 'suppliers',
   'spend-settings': 'spend-settings',
   settings: 'settings',
@@ -49,6 +51,7 @@ const PATH_TO_PAGE: Record<string, ClinicPage> = {
   overview: 'overview',
   cases: 'cases',
   invoices: 'invoices',
+  analytics: 'analytics',
   suppliers: 'suppliers',
   'spend-settings': 'spend-settings',
   settings: 'settings',
@@ -95,6 +98,11 @@ export default function ClinicApp() {
     [prefillDraftId],
   );
 
+  // Filter to apply when the Invoices list opens — set by Analytics / Overview
+  // figures so clicking a number lands on the matching filtered list. Cleared
+  // on any plain sidebar navigation so a normal "Invoices" click is unfiltered.
+  const [invoiceFilter, setInvoiceFilter] = useState<string | undefined>(undefined);
+
   const setActivePage = (p: ClinicPage, id?: string) => {
     const base = PAGE_TO_PATH[p];
     // cases/:id, invoices/:id, suppliers/:id can deep-link into a detail
@@ -105,9 +113,18 @@ export default function ClinicApp() {
     navigate(segment ? `/clinic/${segment}` : '/clinic');
   };
 
+  // Open the Invoices list with an optional pre-applied filter (from Analytics/
+  // Overview). Sets the filter before navigating so InvoicesPage mounts with it.
+  const goToInvoices = (filter?: string) => {
+    setInvoiceFilter(filter);
+    setActivePage('invoices');
+  };
+
   const handleNavigate = (page: string) => {
-    const valid: ClinicPage[] = ['overview', 'cases', 'invoices', 'suppliers', 'spend-settings', 'settings', 'messages', 'notifications'];
+    const valid: ClinicPage[] = ['overview', 'cases', 'invoices', 'analytics', 'suppliers', 'spend-settings', 'settings', 'messages', 'notifications'];
     if (valid.includes(page as ClinicPage)) {
+      // Plain sidebar nav → drop any analytics-driven invoice filter.
+      setInvoiceFilter(undefined);
       setActivePage(page as ClinicPage);
     }
   };
@@ -151,6 +168,14 @@ export default function ClinicApp() {
         <ClinicOverviewPage
           onOpenCases={() => setActivePage('cases')}
           onCreateCase={() => setActivePage('quick-create-case')}
+          onOpenInvoices={(filter) => goToInvoices(filter)}
+          onOpenAnalytics={() => setActivePage('analytics')}
+        />
+      )}
+      {activePage === 'analytics' && (
+        <ClinicAnalyticsPage
+          onOpenInvoices={(filter) => goToInvoices(filter)}
+          onOpenCases={() => setActivePage('cases')}
         />
       )}
       {activePage === 'cases' && (
@@ -163,6 +188,7 @@ export default function ClinicApp() {
       {activePage === 'invoices' && (
         <InvoicesPage
           initialInvoiceId={invoiceInitialId}
+          initialFilter={invoiceFilter as any}
           onOpenCase={(caseId) => { setActivePage('cases', caseId); toast.success(`Opening ${caseId}`); }}
           onInvoiceSelected={(invoiceId) => {
             if (invoiceId) setActivePage('invoices', invoiceId);

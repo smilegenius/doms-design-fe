@@ -102,6 +102,9 @@ const clinicNavItems = [
   // Invoices reuses the supplier-portal InvoicesPage as-is; statuses will be
   // customised for the clinic context later.
   { id: 'invoices',  label: 'Invoices',  icon: FilledFileText,  isCustom: false },
+  // Practice-scoped Analytics: spend, invoices and lab cases (no group-HQ /
+  // AP-automation surfaces — see ClinicAnalyticsPage).
+  { id: 'analytics', label: 'Analytics', icon: FilledBarChart,  isCustom: false },
   // Clinic-scope Suppliers: add from Global Registry, from Dental Group, or
   // create new (manual entries land as Pending review for DSO + admin sign-off).
   { id: 'suppliers', label: 'Suppliers', icon: FilledPackage,   isCustom: false },
