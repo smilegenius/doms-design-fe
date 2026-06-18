@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Building2, ShieldCheck, ArrowRight, LogOut, Sparkles, UserPlus, LogIn, Play, Stethoscope } from 'lucide-react';
+import { Building2, ShieldCheck, ArrowRight, LogOut, Sparkles, UserPlus, LogIn, Stethoscope, FlaskConical } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const SmileGeniusLogo = () => (
@@ -73,38 +73,26 @@ function PortalGroup({
         </div>
       </div>
 
-      {/* Journey options */}
-      <div className="relative space-y-2.5">
-        <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-1.5">
-          {journeys.length === 1 ? 'Journey' : 'Choose a journey'}
-        </p>
+      {/* Journey options — compact rows */}
+      <div className="relative space-y-2">
         {journeys.map((j) => (
           <button
             key={j.label}
             onClick={j.onClick}
-            className="group w-full text-left flex items-start gap-3 p-3.5 rounded-xl border border-[#E0E0E6] bg-white hover:border-current hover:shadow-md transition-all"
+            className="group w-full text-left flex items-center gap-3 p-3 rounded-xl border border-[#E0E0E6] bg-white hover:border-current hover:shadow-sm transition-all"
             style={{ color: accent }}
           >
             <div
-              className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+              className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
               style={{ background: accentSoft }}
             >
               {j.icon}
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-sm font-semibold text-[#030213]">{j.label}</p>
-                <span className={`text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full border ${BADGE_TONES[j.badgeTone]}`}>
-                  {j.badge}
-                </span>
-              </div>
-              <p className="text-[11px] text-[#717182] mt-1 leading-relaxed">{j.description}</p>
-              <span className="inline-flex items-center gap-1 mt-2 text-[11px] font-semibold group-hover:gap-1.5 transition-all">
-                <Play className="w-3 h-3" />
-                {j.cta}
-                <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
-              </span>
-            </div>
+            <span className="flex-1 min-w-0 text-sm font-semibold text-[#030213] truncate">{j.label}</span>
+            <span className={`text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full border flex-shrink-0 ${BADGE_TONES[j.badgeTone]}`}>
+              {j.badge}
+            </span>
+            <ArrowRight className="w-4 h-4 flex-shrink-0 group-hover:translate-x-0.5 transition-transform" />
           </button>
         ))}
       </div>
@@ -125,8 +113,8 @@ export default function PortalSelectPage() {
   // ── Portal 1 — Dental Group Portal (two journeys) ──
   const dentalGroupJourneys: JourneyOption[] = [
     {
-      label: 'New User Journey',
-      description: 'See what a brand new admin experiences — invite email → 3-step onboarding wizard → land on the portal.',
+      label: 'New user',
+      description: '',
       icon: <UserPlus className="w-4 h-4 text-[#4D8EF7]" />,
       badge: 'Onboarding',
       badgeTone: 'blue',
@@ -134,8 +122,8 @@ export default function PortalSelectPage() {
       onClick: () => navigate('/invite'),
     },
     {
-      label: 'Existing User Journey',
-      description: 'A returning admin signs in and goes straight to their dental-group portal.',
+      label: 'Existing user',
+      description: '',
       icon: <LogIn className="w-4 h-4 text-[#7C3AED]" />,
       badge: 'Returning',
       badgeTone: 'purple',
@@ -147,8 +135,8 @@ export default function PortalSelectPage() {
   // ── Portal 2 — Clinic Portal (single journey for now) ──
   const clinicJourneys: JourneyOption[] = [
     {
-      label: 'Sign in to clinic workspace',
-      description: 'A clinic team member signs in to track cases, prescriptions and lab deliveries from one workspace.',
+      label: 'Sign in to clinic',
+      description: '',
       icon: <Stethoscope className="w-4 h-4 text-[#7C3AED]" />,
       badge: 'Clinic',
       badgeTone: 'purple',
@@ -157,11 +145,24 @@ export default function PortalSelectPage() {
     },
   ];
 
-  // ── Portal 3 — Super Admin (single journey) ──
+  // ── Portal 3 — Lab Portal (single journey) ──
+  const labJourneys: JourneyOption[] = [
+    {
+      label: 'Sign in to lab',
+      description: '',
+      icon: <FlaskConical className="w-4 h-4 text-[#0F766E]" />,
+      badge: 'Lab',
+      badgeTone: 'blue',
+      cta: isAuthed ? 'Open lab' : 'Sign in & explore',
+      onClick: () => (isAuthed ? navigate('/lab') : navigate('/login?portal=lab')),
+    },
+  ];
+
+  // ── Portal 4 — Super Admin (single journey) ──
   const adminJourneys: JourneyOption[] = [
     {
-      label: 'Sign in as platform admin',
-      description: 'Tenant management, user administration and system oversight from the SmileGenius operator view.',
+      label: 'Sign in as admin',
+      description: '',
       icon: <ShieldCheck className="w-4 h-4 text-[#E65100]" />,
       badge: 'Internal',
       badgeTone: 'amber',
@@ -206,16 +207,14 @@ export default function PortalSelectPage() {
             Interactive demo
           </span>
           <h1 className="text-3xl sm:text-4xl font-bold text-[#030213] mb-2">Select your portal</h1>
-          <p className="text-sm text-[#717182] leading-relaxed">
-            Pick a portal, then choose which journey to walk through. Each one starts at the right entry screen — onboarding or sign in — so you can demo it end-to-end.
-          </p>
+          <p className="text-sm text-[#717182]">Pick a portal to explore the demo.</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl items-start">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-5xl items-start">
           <PortalGroup
             icon={<Building2 className="w-6 h-6 text-[#4D8EF7]" />}
             title="Dental Group Portal"
-            description="Manage dental practices, staff, cases, billing and supplier relationships."
+            description="Practices, staff, cases & billing."
             accent="#4D8EF7"
             accentSoft="#EEF4FF"
             journeys={dentalGroupJourneys}
@@ -223,15 +222,23 @@ export default function PortalSelectPage() {
           <PortalGroup
             icon={<Stethoscope className="w-6 h-6 text-[#7C3AED]" />}
             title="Clinic Portal"
-            description="A single clinic's workspace — track cases through the lab pipeline and stay on top of deliveries."
+            description="Track lab cases & deliveries."
             accent="#7C3AED"
             accentSoft="#F5F3FF"
             journeys={clinicJourneys}
           />
           <PortalGroup
+            icon={<FlaskConical className="w-6 h-6 text-[#0F766E]" />}
+            title="Lab Portal"
+            description="Incoming cases, production & scoring."
+            accent="#0F766E"
+            accentSoft="#ECFEFF"
+            journeys={labJourneys}
+          />
+          <PortalGroup
             icon={<ShieldCheck className="w-6 h-6 text-[#E65100]" />}
             title="Super Admin"
-            description="Platform operations, tenant management, user administration and system oversight."
+            description="Platform & tenant operations."
             badge="Internal"
             accent="#E65100"
             accentSoft="#FFF3E0"
@@ -242,9 +249,6 @@ export default function PortalSelectPage() {
         {/* Footer hint */}
         <div className="mt-10 text-center">
           <p className="text-[11px] text-[#A0A0B0]">
-            Already signed in? Pick any journey to jump straight in.
-          </p>
-          <p className="text-[11px] text-[#A0A0B0] mt-1">
             <span className="font-medium text-[#5A5568]">SmileGenius</span> · Dental Operations Suite
           </p>
         </div>

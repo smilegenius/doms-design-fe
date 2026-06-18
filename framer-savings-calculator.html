@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Savings &amp; Revenue Calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  /* ---- Theme tokens (tweak these to re-skin) ---- */
+  :root {
+    --bg: #0a0b10;            /* page background (set to transparent to blend with Framer) */
+    --card: #12141d;          /* result + input card surface */
+    --card-2: #0d0f17;        /* input field background */
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.14);
+    --eyebrow: #8b8cf7;       /* "RUN YOUR OWN NUMBERS" */
+    --title: #f4f5f8;
+    --muted: #9aa0ad;         /* subtitle / footer */
+    --label: #8b90a1;         /* field labels */
+    --text: #f4f5f8;
+    --accent-a: #a78bfa;      /* gradient start (purple) */
+    --accent-b: #5b8def;      /* gradient end (blue) */
+    --radius-lg: 18px;
+    --radius-md: 12px;
+    --radius-sm: 11px;
+    --font-head: "Poppins", "Inter", system-ui, sans-serif;
+    --font-body: "Inter", system-ui, -apple-system, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .calc {
+    width: 100%;
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 28px 22px 18px;
+    color: var(--text);
+  }
+
+  .eyebrow {
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--eyebrow);
+    margin: 0 0 14px;
+  }
+
+  .title {
+    font-family: var(--font-head);
+    font-size: clamp(26px, 5vw, 38px);
+    line-height: 1.12;
+    font-weight: 800;
+    color: var(--title);
+    margin: 0 0 14px;
+  }
+
+  .subtitle {
+    font-size: clamp(15px, 2.4vw, 18px);
+    line-height: 1.5;
+    color: var(--muted);
+    margin: 0 0 22px;
+    max-width: 640px;
+  }
+
+  /* ---- Mode toggle ---- */
+  .toggle {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+
+  .toggle button {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--card-2);
+    color: #c7cad3;
+    font-family: var(--font-body);
+    font-size: 16px;
+    font-weight: 600;
+    padding: 15px 14px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+
+  .toggle button:hover { border-color: var(--border-strong); }
+
+  .toggle button[aria-pressed="true"] {
+    color: #fff;
+    border-color: transparent;
+    background: linear-gradient(90deg, var(--accent-a), var(--accent-b));
+    box-shadow: 0 8px 24px rgba(91, 141, 239, 0.28);
+  }
+
+  /* ---- Input grid ---- */
+  .fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px 18px;
+    margin-bottom: 24px;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+
+  .field label {
+    font-size: 14.5px;
+    font-weight: 500;
+    color: var(--label);
+  }
+
+  .field input {
+    width: 100%;
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 17px;
+    font-weight: 500;
+    padding: 15px 16px;
+    outline: none;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease;
+  }
+
+  .field input::placeholder { color: #565c6b; }
+
+  .field input:focus {
+    border-color: var(--accent-a);
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18);
+  }
+
+  /* Hide number spinners */
+  .field input::-webkit-outer-spin-button,
+  .field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .field input[type="number"] { -moz-appearance: textfield; }
+
+  /* ---- Result card ---- */
+  .result {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 30px 24px 34px;
+    text-align: center;
+    margin-bottom: 18px;
+  }
+
+  .result .r-label {
+    font-size: clamp(15px, 2.4vw, 19px);
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+
+  .result .r-value {
+    font-family: var(--font-head);
+    font-weight: 800;
+    font-size: clamp(46px, 10vw, 70px);
+    line-height: 1;
+    margin: 0 0 12px;
+    background: linear-gradient(90deg, #9b8cff, #6f9bff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: #7c7cf0; /* fallback */
+  }
+
+  .result .r-note {
+    font-size: clamp(14px, 2.2vw, 17px);
+    color: var(--muted);
+    margin: 0;
+  }
+
+  /* ---- Footer ---- */
+  .foot {
+    text-align: center;
+    font-size: 14.5px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 0;
+    padding: 4px 6px 8px;
+  }
+  .foot strong { color: var(--title); font-weight: 700; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 560px) {
+    .calc { padding: 22px 16px 14px; }
+    .toggle { gap: 10px; }
+    .toggle button { font-size: 15px; padding: 14px 10px; }
+    .fields { grid-template-columns: 1fr; gap: 16px; }
+  }
+</style>
+</head>
+<body>
+  <div class="calc">
+    <p class="eyebrow">Run your own numbers</p>
+    <h1 class="title">What is admin leaving on your table?</h1>
+    <p class="subtitle">
+      The room agreed nobody measures this. So measure it. Type in your numbers
+      and see the annual figure. Nothing leaves your browser.
+    </p>
+
+    <div class="toggle" role="tablist" aria-label="Calculator mode">
+      <button id="tab-cost" type="button" aria-pressed="true">Cost of wasted time</button>
+      <button id="tab-rev" type="button" aria-pressed="false">Revenue opportunity</button>
+    </div>
+
+    <div class="fields" id="fields"></div>
+
+    <div class="result">
+      <p class="r-label" id="r-label">Annual value of the time you could reclaim</p>
+      <p class="r-value" id="r-value">£0</p>
+      <p class="r-note" id="r-note"></p>
+    </div>
+
+    <p class="foot">
+      Illustrative only, not a guarantee. Your figures depend on your lab. Want
+      us to run them properly? <strong>Book a 20 minute demo below.</strong>
+    </p>
+  </div>
+
+<script>
+  // ---- State (defaults match the reference figures) ----
+  var state = {
+    casesPerWeek: 200,
+    adminMinutes: 3,
+    loadedCost: 18,
+    avgHoursPerCase: 4,
+    avgCaseValue: 90,
+    weeksPerYear: 5
+  };
+
+  var mode = "cost"; // "cost" | "revenue"
+
+  // Field layouts per mode (order matches the design)
+  var LAYOUTS = {
+    cost: [
+      { key: "casesPerWeek",  label: "Cases per week" },
+      { key: "adminMinutes",  label: "Admin minutes saved per case" },
+      { key: "loadedCost",    label: "Loaded staff cost per hour (£)" },
+      { key: "weeksPerYear",  label: "Weeks worked per year" }
+    ],
+    revenue: [
+      { key: "casesPerWeek",    label: "Cases per week" },
+      { key: "adminMinutes",    label: "Admin minutes saved per case" },
+      { key: "avgHoursPerCase", label: "Avg hours of work per case" },
+      { key: "avgCaseValue",    label: "Average case value (£)" },
+      { key: "weeksPerYear",    label: "Weeks worked per year" }
+    ]
+  };
+
+  var gbp = new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+    maximumFractionDigits: 0
+  });
+
+  // Format a number: drop ".0", keep one decimal otherwise
+  function num(n) {
+    if (!isFinite(n)) n = 0;
+    var rounded = Math.round(n * 10) / 10;
+    return Number.isInteger(rounded)
+      ? rounded.toLocaleString("en-GB")
+      : rounded.toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+
+  var fieldsEl = document.getElementById("fields");
+  var labelEl = document.getElementById("r-label");
+  var valueEl = document.getElementById("r-value");
+  var noteEl  = document.getElementById("r-note");
+  var tabCost = document.getElementById("tab-cost");
+  var tabRev  = document.getElementById("tab-rev");
+
+  function renderFields() {
+    fieldsEl.innerHTML = "";
+    LAYOUTS[mode].forEach(function (f) {
+      var wrap = document.createElement("div");
+      wrap.className = "field";
+
+      var lab = document.createElement("label");
+      lab.setAttribute("for", "in-" + f.key);
+      lab.textContent = f.label;
+
+      var input = document.createElement("input");
+      input.type = "number";
+      input.id = "in-" + f.key;
+      input.inputMode = "decimal";
+      input.min = "0";
+      input.value = state[f.key];
+      input.addEventListener("input", function () {
+        state[f.key] = input.value === "" ? 0 : parseFloat(input.value);
+        compute();
+      });
+
+      wrap.appendChild(lab);
+      wrap.appendChild(input);
+      fieldsEl.appendChild(wrap);
+    });
+  }
+
+  function compute() {
+    var s = state;
+    if (mode === "cost") {
+      // hours reclaimed per year, valued at loaded staff cost
+      var hoursPerYear = (s.casesPerWeek * s.adminMinutes * s.weeksPerYear) / 60;
+      var annualValue = hoursPerYear * s.loadedCost;
+
+      labelEl.textContent = "Annual value of the time you could reclaim";
+      valueEl.textContent = gbp.format(Math.round(annualValue));
+      noteEl.textContent = "about " + num(hoursPerYear) + " hours a year back";
+    } else {
+      // time saved converted into extra billable cases
+      var hoursSavedPerWeek = (s.casesPerWeek * s.adminMinutes) / 60;
+      var extraCasesPerWeek = s.avgHoursPerCase > 0 ? hoursSavedPerWeek / s.avgHoursPerCase : 0;
+      var annualRevenue = extraCasesPerWeek * s.weeksPerYear * s.avgCaseValue;
+
+      labelEl.textContent = "Annual revenue that time could win back";
+      valueEl.textContent = gbp.format(Math.round(annualRevenue));
+      noteEl.textContent = "about " + num(extraCasesPerWeek) + " extra cases a week";
+    }
+  }
+
+  function setMode(next) {
+    mode = next;
+    tabCost.setAttribute("aria-pressed", next === "cost");
+    tabRev.setAttribute("aria-pressed", next === "revenue");
+    renderFields();
+    compute();
+  }
+
+  tabCost.addEventListener("click", function () { setMode("cost"); });
+  tabRev.addEventListener("click", function () { setMode("revenue"); });
+
+  // init
+  renderFields();
+  compute();
+</script>
+</body>
+</html>

@@ -32,6 +32,8 @@ import SortDropdown from '../components/SortDropdown';
 import Pagination from '../components/Pagination';
 import FilterDrawer from '../components/FilterDrawer';
 import { useToast } from '../context/ToastContext';
+import { useCaseScoring } from '../context/CaseScoringContext';
+import type { CaseScore } from '../data/caseScoring';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -165,9 +167,68 @@ export function sourceLabel(source: CaseSource, scanner: Scanner, hasScanFiles =
   return 'Manual';
 }
 
+// Case completeness score pill — RAG-coloured % for scored services, or a
+// muted "No score" chip when the lab hasn't set up scoring for that service.
+const SCORE_BAND_STYLES: Record<'red' | 'amber' | 'green', string> = {
+  green: 'bg-[#ECFDF5] text-[#047857] border-[#A7F3D0]',
+  amber: 'bg-[#FFF8E1] text-[#B45309] border-[#FDE68A]',
+  red:   'bg-[#FEF2F2] text-[#B91C1C] border-[#FECACA]',
+};
+// A compact round score badge. The colour encodes the band, the number is the
+// completeness %, and a hover tooltip spells out the tier + per-field breakdown.
+// "No score" → a dashed grey circle; out-of-sync → an amber circle (clickable
+// for the lab to jump to the scoring config).
+function scoreDetail(score: CaseScore): string {
+  const head = `${score.tierLabel} — ${score.percent}% (${score.earned}/${score.total} weight)`;
+  const lines = score.services
+    .filter(s => s.configured)
+    .flatMap(s => s.fields.map(f => `${f.filled ? '✓' : '✗'} ${f.label}${f.weight ? ` · ${f.weight}` : ''}`));
+  return [head, ...lines].join('\n');
+}
+
+function ScoreBadge({ score, size = 'sm', onFix }: { score: CaseScore; size?: 'sm' | 'xs'; onFix?: () => void }) {
+  const dim = size === 'xs' ? 'w-7 h-7 text-[9px]' : 'w-8 h-8 text-[10px]';
+  const base = `${dim} rounded-full inline-flex items-center justify-center font-bold border flex-shrink-0`;
+
+  // Out of sync with the Prescription Builder — only the lab (onFix) can fix it.
+  if (score.unavailable) {
+    const cls = `${base} bg-[#FFF7ED] text-[#C2410C] border-[#FED7AA]`;
+    const icon = <AlertTriangle className={size === 'xs' ? 'w-3 h-3' : 'w-3.5 h-3.5'} />;
+    if (onFix) {
+      return (
+        <button
+          onClick={(e) => { e.stopPropagation(); onFix(); }}
+          title="Score unavailable — scoring is out of sync with the Prescription Builder. Click to set it up."
+          className={`${cls} hover:bg-[#FFEDD5] transition-colors`}
+        >
+          {icon}
+        </button>
+      );
+    }
+    return <span title="Score unavailable — the lab is updating scoring for this service." className={cls}>{icon}</span>;
+  }
+
+  if (!score.applicable) {
+    return (
+      <span
+        title="No scoring set up for this service type"
+        className={`${dim} rounded-full inline-flex items-center justify-center font-semibold border border-dashed bg-[#F8F9FC] text-[#A0A0B0] border-[#D4CEE1] flex-shrink-0`}
+      >
+        –
+      </span>
+    );
+  }
+
+  return (
+    <span title={scoreDetail(score)} className={`${base} ${SCORE_BAND_STYLES[score.band]}`}>
+      {score.percent}
+    </span>
+  );
+}
+
 function pick<T>(arr: T[], i: number): T { return arr[i % arr.length]; }
 
-const mockCases: Case[] = Array.from({ length: 50 }, (_, i) => {
+export const mockCases: Case[] = Array.from({ length: 50 }, (_, i) => {
   const firstName   = pick(PATIENT_FIRST, i * 3 + 1);
   const lastName    = pick(PATIENT_LAST,  i * 7 + 2);
   const statusIndex = (i * 11 + 3) % STATUSES.length;
@@ -523,15 +584,20 @@ function StatusBadge({ status }: { status: CaseStatus }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: {
+export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring }: {
   initialCaseId?: string;
   onCreateCase?: () => void;
   // Called when the user clicks a draft case (status === 'draft'). The host
   // navigates to the case-creation flow with this draft pre-filled instead of
   // opening the read-only Case Detail page.
   onOpenDraft?: (caseData: Case) => void;
+  // Only the lab passes this — lets a user jump to the scoring config when a
+  // case's score is "unavailable" (out of sync). Absent in clinic/group, so
+  // there the unavailable pill is non-interactive.
+  onConfigureScoring?: () => void;
 } = {}) {
   const { toast } = useToast();
+  const { scoreCase } = useCaseScoring();
   const [cases, setCases] = useState<Case[]>(mockCases);
   const [showArchived, setShowArchived] = useState(false);
   const [selectedCase, setSelectedCase] = useState<Case | null>(() => {
@@ -557,7 +623,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
   const [timeFilter, setTimeFilter] = useState<'all' | '1h' | '1d' | '7d'>('all');
 
   // ── Column visibility — saved per-user in localStorage so preferences persist ──
-  type ColId = 'status' | 'caseId' | 'createdAt' | 'updatedAt' | 'deliveryDate' | 'patient' | 'service' | 'practice' | 'lab' | 'dentist';
+  type ColId = 'status' | 'caseId' | 'createdAt' | 'updatedAt' | 'deliveryDate' | 'patient' | 'service' | 'score' | 'practice' | 'lab' | 'dentist';
   const DEFAULT_COLS: Record<ColId, boolean> = {
     status: true,
     caseId: true,
@@ -566,12 +632,14 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
     deliveryDate: true,
     patient: true,
     service: true,
+    score: true,
     practice: true,
     lab: false,         // off by default — opt-in
     dentist: true,
   };
   const COL_LABELS: Record<ColId, string> = {
     status: 'Status',
+    score: 'Score',
     caseId: 'Case ID',
     createdAt: 'Created On',
     updatedAt: 'Updated On',
@@ -910,6 +978,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
                   {visibleCols.status && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Status</th>
                   )}
+                  {visibleCols.score && (
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Score</th>
+                  )}
                   {visibleCols.caseId && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Case ID</th>
                   )}
@@ -998,6 +1069,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
                   const overdue = isOverdue(c.requestedDelivery);
                   const isExpanded = expandedRows.has(c.id);
                   const isMulti = c.serviceItems.length > 1;
+                  const caseScore = scoreCase(c);
                   return (
                     <React.Fragment key={c.id}>
                     {/* ── Parent row ── */}
@@ -1033,6 +1105,11 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
                           {!visibleCols.caseId && (
                             <div className="text-[11px] font-semibold text-[#030213] mt-1">{c.id}</div>
                           )}
+                        </td>
+                      )}
+                      {visibleCols.score && (
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <ScoreBadge score={caseScore} onFix={onConfigureScoring} />
                         </td>
                       )}
                       {visibleCols.caseId && (
@@ -1127,6 +1204,11 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
                             <StatusBadge status={si.status} />
                           </td>
                         )}
+                        {visibleCols.score && (
+                          <td className="px-4 py-2 whitespace-nowrap">
+                            <ScoreBadge score={scoreCase({ ...c, serviceItems: [si] })} size="xs" onFix={onConfigureScoring} />
+                          </td>
+                        )}
                         {/* Case ID — sub-case number: CASE-007-1, CASE-007-2 … */}
                         {visibleCols.caseId && (
                           <td className="px-4 py-2 whitespace-nowrap">
@@ -1187,6 +1269,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
           >
             {paginated.map(c => {
               const overdue = isOverdue(c.requestedDelivery);
+              const caseScore = scoreCase(c);
               return (
                 <div
                   key={c.id}
@@ -1273,6 +1356,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft }: 
                     <div className="flex items-center justify-between">
                       <span className="text-[#8B8B9E]">Created</span>
                       <span className="text-[#5A5568]">{c.createdAt}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#8B8B9E]">Score</span>
+                      <ScoreBadge score={caseScore} size="xs" onFix={onConfigureScoring} />
                     </div>
                     {c.requestedDelivery && (
                       <div className="flex items-center justify-between">

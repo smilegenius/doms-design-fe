@@ -78,8 +78,10 @@ interface LayoutProps {
   // Which portal context this Layout is being used in. Controls which nav
   // items show in the sidebar. Defaults to 'supplier' (dental group portal).
   // 'clinic' shows only Overview + Cases — used by the Clinic Portal which
-  // doesn't expose the network / spending modules.
-  portal?: 'supplier' | 'clinic';
+  // doesn't expose the network / spending modules. 'lab' is the manufacturing
+  // lab's view — incoming cases from its clinic/dental-group clients, plus the
+  // Case Scoring configuration.
+  portal?: 'supplier' | 'clinic' | 'lab';
 }
 
 // Flat sidebar — Spending parent removed; all items live at one level.
@@ -110,8 +112,19 @@ const clinicNavItems = [
   { id: 'suppliers', label: 'Suppliers', icon: FilledPackage,   isCustom: false },
 ];
 
+// Lab Portal — the manufacturing lab's view. Cases flow IN from its clients
+// (clinics + dental groups); Configuration is where the lab sets up case
+// scoring (weighted prescription fields per service type).
+const labNavItems = [
+  { id: 'overview',      label: 'Overview',      icon: OverviewIcon,    isCustom: true  },
+  { id: 'cases',         label: 'Cases',         icon: CasesIcon,       isCustom: true  },
+  { id: 'invoices',      label: 'Invoices',      icon: FilledFileText,  isCustom: false },
+  { id: 'analytics',     label: 'Analytics',     icon: FilledBarChart,  isCustom: false },
+  { id: 'configuration', label: 'Configuration', icon: FilledSliders,   isCustom: false },
+];
+
 export default function Layout({ children, activePage = 'overview', onNavigate, portal = 'supplier' }: LayoutProps) {
-  const mainNavItems = portal === 'clinic' ? clinicNavItems : supplierNavItems;
+  const mainNavItems = portal === 'clinic' ? clinicNavItems : portal === 'lab' ? labNavItems : supplierNavItems;
   const navigate = useNavigate();
   const { logout, user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);

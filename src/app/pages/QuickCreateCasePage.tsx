@@ -3,7 +3,7 @@ import {
   User, FlaskConical, Stethoscope, Calendar, FileText, Search,
   Plus, X, Check, ChevronDown, ChevronRight,
   Pencil, Zap, Star, Upload, UploadCloud, Box, Image as ImageIcon,
-  AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen,
+  AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen, Copy, ExternalLink,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import ModalPortal from '../components/ModalPortal';
@@ -805,73 +805,86 @@ function IteroLogo({ className = '' }: { className?: string }) {
 // zip" helper, and the Upload Zip File action. Once the zip is "uploaded"
 // (mocked — fills the scan slots) it flips to a success state with a jump to
 // the 3D Model tab.
-function IteroUploadPane({ attachmentName, uploadedCount, onUploadZip, onView3D }: {
+function IteroUploadPane({ uploadedCount, onUploadZip, onView3D, orderNumber = 'Order210398' }: {
+  /** Kept for callers but no longer surfaced — we don't show the zip filename. */
   attachmentName?: string;
   uploadedCount: number;
   onUploadZip: () => void;
   onView3D: () => void;
+  /** iTero order reference — the user searches for this when they open iTero. */
+  orderNumber?: string;
 }) {
-  const [helpOpen, setHelpOpen] = useState(false);
+  const { toast } = useToast();
   const uploaded = uploadedCount > 0;
+  const copyOrder = () => {
+    navigator.clipboard?.writeText(orderNumber);
+    toast.success(`${orderNumber} copied`);
+  };
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-      {/* Pane title — iTero brand, no email address */}
-      <div className="flex-shrink-0 px-4 py-2.5 border-b border-[#F0EFF6] bg-[#F8F9FC] flex items-center gap-2">
-        <span className="w-6 h-6 rounded-lg bg-white border border-[#E0E0E6] flex items-center justify-center overflow-hidden">
-          <IteroLogo className="w-4 h-4" />
-        </span>
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider leading-tight">iTero</p>
-          <p className="text-[10px] text-[#717182] leading-tight truncate">Scans received by email</p>
-        </div>
-      </div>
-
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {/* Email received from iTero */}
-        <div className="bg-white border border-[#E0E0E6] rounded-xl p-3 flex items-center gap-2.5">
-          <span className="w-9 h-9 rounded-lg bg-[#EEF4FF] border border-[#C8D8FC] flex items-center justify-center flex-shrink-0">
-            <Mail className="w-4 h-4 text-[#1565C0]" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-bold text-[#030213] leading-tight">Email received from <span className="text-[#1565C0]">iTero</span></p>
-            <p className="text-[10px] text-[#717182] leading-tight truncate">
-              {attachmentName ? attachmentName : 'iTero scan export attached'}
-            </p>
+        {/* Case received from iTero + the iTero order reference (copyable) */}
+        <div className="bg-white border border-[#E0E0E6] rounded-xl p-3 space-y-2.5">
+          <div className="flex items-center gap-2.5">
+            <span className="w-9 h-9 rounded-lg bg-[#EEF4FF] border border-[#C8D8FC] flex items-center justify-center flex-shrink-0">
+              <Mail className="w-4 h-4 text-[#1565C0]" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-bold text-[#030213] leading-tight">Case received from <span className="text-[#1565C0]">iTero</span></p>
+            </div>
+            <IteroLogo className="w-6 h-6 flex-shrink-0" />
           </div>
-          <IteroLogo className="w-6 h-6 flex-shrink-0" />
+          {/* Order ref — copy it, then find this order in iTero */}
+          <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-[#F8F9FC] border border-[#E8EAF6]">
+            <div className="min-w-0 flex-1">
+              <p className="text-[9px] font-bold text-[#A0A0B0] uppercase tracking-wider">iTero order</p>
+              <p className="text-xs font-bold text-[#030213] font-mono leading-tight truncate">{orderNumber}</p>
+            </div>
+            <button
+              type="button"
+              onClick={copyOrder}
+              title="Copy order number"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold text-[#1565C0] border border-[#C8D8FC] bg-white hover:bg-[#EEF4FF] transition-colors flex-shrink-0"
+            >
+              <Copy className="w-3 h-3" />
+              Copy
+            </button>
+            {/* CTA — jump straight to the iTero portal to find this order */}
+            <a
+              href="https://www.myitero.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open the iTero portal"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold text-white bg-[#1565C0] hover:bg-[#0F4FA0] transition-colors flex-shrink-0"
+            >
+              <ExternalLink className="w-3 h-3" />
+              Go to iTero
+            </a>
+          </div>
         </div>
 
-        {/* How to upload iTero zip? — toggles the step list */}
+        {/* How to upload iTero zip? — always visible (not collapsible) */}
         <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setHelpOpen(o => !o)}
-            className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-[#F8F9FC] transition-colors"
-          >
-            <span className="flex items-center gap-1.5 min-w-0">
-              <AlertCircle className="w-3.5 h-3.5 text-[#1565C0] flex-shrink-0" />
-              <span className="text-xs font-semibold text-[#1565C0] truncate">How to upload iTero zip?</span>
-            </span>
-            <ChevronDown className={`w-3.5 h-3.5 text-[#A0A0B0] flex-shrink-0 transition-transform ${helpOpen ? '' : '-rotate-90'}`} />
-          </button>
-          {helpOpen && (
-            <div className="px-4 pb-3 pt-1 border-t border-[#F0EFF6]">
-              <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-1.5">Steps to upload your iTero scan</p>
-              <ol className="space-y-1.5">
-                {[
-                  <>Open iTero and download the scan zip file.</>,
-                  <>Come back to this page.</>,
-                  <>Click <span className="font-semibold text-[#030213]">Upload Zip File</span> and upload the downloaded zip file.</>,
-                ].map((step, i) => (
-                  <li key={i} className="flex items-start gap-2 text-[11px] text-[#5A5568] leading-snug">
-                    <span className="w-4 h-4 rounded-full bg-[#EEF4FF] text-[#1565C0] text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
-                    <span>{step}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
+          <div className="w-full flex items-center gap-1.5 px-3 py-2.5">
+            <AlertCircle className="w-3.5 h-3.5 text-[#1565C0] flex-shrink-0" />
+            <span className="text-xs font-semibold text-[#1565C0] truncate">How to upload iTero zip?</span>
+          </div>
+          <div className="px-4 pb-3 pt-1 border-t border-[#F0EFF6]">
+            <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-1.5">Steps to upload your iTero scan</p>
+            <ol className="space-y-1.5">
+              {[
+                <>Open iTero and find order <span className="font-semibold text-[#030213] font-mono">{orderNumber}</span>, then download its scan zip file.</>,
+                <>Come back to this page.</>,
+                <>Click <span className="font-semibold text-[#030213]">Upload Zip File</span> and upload the downloaded zip file.</>,
+              ].map((step, i) => (
+                <li key={i} className="flex items-start gap-2 text-[11px] text-[#5A5568] leading-snug">
+                  <span className="w-4 h-4 rounded-full bg-[#EEF4FF] text-[#1565C0] text-[9px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
         </div>
 
         {/* Upload Zip File — or the uploaded success state */}
@@ -920,7 +933,7 @@ function IteroUploadPane({ attachmentName, uploadedCount, onUploadZip, onView3D 
               <p className="text-[10px] text-[#A0A0B0] mt-2 font-medium">.zip · iTero export</p>
             </button>
             <div className="text-[10px] text-[#717182] text-center leading-relaxed px-2">
-              Not sure how? Tap <span className="font-semibold text-[#1565C0]">How to upload iTero zip?</span> above.
+              Not sure how? Follow the <span className="font-semibold text-[#1565C0]">steps above</span> to download your scan from iTero.
             </div>
           </>
         )}
@@ -1418,11 +1431,13 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                       <UploadCloud className={`w-3.5 h-3.5 flex-shrink-0 ${caseSource ? '' : 'text-[#A0A0B0]'}`} />
                       <span className={`flex-1 text-left truncate ${caseSource ? '' : 'font-medium italic'}`}>
                         {caseSource
-                          ? (caseSource === 'Via Scanner' && caseSourceScanner
-                              ? `Via Scanner · ${caseSourceScanner}`
-                              : caseSource === 'Impressions (By Post)' && caseSourceCourier
-                                ? `Impressions · ${caseSourceCourier}`
-                                : caseSource)
+                          ? (isIteroEmail
+                              ? `Scanner · ${prefillDraft?.scanner ?? 'iTero'}`
+                              : caseSource === 'Via Scanner' && caseSourceScanner
+                                ? `Via Scanner · ${caseSourceScanner}`
+                                : caseSource === 'Impressions (By Post)' && caseSourceCourier
+                                  ? `Impressions · ${caseSourceCourier}`
+                                  : caseSource)
                           : 'Case Source'}
                       </span>
                       {fileCount > 0 && (

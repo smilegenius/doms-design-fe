@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { SupplierFieldsProvider } from './context/SupplierFieldsContext';
+import { CaseScoringProvider } from './context/CaseScoringContext';
 import { useAuth } from './context/AuthContext';
 import { ToastProvider, useToast } from './context/ToastContext';
 import LoginPage from './pages/LoginPage';
@@ -9,6 +10,7 @@ import OnboardingPage from './pages/OnboardingPage';
 import PortalSelectPage from './pages/PortalSelectPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
+import LabApp from './LabApp';
 import SuppliersPage from './pages/SuppliersPage';
 import SupplierDetailPage from './pages/SupplierDetailPage';
 import InvoicesPage from './pages/InvoicesPage';
@@ -394,6 +396,7 @@ export default function App() {
   return (
     <ToastProvider>
     <SupplierFieldsProvider>
+    <CaseScoringProvider>
     <Routes>
       <Route path="/" element={<PortalSelectPage />} />
       <Route path="/portal-select" element={<PortalSelectPage />} />
@@ -424,8 +427,17 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/lab/*"
+        element={
+          <ProtectedRoute>
+            <LabApp />
+          </ProtectedRoute>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </CaseScoringProvider>
     </SupplierFieldsProvider>
     </ToastProvider>
   );
