@@ -27,6 +27,7 @@ import {
   ArchiveRestore,
 } from 'lucide-react';
 import Button from '../components/Button';
+import ModalPortal from '../components/ModalPortal';
 import SearchInput from '../components/SearchInput';
 import SortDropdown from '../components/SortDropdown';
 import Pagination from '../components/Pagination';
@@ -92,6 +93,10 @@ export interface Case {
   // missing items were fetched from that reply (the case opens showing the
   // "score updated" confirmation). Orthogonal to status.
   emailReplyReceived?: boolean;
+  // Recorded when a user changes the status while requirements are still missing
+  // (proceeding without waiting for the dentist). Surfaced on the case as the
+  // override reason + who edited it.
+  statusOverride?: StatusOverride;
   // Archived cases are hidden from the main list and surfaced only under the
   // "View Archived" toggle. Orthogonal to lifecycle `status`, so any case
   // (draft, in-production, completed…) can be archived and later restored.
@@ -686,6 +691,158 @@ function StatusBadge({ status }: { status: CaseStatus }) {
   );
 }
 
+// ─── Status override ──────────────────────────────────────────────────────────
+// When a user moves a case forward while required information is still missing
+// (i.e. without waiting for the dentist's reply), they must pick a reason. The
+// reason + who/when is recorded on the case and shown in the detail + listing.
+export interface StatusOverride {
+  reason: string;
+  notes?: string;
+  by: string;        // the user who overrode the missing-info check
+  at: string;        // display timestamp, e.g. "19-Jun-2026 14:30"
+  fromStatus: CaseStatus;
+  toStatus: CaseStatus;
+  missing: string[]; // requirements still missing at the moment of override
+}
+
+export const OVERRIDE_REASONS = [
+  'Dentist confirmed the missing details verbally',
+  'Missing information not required for this case',
+  'Urgent case — proceeding now, will follow up',
+  'Clinical judgement — enough to begin production',
+  'Other (explain in notes)',
+];
+
+// The signed-in lab user — stamped onto overrides as "edited by".
+export const CURRENT_USER = 'Sana Khan';
+
+// Statuses a user can move a case to from the listing/detail (excludes 'draft',
+// which only exists pre-submission).
+const CHANGEABLE_STATUSES: CaseStatus[] = [
+  'new', 'sent-for-review', 'submitted', 'in-production',
+  'quality-check', 'shipped', 'delivered', 'refinement', 'on-hold', 'completed',
+];
+
+function formatNow(): string {
+  const d = new Date();
+  const MM = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}-${MM[d.getMonth()]}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// Small amber chip flagging an overridden case in the listing (tooltip = reason).
+function OverrideTag({ override }: { override: StatusOverride }) {
+  return (
+    <span
+      title={`Override: ${override.reason}${override.notes ? ` — ${override.notes}` : ''} · by ${override.by} on ${override.at}`}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#FEF3C7] text-[#92610A] border border-[#FDE68A]"
+    >
+      <AlertTriangle className="w-2.5 h-2.5" />
+      Override
+    </span>
+  );
+}
+
+// Modal for changing a case's status. If the case is still missing required
+// information, picking a new status reveals a mandatory override reason +
+// optional notes (the flow: warn → reason → notes → save → proceed).
+function StatusChangeModal({ caseData, missing, onClose, onConfirm }: {
+  caseData: Case;
+  missing: string[];
+  onClose: () => void;
+  onConfirm: (toStatus: CaseStatus, override?: StatusOverride) => void;
+}) {
+  const [toStatus, setToStatus] = useState<CaseStatus>(caseData.status);
+  const [reason, setReason] = useState('');
+  const [notes, setNotes] = useState('');
+  const changed = toStatus !== caseData.status;
+  const needsOverride = changed && missing.length > 0;
+  const canConfirm = changed && (!needsOverride || !!reason);
+
+  function confirm() {
+    if (!canConfirm) return;
+    const override: StatusOverride | undefined = needsOverride
+      ? { reason, notes: notes.trim() || undefined, by: CURRENT_USER, at: formatNow(), fromStatus: caseData.status, toStatus, missing }
+      : undefined;
+    onConfirm(toStatus, override);
+  }
+
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[#F0EFF6]">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-[#030213]">Change status</h3>
+              <p className="text-[11px] text-[#717182] truncate">{caseData.id} · {caseData.patientName}</p>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors"><X className="w-4 h-4" /></button>
+          </div>
+
+          <div className="p-5 space-y-4">
+            <div>
+              <label className="block text-[11px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-2">New status</label>
+              <div className="grid grid-cols-2 gap-2">
+                {CHANGEABLE_STATUSES.map(st => {
+                  const sty = STATUS_STYLE[st];
+                  const Icon = sty.icon;
+                  const active = toStatus === st;
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => setToStatus(st)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${active ? 'border-[#4D8EF7] bg-[#EEF4FF] text-[#1565C0]' : 'border-[#E0E0E6] bg-white text-[#5A5568] hover:border-[#C8D8FC]'}`}
+                    >
+                      <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="truncate">{STATUS_LABEL[st]}</span>
+                      {st === caseData.status && <span className="ml-auto text-[9px] text-[#A0A0B0] flex-shrink-0">current</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {needsOverride && (
+              <div className="rounded-xl border border-[#FDE68A] bg-[#FFF8E1] p-3 space-y-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-[#B45309] flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-[#B45309]">This case is still missing required information</p>
+                    <p className="text-[11px] text-[#92610A] mt-0.5 leading-relaxed">Missing: {missing.join(', ')}. Moving it to “{STATUS_LABEL[toStatus]}” without waiting for the dentist requires an override reason.</p>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#92610A] mb-1">Override reason <span className="text-[#B91C1C]">*</span></label>
+                  <select value={reason} onChange={(e) => setReason(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-[#E0C56B] bg-white text-sm text-[#030213] focus:border-[#B45309] focus:outline-none">
+                    <option value="">Select a reason…</option>
+                    {OVERRIDE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#92610A] mb-1">Additional notes <span className="font-normal text-[#A0895A]">(optional)</span></label>
+                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Add context for the override…" className="w-full px-3 py-2 rounded-lg border border-[#E0C56B] bg-white text-sm text-[#030213] focus:border-[#B45309] focus:outline-none resize-none" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-[#F0EFF6] bg-[#FAFBFC]">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-[#5A5568] border border-[#E0E0E6] bg-white hover:bg-[#F3F3F5] transition-colors">Cancel</button>
+            <button
+              onClick={confirm}
+              disabled={!canConfirm}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-opacity ${canConfirm ? 'bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90' : 'bg-[#C8C0F0] cursor-not-allowed opacity-60'}`}
+            >
+              {needsOverride ? <><AlertTriangle className="w-4 h-4" /> Override &amp; change status</> : <><Check className="w-4 h-4" /> Change status</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring }: {
@@ -793,6 +950,8 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [gridMenuOpen, setGridMenuOpen] = useState<string | null>(null);
+  // The case whose "Change status" modal is currently open (from listing or detail).
+  const [statusModalCase, setStatusModalCase] = useState<Case | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   function toggleRow(id: string) {
     setExpandedRows(prev => {
@@ -950,11 +1109,47 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     toast.success(`${c.id} ${nextArchived ? 'archived' : 'restored'}`);
   }
 
+  // Apply a status change to a case (from the listing or the detail page),
+  // updating both the list and the open detail snapshot. When an override is
+  // supplied it's recorded on the case so the reason + who/when shows everywhere.
+  function applyStatusChange(c: Case, toStatus: CaseStatus, override?: StatusOverride) {
+    setCases(prev => prev.map(x => x.id === c.id ? { ...x, status: toStatus, statusOverride: override ?? x.statusOverride } : x));
+    setSelectedCase(prev => prev && prev.id === c.id ? { ...prev, status: toStatus, statusOverride: override ?? prev.statusOverride } : prev);
+    if (override) toast.success(`${c.id} → ${STATUS_LABEL[toStatus]} (override recorded)`);
+    else toast.success(`${c.id} → ${STATUS_LABEL[toStatus]}`);
+  }
+
+  // Missing requirements for the case in the status modal — drives whether an
+  // override reason is required.
+  const statusModalMissing = useMemo(() => {
+    if (!statusModalCase) return [];
+    const sc = scoreCase(statusModalCase);
+    return sc.applicable ? sc.services.filter(s => s.configured).flatMap(s => s.fields.filter(f => !f.filled).map(f => f.label)) : [];
+  }, [statusModalCase, scoreCase]);
+
   if (selectedCase) {
     // Drafts route to the QuickCreate flow via onOpenDraft, so selectedCase
     // here is always a non-draft case opening the read-only detail. (The
     // supplier portal, which has no draft flow, can still open a draft here.)
-    return <CaseDetailPage caseData={selectedCase as any} onBack={() => setSelectedCase(null)} onArchiveToggle={() => toggleArchive(selectedCase)} />;
+    return (
+      <>
+        <CaseDetailPage
+          caseData={selectedCase as any}
+          onBack={() => setSelectedCase(null)}
+          onArchiveToggle={() => toggleArchive(selectedCase)}
+          onRequestStatusChange={() => setStatusModalCase(selectedCase)}
+          onSetStatus={(toStatus) => applyStatusChange(selectedCase, toStatus)}
+        />
+        {statusModalCase && (
+          <StatusChangeModal
+            caseData={statusModalCase}
+            missing={statusModalMissing}
+            onClose={() => setStatusModalCase(null)}
+            onConfirm={(toStatus, override) => { applyStatusChange(statusModalCase, toStatus, override); setStatusModalCase(null); }}
+          />
+        )}
+      </>
+    );
   }
 
   function ColSortIcon({ col }: { col: SortColumn }) {
@@ -1212,6 +1407,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                           ) : (
                             <StatusBadge status={c.status} />
                           )}
+                          {c.statusOverride && (
+                            <div className="mt-1"><OverrideTag override={c.statusOverride} /></div>
+                          )}
                           {!visibleCols.caseId && (
                             <div className="text-[11px] font-semibold text-[#030213] mt-1">{c.id}</div>
                           )}
@@ -1278,6 +1476,15 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                             >
                               <Mail className="w-4 h-4" />
                               <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-[#D4183D] border border-white" />
+                            </button>
+                          )}
+                          {c.status !== 'draft' && (
+                            <button
+                              title="Change status"
+                              onClick={() => setStatusModalCase(c)}
+                              className="p-1.5 rounded-lg text-[#717182] hover:text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors"
+                            >
+                              <RefreshCw className="w-4 h-4" />
                             </button>
                           )}
                           <button title="Download" className="p-1.5 rounded-lg text-[#717182] hover:text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors">
@@ -1398,7 +1605,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
 
                   {/* Header */}
                   <div className="flex items-start justify-between px-4 pt-4 pb-2">
-                    <StatusBadge status={c.status} />
+                    <span className="inline-flex flex-col items-start gap-1">
+                      <StatusBadge status={c.status} />
+                      {c.statusOverride && <OverrideTag override={c.statusOverride} />}
+                    </span>
                     <div className="relative" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => setGridMenuOpen(gridMenuOpen === c.id ? null : c.id)}
@@ -1419,6 +1629,15 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                             <Eye className="w-3.5 h-3.5 text-[#717182]" />
                             View Case
                           </button>
+                          {c.status !== 'draft' && (
+                            <button
+                              onClick={() => { setGridMenuOpen(null); setStatusModalCase(c); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#030213] hover:bg-[#F8F9FC]"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5 text-[#717182]" />
+                              Change status
+                            </button>
+                          )}
                           <button
                             onClick={() => toggleArchive(c)}
                             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#030213] hover:bg-[#F8F9FC]"
@@ -1541,6 +1760,17 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
             hasAlert: orderFormCase.hasAlert,
           }}
           onClose={() => setOrderFormCase(null)}
+        />
+      )}
+
+      {/* Change-status modal — opened from a row's "Change status" action. When
+          the case is still missing requirements it demands an override reason. */}
+      {statusModalCase && (
+        <StatusChangeModal
+          caseData={statusModalCase}
+          missing={statusModalMissing}
+          onClose={() => setStatusModalCase(null)}
+          onConfirm={(toStatus, override) => { applyStatusChange(statusModalCase, toStatus, override); setStatusModalCase(null); }}
         />
       )}
     </div>

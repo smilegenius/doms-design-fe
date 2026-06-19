@@ -89,6 +89,17 @@ interface CaseForDetail {
   /** Demo seed — the dentist already replied to the missing-info email, so the
       case opens showing the "score updated" confirmation. */
   emailReplyReceived?: boolean;
+  /** Recorded when a user changed the status while requirements were still
+      missing — surfaced as a banner (reason + who/when). */
+  statusOverride?: {
+    reason: string;
+    notes?: string;
+    by: string;
+    at: string;
+    fromStatus?: CaseStatus;
+    toStatus: CaseStatus;
+    missing?: string[];
+  };
   /** Service-level detail — one entry per service on this case */
   serviceItems?: ServiceItem[];
   /** Whether this case is archived (hidden from the main Cases list). */
@@ -110,6 +121,12 @@ interface CaseDetailPageProps {
   onBack: () => void;
   /** Toggle this case's archived state — wired from the Cases list. */
   onArchiveToggle?: () => void;
+  /** Open the "Change status" modal (which enforces the override flow when the
+      case is still missing requirements). Wired from the Cases list. */
+  onRequestStatusChange?: () => void;
+  /** Directly set the status (no override gate) — used by the in-case
+      missing-info email flow (Sent for Review → Submitted). */
+  onSetStatus?: (toStatus: CaseStatus) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -2384,7 +2401,7 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
-export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: CaseDetailPageProps) {
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState(caseData.requestedDelivery ?? '');
@@ -2447,17 +2464,16 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
   // updates surface as header notices alongside the delivery-date warning.
   const [emailSent, setEmailSent]         = useState(caseData.status === 'sent-for-review' || !!caseData.emailReplyReceived);
   const [replyReceived, setReplyReceived] = useState(!!caseData.emailReplyReceived);
-  const [localStatus, setLocalStatus]     = useState<CaseStatus>(caseData.status);
 
   function sendMissingInfoEmail() {
     setEmailSent(true);
-    setLocalStatus('sent-for-review');
+    onSetStatus?.('sent-for-review');
     setThreadOpen(true);
     toast.success(`Missing-info email sent to ${caseData.dentist} — case set to “Sent for Review”.`);
   }
   function markReplyReceived() {
     setReplyReceived(true);
-    setLocalStatus('submitted');
+    onSetStatus?.('submitted');
     toast.success(`${caseData.dentist} replied — missing items received, score updated to 100%.`);
   }
 
@@ -2469,7 +2485,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
   // "Received via" — derived from the real case source so it stays in sync.
   const receivedVia = receivedViaLabel(caseData);
 
-  const s = STATUS_MAP[localStatus];
+  const s = STATUS_MAP[caseData.status];
   const service = caseData.services[0] ?? 'Service';
   const iconStyle = SERVICE_ICON_COLOR[service] ?? { bg: '#FFF7ED', color: '#F59E0B' };
   const missingDeliveryDate = !deliveryDate.trim();
@@ -2553,16 +2569,20 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
         <div className="px-5 py-4 border-b border-[#F0EFF6] flex items-center gap-3 flex-wrap">
           <h1 className="text-base font-bold text-[#030213] tracking-tight">{caseData.id}</h1>
 
-          {/* Live case status — flips to "Sent for Review" once the missing-info
-              email goes out, then advances when the dentist replies. */}
-          <span
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold"
+          {/* Live case status — click to change it (the change-status modal
+              enforces the override flow when requirements are still missing).
+              Also flips automatically through the missing-info email loop. */}
+          <button
+            onClick={onRequestStatusChange}
+            disabled={!onRequestStatusChange}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold hover:opacity-80 transition-opacity disabled:cursor-default"
             style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}
-            title="Case status"
+            title="Change case status"
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.dot }} />
             {s.label}
-          </span>
+            {onRequestStatusChange && <ChevronDown className="w-3 h-3 opacity-70" />}
+          </button>
 
           {caseData.archived && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#F3F3F5] text-[#616161] border border-[#BDBDBD]">
@@ -2680,6 +2700,26 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
           </div>
         )}
       </div>
+
+      {/* ── Status-override banner — shown when a user advanced this case while
+            requirements were still missing (reason + who/when). ── */}
+      {caseData.statusOverride && (
+        <div className="mx-6 mt-3 rounded-xl border border-[#FDE68A] bg-[#FFF8E1] px-4 py-3 flex items-start gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-[#B45309] flex-shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-[#B45309]">
+              Status override — moved to “{STATUS_MAP[caseData.statusOverride.toStatus].label}” with requirements still missing
+            </p>
+            <p className="text-[11px] text-[#92610A] mt-0.5 leading-relaxed">
+              Reason: {caseData.statusOverride.reason}{caseData.statusOverride.notes ? ` · ${caseData.statusOverride.notes}` : ''}
+            </p>
+            {caseData.statusOverride.missing && caseData.statusOverride.missing.length > 0 && (
+              <p className="text-[11px] text-[#92610A] mt-0.5">Missing at override: {caseData.statusOverride.missing.join(', ')}</p>
+            )}
+            <p className="text-[10px] text-[#A0895A] mt-1">Edited by {caseData.statusOverride.by} · {caseData.statusOverride.at}</p>
+          </div>
+        </div>
+      )}
 
       {/* ── Top tab bar: Case Summary (multi-service only) + one tab per service ── */}
       <div className="mx-6 mt-3 bg-white border border-[#E0E0E6] rounded-xl overflow-x-auto">
