@@ -21,15 +21,29 @@ export interface ScoreFieldDef {
   id: string;
   label: string;
   hint: string;
+  /** Parent group id for nested sub-fields (e.g. the 3D-scan slots). */
+  parent?: string;
   /** True when this field is considered "provided" for the given service. */
   isFilled: (si: ServiceItem, c: Case) => boolean;
 }
+
+// The "3D scan files" field is scored per intra-oral scan slot. These slots are
+// hardcoded (not from the Prescription Builder) so the lab can weight each scan
+// type per service. We derive each slot from the case's scan file count.
+export const SCAN_SLOT_DEFS: ScoreFieldDef[] = [
+  { id: 'scan_upper', label: 'Upper',        hint: 'Upper arch scan',  parent: 'scans', isFilled: (si) => (si.scanFileCount ?? 0) >= 1 },
+  { id: 'scan_lower', label: 'Lower',        hint: 'Lower arch scan',  parent: 'scans', isFilled: (si) => (si.scanFileCount ?? 0) >= 2 },
+  { id: 'scan_bite',  label: 'Bite Scan',    hint: 'Bite registration', parent: 'scans', isFilled: (si) => (si.scanFileCount ?? 0) >= 3 },
+  { id: 'scan_bite2', label: 'Bite Scan 2',  hint: 'Second bite scan',  parent: 'scans', isFilled: (si) => (si.scanFileCount ?? 0) >= 4 },
+];
+export const SCAN_SLOT_IDS = SCAN_SLOT_DEFS.map(d => d.id);
 
 export const SCORE_FIELD_DEFS: ScoreFieldDef[] = [
   { id: 'teeth',        label: 'Teeth selected',      hint: 'At least one tooth marked on the chart', isFilled: (si) => (si.fdi?.length ?? 0) > 0 },
   { id: 'material',     label: 'Material',            hint: 'Restoration material chosen',            isFilled: (si) => !!si.material },
   { id: 'shade',        label: 'Shade',               hint: 'Tooth shade specified',                  isFilled: (si) => !!si.shade },
   { id: 'scans',        label: '3D scan files',       hint: 'Intra-oral scan files attached',         isFilled: (si) => (si.scanFileCount ?? 0) > 0 },
+  ...SCAN_SLOT_DEFS,
   { id: 'attachments',  label: 'Photos / attachments', hint: 'Supporting photos or files attached',   isFilled: (si) => (si.attachmentCount ?? 0) > 0 },
   { id: 'instructions', label: 'Lab instructions',    hint: 'Written instructions for the lab',       isFilled: (si) => !!(si.instructions && si.instructions.trim()) },
   { id: 'delivery',     label: 'Requested delivery',  hint: 'A delivery date was requested',          isFilled: (si, c) => !!si.deliveryDate || !!c.requestedDelivery },
@@ -71,14 +85,34 @@ const f = (id: string, weight: number): ScoreField => ({
 // Retainer) so those cases demonstrate the "No score applicable" fallback
 // until the lab configures them.
 export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
-  'Crown':          [f('teeth', 20), f('material', 20), f('shade', 20), f('scans', 25), f('instructions', 15)],
-  'Veneers':        [f('teeth', 15), f('material', 20), f('shade', 30), f('scans', 20), f('instructions', 15)],
-  'Bridge':         [f('teeth', 20), f('material', 25), f('shade', 20), f('scans', 20), f('instructions', 15)],
-  'Clear Aligners': [f('teeth', 20), f('scans', 30), f('instructions', 20), f('delivery', 15), f('attachments', 15)],
+  'Crown':          [f('teeth', 20), f('material', 20), f('shade', 20), f('scan_upper', 10), f('scan_lower', 10), f('scan_bite', 5), f('instructions', 15)],
+  'Veneers':        [f('teeth', 15), f('material', 20), f('shade', 30), f('scan_upper', 8), f('scan_lower', 8), f('scan_bite', 4), f('instructions', 15)],
+  'Bridge':         [f('teeth', 20), f('material', 25), f('shade', 20), f('scan_upper', 8), f('scan_lower', 8), f('scan_bite', 4), f('instructions', 15)],
+  'Clear Aligners': [f('teeth', 20), f('scan_upper', 12), f('scan_lower', 12), f('scan_bite', 6), f('instructions', 20), f('delivery', 15), f('attachments', 15)],
   'Full Denture':   [f('teeth', 15), f('material', 20), f('shade', 20), f('stages', 30), f('instructions', 15)],
   'Partial Denture':[f('teeth', 15), f('material', 20), f('shade', 20), f('stages', 30), f('instructions', 15)],
   // 'Night Guard' and 'Retainer' deliberately unconfigured → "No score applicable".
 };
+
+// ── Missing-info auto-email ──────────────────────────────────────────────────
+// When a case is missing required prescription info (a low score), the lab can
+// auto-email the dentist the list of missing items. This is the default
+// template; the lab can edit it in Configuration → Case Scoring → Auto-Email.
+export const MISSING_INFO_EMAIL = {
+  subject: 'Additional information required for Case {{case_number}}',
+  body: `Hello {{dentist_name}},
+
+We have reviewed Case {{case_number}} and identified missing information required to begin production.
+
+Missing Items:
+{{missing_requirements}}
+
+Please update the case at your earliest convenience.
+
+Thank you,
+{{lab_name}}`,
+};
+export const MISSING_INFO_EMAIL_PLACEHOLDERS = ['case_number', 'dentist_name', 'missing_requirements', 'lab_name'];
 
 // ── Score bands & thresholds ─────────────────────────────────────────────────
 // The lab decides where the cut-offs sit. Three tiers — Incomplete / Need

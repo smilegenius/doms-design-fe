@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Take the room home with you</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --bg: #000000;
+    --panel: #0e1017;
+    --card-2: #0d0f17;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --eyebrow: #8b8cf7;
+    --title: #f4f5f8;
+    --muted: #9aa0ad;
+    --label: #d6d8df;
+    --text: #f4f5f8;
+    --accent-a: #a78bfa;
+    --accent-b: #5b8def;
+    --danger: #f87171;
+    --radius-lg: 16px;
+    --radius-sm: 11px;
+    --font-head: "Poppins", "Inter", system-ui, sans-serif;
+    --font-body: "Inter", system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  .lead { width: 100%; max-width: 720px; margin: 0 auto; padding: 26px 20px 16px; color: var(--text); }
+
+  .eyebrow {
+    font-size: 12.5px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--eyebrow); margin: 0 0 12px;
+  }
+  .title {
+    font-family: var(--font-head); font-size: clamp(25px, 5vw, 34px);
+    line-height: 1.12; font-weight: 800; color: var(--title); margin: 0 0 12px;
+  }
+  .subtitle {
+    font-size: clamp(15px, 2.4vw, 17px); line-height: 1.5;
+    color: var(--muted); margin: 0 0 22px; max-width: 600px;
+  }
+
+  /* ---- Bullets ---- */
+  .bullets { margin: 0 0 8px; }
+  .bullet { display: flex; gap: 14px; align-items: flex-start; padding: 14px 0; }
+  .bullet + .bullet { border-top: 1px solid var(--border); }
+  .bullet-mark { flex: 0 0 auto; margin-top: 1px; color: var(--accent-a); display: inline-flex; }
+  .bullet-mark svg { width: 22px; height: 22px; display: block; }
+  .bullet p { margin: 0; font-size: clamp(14.5px, 2.3vw, 16px); line-height: 1.5; color: var(--muted); }
+  .bullet p strong { color: var(--title); font-weight: 700; }
+
+  /* ---- Form panel ---- */
+  .form-panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 26px 24px 24px; margin-top: 14px;
+  }
+  .group { margin-bottom: 18px; }
+  .group label.field-label { display: block; font-size: 14.5px; font-weight: 700; color: var(--label); margin-bottom: 9px; }
+  .group input[type="text"], .group input[type="email"] {
+    width: 100%; background: var(--card-2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text);
+    font-family: var(--font-body); font-size: 16px; font-weight: 500;
+    padding: 15px 16px; outline: none;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease;
+  }
+  .group input::placeholder { color: #565c6b; }
+  .group input:focus { border-color: var(--accent-a); box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18); }
+  .group.invalid input { border-color: var(--danger); }
+  .err { display: none; color: var(--danger); font-size: 13px; margin-top: 7px; }
+  .group.invalid .err { display: block; }
+
+  /* ---- Consent ---- */
+  .consent { display: flex; gap: 11px; align-items: flex-start; margin: 4px 0 20px; }
+  .consent input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent-a); flex: 0 0 auto; cursor: pointer; }
+  .consent label { font-size: 14px; line-height: 1.5; color: var(--muted); cursor: pointer; }
+  .consent.invalid label { color: var(--danger); }
+
+  /* ---- Button ---- */
+  .submit {
+    width: 100%; appearance: none; border: 0; cursor: pointer;
+    color: #fff; font-family: var(--font-body); font-size: 17px; font-weight: 700;
+    padding: 17px 20px; border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-a), var(--accent-b));
+    box-shadow: 0 10px 28px rgba(91, 141, 239, 0.30);
+    transition: transform 0.12s ease, opacity 0.16s ease, box-shadow 0.16s ease;
+  }
+  .submit:hover { transform: translateY(-1px); }
+  .submit:active { transform: translateY(0); }
+  .submit:disabled { opacity: 0.65; cursor: default; transform: none; box-shadow: none; }
+
+  .foot { text-align: center; font-size: 13.5px; color: var(--muted); margin: 14px 0 0; }
+
+  /* ---- Success state ---- */
+  .success { display: none; text-align: center; padding: 8px 4px 4px; }
+  .success.show { display: block; }
+  .form-panel.hide { display: none; }
+  .success h2 { font-family: var(--font-head); font-size: clamp(20px, 4vw, 26px); color: var(--title); margin: 0 0 8px; }
+  .success p { color: var(--muted); font-size: 15px; line-height: 1.5; margin: 0 0 20px; }
+  .dl-row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .dl-btn {
+    display: block; text-decoration: none; text-align: center;
+    background: var(--card-2); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    color: var(--text); font-weight: 600; font-size: 14.5px; padding: 14px 12px;
+    transition: border-color 0.16s ease, background 0.16s ease;
+  }
+  .dl-btn:hover { border-color: var(--accent-a); background: #11131c; }
+
+  @media (max-width: 560px) {
+    .lead { padding: 22px 16px 14px; }
+    .form-panel { padding: 22px 18px; }
+    .dl-row { grid-template-columns: 1fr; }
+  }
+</style>
+<!-- Meta Pixel Code -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', 'YOUR_PIXEL_ID');
+</script>
+<!-- End Meta Pixel Code -->
+</head>
+<body>
+  <div class="lead">
+    <p class="eyebrow">Free from the roundtable</p>
+    <h1 class="title">Take the room home with you</h1>
+    <p class="subtitle">
+      We turned what owners shared into two things you can use this week. Pop in
+      your email and both download straight away.
+    </p>
+
+    <div class="bullets">
+      <div class="bullet">
+        <span class="bullet-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></span>
+        <p><strong>The Lab Admin Audit</strong> &mdash; a 10 minute self-check that turns your hidden admin cost into a number you can actually see.</p>
+      </div>
+      <div class="bullet">
+        <span class="bullet-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></span>
+        <p><strong>The Calm Lab Playbook</strong> &mdash; the five principles the calmest labs in the room had in common.</p>
+      </div>
+    </div>
+
+    <!-- ============ FORM ============ -->
+    <form class="form-panel" id="leadForm" novalidate>
+      <div class="group" id="g-name">
+        <label class="field-label" for="name">Your name</label>
+        <input type="text" id="name" name="name" placeholder="First name" autocomplete="given-name" />
+        <span class="err">Please enter your name.</span>
+      </div>
+
+      <div class="group" id="g-lab">
+        <label class="field-label" for="lab">Lab name</label>
+        <input type="text" id="lab" name="lab" placeholder="Your lab" autocomplete="organization" />
+        <span class="err">Please enter your lab name.</span>
+      </div>
+
+      <div class="group" id="g-email">
+        <label class="field-label" for="email">Work email</label>
+        <input type="email" id="email" name="email" placeholder="you@yourlab.co.uk" autocomplete="email" />
+        <span class="err">Please enter a valid email address.</span>
+      </div>
+
+      <div class="consent" id="g-consent">
+        <input type="checkbox" id="consent" name="consent" />
+        <label for="consent">I'd like the guides and consent to Smile Genius storing my details under GDPR. No spam, unsubscribe anytime.</label>
+      </div>
+
+      <button type="submit" class="submit" id="submitBtn">Get the guides</button>
+      <p class="foot">Two PDFs &middot; no cost &middot; about a 10 minute read</p>
+    </form>
+
+    <!-- ============ SUCCESS ============ -->
+    <div class="success" id="success">
+      <h2 id="successTitle">Your guides are downloading 🎉</h2>
+      <p>If the download didn't start, use the button below.</p>
+      <div class="dl-row">
+        <a class="dl-btn" id="dl1" href="#" target="_blank" rel="noopener">Download manually</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- hidden target for the lead POST (most reliable way to reach Apps Script) -->
+  <iframe name="sg_sink" id="sg_sink" style="display:none" title="lead-sink"></iframe>
+
+<script>
+  /* =======================================================================
+     CONFIG — fill these three values in.
+     1) Deploy the Apps Script (apps-script-leads.gs) as a Web App and paste
+        its URL into SHEET_ENDPOINT.
+     2) Share each PDF in Drive as "Anyone with the link", then paste each
+        file's ID (the long string in its share URL) below.
+     ======================================================================= */
+  var SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbymJXvwqnXca4wFhaU8VxjgjWuTOtMwubj7qFfIpluZkk592oQ_RpxK0xZXtnkTeDIrUQ/exec";
+  // Single combined PDF (both guides inside). Paste the MERGED file's Drive ID here.
+  var GUIDE = { name: "Smile Genius Guides", id: "1Oe3DD186ei7Z6sj_m_-NDToUeGRcVg9P" };
+  var SOURCE = "Take the room home (Framer)";
+
+  function driveDownloadUrl(id) {
+    return "https://drive.google.com/uc?export=download&id=" + encodeURIComponent(id);
+  }
+
+  var form = document.getElementById("leadForm");
+  var btn = document.getElementById("submitBtn");
+  var nameEl = document.getElementById("name");
+  var labEl = document.getElementById("lab");
+  var emailEl = document.getElementById("email");
+  var consentEl = document.getElementById("consent");
+  var gName = document.getElementById("g-name");
+  var gLab = document.getElementById("g-lab");
+  var gEmail = document.getElementById("g-email");
+  var gConsent = document.getElementById("g-consent");
+  var successEl = document.getElementById("success");
+  var successTitle = document.getElementById("successTitle");
+
+  var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  function validate() {
+    var nameOk = nameEl.value.trim().length > 0;
+    var labOk = labEl.value.trim().length > 0;
+    var emailOk = EMAIL_RE.test(emailEl.value.trim());
+    var consentOk = consentEl.checked;
+    gName.classList.toggle("invalid", !nameOk);
+    gLab.classList.toggle("invalid", !labOk);
+    gEmail.classList.toggle("invalid", !emailOk);
+    gConsent.classList.toggle("invalid", !consentOk);
+    return nameOk && labOk && emailOk && consentOk;
+  }
+
+  // Clear an error as soon as the field is corrected
+  [nameEl, labEl, emailEl].forEach(function (el) {
+    el.addEventListener("input", function () { el.closest(".group").classList.remove("invalid"); });
+  });
+  consentEl.addEventListener("change", function () { gConsent.classList.remove("invalid"); });
+
+  function startDownload(url, delay) {
+    setTimeout(function () {
+      var a = document.createElement("a");
+      a.href = url;
+      a.rel = "noopener";
+      // Drive sends Content-Disposition: attachment, so this downloads rather than navigates.
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }, delay || 0);
+  }
+
+  function saveLead(name, lab, email) {
+    // A real form POST into a hidden iframe — no fetch, no CORS, can't be silently blocked.
+    var f = document.createElement("form");
+    f.action = SHEET_ENDPOINT;
+    f.method = "POST";
+    f.target = "sg_sink";
+    function add(n, v) {
+      var i = document.createElement("input");
+      i.type = "hidden"; i.name = n; i.value = v;
+      f.appendChild(i);
+    }
+    add("name", name);
+    add("lab", lab);
+    add("email", email);
+    add("consent", "true");
+    add("source", SOURCE);
+    document.body.appendChild(f);
+    f.submit();
+    setTimeout(function () { f.remove(); }, 3000);
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (!validate()) return;
+
+    var name = nameEl.value.trim();
+    var lab = labEl.value.trim();
+    var email = emailEl.value.trim();
+
+    btn.disabled = true;
+    btn.textContent = "Preparing your guides…";
+
+    // One file = one download (both guides live inside the combined PDF).
+    var u = driveDownloadUrl(GUIDE.id);
+    document.getElementById("dl1").href = u;
+
+    saveLead(name, lab, email);
+    startDownload(u, 0);
+
+    // Fire the Meta Pixel Lead conversion event
+    try { if (window.fbq) fbq("track", "Lead"); } catch (e) {}
+
+    // Swap to success view (thank-you)
+    successTitle.textContent = "Thank you, " + name + " — your guides are downloading 🎉";
+    form.classList.add("hide");
+    successEl.classList.add("show");
+  });
+</script>
+</body>
+</html>

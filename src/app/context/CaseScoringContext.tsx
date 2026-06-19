@@ -5,7 +5,7 @@ import {
   DEFAULT_THRESHOLDS, ScoreThreshold, ScoreTierId,
 } from '../data/caseScoring';
 import {
-  DEFAULT_PRESCRIPTION_CONFIG, PrescriptionConfig, isServiceScoringStale, staleScoringFields,
+  DEFAULT_PRESCRIPTION_CONFIG, PrescriptionConfig, isServiceScoringStale, staleScoringFields, scoreableFieldsFor,
 } from '../data/prescriptionBuilder';
 import type { Case } from '../pages/CasesPage';
 
@@ -39,6 +39,11 @@ interface CaseScoringContextType {
   setServiceFields: (service: string, fields: ScoreField[]) => void;
   /** Remove all scoring for a service → its cases become "No score applicable". */
   clearService: (service: string) => void;
+  /** Master on/off for a service's scoring. On seeds sensible weights (defaults
+      where known, else even weights across enabled scoreable fields); off clears. */
+  setServiceScoringEnabled: (service: string, on: boolean) => void;
+  /** Is scoring currently on for a service (has at least one weighted field)? */
+  isServiceScored: (service: string) => boolean;
   /** Edit a tier's upper cut-off %. */
   setThresholdUpTo: (id: ScoreTierId, upTo: number) => void;
   /** Enable/disable a tier (disabled tiers merge into the next enabled one). */
@@ -98,6 +103,31 @@ export function CaseScoringProvider({ children }: { children: ReactNode }) {
     setConfig(prev => ({ ...prev, [service]: [] }));
   }, []);
 
+  const setServiceScoringEnabled = useCallback((service: string, on: boolean) => {
+    if (!on) { setConfig(prev => ({ ...prev, [service]: [] })); return; }
+    setConfig(prev => {
+      const existing = prev[service] ?? [];
+      if (existing.some(f => f.weight > 0)) return prev; // already on — keep current weights
+      const okIds = new Set(scoreableFieldsFor(service, prescription).map(f => f.id));
+      const defaults = (DEFAULT_SCORING_CONFIG[service] ?? []).filter(d => okIds.has(d.id));
+      let seed: ScoreField[];
+      if (defaults.length) {
+        // Seeded defaults already sum to 100.
+        seed = defaults.map(d => ({ ...d }));
+      } else {
+        // No defaults — distribute 100 evenly across enabled scoreable fields.
+        const fields = scoreableFieldsFor(service, prescription);
+        if (fields.length === 0) return prev;
+        const base = Math.floor(100 / fields.length);
+        const rem = 100 - base * fields.length;
+        seed = fields.map((f, i) => ({ id: f.id, label: f.label, weight: base + (i < rem ? 1 : 0) }));
+      }
+      return { ...prev, [service]: seed };
+    });
+  }, [prescription]);
+
+  const isServiceScored = useCallback((service: string) => (config[service] ?? []).some(f => f.weight > 0), [config]);
+
   const setThresholdUpTo = useCallback((id: ScoreTierId, upTo: number) => {
     const safe = Number.isFinite(upTo) ? Math.min(100, Math.max(0, Math.round(upTo))) : 0;
     setThresholds(prev => prev.map(t => t.id === id ? { ...t, upTo: safe } : t));
@@ -148,14 +178,14 @@ export function CaseScoringProvider({ children }: { children: ReactNode }) {
       config, thresholds, prescription,
       setPrescriptionEnabled, setPrescriptionRequired, addPrescriptionOption, removePrescriptionOption,
       staleFieldsForService, isServiceStale,
-      setFieldWeight, toggleField, setServiceFields, clearService,
+      setFieldWeight, toggleField, setServiceFields, clearService, setServiceScoringEnabled, isServiceScored,
       setThresholdUpTo, toggleThreshold, setThresholdLabel, resetDefaults, scoreCase,
     }),
     [
       config, thresholds, prescription,
       setPrescriptionEnabled, setPrescriptionRequired, addPrescriptionOption, removePrescriptionOption,
       staleFieldsForService, isServiceStale,
-      setFieldWeight, toggleField, setServiceFields, clearService,
+      setFieldWeight, toggleField, setServiceFields, clearService, setServiceScoringEnabled, isServiceScored,
       setThresholdUpTo, toggleThreshold, setThresholdLabel, resetDefaults, scoreCase,
     ],
   );

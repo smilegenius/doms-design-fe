@@ -84,9 +84,22 @@ export const DEFAULT_PRESCRIPTION_CONFIG: PrescriptionConfig = {
   'Other':                 other(),
 };
 
-// Enabled + scoreable field ids for a service — the candidates Case Scoring can weight.
+// The hardcoded intra-oral scan slots that "3D scan files" expands into for
+// scoring — independent of the Prescription Builder.
+export const SCAN_SLOT_FIELDS: PrescriptionField[] = [
+  { id: 'scan_upper', label: 'Upper',       type: 'files', enabled: true, required: false, scoreable: true },
+  { id: 'scan_lower', label: 'Lower',       type: 'files', enabled: true, required: false, scoreable: true },
+  { id: 'scan_bite',  label: 'Bite Scan',   type: 'files', enabled: true, required: false, scoreable: true },
+  { id: 'scan_bite2', label: 'Bite Scan 2', type: 'files', enabled: true, required: false, scoreable: true },
+];
+
+// Enabled + scoreable field ids for a service — the candidates Case Scoring can
+// weight. The "scans" (3D scan files) field expands into per-slot sub-fields so
+// the lab can weight each scan type individually.
 export function scoreableFieldsFor(service: string, prescription: PrescriptionConfig): PrescriptionField[] {
-  return (prescription[service] ?? []).filter(f => f.enabled && f.scoreable);
+  return (prescription[service] ?? [])
+    .filter(f => f.enabled && f.scoreable)
+    .flatMap(f => (f.id === 'scans' ? SCAN_SLOT_FIELDS : [f]));
 }
 
 // A service's scoring is "stale" when it weights a field that's no longer an

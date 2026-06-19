@@ -5,13 +5,16 @@ import {
   StickyNote, X, Bold, Italic, Underline, Strikethrough, Code as CodeIcon,
   Superscript, Subscript, Undo2, Redo2, Paperclip, Eye, Plus, Minus,
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
-  Check, Clock, CheckCircle2, Archive, ArchiveRestore,
+  Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
+import { useCaseScoring } from '../context/CaseScoringContext';
+import { useToast } from '../context/ToastContext';
+import { MISSING_INFO_EMAIL } from '../data/caseScoring';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type CaseStatus = 'new' | 'submitted' | 'in-production' | 'quality-check' | 'shipped' | 'delivered' | 'refinement' | 'on-hold' | 'completed';
+type CaseStatus = 'draft' | 'new' | 'sent-for-review' | 'submitted' | 'in-production' | 'quality-check' | 'shipped' | 'delivered' | 'refinement' | 'on-hold' | 'completed';
 type Tab = 'prescription' | 'timeline' | 'invoice' | 'shipping';
 type ViewerFormat = '3D' | 'PLY' | 'STL' | 'OBJ';
 
@@ -78,10 +81,28 @@ interface CaseForDetail {
   updatedAt: string;
   requestedDelivery: string | null;
   hasAlert: boolean;
+  /** How the case arrived — drives whether the Emails thread is shown (only
+      for email / iTero-sourced cases). */
+  source?: 'scanner' | 'email' | 'manual';
+  /** Scanner brand (when scanner-captured or an iTero email export). */
+  scanner?: string;
+  /** Demo seed — the dentist already replied to the missing-info email, so the
+      case opens showing the "score updated" confirmation. */
+  emailReplyReceived?: boolean;
   /** Service-level detail — one entry per service on this case */
   serviceItems?: ServiceItem[];
   /** Whether this case is archived (hidden from the main Cases list). */
   archived?: boolean;
+}
+
+// "Received via" label — derived from the real case source so the detail view
+// always matches the case's origin (no more hardcoded "Manual upload").
+function receivedViaLabel(c: CaseForDetail): string {
+  const hasScans = (c.serviceItems ?? []).some(si => (si.scanFileCount ?? 0) > 0);
+  if (c.source === 'manual') return 'Manual upload';
+  if (c.source === 'scanner') return `Scanner · ${c.scanner ?? '—'}`;
+  if (c.source === 'email') return hasScans ? `Email · ${c.scanner ?? 'scan'}` : 'Email';
+  return 'Manual upload';
 }
 
 interface CaseDetailPageProps {
@@ -94,7 +115,9 @@ interface CaseDetailPageProps {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const STATUS_MAP: Record<CaseStatus, { label: string; bg: string; color: string; border: string; banner: string; dot: string }> = {
+  draft:          { label: 'Draft',         bg: '#F3F3F5', color: '#5A5568', border: '#E0E0E6', banner: '#F8F9FC', dot: '#A0A0B0' },
   new:            { label: 'New',           bg: '#EEF4FF', color: '#1565C0', border: '#BFDBFE', banner: '#EFF6FF', dot: '#4D8EF7' },
+  'sent-for-review':{ label: 'Sent for Review', bg: '#EEF2FF', color: '#4338CA', border: '#C7D2FE', banner: '#EEF2FF', dot: '#6366F1' },
   submitted:      { label: 'Submitted',     bg: '#FFF7ED', color: '#C2410C', border: '#FED7AA', banner: '#FFF7ED', dot: '#F97316' },
   'in-production':{ label: 'In Production', bg: '#F5F3FF', color: '#6D28D9', border: '#DDD6FE', banner: '#F5F3FF', dot: '#8B5CF6' },
   'quality-check':{ label: 'Quality Check', bg: '#FFF7ED', color: '#B45309', border: '#FDE68A', banner: '#FFFBEB', dot: '#F59E0B' },
@@ -131,10 +154,12 @@ interface CaseTimelineStep {
 }
 
 const PIPELINE_RANK: Record<CaseStatus, number> = {
+  draft: 0,
   new: 0, submitted: 1, 'in-production': 2, 'quality-check': 3,
   shipped: 4, delivered: 5,
   // Soft states stay where the case currently sits in the pipeline.
-  refinement: 3, 'on-hold': 2, completed: 5,
+  // "Sent for Review" is an early hold — the case is paused waiting on the dentist.
+  'sent-for-review': 1, refinement: 3, 'on-hold': 2, completed: 5,
 };
 
 function buildCasePipeline(c: CaseForDetail): CaseTimelineStep[] {
@@ -813,7 +838,7 @@ export function FullViewModal({ caseData, onClose, onOpenNotes }: {
                     <KV label="Case Created" value={caseData.createdAt} />
                     <KV label="Delivery Date" value={caseData.requestedDelivery ?? '—'} />
                     <KV label="Submitted by" value={caseData.practice} />
-                    <KV label="Received Via" value="Manual upload" />
+                    <KV label="Received Via" value={receivedViaLabel(caseData)} />
                   </Section>
 
                   <div>
@@ -1370,7 +1395,7 @@ function CaseSummaryOverview({
 //   Details  — service phases (or single "Mark as Received") + status + delivery
 //   Invoice  — matched invoice lines for this case
 //   Shipping — shipment tracking
-type ServiceSubTab = 'details' | 'invoice' | 'shipping';
+type ServiceSubTab = 'details' | 'invoice' | 'shipping' | 'communications';
 
 const PHASE_STATUS_MAP: Record<string, { label: string; bg: string; color: string; border: string; dot: string }> = {
   pending:      { label: 'Pending',     bg: '#F3F3F5', color: '#5A5568', border: '#E0E0E6', dot: '#A0A0B0' },
@@ -1550,6 +1575,124 @@ function StageOrderPickerModal({ service, mode, remaining, nextPhaseName, onCanc
   );
 }
 
+// ─── In-case email thread ─────────────────────────────────────────────────────
+// Shows the lab's auto "missing info" email to the dentist and any reply — the
+// same setup as the dental-group portal. Only appears when the service is scored
+// and something is missing (i.e. the auto-email would have fired).
+function nameInitials(name: string) {
+  return name.split(' ').filter(Boolean).map(p => p[0]).slice(0, 2).join('').toUpperCase();
+}
+function fillTemplate(text: string, vars: Record<string, string>) {
+  return text.replace(/{{(\w+)}}/g, (_, k) => vars[k] ?? `{{${k}}}`);
+}
+
+function EmailBubble({ dir, name, initials, time, body }: {
+  dir: 'in' | 'out'; name: string; initials: string; time: string; body: string;
+}) {
+  const out = dir === 'out';
+  return (
+    <div className="flex gap-2.5">
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 ${out ? 'bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF]' : 'bg-[#7C8DB5]'}`}>{initials}</div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xs font-semibold text-[#030213]">{name}</span>
+          <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-px rounded ${out ? 'bg-[#EEF4FF] text-[#1565C0]' : 'bg-[#F3F3F5] text-[#717182]'}`}>{out ? 'Lab' : 'Dentist'}</span>
+          <span className="text-[10px] text-[#A0A0B0]">{time}</span>
+        </div>
+        <div className={`rounded-xl border px-3 py-2.5 ${out ? 'bg-white border-[#E0E0E6]' : 'bg-[#EEF4FF] border-[#DBEAFE]'}`}>
+          <pre className="text-xs text-[#030213] whitespace-pre-wrap font-sans leading-relaxed">{body}</pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CommunicationsTab({ caseData, service, replied = false, onMarkReceived }: { caseData: CaseForDetail; service?: ServiceItem; replied?: boolean; onMarkReceived?: () => void }) {
+  const { scoreCase } = useCaseScoring();
+  // With a service → score that one (single-service case). Without → score the
+  // whole case (used at the Case Summary level for multi-service cases).
+  const items = service ? [service] : (caseData.serviceItems ?? []);
+  const score = scoreCase({ ...caseData, serviceItems: items } as any);
+  const missing = score.services.filter(s => s.configured).flatMap(s => s.fields.filter(f => !f.filled).map(f => f.label));
+
+  if (!score.applicable || missing.length === 0) {
+    return (
+      <div className="bg-white border border-[#E0E0E6] rounded-xl p-8 flex flex-col items-center text-center">
+        <span className="w-10 h-10 rounded-full bg-[#F0FDF4] inline-flex items-center justify-center mb-3"><CheckCircle2 className="w-5 h-5 text-[#15803D]" /></span>
+        <p className="text-sm font-semibold text-[#030213]">No emails for this case</p>
+        <p className="text-xs text-[#717182] mt-1">{score.applicable ? 'The prescription is complete — nothing to chase.' : 'Scoring isn’t set up for this service type.'}</p>
+      </div>
+    );
+  }
+
+  const vars = {
+    case_number: caseData.id,
+    dentist_name: caseData.dentist,
+    missing_requirements: missing.map(m => '• ' + m).join('\n'),
+    lab_name: 'Smile Genius Lab',
+  };
+  const subject = fillTemplate(MISSING_INFO_EMAIL.subject, vars);
+  const body = fillTemplate(MISSING_INFO_EMAIL.body, vars);
+
+  return (
+    <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-[#F0EFF6] flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[#030213] truncate">{subject}</p>
+          <p className="text-[11px] text-[#717182]">Missing-info thread with {caseData.dentist}</p>
+        </div>
+        {replied ? (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#F0FDF4] text-[#15803D] border border-[#BBF7D0] flex-shrink-0">
+            <Check className="w-3 h-3" /> Dentist replied
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#FFF7ED] text-[#B45309] border border-[#FDE68A] flex-shrink-0">
+            <Clock className="w-3 h-3" /> Awaiting reply
+          </span>
+        )}
+      </div>
+
+      {replied && (
+        /* The dentist's reply supplied the previously-missing items → surface it on top */
+        <div className="mx-4 mt-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-3 flex items-start gap-2.5">
+          <CheckCircle2 className="w-4 h-4 text-[#15803D] flex-shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-[#15803D]">Now received from {caseData.dentist}</p>
+            <p className="text-[11px] text-[#166534] mt-0.5 leading-relaxed">
+              {missing.join(', ')} — case score updated <span className="font-bold">{score.percent}% → 100%</span>.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="p-4 space-y-4 bg-[#FAFBFC]">
+        <EmailBubble dir="out" name="Smile Genius Lab" initials="SG" time="just now" body={body} />
+        {replied ? (
+          <EmailBubble dir="in" name={caseData.dentist} initials={nameInitials(caseData.dentist)} time="moments ago" body={"Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production."} />
+        ) : (
+          <div className="rounded-xl border border-dashed border-[#C8D8FC] bg-white px-4 py-5 flex flex-col items-center text-center gap-2">
+            <span className="w-9 h-9 rounded-full bg-[#FFF7ED] inline-flex items-center justify-center"><Clock className="w-4 h-4 text-[#B45309]" /></span>
+            <p className="text-xs font-medium text-[#030213]">Waiting for {caseData.dentist} to reply</p>
+            <p className="text-[11px] text-[#717182] max-w-sm">The missing-info email has been sent. When the dentist replies with the missing items, the case score updates automatically.</p>
+            {onMarkReceived && (
+              <button onClick={onMarkReceived} className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity">
+                <Check className="w-3.5 h-3.5" /> Simulate dentist reply
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-[#F0EFF6] p-3">
+        <div className="flex items-center gap-2 border border-[#E0E0E6] rounded-xl px-3 py-2">
+          <input placeholder="Reply to the dentist…" className="flex-1 text-sm text-[#030213] bg-transparent outline-none placeholder-[#A0A0B0]" />
+          <button className="p-1.5 text-[#4D8EF7] hover:text-[#3578E5] rounded transition-colors"><Send className="w-4 h-4" /></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
   service: ServiceItem;
   caseData: CaseForDetail;
@@ -1591,10 +1734,12 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
   const s = STATUS_MAP[effectiveStatus];
   const iStyle = SERVICE_ICON_COLOR[service.name] ?? { bg: '#FFF7ED', color: '#F59E0B' };
 
+  // The email thread now lives in a case-level side drawer (opened from the
+  // header), not a per-service tab.
   const SERVICE_SUB_TABS: { id: ServiceSubTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'details',  label: 'Details',  icon: <FileText className="w-3.5 h-3.5" /> },
-    { id: 'invoice',  label: 'Invoice',  icon: <FileText className="w-3.5 h-3.5" /> },
-    { id: 'shipping', label: 'Shipping', icon: <MapPin   className="w-3.5 h-3.5" /> },
+    { id: 'details',        label: 'Details',        icon: <FileText className="w-3.5 h-3.5" /> },
+    { id: 'invoice',        label: 'Invoice',        icon: <FileText className="w-3.5 h-3.5" /> },
+    { id: 'shipping',       label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
   ];
 
   // Per-service prescription values — fall back to em-dash when missing.
@@ -2283,8 +2428,48 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
   );
   // Details card collapses by default to reclaim vertical space.
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // Email thread lives in a case-level side drawer, opened from the header.
+  const [threadOpen, setThreadOpen] = useState(false);
 
-  const s = STATUS_MAP[caseData.status];
+  const { toast } = useToast();
+  const { scoreCase } = useCaseScoring();
+
+  // Completeness score for this case — drives the "what's missing" messaging
+  // and the missing-info email/reply loop surfaced in the header.
+  const caseScore = scoreCase(caseData as any);
+  const missingRequirements = caseScore.applicable
+    ? caseScore.services.filter(sv => sv.configured).flatMap(sv => sv.fields.filter(f => !f.filled).map(f => f.label))
+    : [];
+  const isIncomplete = caseScore.applicable && missingRequirements.length > 0;
+
+  // Missing-info loop: the lab emails the dentist the gaps (→ "Sent for Review"),
+  // then the dentist replies with the missing items (→ score updated). Both
+  // updates surface as header notices alongside the delivery-date warning.
+  const [emailSent, setEmailSent]         = useState(caseData.status === 'sent-for-review' || !!caseData.emailReplyReceived);
+  const [replyReceived, setReplyReceived] = useState(!!caseData.emailReplyReceived);
+  const [localStatus, setLocalStatus]     = useState<CaseStatus>(caseData.status);
+
+  function sendMissingInfoEmail() {
+    setEmailSent(true);
+    setLocalStatus('sent-for-review');
+    setThreadOpen(true);
+    toast.success(`Missing-info email sent to ${caseData.dentist} — case set to “Sent for Review”.`);
+  }
+  function markReplyReceived() {
+    setReplyReceived(true);
+    setLocalStatus('submitted');
+    toast.success(`${caseData.dentist} replied — missing items received, score updated to 100%.`);
+  }
+
+  // Email thread is available for email- and scanner-sourced cases that are
+  // chasing missing info (or already inside the missing-info loop).
+  const hasEmailThread = caseData.source === 'email'
+    || (caseData.source === 'scanner' && (isIncomplete || emailSent));
+
+  // "Received via" — derived from the real case source so it stays in sync.
+  const receivedVia = receivedViaLabel(caseData);
+
+  const s = STATUS_MAP[localStatus];
   const service = caseData.services[0] ?? 'Service';
   const iconStyle = SERVICE_ICON_COLOR[service] ?? { bg: '#FFF7ED', color: '#F59E0B' };
   const missingDeliveryDate = !deliveryDate.trim();
@@ -2301,6 +2486,38 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
           Back to Cases
         </button>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Missing-info loop — the latest email-thread changes show here,
+              right alongside the delivery-date warning. */}
+          {replyReceived ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0] text-[11px] font-medium text-[#15803D]">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              {caseData.dentist} replied · score updated {caseScore.percent}% → 100%
+            </span>
+          ) : emailSent ? (
+            <button
+              onClick={() => setThreadOpen(true)}
+              title="Open the email thread"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EEF2FF] border border-[#C7D2FE] text-[11px] font-medium text-[#4338CA] hover:bg-[#E0E7FF] transition-colors"
+            >
+              <Mail className="w-3.5 h-3.5" />
+              Missing-info email sent · awaiting {caseData.dentist}
+            </button>
+          ) : isIncomplete ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FFF8E1] border border-[#FDE68A] text-[11px] font-medium text-[#B45309]">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              Incomplete — missing {missingRequirements.join(', ')}
+            </span>
+          ) : null}
+          {isIncomplete && !emailSent && !replyReceived && (
+            <button
+              onClick={sendMissingInfoEmail}
+              title="Auto-email the dentist the list of missing items"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
+            >
+              <Send className="w-3.5 h-3.5" />
+              Email dentist
+            </button>
+          )}
           {missingDeliveryDate && (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FFEBEE] border border-[#FECDD3] text-[11px] font-medium text-[#BE123C]">
               <AlertTriangle className="w-3.5 h-3.5" />
@@ -2336,6 +2553,17 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
         <div className="px-5 py-4 border-b border-[#F0EFF6] flex items-center gap-3 flex-wrap">
           <h1 className="text-base font-bold text-[#030213] tracking-tight">{caseData.id}</h1>
 
+          {/* Live case status — flips to "Sent for Review" once the missing-info
+              email goes out, then advances when the dentist replies. */}
+          <span
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold"
+            style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}
+            title="Case status"
+          >
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.dot }} />
+            {s.label}
+          </span>
+
           {caseData.archived && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#F3F3F5] text-[#616161] border border-[#BDBDBD]">
               <Archive className="w-3 h-3" />
@@ -2357,6 +2585,25 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
                 <span className="text-[#D4CEE1]">·</span>
                 <span className="truncate max-w-[120px]">{caseData.practice}</span>
               </span>
+            )}
+            {/* Received via — always visible (incl. collapsed), synced to source */}
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[#F3F3F5] text-[#5A5568] border border-[#E0E0E6]" title="How this case arrived">
+              {caseData.source === 'email'
+                ? <Mail className="w-3 h-3 text-[#717182]" />
+                : <Paperclip className="w-3 h-3 text-[#717182]" />}
+              {receivedVia}
+            </span>
+            {/* Email thread — opens the case-level side drawer (email/iTero cases) */}
+            {hasEmailThread && (
+              <button
+                onClick={() => setThreadOpen(true)}
+                title="Open email thread with the dentist"
+                className="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#1565C0] border border-[#C8D8FC] bg-[#EEF4FF] hover:bg-[#DBEAFE] transition-colors"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                Email thread
+                {!replyReceived && <span className="w-1.5 h-1.5 rounded-full bg-[#D4183D]" />}
+              </button>
             )}
             <button
               onClick={() => setDetailsOpen(v => !v)}
@@ -2428,7 +2675,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
               <p className="text-[10px] text-[#A0A0B0] mt-3">Created By</p>
               <p className="text-[11px] text-[#717182]">Smile Genius Lab <span className="text-[#A0A0B0]">(Clinic)</span></p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Received via</p>
-              <p className="text-[11px] text-[#717182]">Manual upload</p>
+              <p className="text-[11px] text-[#717182]">{receivedVia}</p>
             </div>
           </div>
         )}
@@ -2482,7 +2729,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
       {/* ── Body: Case Summary cards OR per-service detail ── */}
       {topTab === 'summary' ? (
         /* Case Summary — one card per service, no sidebar */
-        <div className="mt-3 mx-6 mb-6 flex-1 overflow-y-auto">
+        <div className="mt-3 mx-6 mb-6 flex-1 overflow-y-auto space-y-4">
           <CaseSummaryOverview
             serviceItems={serviceItems}
             caseData={caseData}
@@ -2503,6 +2750,28 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle }: Ca
               />
             : null;
         })()
+      )}
+
+      {/* Email-thread side drawer — same right-slide pattern as the dispute drawer */}
+      {threadOpen && (
+        <div className="fixed inset-0 z-[60] flex">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setThreadOpen(false)} />
+          <div className="relative md:ml-auto flex flex-col bg-white shadow-2xl w-full md:w-[55%] md:max-w-[680px] h-full animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6] flex-shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-9 h-9 rounded-full bg-[#EEF4FF] flex items-center justify-center flex-shrink-0"><Mail className="w-4 h-4 text-[#4D8EF7]" /></div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold text-[#030213] truncate">Email thread</h3>
+                  <p className="text-[11px] text-[#717182] truncate">{caseData.id} · {caseData.dentist}</p>
+                </div>
+              </div>
+              <button onClick={() => setThreadOpen(false)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto bg-[#FAFBFC] p-4">
+              <CommunicationsTab caseData={caseData} replied={replyReceived} onMarkReceived={markReplyReceived} />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Lab Notes modal */}

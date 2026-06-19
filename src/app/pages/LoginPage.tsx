@@ -80,6 +80,7 @@ export default function LoginPage() {
       if (portalHint === 'admin') navigate('/admin');
       else if (portalHint === 'supplier') navigate('/supplier');
       else if (portalHint === 'clinic') navigate('/clinic');
+      else if (portalHint === 'lab') navigate('/lab');
       else navigate('/');
     }, 1200);
   }

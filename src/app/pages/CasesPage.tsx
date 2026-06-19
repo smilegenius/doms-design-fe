@@ -40,6 +40,7 @@ import type { CaseScore } from '../data/caseScoring';
 export type CaseStatus =
   | 'draft'
   | 'new'
+  | 'sent-for-review'
   | 'submitted'
   | 'in-production'
   | 'quality-check'
@@ -87,6 +88,10 @@ export interface Case {
   // email) the prescription preview pane shown during case creation.
   source: CaseSource;
   emailPrescription?: EmailPrescription;
+  // Demo seed: the dentist has already replied to the missing-info email and the
+  // missing items were fetched from that reply (the case opens showing the
+  // "score updated" confirmation). Orthogonal to status.
+  emailReplyReceived?: boolean;
   // Archived cases are hidden from the main list and surfaced only under the
   // "View Archived" toggle. Orthogonal to lifecycle `status`, so any case
   // (draft, in-production, completed…) can be archived and later restored.
@@ -174,10 +179,14 @@ const SCORE_BAND_STYLES: Record<'red' | 'amber' | 'green', string> = {
   amber: 'bg-[#FFF8E1] text-[#B45309] border-[#FDE68A]',
   red:   'bg-[#FEF2F2] text-[#B91C1C] border-[#FECACA]',
 };
-// A compact round score badge. The colour encodes the band, the number is the
-// completeness %, and a hover tooltip spells out the tier + per-field breakdown.
-// "No score" → a dashed grey circle; out-of-sync → an amber circle (clickable
-// for the lab to jump to the scoring config).
+const SCORE_TEXT: Record<'red' | 'amber' | 'green', string> = {
+  green: 'text-[#047857]', amber: 'text-[#B45309]', red: 'text-[#B91C1C]',
+};
+// A round score badge (colour = band, number = completeness %). With
+// `withDetails` it also prints the tier label + earned/total beside the circle
+// so the score reads at a glance — no hover needed. The hover tooltip still
+// spells out the per-field breakdown. "No score" → dashed grey circle;
+// out-of-sync → amber circle (clickable for the lab to fix scoring).
 function scoreDetail(score: CaseScore): string {
   const head = `${score.tierLabel} — ${score.percent}% (${score.earned}/${score.total} weight)`;
   const lines = score.services
@@ -186,42 +195,45 @@ function scoreDetail(score: CaseScore): string {
   return [head, ...lines].join('\n');
 }
 
-function ScoreBadge({ score, size = 'sm', onFix }: { score: CaseScore; size?: 'sm' | 'xs'; onFix?: () => void }) {
+function ScoreBadge({ score, size = 'sm', onFix, withDetails }: { score: CaseScore; size?: 'sm' | 'xs'; onFix?: () => void; withDetails?: boolean }) {
   const dim = size === 'xs' ? 'w-7 h-7 text-[9px]' : 'w-8 h-8 text-[10px]';
   const base = `${dim} rounded-full inline-flex items-center justify-center font-bold border flex-shrink-0`;
 
-  // Out of sync with the Prescription Builder — only the lab (onFix) can fix it.
+  let badge: React.ReactNode;
+  let label = '';
+  let sub = '';
+  let labelCls = '';
+
   if (score.unavailable) {
+    // Out of sync with the Prescription Builder — only the lab (onFix) can fix it.
     const cls = `${base} bg-[#FFF7ED] text-[#C2410C] border-[#FED7AA]`;
     const icon = <AlertTriangle className={size === 'xs' ? 'w-3 h-3' : 'w-3.5 h-3.5'} />;
-    if (onFix) {
-      return (
-        <button
-          onClick={(e) => { e.stopPropagation(); onFix(); }}
-          title="Score unavailable — scoring is out of sync with the Prescription Builder. Click to set it up."
-          className={`${cls} hover:bg-[#FFEDD5] transition-colors`}
-        >
-          {icon}
-        </button>
-      );
-    }
-    return <span title="Score unavailable — the lab is updating scoring for this service." className={cls}>{icon}</span>;
-  }
-
-  if (!score.applicable) {
-    return (
-      <span
-        title="No scoring set up for this service type"
-        className={`${dim} rounded-full inline-flex items-center justify-center font-semibold border border-dashed bg-[#F8F9FC] text-[#A0A0B0] border-[#D4CEE1] flex-shrink-0`}
-      >
-        –
-      </span>
+    badge = onFix
+      ? <button onClick={(e) => { e.stopPropagation(); onFix(); }} title="Score unavailable — scoring is out of sync with the Prescription Builder. Click to set it up." className={`${cls} hover:bg-[#FFEDD5] transition-colors`}>{icon}</button>
+      : <span title="Score unavailable — the lab is updating scoring for this service." className={cls}>{icon}</span>;
+    label = 'Score unavailable'; sub = onFix ? 'Set up scoring' : 'out of sync'; labelCls = 'text-[#C2410C]';
+  } else if (!score.applicable) {
+    badge = (
+      <span title="No scoring set up for this service type" className={`${dim} rounded-full inline-flex items-center justify-center font-semibold border border-dashed bg-[#F8F9FC] text-[#A0A0B0] border-[#D4CEE1] flex-shrink-0`}>–</span>
     );
+    label = 'No score'; sub = 'not set up'; labelCls = 'text-[#A0A0B0]';
+  } else {
+    badge = <span title={scoreDetail(score)} className={`${base} ${SCORE_BAND_STYLES[score.band]}`}>{score.percent}</span>;
+    label = score.tierLabel; labelCls = SCORE_TEXT[score.band];
+    // For anything short of complete, surface WHAT is missing — not just the
+    // numbers — so the gap is readable without hovering.
+    const missing = score.services.filter(s => s.configured).flatMap(s => s.fields.filter(f => !f.filled).map(f => f.label));
+    sub = missing.length ? `Missing: ${missing.join(', ')}` : `${score.earned}/${score.total} weight`;
   }
 
+  if (!withDetails) return <>{badge}</>;
   return (
-    <span title={scoreDetail(score)} className={`${base} ${SCORE_BAND_STYLES[score.band]}`}>
-      {score.percent}
+    <span className="inline-flex items-center gap-2 min-w-0">
+      {badge}
+      <span className="leading-tight min-w-0 max-w-[220px]">
+        <span className={`block text-[11px] font-semibold truncate ${labelCls}`}>{label}</span>
+        <span className="block text-[10px] text-[#A0A0B0] whitespace-normal leading-tight">{sub}</span>
+      </span>
     </span>
   );
 }
@@ -528,11 +540,102 @@ export const draftCases: Case[] = [
 
 mockCases.unshift(...draftCases);
 
+// Three non-draft, scanner-sourced cases that arrived INCOMPLETE. They open in
+// the read-only Case Detail page (not the draft creation flow) and together
+// demonstrate the missing-info loop end to end:
+//   • CASE-051 — iTero, status New: click "Email dentist" to send the missing-
+//     info email (→ Sent for Review), then simulate the dentist's reply.
+//   • CASE-052 — 3Shape, already "Sent for Review": the missing-info email has
+//     gone out; the case is awaiting the dentist's reply (thread readable).
+//   • CASE-053 — iTero, dentist already replied: the missing items were fetched
+//     from the reply and the score adjusted (green "score updated" banner on open).
+export const scannerIncompleteCases: Case[] = [
+  {
+    id: 'CASE-051',
+    patientName: 'Olivia Bennett',
+    practice: 'Smile Genius Bristol',
+    dentist: 'Dr. Harper',
+    lab: 'Smile Genius Lab',
+    services: ['Crown'],
+    serviceItems: [{
+      id: 'sc-inc-s1', name: 'Crown', status: 'new', deliveryDate: null,
+      fdi: [46], material: 'Zirconia',
+      shade: '',                 // ← missing
+      orderType: 'Private',
+      instructions: '',          // ← missing
+      scanFileCount: 1,          // ← only the upper arch arrived (lower + bite missing)
+      attachmentCount: 0,
+    }],
+    status: 'new',
+    createdAt: '18-Jun-2026',
+    updatedAt: '18-Jun-2026',
+    requestedDelivery: null,     // ← missing → also triggers the delivery-date warning
+    hasAlert: true,
+    scanner: 'iTero',
+    source: 'scanner',
+  },
+  {
+    // 3Shape case already in the missing-info loop — the email has been sent and
+    // the case sits at "Sent for Review" awaiting the dentist's reply.
+    id: 'CASE-052',
+    patientName: 'Daniel Foster',
+    practice: 'Smile Genius Sheffield',
+    dentist: 'Dr. Reed',
+    lab: 'Smile Genius Lab',
+    services: ['Crown'],
+    serviceItems: [{
+      id: 'sfr-s1', name: 'Crown', status: 'new', deliveryDate: '03-Jul-2026',
+      fdi: [24], material: 'E.max',
+      shade: '',                 // ← missing
+      orderType: 'Private',
+      instructions: '',          // ← missing
+      scanFileCount: 1,          // ← upper only (lower + bite missing)
+      attachmentCount: 0,
+    }],
+    status: 'sent-for-review',
+    createdAt: '19-Jun-2026',
+    updatedAt: '19-Jun-2026',
+    requestedDelivery: '03-Jul-2026',
+    hasAlert: true,
+    scanner: '3Shape',
+    source: 'scanner',
+  },
+  {
+    // iTero case whose dentist has REPLIED — the missing items were fetched from
+    // the reply and the score adjusted; the case has moved into production.
+    id: 'CASE-053',
+    patientName: 'Sophie Turner',
+    practice: 'Smile Genius Cardiff',
+    dentist: 'Dr. Evans',
+    lab: 'Smile Genius Lab',
+    services: ['Crown'],
+    serviceItems: [{
+      id: 'rr-s1', name: 'Crown', status: 'in-production', deliveryDate: '05-Jul-2026',
+      fdi: [14], material: 'Zirconia',
+      shade: '',                 // ← was missing — now received via the reply
+      orderType: 'Private',
+      instructions: '',          // ← was missing — now received via the reply
+      scanFileCount: 1,
+      attachmentCount: 0,
+    }],
+    status: 'in-production',
+    createdAt: '19-Jun-2026',
+    updatedAt: '19-Jun-2026',
+    requestedDelivery: '05-Jul-2026',
+    hasAlert: false,
+    scanner: 'iTero',
+    source: 'scanner',
+    emailReplyReceived: true,
+  },
+];
+mockCases.unshift(...scannerIncompleteCases);
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<CaseStatus, string> = {
   draft: 'Draft',
   new: 'New',
+  'sent-for-review': 'Sent for Review',
   submitted: 'Submitted',
   'in-production': 'In Production',
   'quality-check': 'Quality Check',
@@ -546,6 +649,7 @@ const STATUS_LABEL: Record<CaseStatus, string> = {
 const STATUS_STYLE: Record<CaseStatus, { bg: string; text: string; border: string; icon: any }> = {
   draft:           { bg: '#FFF8E1', text: '#A16207', border: '#FDE68A', icon: PenLine },
   new:             { bg: '#F3F3F5', text: '#5A5568', border: '#E0E0E6', icon: Package },
+  'sent-for-review':{ bg: '#EEF2FF', text: '#4338CA', border: '#C7D2FE', icon: Mail },
   submitted:       { bg: '#EEF4FF', text: '#1565C0', border: '#C8D8FC', icon: Package },
   'in-production': { bg: '#F5F3FF', text: '#7C3AED', border: '#EDE9FE', icon: RefreshCw },
   'quality-check': { bg: '#FFF7ED', text: '#E65100', border: '#FED7AA', icon: CheckCircle2 },
@@ -601,15 +705,22 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   const [cases, setCases] = useState<Case[]>(mockCases);
   const [showArchived, setShowArchived] = useState(false);
   const [selectedCase, setSelectedCase] = useState<Case | null>(() => {
-    if (initialCaseId) return mockCases.find(c => c.id === initialCaseId) ?? null;
+    if (initialCaseId) {
+      const c = mockCases.find(c => c.id === initialCaseId);
+      // Drafts go to the creation flow (handled by the effect below), never the
+      // read-only detail — so don't seed a draft into selectedCase here.
+      if (c && !(c.status === 'draft' && onOpenDraft)) return c;
+    }
     return null;
   });
   // Open the requested case when the prop changes after mount
   React.useEffect(() => {
-    if (initialCaseId) {
-      const c = mockCases.find(c => c.id === initialCaseId);
-      if (c) setSelectedCase(c);
-    }
+    if (!initialCaseId) return;
+    const c = mockCases.find(c => c.id === initialCaseId);
+    if (!c) return;
+    // A deep-linked draft opens the prefilled creation flow, matching a click.
+    if (c.status === 'draft' && onOpenDraft) { onOpenDraft(c); return; }
+    setSelectedCase(c);
   }, [initialCaseId]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<CaseStatus | 'all'>('all');
@@ -623,7 +734,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   const [timeFilter, setTimeFilter] = useState<'all' | '1h' | '1d' | '7d'>('all');
 
   // ── Column visibility — saved per-user in localStorage so preferences persist ──
-  type ColId = 'status' | 'caseId' | 'createdAt' | 'updatedAt' | 'deliveryDate' | 'patient' | 'service' | 'score' | 'practice' | 'lab' | 'dentist';
+  type ColId = 'status' | 'caseId' | 'createdAt' | 'updatedAt' | 'deliveryDate' | 'patient' | 'service' | 'score' | 'practice' | 'lab';
   const DEFAULT_COLS: Record<ColId, boolean> = {
     status: true,
     caseId: true,
@@ -633,9 +744,8 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     patient: true,
     service: true,
     score: true,
-    practice: true,
-    lab: false,         // off by default — opt-in
-    dentist: true,
+    practice: true,       // merged "Practice / Dentist" column
+    lab: false,           // off by default — opt-in
   };
   const COL_LABELS: Record<ColId, string> = {
     status: 'Status',
@@ -646,9 +756,8 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     deliveryDate: 'Delivery Date',
     patient: 'Patient Name',
     service: 'Service(s)',
-    practice: 'Practice',
+    practice: 'Practice / Dentist',
     lab: 'Lab',
-    dentist: 'Dentist',
   };
   const [visibleCols, setVisibleCols] = useState<Record<ColId, boolean>>(() => {
     if (typeof window === 'undefined') return DEFAULT_COLS;
@@ -821,8 +930,11 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // Draft cases route to the case-creation flow instead of the read-only
   // detail page — they get prefilled from the imported email/manual seed.
   function openCase(c: Case) {
-    if (c.status === 'draft') {
-      onOpenDraft?.(c);
+    // Clinic + lab pass onOpenDraft → a draft opens the QuickCreate screen
+    // pre-filled (in draft state) instead of the read-only Case Detail page.
+    // Non-draft cases always open the detail.
+    if (c.status === 'draft' && onOpenDraft) {
+      onOpenDraft(c);
     } else {
       setSelectedCase(c);
     }
@@ -838,9 +950,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     toast.success(`${c.id} ${nextArchived ? 'archived' : 'restored'}`);
   }
 
-  if (selectedCase && selectedCase.status !== 'draft') {
-    // Narrowed away from 'draft' above so the case is structurally
-    // compatible with CaseDetailPage's CaseForDetail interface.
+  if (selectedCase) {
+    // Drafts route to the QuickCreate flow via onOpenDraft, so selectedCase
+    // here is always a non-draft case opening the read-only detail. (The
+    // supplier portal, which has no draft flow, can still open a draft here.)
     return <CaseDetailPage caseData={selectedCase as any} onBack={() => setSelectedCase(null)} onArchiveToggle={() => toggleArchive(selectedCase)} />;
   }
 
@@ -1010,13 +1123,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Service</th>
                   )}
                   {visibleCols.practice && (
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Practice</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Practice / Dentist</th>
                   )}
                   {visibleCols.lab && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Lab</th>
-                  )}
-                  {visibleCols.dentist && (
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Dentist</th>
                   )}
                   {/* Settings / column picker — last column */}
                   <th className="text-right px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -1109,7 +1219,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                       )}
                       {visibleCols.score && (
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <ScoreBadge score={caseScore} onFix={onConfigureScoring} />
+                          <ScoreBadge score={caseScore} onFix={onConfigureScoring} withDetails />
                         </td>
                       )}
                       {visibleCols.caseId && (
@@ -1142,7 +1252,13 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                       )}
                       {visibleCols.practice && (
                         <td className="px-4 py-3">
-                          <span title={c.practice} className="block text-xs text-[#030213] truncate max-w-[140px]">{c.practice}</span>
+                          <div className="min-w-0 max-w-[180px]">
+                            <span title={c.practice} className="block text-xs font-medium text-[#030213] truncate">{c.practice}</span>
+                            <span className="flex items-center gap-1 text-[11px] text-[#717182]">
+                              {c.hasAlert && <AlertTriangle className="w-3 h-3 text-[#E65100] flex-shrink-0" />}
+                              <span title={c.dentist} className="truncate">{c.dentist}</span>
+                            </span>
+                          </div>
                         </td>
                       )}
                       {visibleCols.lab && (
@@ -1150,16 +1266,20 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                           <span title={c.lab} className="block text-xs text-[#030213] truncate max-w-[140px]">{c.lab}</span>
                         </td>
                       )}
-                      {visibleCols.dentist && (
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="inline-flex items-center gap-1.5">
-                            {c.hasAlert && <AlertTriangle className="w-3.5 h-3.5 text-[#E65100] flex-shrink-0" />}
-                            <span className="text-xs text-[#030213]">{c.dentist}</span>
-                          </div>
-                        </td>
-                      )}
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
+                          {/* Email-thread indicator — email/iTero cases carry a reply
+                              from the dentist; a red dot flags the unread thread. */}
+                          {c.source === 'email' && (
+                            <button
+                              title="Email thread — dentist replied"
+                              onClick={() => openCase(c)}
+                              className="relative p-1.5 rounded-lg text-[#1565C0] hover:bg-[#EEF4FF] transition-colors"
+                            >
+                              <Mail className="w-4 h-4" />
+                              <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-[#D4183D] border border-white" />
+                            </button>
+                          )}
                           <button title="Download" className="p-1.5 rounded-lg text-[#717182] hover:text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors">
                             <Download className="w-4 h-4" />
                           </button>
@@ -1236,7 +1356,6 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                         )}
                         {visibleCols.practice  && <td className="px-4 py-2" />}
                         {visibleCols.lab       && <td className="px-4 py-2" />}
-                        {visibleCols.dentist   && <td className="px-4 py-2" />}
                         <td className="px-4 py-2" />
                       </tr>
                     ))}
