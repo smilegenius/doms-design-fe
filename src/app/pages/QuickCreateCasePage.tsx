@@ -6,10 +6,12 @@ import {
   AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen, Copy, ExternalLink,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { useCaseScoring } from '../context/CaseScoringContext';
 import ModalPortal from '../components/ModalPortal';
 import { mockSuppliers } from '../data/suppliersData';
 import { mockStaffMembers } from '../data/clinicsData';
 import type { Case, EmailPrescription } from './CasesPage';
+import { ScoreBadge } from './CasesPage';
 import {
   SERVICE_CATEGORIES,
   ORDER_TYPES,
@@ -955,6 +957,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   prefillDraft?: Case | null;
 }) {
   const { toast } = useToast();
+  const { scoreCase } = useCaseScoring();
 
   // Load any pending draft once on mount. If present, every useState below
   // seeds itself with the draft value instead of the bare default.
@@ -1516,6 +1519,24 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             </button>
           </div>
         )}
+
+        {/* ── Case score — the same completeness messaging the cases list shows
+            for this draft, so the lab sees exactly what's missing while editing. ── */}
+        {prefillDraft && (() => {
+          const score = scoreCase(prefillDraft as any);
+          const tint = !score.applicable
+            ? 'bg-[#F8F9FC] border-[#E0E0E6]'
+            : score.band === 'green' ? 'bg-[#ECFDF5] border-[#A7F3D0]'
+            : score.band === 'amber' ? 'bg-[#FFF8E1] border-[#FDE68A]'
+            : 'bg-[#FEF2F2] border-[#FECACA]';
+          return (
+            <div className={`max-w-6xl mx-auto mb-3 flex items-center gap-3 px-3.5 py-2.5 rounded-xl border ${tint}`}>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#717182] flex-shrink-0">Case score</span>
+              <ScoreBadge score={score} withDetails />
+              <span className="ml-auto text-[10px] text-[#A0A0B0] hidden sm:block flex-shrink-0">Same score shown in the cases list</span>
+            </div>
+          );
+        })()}
 
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
           {/* ── LEFT COLUMN — main form. Uses flex+order so Patient+Lab

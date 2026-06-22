@@ -200,7 +200,7 @@ function scoreDetail(score: CaseScore): string {
   return [head, ...lines].join('\n');
 }
 
-function ScoreBadge({ score, size = 'sm', onFix, withDetails }: { score: CaseScore; size?: 'sm' | 'xs'; onFix?: () => void; withDetails?: boolean }) {
+export function ScoreBadge({ score, size = 'sm', onFix, withDetails }: { score: CaseScore; size?: 'sm' | 'xs'; onFix?: () => void; withDetails?: boolean }) {
   const dim = size === 'xs' ? 'w-7 h-7 text-[9px]' : 'w-8 h-8 text-[10px]';
   const base = `${dim} rounded-full inline-flex items-center justify-center font-bold border flex-shrink-0`;
 
