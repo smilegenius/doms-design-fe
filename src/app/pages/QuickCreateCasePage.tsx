@@ -11,7 +11,7 @@ import ModalPortal from '../components/ModalPortal';
 import { mockSuppliers } from '../data/suppliersData';
 import { mockStaffMembers } from '../data/clinicsData';
 import type { Case, EmailPrescription } from './CasesPage';
-import { ScoreBadge } from './CasesPage';
+import { ScoreBadge } from '../components/ScoreBadge';
 import {
   SERVICE_CATEGORIES,
   ORDER_TYPES,
@@ -1532,7 +1532,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           return (
             <div className={`max-w-6xl mx-auto mb-3 flex items-center gap-3 px-3.5 py-2.5 rounded-xl border ${tint}`}>
               <span className="text-[10px] font-bold uppercase tracking-wider text-[#717182] flex-shrink-0">Case score</span>
-              <ScoreBadge score={score} withDetails />
+              <ScoreBadge score={score} withDetails compact />
               <span className="ml-auto text-[10px] text-[#A0A0B0] hidden sm:block flex-shrink-0">Same score shown in the cases list</span>
             </div>
           );

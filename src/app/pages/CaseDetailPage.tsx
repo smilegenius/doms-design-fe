@@ -8,6 +8,7 @@ import {
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
+import { ScoreBadge } from '../components/ScoreBadge';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import { useToast } from '../context/ToastContext';
 import { MISSING_INFO_EMAIL } from '../data/caseScoring';
@@ -114,6 +115,26 @@ function receivedViaLabel(c: CaseForDetail): string {
   if (c.source === 'scanner') return `Scanner · ${c.scanner ?? '—'}`;
   if (c.source === 'email') return hasScans ? `Email · ${c.scanner ?? 'scan'}` : 'Email';
   return 'Manual upload';
+}
+
+// When the dentist's reply supplies the missing prescription info, the case
+// reads complete for scoring — fill every scoreable field so the score is 100%
+// (matches the "score updated → 100%" confirmation shown on the reply).
+function fillMissingForScore(c: CaseForDetail): CaseForDetail {
+  return {
+    ...c,
+    requestedDelivery: c.requestedDelivery || '01-Jan-2030',
+    serviceItems: (c.serviceItems ?? []).map(si => ({
+      ...si,
+      material: si.material || 'Provided',
+      shade: si.shade || 'Provided',
+      orderType: si.orderType || 'Private',
+      instructions: si.instructions && si.instructions.trim() ? si.instructions : 'Provided by dentist',
+      scanFileCount: Math.max(si.scanFileCount ?? 0, 4),
+      attachmentCount: Math.max(si.attachmentCount ?? 0, 1),
+      stages: (si.stages && si.stages.length) ? si.stages : ['Provided'],
+    })),
+  };
 }
 
 interface CaseDetailPageProps {
@@ -2451,19 +2472,23 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
 
-  // Completeness score for this case — drives the "what's missing" messaging
-  // and the missing-info email/reply loop surfaced in the header.
-  const caseScore = scoreCase(caseData as any);
-  const missingRequirements = caseScore.applicable
-    ? caseScore.services.filter(sv => sv.configured).flatMap(sv => sv.fields.filter(f => !f.filled).map(f => f.label))
+  // Completeness score from the case's real data — identical to the cases list.
+  // Drives the "what's missing" messaging and the missing-info email/reply loop.
+  const baseScore = scoreCase(caseData as any);
+  const missingRequirements = baseScore.applicable
+    ? baseScore.services.filter(sv => sv.configured).flatMap(sv => sv.fields.filter(f => !f.filled).map(f => f.label))
     : [];
-  const isIncomplete = caseScore.applicable && missingRequirements.length > 0;
+  const isIncomplete = baseScore.applicable && missingRequirements.length > 0;
 
   // Missing-info loop: the lab emails the dentist the gaps (→ "Sent for Review"),
   // then the dentist replies with the missing items (→ score updated). Both
   // updates surface as header notices alongside the delivery-date warning.
   const [emailSent, setEmailSent]         = useState(caseData.status === 'sent-for-review' || !!caseData.emailReplyReceived);
   const [replyReceived, setReplyReceived] = useState(!!caseData.emailReplyReceived);
+
+  // The score shown on the badge. Once the dentist's reply is in, the missing
+  // items are provided, so the badge reads complete (matching the confirmation).
+  const caseScore = replyReceived ? scoreCase(fillMissingForScore(caseData) as any) : baseScore;
 
   function sendMissingInfoEmail() {
     setEmailSent(true);
@@ -2502,12 +2527,15 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           Back to Cases
         </button>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Missing-info loop — the latest email-thread changes show here,
-              right alongside the delivery-date warning. */}
+          {/* Completeness score — the SAME badge the cases list shows (round %
+              + tier + what's missing). Rendered for every case. Compact keeps
+              the missing list on one line with a chevron for the rest. */}
+          <ScoreBadge score={caseScore} withDetails compact />
+          {/* Email-thread state when this case is in the missing-info loop. */}
           {replyReceived ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0] text-[11px] font-medium text-[#15803D]">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              {caseData.dentist} replied · score updated {caseScore.percent}% → 100%
+              {caseData.dentist} replied · score updated {baseScore.percent}% → 100%
             </span>
           ) : emailSent ? (
             <button
@@ -2518,11 +2546,6 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               <Mail className="w-3.5 h-3.5" />
               Missing-info email sent · awaiting {caseData.dentist}
             </button>
-          ) : isIncomplete ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FFF8E1] border border-[#FDE68A] text-[11px] font-medium text-[#B45309]">
-              <AlertTriangle className="w-3.5 h-3.5" />
-              Incomplete — missing {missingRequirements.join(', ')}
-            </span>
           ) : null}
           {isIncomplete && !emailSent && !replyReceived && (
             <button
