@@ -2033,11 +2033,12 @@ function DetailSectionRow({ title, required, isOpen, isDone, onToggle, summary, 
 }
 
 // ── Mini labelled field ──
-export function Mini({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+export function Mini({ label, required, accessory, children }: { label: string; required?: boolean; accessory?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-[11px] font-semibold text-[#5A5568] mb-1">
-        {label} {required && <span className="text-[#D4183D]">*</span>}
+      <label className="flex items-center gap-1 text-[11px] font-semibold text-[#5A5568] mb-1">
+        <span>{label} {required && <span className="text-[#D4183D]">*</span>}</span>
+        {accessory}
       </label>
       {children}
     </div>

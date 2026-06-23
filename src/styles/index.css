@@ -77,9 +77,16 @@ input[type="checkbox"]:focus {
 .reveal-stagger > *:nth-child(10) { animation-delay: 540ms; }
 .reveal-stagger > *:nth-child(n+11) { animation-delay: 600ms; }
 
+/* ─── AI sparkle — marks fields auto-filled from a document / AI ──────────── */
+@keyframes aiTwinkle {
+  0%, 100% { opacity: 0.55; transform: scale(0.82) rotate(0deg); }
+  50%      { opacity: 1;    transform: scale(1.15) rotate(10deg); }
+}
+.ai-twinkle { animation: aiTwinkle 1.8s ease-in-out infinite; transform-origin: center; }
+
 /* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .reveal, .reveal-fade, .reveal-stagger > * {
+  .reveal, .reveal-fade, .reveal-stagger > *, .ai-twinkle {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;

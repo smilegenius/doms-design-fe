@@ -12,6 +12,7 @@ import { mockSuppliers } from '../data/suppliersData';
 import { mockStaffMembers } from '../data/clinicsData';
 import type { Case, EmailPrescription } from './CasesPage';
 import { ScoreBadge } from '../components/ScoreBadge';
+import { AiSparkle } from '../components/AiSparkle';
 import {
   SERVICE_CATEGORIES,
   ORDER_TYPES,
@@ -958,6 +959,9 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
 }) {
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
+  // Fields seeded from an email/document-sourced draft were extracted by AI, so
+  // they're flagged with a sparkle for the user to review.
+  const aiPrefilled = !!prefillDraft && prefillDraft.source === 'email';
 
   // Load any pending draft once on mount. If present, every useState below
   // seeds itself with the draft value instead of the bare default.
@@ -1520,8 +1524,9 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           </div>
         )}
 
-        {/* ── Case score — the same completeness messaging the cases list shows
-            for this draft, so the lab sees exactly what's missing while editing. ── */}
+        {/* ── Case score + (conditional) AI extraction notice. For auto-fetched
+            cases (email / iTero / scanned drafts) the AI box sits to the LEFT of
+            the score box; otherwise the score box stands alone. ── */}
         {prefillDraft && (() => {
           const score = scoreCase(prefillDraft as any);
           const tint = !score.applicable
@@ -1530,10 +1535,19 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             : score.band === 'amber' ? 'bg-[#FFF8E1] border-[#FDE68A]'
             : 'bg-[#FEF2F2] border-[#FECACA]';
           return (
-            <div className={`max-w-6xl mx-auto mb-3 flex items-center gap-3 px-3.5 py-2.5 rounded-xl border ${tint}`}>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#717182] flex-shrink-0">Case score</span>
-              <ScoreBadge score={score} withDetails compact />
-              <span className="ml-auto text-[10px] text-[#A0A0B0] hidden sm:block flex-shrink-0">Same score shown in the cases list</span>
+            <div className="max-w-6xl mx-auto mb-3 flex flex-col md:flex-row items-stretch gap-3">
+              {aiPrefilled && (
+                <div className="flex-1 flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl border border-[#FECACA] bg-[#FEF2F2]">
+                  <AiSparkle label title="" className="mt-px" />
+                  <p className="text-[11px] text-[#5A5568] leading-snug">
+                    <span className="font-semibold text-[#030213]">Smile Genius</span> has automatically extracted prescription information from the provided files. Verify all details before submitting the case.
+                  </p>
+                </div>
+              )}
+              <div className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl border ${tint} ${aiPrefilled ? 'md:flex-shrink-0' : 'flex-1'}`}>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#717182] flex-shrink-0">Case score</span>
+                <ScoreBadge score={score} withDetails compact />
+              </div>
             </div>
           );
         })()}
@@ -1557,7 +1571,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             </div>
             {/* Row 1 — Patient + Lab (the headline who/where) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-              <Mini label="Patient" required>
+              <Mini label="Patient" required accessory={aiPrefilled && patientName ? <AiSparkle label /> : undefined}>
                 <PatientSearchSelect
                   value={patientName}
                   onChange={setPatientName}
@@ -1584,7 +1598,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                     : 'Add additional details'}
                 </button>
               </Mini>
-              <Mini label="Lab" required>
+              <Mini label="Lab" required accessory={aiPrefilled && labId ? <AiSparkle label /> : undefined}>
                 <LabSearchSelect
                   labs={labOptions}
                   selectedId={labId}
@@ -1595,7 +1609,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             {/* Row 2 — case-level metadata (Case Source moved to the header
                 action bar at the top of the page). */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-[#F0EFF6]">
-              <Mini label="Dentist">
+              <Mini label="Dentist" accessory={aiPrefilled && dentistId ? <AiSparkle label /> : undefined}>
                 <DentistSearchSelect
                   dentists={dentists}
                   value={dentistId}
@@ -1711,6 +1725,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                 <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded-full bg-[#F0EFF6] text-[9px] font-bold text-[#5A5568] uppercase tracking-wider">
                                   {cat}
                                 </span>
+                                {aiPrefilled && hasDetails && <AiSparkle label title="Teeth, material & shade extracted from the prescription by AI — please review" />}
                               </div>
                               {hasDetails ? (
                                 <p className="text-[10px] text-[#1A5C2A] font-medium mt-0.5 truncate">
@@ -1812,11 +1827,13 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                       >
                                         {code}
                                       </span>
-                                      <span className="text-[10px] font-semibold text-[#030213] truncate">
-                                        {mat || <span className="text-[#A0A0B0] italic font-normal">—</span>}
+                                      <span className="flex items-center gap-1 text-[10px] font-semibold text-[#030213] min-w-0">
+                                        <span className="truncate">{mat || <span className="text-[#A0A0B0] italic font-normal">—</span>}</span>
+                                        {aiPrefilled && mat && <AiSparkle label />}
                                       </span>
-                                      <span className="text-[10px] font-semibold text-[#030213] truncate">
-                                        {shade || <span className="text-[#A0A0B0] italic font-normal">—</span>}
+                                      <span className="flex items-center gap-1 text-[10px] font-semibold text-[#030213] min-w-0">
+                                        <span className="truncate">{shade || <span className="text-[#A0A0B0] italic font-normal">—</span>}</span>
+                                        {aiPrefilled && shade && <AiSparkle label />}
                                       </span>
                                     </div>
                                   );
@@ -1862,11 +1879,13 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                       </span>
                                     )) : <span className="text-[#A0A0B0] italic text-[10px]">—</span>}
                                   </div>
-                                  <span className="text-[10px] font-semibold text-[#030213] truncate">
-                                    {sel.material || <span className="text-[#A0A0B0] italic font-normal">—</span>}
+                                  <span className="flex items-center gap-1 text-[10px] font-semibold text-[#030213] min-w-0">
+                                    <span className="truncate">{sel.material || <span className="text-[#A0A0B0] italic font-normal">—</span>}</span>
+                                    {aiPrefilled && sel.material && <AiSparkle label />}
                                   </span>
-                                  <span className="text-[10px] font-semibold text-[#030213] truncate">
-                                    {sel.shade || <span className="text-[#A0A0B0] italic font-normal">—</span>}
+                                  <span className="flex items-center gap-1 text-[10px] font-semibold text-[#030213] min-w-0">
+                                    <span className="truncate">{sel.shade || <span className="text-[#A0A0B0] italic font-normal">—</span>}</span>
+                                    {aiPrefilled && sel.shade && <AiSparkle label />}
                                   </span>
                                 </div>
                               </div>
@@ -1897,6 +1916,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </span>
                 <h3 className="text-xs font-bold text-[#030213] uppercase tracking-wider">Case Instructions</h3>
                 <span className="text-[10px] text-[#A0A0B0] italic">— optional</span>
+                {aiPrefilled && caseInstructions.trim().length > 0 && <AiSparkle label title="Pulled from the prescription email by AI — please review" />}
               </div>
               {(caseInstructions.trim().length > 0 || caseInstructionsFiles.length > 0) && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#16A34A] uppercase tracking-wider">
@@ -4351,19 +4371,12 @@ function PatientSearchSelect({ value, onChange, onPickExisting }: {
           <Search className="w-3 h-3" />
         </button>
       </div>
-      {/* Status pills under the input — confirm match state */}
-      {value.trim().length > 0 && (
-        exactMatch ? (
-          <p className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-[#1A5C2A]">
-            <Check className="w-2.5 h-2.5" strokeWidth={3} />
-            {exactMatch.patientId}
-          </p>
-        ) : (
-          <p className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-[#7C3AED]">
-            <Plus className="w-2.5 h-2.5" strokeWidth={3} />
-            New patient — will be created on submit
-          </p>
-        )
+      {/* Status pill under the input — confirm an existing-patient match. */}
+      {value.trim().length > 0 && exactMatch && (
+        <p className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-[#1A5C2A]">
+          <Check className="w-2.5 h-2.5" strokeWidth={3} />
+          {exactMatch.patientId}
+        </p>
       )}
       {open && (
         <div className="absolute z-30 mt-1 left-0 right-0 bg-white border border-[#E8EAF6] rounded-xl shadow-[0_10px_30px_rgba(77,142,247,0.15)] overflow-hidden">
