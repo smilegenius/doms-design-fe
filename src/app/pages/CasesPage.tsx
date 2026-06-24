@@ -25,6 +25,8 @@ import {
   PenLine,
   Archive,
   ArchiveRestore,
+  Lock,
+  Sparkles,
 } from 'lucide-react';
 import Button from '../components/Button';
 import ModalPortal from '../components/ModalPortal';
@@ -780,9 +782,45 @@ function StatusChangeModal({ caseData, missing, onClose, onConfirm }: {
   );
 }
 
+// Plan-limit paywall — shown when a plan-limited portal (the lab) opens a case
+// beyond its quota. Asks the user to upgrade; "Back to cases" returns to the list.
+function UpgradeModal({ onUpgrade, onBack }: { onUpgrade: () => void; onBack: () => void }) {
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[130] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-[3px]" onClick={onBack} />
+        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-gradient-to-br from-[#EEF4FF] to-[#F5F3FF] px-6 pt-7 pb-6 text-center border-b border-[#E0E7FF]">
+            <span className="w-14 h-14 rounded-2xl bg-white border border-[#DBEAFE] inline-flex items-center justify-center mb-3 shadow-sm"><Lock className="w-7 h-7 text-[#4D8EF7]" /></span>
+            <h3 className="text-lg font-bold text-[#030213]">You've reached your plan limit</h3>
+            <p className="text-[13px] text-[#5A5568] mt-1 leading-relaxed">Your <span className="font-semibold text-[#030213]">Starter</span> plan includes 2 case views. Upgrade to keep reviewing cases without limits.</p>
+          </div>
+          <div className="px-6 py-5">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[#A0A0B0] mb-2.5">Pro plan includes</p>
+            <ul className="space-y-2">
+              {['Unlimited case views', 'Advanced case scoring & analytics', 'Auto-email the dentist + priority support'].map((b) => (
+                <li key={b} className="flex items-center gap-2 text-sm text-[#030213]">
+                  <span className="w-4 h-4 rounded-full bg-[#ECFDF5] flex items-center justify-center flex-shrink-0"><Check className="w-2.5 h-2.5 text-[#15803D]" strokeWidth={3} /></span>
+                  {b}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="px-6 pb-6 flex flex-col gap-2">
+            <button onClick={onUpgrade} className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity">
+              <Sparkles className="w-4 h-4" /> Upgrade plan
+            </button>
+            <button onClick={onBack} className="px-4 py-2 rounded-xl text-sm font-medium text-[#5A5568] hover:bg-[#F3F3F5] transition-colors">Back to cases</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring }: {
+export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit }: {
   initialCaseId?: string;
   onCreateCase?: () => void;
   // Called when the user clicks a draft case (status === 'draft'). The host
@@ -793,6 +831,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // case's score is "unavailable" (out of sync). Absent in clinic/group, so
   // there the unavailable pill is non-interactive.
   onConfigureScoring?: () => void;
+  // Plan-limited portals (the lab) pass a max number of case-detail views per
+  // session. Opening a further (distinct) case shows the upgrade paywall. Demo:
+  // with a limit of 2, the 3rd case opened triggers it.
+  caseViewLimit?: number;
 } = {}) {
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
@@ -889,6 +931,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   const [gridMenuOpen, setGridMenuOpen] = useState<string | null>(null);
   // The case whose "Change status" modal is currently open (from listing or detail).
   const [statusModalCase, setStatusModalCase] = useState<Case | null>(null);
+  // Plan-limit paywall (lab only): distinct case-detail views this session + the
+  // upgrade popup shown when a further case is opened past the limit.
+  const [viewedCaseIds, setViewedCaseIds] = useState<Set<string>>(() => new Set());
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   function toggleRow(id: string) {
     setExpandedRows(prev => {
@@ -1028,12 +1074,19 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   function openCase(c: Case) {
     // Clinic + lab pass onOpenDraft → a draft opens the QuickCreate screen
     // pre-filled (in draft state) instead of the read-only Case Detail page.
-    // Non-draft cases always open the detail.
     if (c.status === 'draft' && onOpenDraft) {
       onOpenDraft(c);
-    } else {
-      setSelectedCase(c);
+      return;
     }
+    // Plan-limit paywall: once the lab has viewed its quota of distinct cases,
+    // opening a further one surfaces the upgrade popup over the case.
+    if (caseViewLimit != null && !viewedCaseIds.has(c.id) && viewedCaseIds.size >= caseViewLimit) {
+      setSelectedCase(c);
+      setUpgradeOpen(true);
+      return;
+    }
+    if (caseViewLimit != null) setViewedCaseIds(prev => new Set(prev).add(c.id));
+    setSelectedCase(c);
   }
 
   // Archive / unarchive a case. Updates the list AND the open detail snapshot
@@ -1083,6 +1136,12 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
             missing={statusModalMissing}
             onClose={() => setStatusModalCase(null)}
             onConfirm={(toStatus, override) => { applyStatusChange(statusModalCase, toStatus, override); setStatusModalCase(null); }}
+          />
+        )}
+        {upgradeOpen && (
+          <UpgradeModal
+            onUpgrade={() => { setUpgradeOpen(false); toast.success('Redirecting to billing — upgrade flow (demo)'); }}
+            onBack={() => { setUpgradeOpen(false); setSelectedCase(null); }}
           />
         )}
       </>

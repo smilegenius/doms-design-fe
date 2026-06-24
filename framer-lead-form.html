@@ -10,6 +10,7 @@
   href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap"
   rel="stylesheet"
 />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/css/intlTelInput.css" />
 <style>
   :root {
     --bg: #000000;
@@ -67,7 +68,7 @@
   }
   .group { margin-bottom: 18px; }
   .group label.field-label { display: block; font-size: 14.5px; font-weight: 700; color: var(--label); margin-bottom: 9px; }
-  .group input[type="text"], .group input[type="email"] {
+  .group input[type="text"], .group input[type="email"], .group input[type="tel"] {
     width: 100%; background: var(--card-2); border: 1px solid var(--border);
     border-radius: var(--radius-sm); color: var(--text);
     font-family: var(--font-body); font-size: 16px; font-weight: 500;
@@ -106,7 +107,22 @@
   .success.show { display: block; }
   .form-panel.hide { display: none; }
   .success h2 { font-family: var(--font-head); font-size: clamp(20px, 4vw, 26px); color: var(--title); margin: 0 0 8px; }
-  .success p { color: var(--muted); font-size: 15px; line-height: 1.5; margin: 0 0 20px; }
+  .success p { color: var(--muted); font-size: 15px; line-height: 1.5; margin: 0 0 18px; }
+  .success p a { color: var(--accent-a); text-decoration: underline; }
+  .field-label .optional { color: var(--muted); font-weight: 500; }
+  /* intl-tel-input dark theme */
+  .iti { width: 100%; display: block; }
+  .iti--separate-dial-code .iti__selected-flag { background: rgba(255,255,255,0.04); border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+  .iti__selected-dial-code { color: var(--text); }
+  .iti__arrow { border-top-color: var(--muted); }
+  .iti__arrow--up { border-bottom-color: var(--muted); }
+  .iti__country-list { background: var(--panel); color: var(--text); border: 1px solid var(--border); box-shadow: 0 12px 32px rgba(0,0,0,0.55); }
+  .iti__country.iti__highlight { background-color: rgba(255,255,255,0.07); }
+  .iti__dial-code { color: var(--muted); }
+  .iti__divider { border-bottom-color: var(--border); }
+  .demo-title { font-family: var(--font-head); font-size: clamp(18px, 3.5vw, 22px); font-weight: 700; color: var(--title); margin: 26px 0 14px; }
+  .hs-embed { background: #fff; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); }
+  .hs-embed iframe { width: 100%; min-height: 560px; border: 0; display: block; }
   .dl-row { display: grid; grid-template-columns: 1fr; gap: 12px; }
   .dl-btn {
     display: block; text-decoration: none; text-align: center;
@@ -176,6 +192,12 @@ fbq('init', 'YOUR_PIXEL_ID');
         <span class="err">Please enter a valid email address.</span>
       </div>
 
+      <div class="group" id="g-phone">
+        <label class="field-label" for="phone">Phone number <span class="optional">(optional)</span></label>
+        <input type="tel" id="phone" name="phone" placeholder="7700 900000" autocomplete="tel" />
+        <span class="err">Please enter a valid phone number.</span>
+      </div>
+
       <div class="consent" id="g-consent">
         <input type="checkbox" id="consent" name="consent" />
         <label for="consent">I'd like the guides and consent to Smile Genius storing my details under GDPR. No spam, unsubscribe anytime.</label>
@@ -187,10 +209,11 @@ fbq('init', 'YOUR_PIXEL_ID');
 
     <!-- ============ SUCCESS ============ -->
     <div class="success" id="success">
-      <h2 id="successTitle">Your guides are downloading 🎉</h2>
-      <p>If the download didn't start, use the button below.</p>
-      <div class="dl-row">
-        <a class="dl-btn" id="dl1" href="#" target="_blank" rel="noopener">Download manually</a>
+      <h2 id="successTitle">Thank you — your guides are downloading 🎉</h2>
+      <p>If the download didn't start, <a id="dl1" href="#" target="_blank" rel="noopener">download them manually</a>.</p>
+      <h3 class="demo-title">Want us to run your numbers? Book a 20-minute demo</h3>
+      <div class="hs-embed">
+        <iframe title="Book a demo" src="https://share.hsforms.com/2_BGxAZhMQ9C8lDP_NFUMxgc5kf9" loading="lazy"></iframe>
       </div>
     </div>
   </div>
@@ -198,6 +221,7 @@ fbq('init', 'YOUR_PIXEL_ID');
   <!-- hidden target for the lead POST (most reliable way to reach Apps Script) -->
   <iframe name="sg_sink" id="sg_sink" style="display:none" title="lead-sink"></iframe>
 
+<script src="https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/js/intlTelInput.min.js"></script>
 <script>
   /* =======================================================================
      CONFIG — fill these three values in.
@@ -206,7 +230,7 @@ fbq('init', 'YOUR_PIXEL_ID');
      2) Share each PDF in Drive as "Anyone with the link", then paste each
         file's ID (the long string in its share URL) below.
      ======================================================================= */
-  var SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbymJXvwqnXca4wFhaU8VxjgjWuTOtMwubj7qFfIpluZkk592oQ_RpxK0xZXtnkTeDIrUQ/exec";
+  var SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbxx0q6wsmu0wv1uBSYwfbQs5CyiEAJ2naBoDaJoIJcgFBYcYL1_Cq-HAPZv8udRO6sIFg/exec";
   // Single combined PDF (both guides inside). Paste the MERGED file's Drive ID here.
   var GUIDE = { name: "Smile Genius Guides", id: "13foVPPmFhRFjxn1JXt4_Bwh0m61HyKeQ" };
   var SOURCE = "Take the room home (Framer)";
@@ -220,30 +244,54 @@ fbq('init', 'YOUR_PIXEL_ID');
   var nameEl = document.getElementById("name");
   var labEl = document.getElementById("lab");
   var emailEl = document.getElementById("email");
+  var phoneEl = document.getElementById("phone");
   var consentEl = document.getElementById("consent");
   var gName = document.getElementById("g-name");
   var gLab = document.getElementById("g-lab");
   var gEmail = document.getElementById("g-email");
+  var gPhone = document.getElementById("g-phone");
   var gConsent = document.getElementById("g-consent");
   var successEl = document.getElementById("success");
   var successTitle = document.getElementById("successTitle");
 
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+  // International phone input — country dropdown auto-selected from the device locale
+  function deviceCountry() {
+    var langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || "en-GB"];
+    for (var i = 0; i < langs.length; i++) {
+      var m = /[-_]([A-Za-z]{2})(?:[-_]|$)/.exec(langs[i] || "");
+      if (m) return m[1].toLowerCase();
+    }
+    return "gb";
+  }
+  var iti = null;
+  if (window.intlTelInput) {
+    iti = window.intlTelInput(phoneEl, {
+      initialCountry: deviceCountry(),
+      separateDialCode: true,
+      utilsScript: "https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/js/utils.js"
+    });
+  }
+
   function validate() {
     var nameOk = nameEl.value.trim().length > 0;
     var labOk = labEl.value.trim().length > 0;
     var emailOk = EMAIL_RE.test(emailEl.value.trim());
     var consentOk = consentEl.checked;
+    // Phone is optional, but if filled it must be a valid number (once utils has loaded)
+    var phoneOk = true;
+    if (phoneEl.value.trim() && iti && window.intlTelInputUtils) { phoneOk = iti.isValidNumber(); }
     gName.classList.toggle("invalid", !nameOk);
     gLab.classList.toggle("invalid", !labOk);
     gEmail.classList.toggle("invalid", !emailOk);
+    gPhone.classList.toggle("invalid", !phoneOk);
     gConsent.classList.toggle("invalid", !consentOk);
-    return nameOk && labOk && emailOk && consentOk;
+    return nameOk && labOk && emailOk && phoneOk && consentOk;
   }
 
   // Clear an error as soon as the field is corrected
-  [nameEl, labEl, emailEl].forEach(function (el) {
+  [nameEl, labEl, emailEl, phoneEl].forEach(function (el) {
     el.addEventListener("input", function () { el.closest(".group").classList.remove("invalid"); });
   });
   consentEl.addEventListener("change", function () { gConsent.classList.remove("invalid"); });
@@ -260,7 +308,7 @@ fbq('init', 'YOUR_PIXEL_ID');
     }, delay || 0);
   }
 
-  function saveLead(name, lab, email) {
+  function saveLead(name, lab, email, phone) {
     // A real form POST into a hidden iframe — no fetch, no CORS, can't be silently blocked.
     var f = document.createElement("form");
     f.action = SHEET_ENDPOINT;
@@ -274,6 +322,7 @@ fbq('init', 'YOUR_PIXEL_ID');
     add("name", name);
     add("lab", lab);
     add("email", email);
+    add("phone", phone);
     add("consent", "true");
     add("source", SOURCE);
     document.body.appendChild(f);
@@ -288,6 +337,9 @@ fbq('init', 'YOUR_PIXEL_ID');
     var name = nameEl.value.trim();
     var lab = labEl.value.trim();
     var email = emailEl.value.trim();
+    var phone = phoneEl.value.trim();
+    // Prefer the full international format (e.g. +447700900000) when available
+    if (phone && iti && iti.getNumber) { var full = iti.getNumber(); if (full) phone = full; }
 
     btn.disabled = true;
     btn.textContent = "Preparing your guides…";
@@ -296,7 +348,7 @@ fbq('init', 'YOUR_PIXEL_ID');
     var u = driveDownloadUrl(GUIDE.id);
     document.getElementById("dl1").href = u;
 
-    saveLead(name, lab, email);
+    saveLead(name, lab, email, phone);
     startDownload(u, 0);
 
     // Fire the Meta Pixel Lead conversion event
