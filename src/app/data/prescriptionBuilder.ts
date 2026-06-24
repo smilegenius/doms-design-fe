@@ -6,9 +6,10 @@
 // scoring goes "out of sync" until the lab updates it.
 import {
   MATERIAL_TYPES, TOOTH_SHADES, ORDER_TYPES, DENTURE_STAGES,
-  RETAINER_TYPES, ALIGNER_DURATIONS, APPLIANCE_NIGHT_GUARD_TYPES, IMPLANT_BRANDS,
+  RETAINER_TYPES, ALIGNER_DURATIONS, APPLIANCE_NIGHT_GUARD_TYPES,
 } from '../pages/CreateCasePage';
 import type { ScoringConfig } from './caseScoring';
+import { ALL_BRAND_LEAF_IDS } from './implantBrands';
 
 export type PrescriptionFieldType = 'teeth' | 'select' | 'multiselect' | 'toggle' | 'text' | 'files' | 'date';
 
@@ -24,9 +25,22 @@ export interface PrescriptionField {
   /** Dropdown values for select/multiselect — the lab can add/remove these. */
   options?: string[];
   hint?: string;
+  /** True for lab-authored custom questions (not one of the built-in fields).
+      Custom questions are never scoreable. */
+  custom?: boolean;
+  /** Original answer type a custom question was created with (maps onto `type`:
+      single→select, multi→multiselect, long→text). */
+  answerType?: 'single' | 'multi' | 'long';
 }
 
 export type PrescriptionConfig = Record<string, PrescriptionField[]>;
+
+// Services that capture an implant-system brand → these surface the nested
+// brand-selection tree in the Prescription Builder drawer.
+export const BRAND_SERVICES = ['Implant Abutment', 'Bridge'];
+export function isBrandService(service: string): boolean {
+  return BRAND_SERVICES.includes(service);
+}
 
 // Field templates — ids match the SCORE_FIELD_DEFS so scoring lines up 1:1.
 const F = {
@@ -41,7 +55,7 @@ const F = {
   stages:       (required = true):  PrescriptionField => ({ id: 'stages',       label: 'Stages',               type: 'multiselect', enabled: true, required, scoreable: true,  options: [...DENTURE_STAGES] }),
   // Service-specific fields — configurable in the form but not scoreable
   // (no completeness signal on persisted case data).
-  brand:           (): PrescriptionField => ({ id: 'brand',           label: 'Implant brand',     type: 'select', enabled: true, required: false, scoreable: false, options: IMPLANT_BRANDS.slice(0, 8) }),
+  brand:           (): PrescriptionField => ({ id: 'brand',           label: 'Implant brand',     type: 'select', enabled: true, required: false, scoreable: false, options: [...ALL_BRAND_LEAF_IDS] }),
   retainerType:    (): PrescriptionField => ({ id: 'retainerType',    label: 'Retainer type',     type: 'select', enabled: true, required: true,  scoreable: false, options: [...RETAINER_TYPES] }),
   alignerDuration: (): PrescriptionField => ({ id: 'alignerDuration', label: 'Aligner duration',  type: 'select', enabled: true, required: true,  scoreable: false, options: [...ALIGNER_DURATIONS] }),
   nightGuardType:  (): PrescriptionField => ({ id: 'nightGuardType',  label: 'Night guard type',  type: 'select', enabled: true, required: true,  scoreable: false, options: [...APPLIANCE_NIGHT_GUARD_TYPES] }),

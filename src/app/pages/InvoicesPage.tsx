@@ -4202,7 +4202,7 @@ function UploadInvoiceModal({ onClose, onComplete }: {
 }
 
 // ─── Main page ─────────────────────────────────────────────────────────────────
-export default function InvoicesPage({ initialFilter, initialInvoiceId, initialSupplier, onOpenCase, onInvoiceSelected, onUpdateSupplier }: { initialFilter?: InvoiceStatus | 'low_confidence' | 'left_over' | 'not_approved' | 'unpaid' | 'overdue'; initialInvoiceId?: string; initialSupplier?: string; onOpenCase?: (caseId: string) => void; onInvoiceSelected?: (id: string | null) => void; onUpdateSupplier?: (supplierId: string, patch: Partial<Supplier>) => void }) {
+export default function InvoicesPage({ initialFilter, initialInvoiceId, initialSupplier, onOpenCase, onInvoiceSelected, onUpdateSupplier, showMonthlyExports = true }: { initialFilter?: InvoiceStatus | 'low_confidence' | 'left_over' | 'not_approved' | 'unpaid' | 'overdue'; initialInvoiceId?: string; initialSupplier?: string; onOpenCase?: (caseId: string) => void; onInvoiceSelected?: (id: string | null) => void; onUpdateSupplier?: (supplierId: string, patch: Partial<Supplier>) => void; showMonthlyExports?: boolean }) {
   const [invoices, setInvoices] = useState<Invoice[]>(INVOICES);
   const isLowConfFilter = initialFilter === 'low_confidence';
   const isLeftOverFilter = initialFilter === 'left_over';
@@ -4340,8 +4340,8 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
   const [searchParams, setSearchParams] = useSearchParams();
   const paymentFolderParam = searchParams.get('paymentFolder');
   useEffect(() => {
-    if (paymentFolderParam) setPaymentDownloadOpen(true);
-  }, [paymentFolderParam]);
+    if (paymentFolderParam && showMonthlyExports) setPaymentDownloadOpen(true);
+  }, [paymentFolderParam, showMonthlyExports]);
   const closePaymentFolder = () => {
     setPaymentDownloadOpen(false);
     // Drop the deep-link param so a later manual open starts clean.
@@ -4701,10 +4701,12 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
             </p>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0 flex-wrap">
-            <Button variant="outline" icon={<FolderOpen className="w-5 h-5" />} className="whitespace-nowrap flex-1 sm:flex-initial justify-center" onClick={() => setPaymentDownloadOpen(true)}>
-              <span className="hidden sm:inline">Monthly Payment Exports</span>
-              <span className="sm:hidden">Exports</span>
-            </Button>
+            {showMonthlyExports && (
+              <Button variant="outline" icon={<FolderOpen className="w-5 h-5" />} className="whitespace-nowrap flex-1 sm:flex-initial justify-center" onClick={() => setPaymentDownloadOpen(true)}>
+                <span className="hidden sm:inline">Monthly Payment Exports</span>
+                <span className="sm:hidden">Exports</span>
+              </Button>
+            )}
             <Button variant="primary" icon={<Upload className="w-5 h-5" />} className="whitespace-nowrap flex-1 sm:flex-initial justify-center" onClick={() => setUploadModalOpen(true)}>
               <span className="hidden sm:inline">Upload Invoice</span>
               <span className="sm:hidden">Upload</span>
@@ -5358,7 +5360,7 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
         />
       )}
 
-      {paymentDownloadOpen && (
+      {showMonthlyExports && paymentDownloadOpen && (
         <PaymentDataFolderModal
           onClose={closePaymentFolder}
           invoices={invoices}

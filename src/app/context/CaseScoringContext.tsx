@@ -2,10 +2,10 @@ import { createContext, useCallback, useContext, useMemo, useState, ReactNode } 
 import {
   DEFAULT_SCORING_CONFIG, ScoringConfig, ScoreField, CaseScore,
   computeCaseScore, SCORE_FIELD_DEF_MAP,
-  DEFAULT_THRESHOLDS, ScoreThreshold, ScoreTierId,
+  DEFAULT_THRESHOLDS, ScoreThreshold, ScoreTierId, SCOREABLE_SERVICE_TYPES,
 } from '../data/caseScoring';
 import {
-  DEFAULT_PRESCRIPTION_CONFIG, PrescriptionConfig, isServiceScoringStale, staleScoringFields, scoreableFieldsFor,
+  DEFAULT_PRESCRIPTION_CONFIG, PrescriptionConfig, PrescriptionField, isServiceScoringStale, staleScoringFields, scoreableFieldsFor,
 } from '../data/prescriptionBuilder';
 import type { Case } from '../pages/CasesPage';
 
@@ -27,6 +27,17 @@ interface CaseScoringContextType {
   addPrescriptionOption: (service: string, fieldId: string, value: string) => void;
   /** Remove a dropdown option value from a prescription field. */
   removePrescriptionOption: (service: string, fieldId: string, value: string) => void;
+  /** Replace a field's options wholesale (used by the brand tree's bulk toggles). */
+  setPrescriptionOptions: (service: string, fieldId: string, options: string[]) => void;
+  /** Append a lab-authored custom question (a non-scoreable prescription field). */
+  addPrescriptionField: (service: string, field: PrescriptionField) => void;
+  /** Remove a prescription field (e.g. a custom question) from a service. */
+  removePrescriptionField: (service: string, fieldId: string) => void;
+  /** Whether the lab offers a service. Self-contained config — does NOT change
+      the case-creation catalog. */
+  serviceOffered: Record<string, boolean>;
+  /** Toggle whether a service is offered. */
+  setServiceOffered: (service: string, on: boolean) => void;
   /** Which weighted scoring fields are out of sync for a service (stale). */
   staleFieldsForService: (service: string) => string[];
   /** Is the given service's scoring out of sync with the prescription builder? */
@@ -66,6 +77,9 @@ export function CaseScoringProvider({ children }: { children: ReactNode }) {
   const [thresholds, setThresholds] = useState<ScoreThreshold[]>(() => DEFAULT_THRESHOLDS.map(t => ({ ...t })));
   const [prescription, setPrescription] = useState<PrescriptionConfig>(() =>
     Object.fromEntries(Object.entries(DEFAULT_PRESCRIPTION_CONFIG).map(([k, v]) => [k, v.map(f => ({ ...f, options: f.options ? [...f.options] : undefined }))])),
+  );
+  const [serviceOffered, setServiceOfferedState] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(SCOREABLE_SERVICE_TYPES.map(s => [s, true])),
   );
 
   const setServiceFields = useCallback((service: string, fields: ScoreField[]) => {
@@ -158,6 +172,19 @@ export function CaseScoringProvider({ children }: { children: ReactNode }) {
     setPrescription(prev => ({ ...prev, [service]: (prev[service] ?? []).map(f =>
       f.id === fieldId ? { ...f, options: (f.options ?? []).filter(o => o !== value) } : f) }));
   }, []);
+  const setPrescriptionOptions = useCallback((service: string, fieldId: string, options: string[]) => {
+    setPrescription(prev => ({ ...prev, [service]: (prev[service] ?? []).map(f =>
+      f.id === fieldId ? { ...f, options: [...options] } : f) }));
+  }, []);
+  const addPrescriptionField = useCallback((service: string, field: PrescriptionField) => {
+    setPrescription(prev => ({ ...prev, [service]: [...(prev[service] ?? []), { ...field, options: field.options ? [...field.options] : undefined }] }));
+  }, []);
+  const removePrescriptionField = useCallback((service: string, fieldId: string) => {
+    setPrescription(prev => ({ ...prev, [service]: (prev[service] ?? []).filter(f => f.id !== fieldId) }));
+  }, []);
+  const setServiceOffered = useCallback((service: string, on: boolean) => {
+    setServiceOfferedState(prev => ({ ...prev, [service]: on }));
+  }, []);
 
   const staleFieldsForService = useCallback((service: string) => staleScoringFields(service, config, prescription), [config, prescription]);
   const isServiceStale = useCallback((service: string) => isServiceScoringStale(service, config, prescription), [config, prescription]);
@@ -166,6 +193,7 @@ export function CaseScoringProvider({ children }: { children: ReactNode }) {
     setConfig(Object.fromEntries(Object.entries(DEFAULT_SCORING_CONFIG).map(([k, v]) => [k, v.map(f => ({ ...f }))])));
     setThresholds(DEFAULT_THRESHOLDS.map(t => ({ ...t })));
     setPrescription(Object.fromEntries(Object.entries(DEFAULT_PRESCRIPTION_CONFIG).map(([k, v]) => [k, v.map(f => ({ ...f, options: f.options ? [...f.options] : undefined }))])));
+    setServiceOfferedState(Object.fromEntries(SCOREABLE_SERVICE_TYPES.map(s => [s, true])));
   }, []);
 
   const scoreCase = useCallback(
@@ -175,15 +203,17 @@ export function CaseScoringProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
-      config, thresholds, prescription,
+      config, thresholds, prescription, serviceOffered,
       setPrescriptionEnabled, setPrescriptionRequired, addPrescriptionOption, removePrescriptionOption,
+      setPrescriptionOptions, addPrescriptionField, removePrescriptionField, setServiceOffered,
       staleFieldsForService, isServiceStale,
       setFieldWeight, toggleField, setServiceFields, clearService, setServiceScoringEnabled, isServiceScored,
       setThresholdUpTo, toggleThreshold, setThresholdLabel, resetDefaults, scoreCase,
     }),
     [
-      config, thresholds, prescription,
+      config, thresholds, prescription, serviceOffered,
       setPrescriptionEnabled, setPrescriptionRequired, addPrescriptionOption, removePrescriptionOption,
+      setPrescriptionOptions, addPrescriptionField, removePrescriptionField, setServiceOffered,
       staleFieldsForService, isServiceStale,
       setFieldWeight, toggleField, setServiceFields, clearService, setServiceScoringEnabled, isServiceScored,
       setThresholdUpTo, toggleThreshold, setThresholdLabel, resetDefaults, scoreCase,

@@ -189,6 +189,7 @@ export default function ClinicApp() {
         <InvoicesPage
           initialInvoiceId={invoiceInitialId}
           initialFilter={invoiceFilter as any}
+          showMonthlyExports={false}
           onOpenCase={(caseId) => { setActivePage('cases', caseId); toast.success(`Opening ${caseId}`); }}
           onInvoiceSelected={(invoiceId) => {
             if (invoiceId) setActivePage('invoices', invoiceId);

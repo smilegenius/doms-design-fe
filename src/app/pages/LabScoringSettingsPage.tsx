@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
   Sliders, Gauge, FileText, RotateCcw, CheckCircle2, Info, Sparkles, Save,
-  ChevronDown, AlertTriangle, Plus, X, FolderKanban, Mail, Copy, Check,
+  ChevronDown, AlertTriangle, Plus, X, FolderKanban, Mail, Copy, Check, Pencil,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
+import ServiceConfigDrawer from './ServiceConfigDrawer';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import { SCOREABLE_SERVICE_TYPES, SERVICE_GROUPS, TIER_BAND, ScoreBand, SCORE_FIELD_DEF_MAP, MISSING_INFO_EMAIL, MISSING_INFO_EMAIL_PLACEHOLDERS } from '../data/caseScoring';
@@ -39,7 +40,7 @@ const TYPE_LABEL: Record<PrescriptionField['type'], string> = {
 type Section = 'prescription' | 'scoring';
 type ServiceStatus = 'stale' | 'scored' | 'unscored';
 
-function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }) {
+export function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
@@ -59,7 +60,7 @@ function StatusDot({ status }: { status: ServiceStatus }) {
   return <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cls}`} />;
 }
 
-function AddOption({ onAdd }: { onAdd: (v: string) => void }) {
+export function AddOption({ onAdd }: { onAdd: (v: string) => void }) {
   const [v, setV] = useState('');
   const commit = () => { if (v.trim()) { onAdd(v.trim()); setV(''); } };
   return (
@@ -81,8 +82,9 @@ function AddOption({ onAdd }: { onAdd: (v: string) => void }) {
 export default function LabScoringSettingsPage() {
   const { toast } = useToast();
   const {
-    config, thresholds, prescription,
+    config, thresholds, prescription, serviceOffered,
     setPrescriptionEnabled, setPrescriptionRequired, addPrescriptionOption, removePrescriptionOption,
+    setPrescriptionOptions, addPrescriptionField, removePrescriptionField, setServiceOffered,
     staleFieldsForService, isServiceStale,
     toggleField, setFieldWeight, clearService, resetDefaults, setServiceScoringEnabled,
     setThresholdUpTo, toggleThreshold, setThresholdLabel,
@@ -91,6 +93,8 @@ export default function LabScoringSettingsPage() {
   const [section, setSection] = useState<Section>('prescription');
   const [scoringTab, setScoringTab] = useState<'weights' | 'thresholds' | 'email'>('weights');
   const [activeService, setActiveService] = useState<string>(SCOREABLE_SERVICE_TYPES[0]);
+  // The service whose "Configure" drawer is open (null = closed).
+  const [configService, setConfigService] = useState<string | null>(null);
 
   // ── Auto-email config (local — prototype) ──
   const [emailEnabled, setEmailEnabled] = useState(true);
@@ -274,90 +278,73 @@ export default function LabScoringSettingsPage() {
                 </span>
                 <div className="text-xs text-[#3A4A63] leading-relaxed">
                   <span className="font-semibold text-[#1565C0]">Prescription Builder.</span>{' '}
-                  These are the fields a clinic fills in when creating a case. Turn fields on/off, mark them
-                  required, and edit the dropdown values. Fields tagged <span className="font-semibold">Scored</span> feed Case Scoring.
+                  Turn the services your lab offers on or off. Click <span className="font-semibold">Edit</span> (or a service)
+                  to configure its prescription — fields, material types, implant brands and custom questions.
+                  Fields tagged <span className="font-semibold">Scored</span> feed Case Scoring.
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-4">
-                {serviceSelector}
-                <div className="flex-1 min-w-0 bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
-                  <div className="px-5 py-3.5 border-b border-[#F0EFF6] flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-[#030213]">{activeService}</p>
-                      <p className="text-[11px] text-[#717182] mt-0.5">
-                        {SERVICE_CASE_COUNTS[activeService] ?? 0} case{(SERVICE_CASE_COUNTS[activeService] ?? 0) === 1 ? '' : 's'} ·{' '}
-                        {fields.filter(f => f.enabled).length} of {fields.length} fields on
-                      </p>
-                    </div>
+              {/* Offered-services list — click a service (or Edit) to configure it. */}
+              <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-[#F0EFF6] flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[#030213]">Services</p>
+                    <p className="text-[11px] text-[#717182] mt-0.5">
+                      {SCOREABLE_SERVICE_TYPES.filter(s => serviceOffered[s] !== false).length} of {SCOREABLE_SERVICE_TYPES.length} offered
+                    </p>
                   </div>
-
-                  <div className="divide-y divide-[#F6F6F9]">
-                    {fields.map((field) => {
-                      const weighted = isWeighted(field.id);
-                      return (
-                        <div key={field.id} className="px-5 py-3">
-                          <div className="flex items-center gap-3">
-                            <Toggle
-                              on={field.enabled}
-                              onClick={() => {
-                                const turningOff = field.enabled;
-                                if (turningOff && field.scoreable && weighted) {
-                                  toast.error(`"${field.label}" is used in Case Scoring — scoring for ${activeService} will go out of sync.`);
-                                }
-                                setPrescriptionEnabled(activeService, field.id, !field.enabled);
-                              }}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`text-sm ${field.enabled ? 'text-[#030213] font-medium' : 'text-[#A0A0B0]'}`}>{field.label}</span>
-                                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#F3F3F5] text-[#8B8B9E]">{TYPE_LABEL[field.type]}</span>
-                                {field.scoreable && weighted && (
-                                  <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">Scored</span>
-                                )}
-                              </div>
-                              {field.hint && <span className="block text-[10px] text-[#A0A0B0] mt-0.5">{field.hint}</span>}
-                            </div>
-                            {/* Required / Optional */}
-                            <button
-                              type="button"
-                              disabled={!field.enabled}
-                              onClick={() => setPrescriptionRequired(activeService, field.id, !field.required)}
-                              className={`text-[10px] font-semibold px-2 py-1 rounded-md border transition-colors flex-shrink-0 ${
-                                !field.enabled
-                                  ? 'opacity-40 cursor-not-allowed border-[#EEEEF2] text-[#C0C0CC]'
-                                  : field.required
-                                    ? 'bg-[#FFF7ED] text-[#C2410C] border-[#FED7AA] hover:bg-[#FFEDD5]'
-                                    : 'bg-[#F8F9FC] text-[#717182] border-[#E0E0E6] hover:border-[#4D8EF7]'
+                  <button
+                    onClick={() => setConfigService(SCOREABLE_SERVICE_TYPES.find(s => serviceOffered[s] !== false) ?? SCOREABLE_SERVICE_TYPES[0])}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity flex-shrink-0"
+                  >
+                    <Pencil className="w-3.5 h-3.5" /> Edit
+                  </button>
+                </div>
+                <div className="p-3 space-y-3">
+                  {SERVICE_GROUPS.map((group) => (
+                    <div key={group.category}>
+                      <p className="px-1 pb-1.5 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest">{group.category}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {group.services.map((service) => {
+                          const offered = serviceOffered[service] !== false;
+                          const flds = prescription[service] ?? [];
+                          const onCount = flds.filter(f => f.enabled).length;
+                          const scored = (config[service] ?? []).some(f => f.weight > 0);
+                          const stale = isServiceStale(service);
+                          return (
+                            <div
+                              key={service}
+                              className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border transition-colors ${
+                                offered ? 'border-[#E0E0E6] bg-white hover:border-[#C8D8FC]' : 'border-[#EEEEF2] bg-[#FAFBFC] opacity-70'
                               }`}
                             >
-                              {field.required ? 'Required' : 'Optional'}
-                            </button>
-                          </div>
-
-                          {/* Dropdown options editor */}
-                          {field.enabled && (field.type === 'select' || field.type === 'multiselect') && field.options && (
-                            <div className="mt-2 ml-12 flex flex-wrap gap-1.5 items-center">
-                              {field.options.map((opt) => (
-                                <span key={opt} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-[#F3F3F5] text-[#5A5568] border border-[#E8E8EC]">
-                                  {opt}
-                                  <button type="button" onClick={() => removePrescriptionOption(activeService, field.id, opt)} className="text-[#A0A0B0] hover:text-[#D4183D]" title="Remove value">
-                                    <X className="w-2.5 h-2.5" />
-                                  </button>
+                              <button onClick={() => setConfigService(service)} className="flex-1 min-w-0 flex items-center gap-2.5 text-left">
+                                <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#EEF4FF] to-[#F5F3FF] border border-[#DBEAFE] flex items-center justify-center flex-shrink-0 text-[11px] font-bold text-[#4D8EF7]">
+                                  {service.charAt(0)}
                                 </span>
-                              ))}
-                              <AddOption onAdd={(v) => addPrescriptionOption(activeService, field.id, v)} />
+                                <span className="min-w-0">
+                                  <span className="block text-sm font-medium text-[#030213] truncate">{service}</span>
+                                  <span className="block text-[10px] text-[#A0A0B0]">
+                                    {onCount} field{onCount === 1 ? '' : 's'} on
+                                    {scored && <span className="text-[#1565C0] font-semibold"> · Scored</span>}
+                                    {stale && <span className="text-[#B45309] font-semibold"> · Out of sync</span>}
+                                  </span>
+                                </span>
+                              </button>
+                              <button
+                                onClick={() => setConfigService(service)}
+                                title="Configure prescription"
+                                className="p-1.5 rounded-lg text-[#717182] hover:text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors flex-shrink-0"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <Toggle on={offered} onClick={() => setServiceOffered(service, !offered)} />
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="px-5 py-3 border-t border-[#F0EFF6] flex items-center gap-1.5 text-[11px] text-[#717182]">
-                    <Info className="w-3.5 h-3.5 text-[#A0A0B0]" />
-                    Disabling a <span className="font-semibold text-[#1565C0]">Scored</span> field affects Case Scoring — you'll be alerted.
-                  </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </>
@@ -856,6 +843,15 @@ export default function LabScoringSettingsPage() {
           </div>
         </section>
       </div>
+
+      {/* Configure services & prescriptions — side drawer (opened from the list) */}
+      {configService && (
+        <ServiceConfigDrawer
+          service={configService}
+          onSelectService={setConfigService}
+          onClose={() => setConfigService(null)}
+        />
+      )}
     </div>
   );
 }
