@@ -103,6 +103,10 @@ export interface Case {
   // "View Archived" toggle. Orthogonal to lifecycle `status`, so any case
   // (draft, in-production, completed…) can be archived and later restored.
   archived?: boolean;
+  // Demo seed (lab only): opening this case always surfaces the plan-limit
+  // upgrade paywall, regardless of how many cases have been viewed. Used to
+  // showcase the upgrade popup as the first received case in the lab portal.
+  forceUpgrade?: boolean;
 }
 
 type ViewMode = 'table' | 'grid';
@@ -298,6 +302,40 @@ export const mockCases: Case[] = Array.from({ length: 50 }, (_, i) => {
     source: 'scanner',
   };
 });
+
+// ── Upgrade-paywall demo case (lab only) ────────────────────────────────────
+// A freshly received case that always triggers the plan-limit upgrade popup
+// when opened. Dated today so it sorts to the very top of the lab list under
+// the default "created-newest" order — the first case a viewer clicks.
+export const upgradeDemoCase: Case = {
+  id: 'CASE-RX-1042',
+  patientName: 'Grace Bennett',
+  practice: 'Smile Genius London Central',
+  dentist: 'Dr. White',
+  lab: 'Smile Genius Lab',
+  services: ['Crown'],
+  serviceItems: [{
+    id: 'rx1042-s1',
+    name: 'Crown',
+    status: 'new',
+    deliveryDate: null,
+    fdi: [26],
+    material: 'E.max',
+    shade: 'A2',
+    orderType: 'Private',
+    instructions: 'Single crown UL6. Match shade A2 to adjacent.',
+    scanFileCount: 2,
+    attachmentCount: 1,
+  }],
+  status: 'new',
+  createdAt: '29-Jun-2026',
+  updatedAt: '29-Jun-2026',
+  requestedDelivery: '10-Jul-2026',
+  hasAlert: false,
+  scanner: 'iTero',
+  source: 'scanner',
+  forceUpgrade: true,
+};
 
 // ── Email + manual draft cases ───────────────────────────────────────────────
 // Sit at the top of the list (most recent first) so the inbox-fetched cases
@@ -838,7 +876,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
 } = {}) {
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
-  const [cases, setCases] = useState<Case[]>(mockCases);
+  // Plan-limited portals (the lab) lead with the upgrade-paywall demo case so
+  // the very first case opened showcases the upgrade popup.
+  const [cases, setCases] = useState<Case[]>(() => caseViewLimit != null ? [upgradeDemoCase, ...mockCases] : mockCases);
   const [showArchived, setShowArchived] = useState(false);
   const [selectedCase, setSelectedCase] = useState<Case | null>(() => {
     if (initialCaseId) {
@@ -1076,6 +1116,13 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     // pre-filled (in draft state) instead of the read-only Case Detail page.
     if (c.status === 'draft' && onOpenDraft) {
       onOpenDraft(c);
+      return;
+    }
+    // Demo seed: this case always surfaces the upgrade popup, so it works as a
+    // standalone showcase even before the view quota is reached.
+    if (c.forceUpgrade) {
+      setSelectedCase(c);
+      setUpgradeOpen(true);
       return;
     }
     // Plan-limit paywall: once the lab has viewed its quota of distinct cases,
