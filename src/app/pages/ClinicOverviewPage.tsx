@@ -60,13 +60,16 @@ export default function ClinicOverviewPage({ onOpenCases, onCreateCase, onOpenIn
     { label: 'Overdue', value: fmt(3100), color: '#BE123C', onClick: () => onOpenInvoices?.('overdue') },
   ];
 
-  // Case operations — where the practice's lab work stands today.
+  // Case operations — every tile is an "attention" metric: it gets a red outline
+  // when it holds anything, and greys out (cleared / on-track) when it reads 0.
+  // The exception is Cases submitted, a neutral throughput KPI. Beyond delivery
+  // date is shown at 0 to demonstrate the cleared/greyscale state.
   const caseOps: TileProps[] = [
-    { label: 'Cases submitted',     icon: <Layers className="w-4 h-4" />,        accent: '#4D8EF7', value: '128', delta: '+12%', sub: 'Est. £18,450 · £144 avg / case',   onClick: onOpenCases },
-    { label: 'On hold',             icon: <PauseCircle className="w-4 h-4" />,    accent: '#E65100', value: '14',  sub: '9 awaiting clinic · oldest 12 days',            onClick: onOpenCases },
-    { label: 'Approaching delivery',icon: <CalendarClock className="w-4 h-4" />,  accent: '#7C3AED', value: '23',  sub: '£4,250 value · due tomorrow',                   onClick: onOpenCases },
-    { label: 'Beyond delivery date',icon: <CalendarX2 className="w-4 h-4" />,     accent: '#D4183D', alert: true, value: '7',  sub: '£1,850 delayed · 4-day avg delay',  onClick: onOpenCases },
-    { label: 'Case not approved',   icon: <XCircle className="w-4 h-4" />,        accent: '#D4183D', alert: true, value: '5',  sub: '£950 affected · resubmit to lab',   onClick: onOpenCases },
+    { label: 'Cases submitted',     icon: <Layers className="w-4 h-4" />,       accent: '#4D8EF7', value: '128', delta: '+12%', sub: 'Est. £18,450 · £144 avg / case', onClick: onOpenCases },
+    { label: 'On hold',             icon: <PauseCircle className="w-4 h-4" />,   attention: true, value: '14', sub: '9 awaiting clinic · oldest 12 days', onClick: onOpenCases },
+    { label: 'Approaching delivery',icon: <CalendarClock className="w-4 h-4" />, attention: true, value: '23', sub: '£4,250 value · due tomorrow',        onClick: onOpenCases },
+    { label: 'Beyond delivery date',icon: <CalendarX2 className="w-4 h-4" />,    attention: true, value: '0',  sub: 'None past delivery — all on track',   onClick: onOpenCases },
+    { label: 'Case not approved',   icon: <XCircle className="w-4 h-4" />,       attention: true, value: '5',  sub: '£950 affected · resubmit to lab',     onClick: onOpenCases },
   ];
 
   // Priority to-do list — what to action next.
@@ -348,29 +351,33 @@ function MiniStat({ label, value, delta, sub, onClick }: {
 interface TileProps {
   label: string;
   icon: ReactNode;
-  accent: string;
+  accent?: string;
   value: string;
   delta?: string;
   sub: string;
   onClick?: () => void;
-  alert?: boolean;
+  // Attention metric: red outline + red icon while it holds anything, greyscale
+  // ("cleared / on-track") the moment its value reads 0.
+  attention?: boolean;
 }
 
 // Compact KPI tile — the same anatomy as the Lab overview StatCard: label + value
 // on the left, the icon in a soft circle on the right, both sub-metrics folded
-// into one faint line. Alerts read as a red border (the number stays neutral).
-function StatTile({ label, icon, accent, value, delta, sub, onClick, alert }: TileProps) {
-  const tone = alert ? '#D4183D' : accent;
+// into one faint line.
+function StatTile({ label, icon, accent = '#4D8EF7', value, delta, sub, onClick, attention }: TileProps) {
+  const numeric = parseFloat(value.replace(/[^0-9.-]/g, '')) || 0;
+  const clear = attention && numeric === 0;   // resolved → greyscale
+  const risk = attention && numeric !== 0;    // active → red outline
+  const border = risk ? 'border-2 border-[#F87171]' : clear ? 'border border-[#E5E5EA]' : 'border border-[#E0E0E6]';
+  const iconTone = risk ? '#D4183D' : clear ? '#A0A0B0' : accent;
+  const hover = onClick ? (attention ? 'hover:shadow-md' : 'hover:shadow-md hover:border-[#D4CEE1]') : '';
   return (
-    <button
-      onClick={onClick}
-      className={`bg-white rounded-xl border p-4 text-left transition-all ${alert ? 'border-[#FECACA]' : 'border-[#E0E0E6]'} ${onClick ? 'hover:shadow-md hover:border-[#D4CEE1]' : ''}`}
-    >
+    <button onClick={onClick} className={`bg-white rounded-xl p-4 text-left transition-all ${border} ${hover}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-xs text-[#717182] truncate">{label}</p>
+          <p className={`text-xs truncate ${clear ? 'text-[#A0A0B0]' : 'text-[#717182]'}`}>{label}</p>
           <div className="flex items-baseline gap-1.5 mt-1.5 flex-wrap">
-            <span className="text-xl font-semibold text-[#030213] leading-none">{value}</span>
+            <span className={`text-xl font-semibold leading-none ${clear ? 'text-[#A0A0B0]' : 'text-[#030213]'}`}>{value}</span>
             {delta && (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#F0FDF4] text-[#2E7D32]">
                 <TrendingUp className="w-2.5 h-2.5" />{delta}
@@ -379,7 +386,7 @@ function StatTile({ label, icon, accent, value, delta, sub, onClick, alert }: Ti
           </div>
           <p className="text-[11px] text-[#A0A0B0] mt-1.5 leading-snug">{sub}</p>
         </div>
-        <span className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: tone + '1A', color: tone }}>
+        <span className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: iconTone + (clear ? '14' : '1A'), color: iconTone }}>
           {icon}
         </span>
       </div>
