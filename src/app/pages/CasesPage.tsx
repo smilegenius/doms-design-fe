@@ -1418,11 +1418,16 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                   const isExpanded = expandedRows.has(c.id);
                   const isMulti = c.serviceItems.length > 1;
                   const caseScore = scoreCase(c);
+                  // Plan-limit teaser (lab): the paywalled demo case appears in the
+                  // list with its data blurred and an "Upgrade plan" CTA where the
+                  // status would be. Clicking anywhere raises the upgrade modal.
+                  const locked = c.forceUpgrade === true;
+                  const lockBlur = locked ? 'blur-[3px] select-none pointer-events-none' : '';
                   return (
                     <React.Fragment key={c.id}>
                     {/* ── Parent row ── */}
                     <tr onClick={() => openCase(c)} className="bg-white hover:bg-[#F8F9FC] transition-colors cursor-pointer relative [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]">
-                      <td className="pl-3 pr-2 py-3 relative">
+                      <td className={`pl-3 pr-2 py-3 relative ${lockBlur}`}>
                         {(() => {
                           const hasScans = (c.serviceItems[0]?.scanFileCount ?? 0) > 0;
                           // Email cases carrying scanner scans (e.g. iTero) show
@@ -1435,7 +1440,14 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                       </td>
                       {visibleCols.status && (
                         <td className="px-4 py-3 whitespace-nowrap">
-                          {isMulti ? (
+                          {locked ? (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openCase(c); }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity whitespace-nowrap shadow-sm"
+                            >
+                              <Sparkles className="w-3 h-3" /> Upgrade plan
+                            </button>
+                          ) : isMulti ? (
                             /* Count chip — replaces status badge; click to expand/collapse */
                             <button
                               onClick={(e) => { e.stopPropagation(); toggleRow(c.id); }}
@@ -1450,30 +1462,30 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                           ) : (
                             <StatusBadge status={c.status} />
                           )}
-                          {c.statusOverride && (
+                          {!locked && c.statusOverride && (
                             <div className="mt-1"><OverrideTag override={c.statusOverride} /></div>
                           )}
-                          {!visibleCols.caseId && (
+                          {!locked && !visibleCols.caseId && (
                             <div className="text-[11px] font-semibold text-[#030213] mt-1">{c.id}</div>
                           )}
                         </td>
                       )}
                       {visibleCols.score && (
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className={`px-4 py-3 whitespace-nowrap ${lockBlur}`}>
                           <ScoreBadge score={caseScore} onFix={onConfigureScoring} withDetails />
                         </td>
                       )}
                       {visibleCols.caseId && (
-                        <td className="px-4 py-3 text-xs font-semibold text-[#030213] whitespace-nowrap">{c.id}</td>
+                        <td className={`px-4 py-3 text-xs font-semibold text-[#030213] whitespace-nowrap ${lockBlur}`}>{c.id}</td>
                       )}
                       {visibleCols.createdAt && (
-                        <td className="px-4 py-3 text-xs text-[#030213] whitespace-nowrap">{c.createdAt}</td>
+                        <td className={`px-4 py-3 text-xs text-[#030213] whitespace-nowrap ${lockBlur}`}>{c.createdAt}</td>
                       )}
                       {visibleCols.updatedAt && (
-                        <td className="px-4 py-3 text-xs text-[#717182] whitespace-nowrap">{c.updatedAt}</td>
+                        <td className={`px-4 py-3 text-xs text-[#717182] whitespace-nowrap ${lockBlur}`}>{c.updatedAt}</td>
                       )}
                       {visibleCols.deliveryDate && (
-                        <td className="px-4 py-3 whitespace-nowrap text-xs">
+                        <td className={`px-4 py-3 whitespace-nowrap text-xs ${lockBlur}`}>
                           {c.requestedDelivery ? (
                             overdue
                               ? <span className="font-semibold text-[#D4183D]">{c.requestedDelivery}</span>
@@ -1487,7 +1499,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                         </td>
                       )}
                       {visibleCols.service && (
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className={`px-4 py-3 whitespace-nowrap ${lockBlur}`}>
                           <span className="text-xs text-[#5A5568]">{c.services[0]}</span>
                         </td>
                       )}
@@ -1503,11 +1515,11 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                         </td>
                       )}
                       {visibleCols.lab && (
-                        <td className="px-4 py-3">
+                        <td className={`px-4 py-3 ${lockBlur}`}>
                           <span title={c.lab} className="block text-xs text-[#030213] truncate max-w-[140px]">{c.lab}</span>
                         </td>
                       )}
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className={`px-4 py-3 ${lockBlur}`} onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
                           {/* Email-thread indicator — email/iTero cases carry a reply
                               from the dentist; a red dot flags the unread thread. */}

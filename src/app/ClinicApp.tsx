@@ -170,6 +170,7 @@ export default function ClinicApp() {
           onCreateCase={() => setActivePage('quick-create-case')}
           onOpenInvoices={(filter) => goToInvoices(filter)}
           onOpenAnalytics={() => setActivePage('analytics')}
+          onOpenMessages={() => setActivePage('messages')}
         />
       )}
       {activePage === 'analytics' && (
