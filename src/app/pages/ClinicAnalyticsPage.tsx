@@ -39,7 +39,7 @@ const SUBTITLE: Record<Tab, string> = {
   intelligence: 'Your invoice pipeline — received, approved, paid and what needs action.',
   spend:        'What your practice buys, by month and category.',
   suppliers:    'Who you buy from — dental labs and general suppliers.',
-  clinical:     'Lab performance, financial exposure and six-month trends.',
+  clinical:     'Lab performance and six-month clinical trends.',
 };
 
 // ── Invoice Intelligence — clinic AP pipeline (counts + £) ────────────────────
@@ -143,17 +143,8 @@ const CATEGORY_SPEND = [
   { label: 'Equipment',   amount: 1480, color: '#A59DFF' },
 ];
 
-// ── Clinical — financial exposure pipeline + trends (moved off the dashboard) ─
-const OPEN_EXPOSURE = 20400;
-const FINANCE_BUCKETS = [
-  { label: 'Needs review', value: 5800, count: 18, color: '#E65100', filter: 'qc_review' },
-  { label: 'Disputed',     value: 1150, count: 6,  color: '#D4183D', filter: 'disputed' },
-  { label: 'Rejected',     value: 1900, count: 8,  color: '#F87171', filter: 'rejected' },
-  { label: 'To pay',       value: 8450, count: 24, color: '#4D8EF7', filter: 'unpaid' },
-  { label: 'Overdue',      value: 3100, count: 9,  color: '#BE123C', filter: 'overdue' },
-];
-const EXPOSURE_COUNT = FINANCE_BUCKETS.reduce((s, b) => s + b.count, 0);
-
+// ── Trends (six-month, mock) — split across the Invoice Intelligence and
+// Clinical tabs. Financial control now lives back on the dashboard. ──────────
 const CLINICAL_TREND = [82, 95, 101, 98, 112, 128];                 // cases submitted / month
 const FINANCIAL_TREND = [27, 29, 31, 30, 33, 34.25];               // invoice value £k / month
 const PAYMENT_TREND = [                                             // paid vs outstanding £k
@@ -332,6 +323,19 @@ export default function ClinicAnalyticsPage({ onOpenInvoices }: {
               ))}
             </div>
           </Card>
+
+          {/* Invoice value & payment trends */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <ChartCard title="Financial trend" subtitle="Invoice value per month (£)">
+              <AreaChart data={FINANCIAL_TREND} max={Math.max(...FINANCIAL_TREND) * 1.12} />
+            </ChartCard>
+            <ChartCard
+              title="Payment trend" subtitle="Paid vs outstanding (£)"
+              legend={<><LegendDot color="#34D399" label="Paid" /><LegendDot color="#FB923C" label="Outstanding" /></>}
+            >
+              <StackedBars data={PAYMENT_TREND} max={Math.max(...PAYMENT_TREND.map(p => p.paid + p.out)) * 1.1} />
+            </ChartCard>
+          </div>
         </>
       )}
 
@@ -545,58 +549,12 @@ export default function ClinicAnalyticsPage({ onOpenInvoices }: {
             </Card>
           </div>
 
-          {/* Financial control — concise exposure pipeline */}
-          <section>
-            <SectionLabel info="Total exposure across the invoice lifecycle — review, approve, pay.">Financial control</SectionLabel>
-            <div className="bg-white border border-[#E0E0E6] rounded-xl p-5">
-              <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0]">Open exposure</p>
-                  <div className="flex items-baseline gap-2 mt-1">
-                    <span className="text-3xl font-bold text-[#030213] leading-none">{fmt(OPEN_EXPOSURE)}</span>
-                    <span className="text-[11px] text-[#717182]">{EXPOSURE_COUNT} invoices unsettled</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-6">
-                  <MiniStat label="Total invoiced" value="£34,250" delta="+8%" onClick={() => onOpenInvoices?.()} />
-                  <MiniStat label="Paid this month" value="£21,450" sub="94% on-time" onClick={() => onOpenInvoices?.('payment_processed')} />
-                </div>
-              </div>
-
-              <div className="mt-4 flex h-2.5 rounded-full overflow-hidden gap-0.5 bg-[#F3F3F5]">
-                {FINANCE_BUCKETS.map((b) => (
-                  <div key={b.label} title={`${b.label}: ${fmt(b.value)}`} style={{ flexGrow: b.value, background: b.color }} />
-                ))}
-              </div>
-
-              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8">
-                {FINANCE_BUCKETS.map((b) => (
-                  <button key={b.label} onClick={() => onOpenInvoices?.(b.filter)} className="flex items-center gap-2.5 py-1.5 text-left group border-b border-[#F6F5FA] last:border-0 sm:[&:nth-last-child(2)]:border-0">
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color }} />
-                    <span className="text-xs text-[#030213] flex-1 truncate group-hover:text-[#4D8EF7] transition-colors">{b.label}</span>
-                    <span className="text-[11px] text-[#A0A0B0] tabular-nums">{b.count} inv</span>
-                    <span className="text-xs font-semibold text-[#030213] tabular-nums w-14 text-right">{fmt(b.value)}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
-
           {/* Trends & performance */}
           <section>
-            <SectionLabel info="Six-month view of clinical throughput, spend and delivery reliability.">Trends &amp; performance</SectionLabel>
+            <SectionLabel info="Six-month view of clinical throughput and delivery reliability.">Trends &amp; performance</SectionLabel>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <ChartCard title="Clinical trend" subtitle="Cases submitted per month">
                 <BarChart data={CLINICAL_TREND} max={Math.max(...CLINICAL_TREND) * 1.12} />
-              </ChartCard>
-              <ChartCard title="Financial trend" subtitle="Invoice value per month (£)">
-                <AreaChart data={FINANCIAL_TREND} max={Math.max(...FINANCIAL_TREND) * 1.12} />
-              </ChartCard>
-              <ChartCard
-                title="Payment trend" subtitle="Paid vs outstanding (£)"
-                legend={<><LegendDot color="#34D399" label="Paid" /><LegendDot color="#FB923C" label="Outstanding" /></>}
-              >
-                <StackedBars data={PAYMENT_TREND} max={Math.max(...PAYMENT_TREND.map(p => p.paid + p.out)) * 1.1} />
               </ChartCard>
               <ChartCard
                 title="Delivery performance" subtitle="On-time vs delayed cases"
@@ -783,21 +741,6 @@ function InfoTip({ text }: { text: string }) {
         {text}
       </span>
     </span>
-  );
-}
-
-function MiniStat({ label, value, delta, sub, onClick }: {
-  label: string; value: string; delta?: string; sub?: string; onClick?: () => void;
-}) {
-  return (
-    <button onClick={onClick} className="text-left group">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-[#A0A0B0]">{label}</p>
-      <div className="flex items-baseline gap-1 mt-0.5">
-        <span className="text-base font-bold text-[#030213] group-hover:text-[#4D8EF7] transition-colors">{value}</span>
-        {delta && <span className="text-[10px] font-semibold text-[#2E7D32]">{delta}</span>}
-      </div>
-      {sub && <p className="text-[10px] text-[#A0A0B0] mt-0.5">{sub}</p>}
-    </button>
   );
 }
 

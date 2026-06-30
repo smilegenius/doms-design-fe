@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from 'react';
 import {
   Sparkles, ArrowRight, FolderKanban, Plus, Wallet,
-  CheckCircle2, FileText, Layers, PauseCircle, CalendarClock,
+  CheckCircle2, FileText, PauseCircle,
   CalendarX2, XCircle, MessageSquare, TrendingUp, Info,
-  Reply, Check, Send,
+  Reply, Check, Send, FilePen,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -21,9 +21,17 @@ function fmt(n: number) {
   return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(n);
 }
 
-// Open financial exposure — referenced in the hero headline only; the full
-// pipeline breakdown now lives on Analytics ▸ Clinical.
+// Open financial exposure + the five invoice-lifecycle buckets that make it up
+// (values sum to OPEN_EXPOSURE). Each row deep-links to the filtered invoices.
 const OPEN_EXPOSURE = 20400;
+const FINANCE_BUCKETS = [
+  { label: 'Needs review', value: 5800, count: 18, color: '#E65100', filter: 'qc_review' },
+  { label: 'Disputed',     value: 1150, count: 6,  color: '#D4183D', filter: 'disputed' },
+  { label: 'Rejected',     value: 1900, count: 8,  color: '#F87171', filter: 'rejected' },
+  { label: 'To pay',       value: 8450, count: 24, color: '#4D8EF7', filter: 'unpaid' },
+  { label: 'Overdue',      value: 3100, count: 9,  color: '#BE123C', filter: 'overdue' },
+];
+const EXPOSURE_COUNT = FINANCE_BUCKETS.reduce((s, b) => s + b.count, 0);
 
 // Unread inbox preview — mirrors the conversations on the Messages page.
 type ConvType = 'Clinic' | 'Lab' | 'Supplier';
@@ -85,16 +93,15 @@ export default function ClinicOverviewPage({ onOpenCases, onCreateCase, onOpenIn
     { label: 'Overdue', value: fmt(3100), color: '#BE123C', onClick: () => onOpenInvoices?.('overdue') },
   ];
 
-  // Case operations — every tile is an "attention" metric: it gets a red outline
-  // when it holds anything, and greys out (cleared / on-track) when it reads 0.
-  // The exception is Cases submitted, a neutral throughput KPI. Beyond delivery
-  // date is shown at 0 to demonstrate the cleared/greyscale state.
+  // Needs action — cases. Each tile is something waiting on the clinic to move
+  // forward. Draft is the calm "pre-submission" stage (neutral accent); the
+  // other three are attention metrics — red outline while they hold anything,
+  // greyscale ("cleared / on-track") the moment they read 0.
   const caseOps: TileProps[] = [
-    { label: 'Cases submitted',     icon: <Layers className="w-4 h-4" />,       accent: '#4D8EF7', value: '128', delta: '+12%', sub: 'Est. £18,450 · £144 avg / case', onClick: onOpenCases },
-    { label: 'On hold',             icon: <PauseCircle className="w-4 h-4" />,   attention: true, value: '14', sub: '9 awaiting clinic · oldest 12 days', onClick: onOpenCases },
-    { label: 'Approaching delivery',icon: <CalendarClock className="w-4 h-4" />, attention: true, value: '23', sub: '£4,250 value · due tomorrow',        onClick: onOpenCases },
-    { label: 'Beyond delivery date',icon: <CalendarX2 className="w-4 h-4" />,    attention: true, value: '0',  sub: 'None past delivery — all on track',   onClick: onOpenCases },
-    { label: 'Case not approved',   icon: <XCircle className="w-4 h-4" />,       attention: true, value: '5',  sub: '£950 affected · resubmit to lab',     onClick: onOpenCases },
+    { label: 'Draft',               icon: <FilePen className="w-4 h-4" />,     accent: '#7C3AED', value: '6',  sub: '£880 value · oldest draft 3 days',       onClick: onOpenCases },
+    { label: 'On hold',             icon: <PauseCircle className="w-4 h-4" />,  attention: true, value: '14', sub: '9 awaiting clinic · oldest hold 12 days', onClick: onOpenCases },
+    { label: 'Beyond delivery date',icon: <CalendarX2 className="w-4 h-4" />,   attention: true, value: '7',  sub: '£1,850 delayed · avg 4 days delay',       onClick: onOpenCases },
+    { label: 'Case not approved',   icon: <XCircle className="w-4 h-4" />,      attention: true, value: '5',  sub: '£950 affected · rejected by lab',         onClick: onOpenCases },
   ];
 
   // Live activity feed across cases & invoices.
@@ -170,11 +177,49 @@ export default function ClinicOverviewPage({ onOpenCases, onCreateCase, onOpenIn
         {/* ── LEFT COLUMN ─────────────────────────────────────────── */}
         <div className="lg:col-span-2 space-y-6 min-w-0">
 
-          {/* Case operations */}
+          {/* Needs action — cases */}
           <section>
-            <SectionLabel info="Where your lab work stands today — counts, value and delivery risk across active cases.">Case operations</SectionLabel>
-            <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+            <SectionLabel info="Cases waiting on you to move them forward — drafts, holds, delays and rejections.">Needs action — cases</SectionLabel>
+            <p className="text-xs text-[#717182] -mt-1.5 mb-3 leading-snug">Cases waiting on you to move them forward.</p>
+            <div className="grid grid-cols-2 gap-3">
               {caseOps.map((c) => <StatTile key={c.label} {...c} />)}
+            </div>
+          </section>
+
+          {/* Financial control — concise invoice-lifecycle exposure */}
+          <section>
+            <SectionLabel info="Total exposure across the invoice lifecycle — review, approve, pay.">Financial control</SectionLabel>
+            <div className="bg-white border border-[#E0E0E6] rounded-xl p-5">
+              <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0]">Open exposure</p>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-3xl font-bold text-[#030213] leading-none">{fmt(OPEN_EXPOSURE)}</span>
+                    <span className="text-[11px] text-[#717182]">{EXPOSURE_COUNT} invoices unsettled</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-6">
+                  <MiniStat label="Total invoiced" value="£34,250" delta="+8%" onClick={() => onOpenInvoices?.()} />
+                  <MiniStat label="Paid this month" value="£21,450" sub="94% on-time" onClick={() => onOpenInvoices?.('payment_processed')} />
+                </div>
+              </div>
+
+              <div className="mt-4 flex h-2.5 rounded-full overflow-hidden gap-0.5 bg-[#F3F3F5]">
+                {FINANCE_BUCKETS.map((b) => (
+                  <div key={b.label} title={`${b.label}: ${fmt(b.value)}`} style={{ flexGrow: b.value, background: b.color }} />
+                ))}
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+                {FINANCE_BUCKETS.map((b) => (
+                  <button key={b.label} onClick={() => onOpenInvoices?.(b.filter)} className="flex items-center gap-2.5 py-1.5 text-left group border-b border-[#F6F5FA] last:border-0 sm:[&:nth-last-child(2)]:border-0">
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color }} />
+                    <span className="text-xs text-[#030213] flex-1 truncate group-hover:text-[#4D8EF7] transition-colors">{b.label}</span>
+                    <span className="text-[11px] text-[#A0A0B0] tabular-nums">{b.count} inv</span>
+                    <span className="text-xs font-semibold text-[#030213] tabular-nums w-14 text-right">{fmt(b.value)}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </section>
 
@@ -338,6 +383,22 @@ function InfoTip({ text }: { text: string }) {
         {text}
       </span>
     </span>
+  );
+}
+
+// Small inline metric — the context figures in the Financial control panel.
+function MiniStat({ label, value, delta, sub, onClick }: {
+  label: string; value: string; delta?: string; sub?: string; onClick?: () => void;
+}) {
+  return (
+    <button onClick={onClick} className="text-left group">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-[#A0A0B0]">{label}</p>
+      <div className="flex items-baseline gap-1 mt-0.5">
+        <span className="text-base font-bold text-[#030213] group-hover:text-[#4D8EF7] transition-colors">{value}</span>
+        {delta && <span className="text-[10px] font-semibold text-[#2E7D32]">{delta}</span>}
+      </div>
+      {sub && <p className="text-[10px] text-[#A0A0B0] mt-0.5">{sub}</p>}
+    </button>
   );
 }
 
