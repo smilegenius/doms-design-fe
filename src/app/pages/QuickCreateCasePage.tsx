@@ -34,6 +34,13 @@ const CLINIC_AVATAR_COLORS = [
   'bg-[#FFF1F2] text-[#BE123C]',
   'bg-[#ECFEFF] text-[#0F766E]',
 ];
+// A newly-created clinic (lab portal) carries a few extra contact fields the
+// details drawer captures. Extends the picker option shape.
+type NewClinic = CounterpartyOption & { city?: string; phone?: string; email?: string };
+function initialsFor(name: string): string {
+  const letters = name.replace(/[^A-Za-z ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0] ?? '').join('');
+  return (letters || name.slice(0, 2)).toUpperCase();
+}
 import type { Case, EmailPrescription } from './CasesPage';
 import { ScoreBadge } from '../components/ScoreBadge';
 import { AiSparkle } from '../components/AiSparkle';
@@ -1067,12 +1074,24 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   const [labId, setLabId]             = useState(draft?.labId ?? prefillDraftSeed?.labId ?? '');
   const [selections, setSelections]   = useState<ServiceSelection[]>(draft?.selections ?? prefillDraftSeed?.selections ?? []);
 
-  // Dentists — the full directory in the clinic portal; scoped to the chosen
-  // clinic's own dentists when the lab is entering the case (isLab).
+  // ── Lab portal: create clinics & dentists inline (like patient creation) ──
+  // A case can arrive from a clinic/dentist not yet on the platform, so the lab
+  // types a new name to create one on the fly. New records live in local state
+  // (merged into the pickers) and would persist on submit.
+  const newIdRef = useRef(0);
+  const [customClinics, setCustomClinics]   = useState<NewClinic[]>([]);
+  const [customDentists, setCustomDentists] = useState<typeof mockStaffMembers>([]);
+  const [clinicDrawerOpen, setClinicDrawerOpen]   = useState(false);
+  const [dentistDrawerOpen, setDentistDrawerOpen] = useState(false);
+
+  // Dentists — full directory in the clinic portal; scoped to the chosen clinic
+  // (plus any just-created dentists for it) when the lab is entering the case.
   const dentists = useMemo(() => {
     const all = mockStaffMembers.filter(s => s.staffType === 'Dentist');
-    return isLab ? all.filter(d => d.practiceId === labId) : all;
-  }, [isLab, labId]);
+    if (!isLab) return all;
+    const custom = customDentists.filter(d => d.practiceId === labId);
+    return [...custom, ...all.filter(d => d.practiceId === labId)];
+  }, [isLab, labId, customDentists]);
   const [dentistId, setDentistId] = useState(() =>
     draft?.dentistId ?? prefillDraftSeed?.dentistId ??
     (isLab ? '' : (mockStaffMembers.find(s => s.staffType === 'Dentist')?.id ?? ''))
@@ -1123,18 +1142,50 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // mapped into the shared CounterpartyOption shape the searchable picker reads.
   const labOptions: CounterpartyOption[] = useMemo(() => {
     if (!isLab) return mockSuppliers;
-    return mockClinics
+    const base = mockClinics
       .filter(c => c.status === 'active')
       .map(c => ({
         id: c.id,
         name: c.name,
         country: c.city || c.country || '',
         categories: [c.city, c.practiceCode].filter(Boolean) as string[],
-        initials: (c.name.replace(/[^A-Za-z ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0] ?? '').join('').toUpperCase()) || c.name.slice(0, 2).toUpperCase(),
+        initials: initialsFor(c.name),
         avatarColor: CLINIC_AVATAR_COLORS[Number(c.id) % CLINIC_AVATAR_COLORS.length],
       }));
-  }, [isLab]);
+    // Newly-created clinics sit at the top so they're easy to find again.
+    return [...customClinics, ...base];
+  }, [isLab, customClinics]);
   const selectedLab: CounterpartyOption | null = labOptions.find(l => l.id === labId) ?? null;
+
+  // ── Inline creation (lab portal only) — mirrors "type a new patient". ──
+  function createClinic(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const id = `new-clinic-${++newIdRef.current}`;
+    setCustomClinics(prev => [{
+      id, name: trimmed, country: '',
+      categories: ['New clinic'],
+      initials: initialsFor(trimmed),
+      avatarColor: 'bg-[#F0FDF4] text-[#1A5C2A]',
+    }, ...prev]);
+    setLabId(id);
+    setClinicDrawerOpen(true);   // let them fill address / contact next
+    toast.success(`New clinic "${trimmed}" added`);
+  }
+  function createDentist(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (!labId) { toast.error('Pick or create a clinic first.'); return; }
+    const id = `new-dentist-${++newIdRef.current}`;
+    const clinicName = labOptions.find(c => c.id === labId)?.name ?? '';
+    const display = /^dr\.?\s/i.test(trimmed) ? trimmed : `Dr. ${trimmed}`;
+    setCustomDentists(prev => [{
+      id, practiceId: labId, practiceName: clinicName,
+      name: display, staffType: 'Dentist', status: 'active',
+    } as typeof mockStaffMembers[number], ...prev]);
+    setDentistId(id);
+    toast.success(`New dentist "${display}" added`);
+  }
   const selectedDentist = dentists.find(d => d.id === dentistId) ?? null;
   const activeDetailsService = activeDetailsId
     ? selections.find(s => s.itemId === activeDetailsId) ?? null
@@ -1664,7 +1715,18 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                   onSelect={setLabId}
                   noun={cpNoun}
                   favoritesKey={isLab ? 'cases.favoriteClinics' : 'cases.favoriteLabs'}
+                  allowCreate={isLab}
+                  onCreate={createClinic}
                 />
+                {isLab && selectedLab && String(selectedLab.id).startsWith('new-clinic-') && (
+                  <button
+                    onClick={() => setClinicDrawerOpen(true)}
+                    className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#4D8EF7] hover:text-[#1565C0]"
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                    Add clinic details
+                  </button>
+                )}
               </Mini>
             </div>
             {/* Row 2 — case-level metadata (Case Source moved to the header
@@ -1675,7 +1737,18 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                   dentists={dentists}
                   value={dentistId}
                   onChange={setDentistId}
+                  allowCreate={isLab}
+                  onCreate={createDentist}
                 />
+                {isLab && selectedDentist && String(selectedDentist.id).startsWith('new-dentist-') && (
+                  <button
+                    onClick={() => setDentistDrawerOpen(true)}
+                    className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#4D8EF7] hover:text-[#1565C0]"
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                    Add dentist details
+                  </button>
+                )}
               </Mini>
               <Mini label="Order Type">
                 <div className="relative">
@@ -2105,6 +2178,30 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         />
       )}
 
+      {/* ── New-clinic details drawer (lab portal) ── */}
+      {clinicDrawerOpen && selectedLab && (
+        <ClinicDetailsDrawer
+          value={customClinics.find(c => c.id === selectedLab.id) ?? { id: selectedLab.id, name: selectedLab.name }}
+          onChange={(patch) => setCustomClinics(prev => prev.map(c =>
+            c.id === selectedLab.id
+              ? { ...c, ...patch, categories: patch.city ? [patch.city] : c.categories }
+              : c
+          ))}
+          onClose={() => setClinicDrawerOpen(false)}
+        />
+      )}
+
+      {/* ── New-dentist details drawer (lab portal) ── */}
+      {dentistDrawerOpen && selectedDentist && (
+        <DentistDetailsDrawer
+          value={customDentists.find(d => d.id === selectedDentist.id) ?? selectedDentist}
+          onChange={(patch) => setCustomDentists(prev => prev.map(d =>
+            d.id === selectedDentist.id ? { ...d, ...patch } : d
+          ))}
+          onClose={() => setDentistDrawerOpen(false)}
+        />
+      )}
+
       {/* ── Combined service picker + details drawer ──
           One drawer with two panes: pick services on the left, fill in
           the active service's details (teeth chart, material, shade,
@@ -2371,6 +2468,162 @@ function PatientExtrasDrawer({ value, onChange, onClose }: {
               </select>
               <ChevronDown className="w-4 h-4 text-[#A0A0B0] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
+          </Mini>
+        </div>
+        <div className="px-5 py-3 border-t border-[#F0EFF6] bg-[#F8F9FC] flex justify-end flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 transition-opacity"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+    </ModalPortal>
+  );
+}
+
+// ─── New-clinic details drawer (lab portal) ──────────────────────────────────
+// Mirrors PatientExtrasDrawer: optional contact fields for a clinic the lab
+// just created inline. Edits the custom clinic option in place.
+function ClinicDetailsDrawer({ value, onChange, onClose }: {
+  value: NewClinic;
+  onChange: (patch: Partial<NewClinic>) => void;
+  onClose: () => void;
+}) {
+  return (
+    <ModalPortal>
+    <div className="fixed inset-0 z-[100] flex">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="relative ml-auto bg-white shadow-2xl w-full max-w-md flex flex-col animate-in slide-in-from-right duration-200">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#F0EFF6] flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-[#F0FDF4] flex items-center justify-center flex-shrink-0">
+              <Building2 className="w-4 h-4 text-[#1A5C2A]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[#030213]">Clinic details</h3>
+              <p className="text-[11px] text-[#717182]">New clinic — fill what's available.</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182]">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          <Mini label="Clinic name">
+            <input
+              type="text"
+              value={value.name}
+              onChange={(e) => onChange({ name: e.target.value })}
+              placeholder="e.g. Riverside Dental Care"
+              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
+            />
+          </Mini>
+          <Mini label="City">
+            <input
+              type="text"
+              value={value.city ?? ''}
+              onChange={(e) => onChange({ city: e.target.value })}
+              placeholder="e.g. Leeds"
+              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
+            />
+          </Mini>
+          <Mini label="Phone">
+            <input
+              type="tel"
+              value={value.phone ?? ''}
+              onChange={(e) => onChange({ phone: e.target.value })}
+              placeholder="Phone number"
+              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
+            />
+          </Mini>
+          <Mini label="Email">
+            <input
+              type="email"
+              value={value.email ?? ''}
+              onChange={(e) => onChange({ email: e.target.value })}
+              placeholder="clinic@example.com"
+              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
+            />
+          </Mini>
+        </div>
+        <div className="px-5 py-3 border-t border-[#F0EFF6] bg-[#F8F9FC] flex justify-end flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 transition-opacity"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+    </ModalPortal>
+  );
+}
+
+// ─── New-dentist details drawer (lab portal) ─────────────────────────────────
+function DentistDetailsDrawer({ value, onChange, onClose }: {
+  value: typeof mockStaffMembers[number];
+  onChange: (patch: Partial<typeof mockStaffMembers[number]>) => void;
+  onClose: () => void;
+}) {
+  return (
+    <ModalPortal>
+    <div className="fixed inset-0 z-[100] flex">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="relative ml-auto bg-white shadow-2xl w-full max-w-md flex flex-col animate-in slide-in-from-right duration-200">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#F0EFF6] flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-[#F0FDF4] flex items-center justify-center flex-shrink-0">
+              <Stethoscope className="w-4 h-4 text-[#1A5C2A]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[#030213]">Dentist details</h3>
+              <p className="text-[11px] text-[#717182]">New dentist — fill what's available.</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182]">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          <Mini label="Dentist name">
+            <input
+              type="text"
+              value={value.name}
+              onChange={(e) => onChange({ name: e.target.value })}
+              placeholder="e.g. Dr. Amelia Hart"
+              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
+            />
+          </Mini>
+          <Mini label="Email">
+            <input
+              type="email"
+              value={value.email ?? ''}
+              onChange={(e) => onChange({ email: e.target.value })}
+              placeholder="dentist@example.com"
+              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
+            />
+          </Mini>
+          <Mini label="Performer code">
+            <input
+              type="text"
+              value={value.performerCode ?? ''}
+              onChange={(e) => onChange({ performerCode: e.target.value })}
+              placeholder="e.g. DEN-0123"
+              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
+            />
+          </Mini>
+          <Mini label="Phone">
+            <input
+              type="tel"
+              value={value.phone ?? ''}
+              onChange={(e) => onChange({ phone: e.target.value })}
+              placeholder="Phone number"
+              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
+            />
           </Mini>
         </div>
         <div className="px-5 py-3 border-t border-[#F0EFF6] bg-[#F8F9FC] flex justify-end flex-shrink-0">
@@ -4501,10 +4754,13 @@ function PatientSearchSelect({ value, onChange, onPickExisting }: {
 // ─── Dentist search select — searchable dropdown over the practice roster ───
 // Native <select> with 100+ dentists is unusable; this lets the user type
 // part of a name to narrow the list. Same pattern as LabSearchSelect.
-function DentistSearchSelect({ dentists, value, onChange }: {
+function DentistSearchSelect({ dentists, value, onChange, allowCreate = false, onCreate }: {
   dentists: typeof mockStaffMembers;
   value: string;
   onChange: (id: string) => void;
+  /** Lab portal: allow typing a new name to create a dentist on the fly. */
+  allowCreate?: boolean;
+  onCreate?: (name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -4565,8 +4821,20 @@ function DentistSearchSelect({ dentists, value, onChange }: {
             </div>
           </div>
           <div className="max-h-56 overflow-y-auto py-1">
+            {allowCreate && query.trim() && !dentists.some(d => d.name.toLowerCase() === query.trim().toLowerCase()) && (
+              <button
+                type="button"
+                onClick={() => { onCreate?.(query.trim()); setOpen(false); setQuery(''); }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left border-b border-[#F0EFF6] hover:bg-[#F0FDF4] transition-colors"
+              >
+                <span className="w-5 h-5 rounded-full bg-[#F0FDF4] text-[#1A5C2A] flex items-center justify-center flex-shrink-0"><Plus className="w-3 h-3" /></span>
+                <p className="text-[11px] font-semibold text-[#1A5C2A] truncate">Add new dentist: "{query.trim()}"</p>
+              </button>
+            )}
             {visible.length === 0 ? (
-              <p className="px-2 py-3 text-center text-[11px] text-[#A0A0B0] italic">No matches.</p>
+              <p className="px-2 py-3 text-center text-[11px] text-[#A0A0B0] italic">
+                {allowCreate ? 'Type a name above to add a new dentist.' : 'No matches.'}
+              </p>
             ) : visible.map(d => {
               const isSelected = d.id === value;
               return (
@@ -4602,7 +4870,7 @@ function DentistSearchSelect({ dentists, value, onChange }: {
 //   2. Tabs let the user flip between Favourites and All labs.
 //   3. Per-row star toggle persists to localStorage so favourites survive
 //      reloads (same key the detailed flow uses).
-function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKey = 'cases.favoriteLabs' }: {
+function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKey = 'cases.favoriteLabs', allowCreate = false, onCreate }: {
   labs: CounterpartyOption[];
   selectedId: string;
   onSelect: (id: string) => void;
@@ -4610,6 +4878,9 @@ function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKe
   noun?: string;
   /** localStorage key for favourites, so lab + clinic favourites don't collide. */
   favoritesKey?: string;
+  /** Lab portal: allow typing a new name to create a record on the fly. */
+  allowCreate?: boolean;
+  onCreate?: (name: string) => void;
 }) {
   const nounPlural = `${noun}s`;
   const FallbackIcon = noun === 'clinic' ? Building2 : FlaskConical;
@@ -4738,6 +5009,19 @@ function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKe
           </div>
           {/* List */}
           <div className="max-h-72 overflow-y-auto py-1">
+            {allowCreate && query.trim() && !labs.some(l => l.name.toLowerCase() === query.trim().toLowerCase()) && (
+              <button
+                type="button"
+                onClick={() => { onCreate?.(query.trim()); setOpen(false); setQuery(''); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-left border-b border-[#F0EFF6] hover:bg-[#F0FDF4] transition-colors"
+              >
+                <span className="w-7 h-7 rounded-lg bg-[#F0FDF4] text-[#1A5C2A] flex items-center justify-center flex-shrink-0"><Plus className="w-3.5 h-3.5" /></span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-[#1A5C2A] truncate">Create new {noun}: "{query.trim()}"</p>
+                  <p className="text-[10px] text-[#717182]">Added to this case — saved on submit</p>
+                </div>
+              </button>
+            )}
             {visible.length === 0 ? (
               <p className="px-3 py-6 text-center text-xs text-[#A0A0B0] italic">
                 {tab === 'favorites'
