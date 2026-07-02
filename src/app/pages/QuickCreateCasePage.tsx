@@ -3,13 +3,37 @@ import {
   User, FlaskConical, Stethoscope, Calendar, FileText, Search,
   Plus, X, Check, ChevronDown, ChevronRight,
   Pencil, Zap, Star, Upload, UploadCloud, Box, Image as ImageIcon,
-  AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen, Copy, ExternalLink,
+  AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen, Copy, ExternalLink, Building2,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import ModalPortal from '../components/ModalPortal';
 import { mockSuppliers } from '../data/suppliersData';
-import { mockStaffMembers } from '../data/clinicsData';
+import { mockStaffMembers, mockClinics } from '../data/clinicsData';
+
+// ─── Counterparty (Lab ↔ Clinic) ─────────────────────────────────────────────
+// The Quick Create flow is shared by both portals. In the CLINIC portal the
+// case is sent TO a lab, so step 2 asks for the Lab. In the LAB portal the lab
+// is entering a case it received FROM a clinic, so the same step asks for the
+// Clinic instead. Everything else (patient, services, order form) is identical.
+// The searchable picker takes a minimal option shape both directories satisfy.
+export interface CounterpartyOption {
+  id: string;
+  name: string;
+  country?: string;
+  categories?: string[];
+  initials?: string;
+  avatarColor?: string;
+}
+// Soft avatar palette for clinic options (mockClinics has no avatarColor).
+const CLINIC_AVATAR_COLORS = [
+  'bg-[#EEF4FF] text-[#1565C0]',
+  'bg-[#F3EEFF] text-[#5B21B6]',
+  'bg-[#F0FDF4] text-[#1A5C2A]',
+  'bg-[#FFF7ED] text-[#C2410C]',
+  'bg-[#FFF1F2] text-[#BE123C]',
+  'bg-[#ECFEFF] text-[#0F766E]',
+];
 import type { Case, EmailPrescription } from './CasesPage';
 import { ScoreBadge } from '../components/ScoreBadge';
 import { AiSparkle } from '../components/AiSparkle';
@@ -945,7 +969,7 @@ function IteroUploadPane({ uploadedCount, onUploadZip, onView3D, orderNumber = '
   );
 }
 
-export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraft }: {
+export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraft, counterparty = 'clinic' }: {
   onCancel: () => void;
   onSubmitted: () => void;
   /** No longer rendered — kept on the parent so the route survives, but
@@ -956,7 +980,15 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       field from it AND (for email source) render a left preview pane with
       the email + prescription mock. */
   prefillDraft?: Case | null;
+  /** Who the case counterparty is. 'clinic' (default) = the clinic sends the
+      case to a lab → step asks for the Lab. 'lab' = the lab is entering a case
+      received from a clinic → the same step asks for the Clinic. */
+  counterparty?: 'lab' | 'clinic';
 }) {
+  // Lab portal enters cases on behalf of a clinic; clinic portal picks a lab.
+  const isLab = counterparty === 'lab';
+  const cpLabel = isLab ? 'Clinic' : 'Lab';   // field label / order-form label
+  const cpNoun  = isLab ? 'clinic' : 'lab';   // lowercase for copy
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
   // Fields seeded from an email/document-sourced draft were extracted by AI, so
@@ -1017,11 +1049,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(draft?.savedAt ?? null);
 
   // Auto-populated defaults — sit in a small strip at the top, all editable.
-  const dentists = useMemo(
-    () => mockStaffMembers.filter(s => s.staffType === 'Dentist'),
-    []
-  );
-  const [dentistId, setDentistId]       = useState(() => draft?.dentistId ?? prefillDraftSeed?.dentistId ?? dentists[0]?.id ?? '');
   const [orderType, setOrderType]       = useState(draft?.orderType ?? ORDER_TYPES[0]);
   const [deliveryDate, setDeliveryDate] = useState(draft?.deliveryDate ?? defaultDeliveryISO());
   // Case Source — the way the case data reached the lab. Left blank by
@@ -1035,10 +1062,27 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   const [caseSourceCourier, setCaseSourceCourier]   = useState(draft?.caseSourceCourier ?? '');
   const [caseSourceOpen, setCaseSourceOpen]         = useState(false);
 
-  // Required minimum surface — Patient name, Lab, Services.
+  // Required minimum surface — Patient name, Lab/Clinic, Services.
   const [patientName, setPatientName] = useState(draft?.patientName ?? prefillDraftSeed?.patientName ?? '');
   const [labId, setLabId]             = useState(draft?.labId ?? prefillDraftSeed?.labId ?? '');
   const [selections, setSelections]   = useState<ServiceSelection[]>(draft?.selections ?? prefillDraftSeed?.selections ?? []);
+
+  // Dentists — the full directory in the clinic portal; scoped to the chosen
+  // clinic's own dentists when the lab is entering the case (isLab).
+  const dentists = useMemo(() => {
+    const all = mockStaffMembers.filter(s => s.staffType === 'Dentist');
+    return isLab ? all.filter(d => d.practiceId === labId) : all;
+  }, [isLab, labId]);
+  const [dentistId, setDentistId] = useState(() =>
+    draft?.dentistId ?? prefillDraftSeed?.dentistId ??
+    (isLab ? '' : (mockStaffMembers.find(s => s.staffType === 'Dentist')?.id ?? ''))
+  );
+  // When the lab switches clinic, re-point the dentist to that clinic's first
+  // dentist (or clear it if the current one doesn't belong to the new clinic).
+  useEffect(() => {
+    if (!isLab) return;
+    setDentistId(prev => (prev && dentists.some(d => d.id === prev)) ? prev : (dentists[0]?.id ?? ''));
+  }, [isLab, dentists]);
 
   // Optional extras kept behind drawers / collapsibles.
   const [patientExtras, setPatientExtras] = useState<PatientExtras>(draft?.patientExtras ?? EMPTY_EXTRAS);
@@ -1075,8 +1119,22 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // Remove button funnel through it.
   const [confirmRemoveId, setConfirmRemoveId]     = useState<string | null>(null);
 
-  const labOptions = mockSuppliers;
-  const selectedLab = labOptions.find(l => l.id === labId) ?? null;
+  // Picker options — labs (clinic portal) or active clinics (lab portal),
+  // mapped into the shared CounterpartyOption shape the searchable picker reads.
+  const labOptions: CounterpartyOption[] = useMemo(() => {
+    if (!isLab) return mockSuppliers;
+    return mockClinics
+      .filter(c => c.status === 'active')
+      .map(c => ({
+        id: c.id,
+        name: c.name,
+        country: c.city || c.country || '',
+        categories: [c.city, c.practiceCode].filter(Boolean) as string[],
+        initials: (c.name.replace(/[^A-Za-z ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0] ?? '').join('').toUpperCase()) || c.name.slice(0, 2).toUpperCase(),
+        avatarColor: CLINIC_AVATAR_COLORS[Number(c.id) % CLINIC_AVATAR_COLORS.length],
+      }));
+  }, [isLab]);
+  const selectedLab: CounterpartyOption | null = labOptions.find(l => l.id === labId) ?? null;
   const selectedDentist = dentists.find(d => d.id === dentistId) ?? null;
   const activeDetailsService = activeDetailsId
     ? selections.find(s => s.itemId === activeDetailsId) ?? null
@@ -1111,7 +1169,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
 
   function handleSubmit() {
     if (!canSubmit) {
-      toast.error('Add a patient name, pick a lab, and at least one service.');
+      toast.error(`Add a patient name, pick a ${cpNoun}, and at least one service.`);
       return;
     }
     // Successful submission — discard any pending draft and move on.
@@ -1333,6 +1391,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
               patientName={patientName}
               patientExtras={patientExtras}
               lab={selectedLab}
+              partyLabel={cpLabel}
               dentist={selectedDentist}
               orderType={orderType}
               deliveryDate={deliveryDate}
@@ -1598,11 +1657,13 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                     : 'Add additional details'}
                 </button>
               </Mini>
-              <Mini label="Lab" required accessory={aiPrefilled && labId ? <AiSparkle label /> : undefined}>
+              <Mini label={cpLabel} required accessory={aiPrefilled && labId ? <AiSparkle label /> : undefined}>
                 <LabSearchSelect
                   labs={labOptions}
                   selectedId={labId}
                   onSelect={setLabId}
+                  noun={cpNoun}
+                  favoritesKey={isLab ? 'cases.favoriteClinics' : 'cases.favoriteLabs'}
                 />
               </Mini>
             </div>
@@ -2002,7 +2063,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             <div className="hidden sm:flex items-center gap-1.5">
               {[
                 { label: 'Patient',  done: !!patientName.trim() },
-                { label: 'Lab',      done: !!labId },
+                { label: cpLabel,    done: !!labId },
                 { label: 'Services', done: selections.length > 0 },
               ].map(s => (
                 <span
@@ -2106,6 +2167,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           patientName={patientName}
           patientExtras={patientExtras}
           lab={selectedLab}
+          partyLabel={cpLabel}
           dentist={selectedDentist}
           orderType={orderType}
           deliveryDate={deliveryDate}
@@ -4540,17 +4602,23 @@ function DentistSearchSelect({ dentists, value, onChange }: {
 //   2. Tabs let the user flip between Favourites and All labs.
 //   3. Per-row star toggle persists to localStorage so favourites survive
 //      reloads (same key the detailed flow uses).
-function LabSearchSelect({ labs, selectedId, onSelect }: {
-  labs: typeof mockSuppliers;
+function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKey = 'cases.favoriteLabs' }: {
+  labs: CounterpartyOption[];
   selectedId: string;
   onSelect: (id: string) => void;
+  /** Singular noun for the picker copy — 'lab' (clinic portal) or 'clinic' (lab portal). */
+  noun?: string;
+  /** localStorage key for favourites, so lab + clinic favourites don't collide. */
+  favoritesKey?: string;
 }) {
+  const nounPlural = `${noun}s`;
+  const FallbackIcon = noun === 'clinic' ? Building2 : FlaskConical;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<'all' | 'favorites'>('all');
   const [favorites, setFavorites] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
-    try { return JSON.parse(localStorage.getItem('cases.favoriteLabs') || '[]'); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(favoritesKey) || '[]'); } catch { return []; }
   });
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -4576,7 +4644,7 @@ function LabSearchSelect({ labs, selectedId, onSelect }: {
   function toggleFavorite(id: string) {
     setFavorites(prev => {
       const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
-      try { localStorage.setItem('cases.favoriteLabs', JSON.stringify(next)); } catch {}
+      try { localStorage.setItem(favoritesKey, JSON.stringify(next)); } catch {}
       return next;
     });
   }
@@ -4610,7 +4678,7 @@ function LabSearchSelect({ labs, selectedId, onSelect }: {
           </div>
         ) : (
           <div className="w-5 h-5 rounded-md bg-[#F3F3F5] flex items-center justify-center flex-shrink-0">
-            <FlaskConical className="w-3 h-3 text-[#A0A0B0]" />
+            <FallbackIcon className="w-3 h-3 text-[#A0A0B0]" />
           </div>
         )}
         <div className="flex-1 min-w-0">
@@ -4622,7 +4690,7 @@ function LabSearchSelect({ labs, selectedId, onSelect }: {
               </p>
             </>
           ) : (
-            <p className="text-xs text-[#A0A0B0] italic">Search or pick a lab…</p>
+            <p className="text-xs text-[#A0A0B0] italic">Search or pick a {noun}…</p>
           )}
         </div>
         <ChevronDown className={`w-3.5 h-3.5 text-[#A0A0B0] flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -4640,7 +4708,7 @@ function LabSearchSelect({ labs, selectedId, onSelect }: {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search labs by name, country, category…"
+                placeholder={`Search ${nounPlural} by name, country, category…`}
                 className="w-full pl-8 pr-2.5 py-1.5 text-xs border border-[#E0E0E6] rounded-md outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/20"
               />
             </div>
@@ -4662,7 +4730,7 @@ function LabSearchSelect({ labs, selectedId, onSelect }: {
                   {t === 'favorites' ? (
                     <Star className={`w-3 h-3 ${tab === 'favorites' ? 'fill-[#F59E0B] text-[#F59E0B]' : 'text-[#A0A0B0]'}`} />
                   ) : null}
-                  {t === 'favorites' ? 'Favourites' : 'All labs'}
+                  {t === 'favorites' ? 'Favourites' : `All ${nounPlural}`}
                   <span className="ml-0.5 text-[9px] font-bold text-[#A0A0B0] tabular-nums">({count})</span>
                 </button>
               );
@@ -4673,10 +4741,10 @@ function LabSearchSelect({ labs, selectedId, onSelect }: {
             {visible.length === 0 ? (
               <p className="px-3 py-6 text-center text-xs text-[#A0A0B0] italic">
                 {tab === 'favorites'
-                  ? 'No favourites yet — tap the star next to any lab to add it here.'
+                  ? `No favourites yet — tap the star next to any ${noun} to add it here.`
                   : query
-                    ? `No labs match "${query}".`
-                    : 'No labs available.'}
+                    ? `No ${nounPlural} match "${query}".`
+                    : `No ${nounPlural} available.`}
               </p>
             ) : (
               visible.map(lab => {
@@ -4956,7 +5024,9 @@ function Model3DPane({ files, onUploadScans }: {
 type OrderFormData = {
   patientName: string;
   patientExtras: PatientExtras;
-  lab: typeof mockSuppliers[number] | null;
+  lab: CounterpartyOption | null;
+  /** Label for the lab/clinic field — 'Lab' (clinic portal) or 'Clinic' (lab portal). */
+  partyLabel?: string;
   dentist: typeof mockStaffMembers[number] | null;
   orderType: string;
   deliveryDate: string;
@@ -5044,7 +5114,7 @@ function OrderFormPreview({ onClose, ...data }: OrderFormData & { onClose: () =>
 // tightens padding + collapses the grids for the 380px column).
 function OrderFormSheet({
   patientName, patientExtras,
-  lab, dentist,
+  lab, partyLabel = 'Lab', dentist,
   orderType, deliveryDate,
   caseSource, caseSourceFiles, caseSourceExtraFiles, caseSourceScanner, caseSourceCourier,
   selections, notes,
@@ -5069,7 +5139,7 @@ function OrderFormSheet({
             {/* Patient + Lab + Dentist grid */}
             <div className={compact ? 'grid grid-cols-2 gap-3 text-sm' : 'grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm'}>
               <FormField label="Patient" value={patientName || '—'} />
-              <FormField label="Lab" value={lab?.name || '—'} />
+              <FormField label={partyLabel} value={lab?.name || '—'} />
               <FormField label="Dentist" value={dentist?.name || '—'} />
               <FormField label="Requested Delivery" value={deliveryDate || '—'} />
               <FormField

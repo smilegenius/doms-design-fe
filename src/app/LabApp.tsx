@@ -109,6 +109,7 @@ export default function LabApp() {
         onCancel={() => setActivePage('cases')}
         onSubmitted={() => setActivePage('cases')}
         prefillDraft={prefillDraft}
+        counterparty="lab"
       />
     );
   }
@@ -131,6 +132,7 @@ export default function LabApp() {
       {activePage === 'cases' && (
         <CasesPage
           initialCaseId={caseInitialId}
+          onCreateCase={() => navigate('/lab/cases/quick-new')}
           onConfigureScoring={() => setActivePage('configuration')}
           onOpenDraft={(c) => navigate(`/lab/cases/quick-new/${encodeURIComponent(c.id)}`)}
           caseViewLimit={2}
