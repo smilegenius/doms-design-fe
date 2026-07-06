@@ -24,10 +24,12 @@ interface AddPracticeModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialData?: Practice;
+  /** Prefill the practice name in add mode (e.g. a name typed in a picker). */
+  defaultName?: string;
   onSubmit: (data: PracticeFormData) => void;
 }
 
-export default function AddPracticeModal({ isOpen, onClose, initialData, onSubmit }: AddPracticeModalProps) {
+export default function AddPracticeModal({ isOpen, onClose, initialData, defaultName, onSubmit }: AddPracticeModalProps) {
   const isEdit = !!initialData;
   const [loading, setLoading] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
@@ -42,7 +44,8 @@ export default function AddPracticeModal({ isOpen, onClose, initialData, onSubmi
   const [practicePhone, setPracticePhone] = useState('');
 
   useEffect(() => {
-    if (isOpen && initialData) {
+    if (!isOpen) return;
+    if (initialData) {
       setPracticeName(initialData.name ?? '');
       setPracticeCode(initialData.practiceCode ?? '');
       setAddress(initialData.address ?? '');
@@ -51,8 +54,10 @@ export default function AddPracticeModal({ isOpen, onClose, initialData, onSubmi
       setCountry(initialData.country ?? 'GB');
       setPracticeEmail(initialData.email ?? '');
       setPracticePhone(initialData.phone ?? '');
+    } else if (defaultName) {
+      setPracticeName(defaultName);
     }
-  }, [isOpen, initialData]);
+  }, [isOpen, initialData, defaultName]);
 
   const buildData = (status: 'active' | 'draft') => ({
     name: practiceName,

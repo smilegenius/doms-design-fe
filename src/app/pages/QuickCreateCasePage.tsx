@@ -8,6 +8,8 @@ import {
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import ModalPortal from '../components/ModalPortal';
+import AddPracticeModal from '../components/AddPracticeModal';
+import AddStaffModal from '../components/AddStaffModal';
 import { mockSuppliers } from '../data/suppliersData';
 import { mockStaffMembers, mockClinics } from '../data/clinicsData';
 
@@ -1081,8 +1083,12 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   const newIdRef = useRef(0);
   const [customClinics, setCustomClinics]   = useState<NewClinic[]>([]);
   const [customDentists, setCustomDentists] = useState<typeof mockStaffMembers>([]);
-  const [clinicDrawerOpen, setClinicDrawerOpen]   = useState(false);
-  const [dentistDrawerOpen, setDentistDrawerOpen] = useState(false);
+  // Reuse the group-portal's Add Practice / Add Staff modals for consistency.
+  const [practiceModalOpen, setPracticeModalOpen] = useState(false);
+  const [staffModalOpen, setStaffModalOpen]       = useState(false);
+  const [practiceEditId, setPracticeEditId]       = useState<string | null>(null);
+  const [staffEditId, setStaffEditId]             = useState<string | null>(null);
+  const [prefillName, setPrefillName]             = useState('');
 
   // Dentists — full directory in the clinic portal; scoped to the chosen clinic
   // (plus any just-created dentists for it) when the lab is entering the case.
@@ -1157,34 +1163,79 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   }, [isLab, customClinics]);
   const selectedLab: CounterpartyOption | null = labOptions.find(l => l.id === labId) ?? null;
 
-  // ── Inline creation (lab portal only) — mirrors "type a new patient". ──
-  function createClinic(name: string) {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    const id = `new-clinic-${++newIdRef.current}`;
-    setCustomClinics(prev => [{
-      id, name: trimmed, country: '',
-      categories: ['New clinic'],
-      initials: initialsFor(trimmed),
-      avatarColor: 'bg-[#F0FDF4] text-[#1A5C2A]',
-    }, ...prev]);
-    setLabId(id);
-    setClinicDrawerOpen(true);   // let them fill address / contact next
-    toast.success(`New clinic "${trimmed}" added`);
-  }
-  function createDentist(name: string) {
-    const trimmed = name.trim();
-    if (!trimmed) return;
+  // ── Inline creation (lab portal only) — reuses the group-portal's Add
+  // Practice / Add Staff modals so the design matches the rest of the app. ──
+  function openAddClinic(name = '') { setPracticeEditId(null); setPrefillName(name.trim()); setPracticeModalOpen(true); }
+  function openEditClinic() { if (!selectedLab) return; setPracticeEditId(selectedLab.id); setPracticeModalOpen(true); }
+  function openAddDentist(name = '') {
     if (!labId) { toast.error('Pick or create a clinic first.'); return; }
-    const id = `new-dentist-${++newIdRef.current}`;
-    const clinicName = labOptions.find(c => c.id === labId)?.name ?? '';
-    const display = /^dr\.?\s/i.test(trimmed) ? trimmed : `Dr. ${trimmed}`;
-    setCustomDentists(prev => [{
-      id, practiceId: labId, practiceName: clinicName,
-      name: display, staffType: 'Dentist', status: 'active',
-    } as typeof mockStaffMembers[number], ...prev]);
-    setDentistId(id);
-    toast.success(`New dentist "${display}" added`);
+    setStaffEditId(null); setPrefillName(name.trim()); setStaffModalOpen(true);
+  }
+  function openEditDentist() { if (!selectedDentist) return; setStaffEditId(selectedDentist.id); setStaffModalOpen(true); }
+
+  // Practices list the Add Staff modal shows in its (locked) practice select —
+  // custom clinics prepended so a just-created clinic is selectable.
+  const practicesForModal = useMemo(
+    () => [
+      ...customClinics.map(c => ({ id: c.id, name: c.name, practiceCode: '', status: 'active' as const, managers: [], dentists: [] })),
+      ...mockClinics,
+    ],
+    [customClinics],
+  );
+  const practiceInitial = useMemo(() => {
+    if (!practiceEditId) return undefined;
+    const c = customClinics.find(x => x.id === practiceEditId);
+    return c ? { id: c.id, name: c.name, city: c.city, email: c.email, phone: c.phone, status: 'active' as const, managers: [], dentists: [] } : undefined;
+  }, [practiceEditId, customClinics]);
+  const staffInitial = useMemo(() => {
+    if (staffEditId) {
+      const d = customDentists.find(x => x.id === staffEditId);
+      return d ? { practiceId: d.practiceId, name: d.name, staffType: 'Dentist', email: d.email, phone: d.phone, performerCode: d.performerCode, performerName: d.performerName } : undefined;
+    }
+    return { staffType: 'Dentist', practiceId: labId, name: prefillName };
+  }, [staffEditId, customDentists, labId, prefillName]);
+
+  function handlePracticeSubmit(data: { name: string; practiceCode?: string; city?: string; email?: string; phone?: string }) {
+    if (practiceEditId) {
+      setCustomClinics(prev => prev.map(c => c.id === practiceEditId ? {
+        ...c, name: data.name, city: data.city, phone: data.phone, email: data.email,
+        country: data.city || c.country, initials: initialsFor(data.name),
+        categories: [data.city, data.practiceCode].filter(Boolean) as string[],
+      } : c));
+      toast.success(`Clinic "${data.name}" updated`);
+    } else {
+      const id = `new-clinic-${++newIdRef.current}`;
+      setCustomClinics(prev => [{
+        id, name: data.name, country: data.city || '',
+        categories: [data.city, data.practiceCode].filter(Boolean) as string[],
+        initials: initialsFor(data.name), avatarColor: 'bg-[#F0FDF4] text-[#1A5C2A]',
+        city: data.city, phone: data.phone, email: data.email,
+      }, ...prev]);
+      setLabId(id);
+      toast.success(`New clinic "${data.name}" added`);
+    }
+    setPracticeEditId(null);
+  }
+  function handleStaffSubmit(data: { practiceId: string; name: string; email?: string; phone?: string; performerCode?: string; performerName?: string }) {
+    const display = data.performerName || data.name;
+    if (staffEditId) {
+      setCustomDentists(prev => prev.map(d => d.id === staffEditId ? {
+        ...d, name: display, email: data.email, phone: data.phone,
+        performerCode: data.performerCode, performerName: data.performerName,
+      } : d));
+      toast.success(`Dentist "${display}" updated`);
+    } else {
+      const id = `new-dentist-${++newIdRef.current}`;
+      const clinicName = labOptions.find(c => c.id === (data.practiceId || labId))?.name ?? '';
+      setCustomDentists(prev => [{
+        id, practiceId: data.practiceId || labId, practiceName: clinicName,
+        name: display, staffType: 'Dentist', status: 'active',
+        email: data.email, phone: data.phone, performerCode: data.performerCode, performerName: data.performerName,
+      } as typeof mockStaffMembers[number], ...prev]);
+      setDentistId(id);
+      toast.success(`New dentist "${display}" added`);
+    }
+    setStaffEditId(null);
   }
   const selectedDentist = dentists.find(d => d.id === dentistId) ?? null;
   const activeDetailsService = activeDetailsId
@@ -1716,16 +1767,26 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                   noun={cpNoun}
                   favoritesKey={isLab ? 'cases.favoriteClinics' : 'cases.favoriteLabs'}
                   allowCreate={isLab}
-                  onCreate={createClinic}
+                  onCreate={openAddClinic}
                 />
-                {isLab && selectedLab && String(selectedLab.id).startsWith('new-clinic-') && (
-                  <button
-                    onClick={() => setClinicDrawerOpen(true)}
-                    className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#4D8EF7] hover:text-[#1565C0]"
-                  >
-                    <Plus className="w-2.5 h-2.5" />
-                    Add clinic details
-                  </button>
+                {isLab && (
+                  selectedLab && String(selectedLab.id).startsWith('new-clinic-') ? (
+                    <button
+                      onClick={openEditClinic}
+                      className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#4D8EF7] hover:text-[#1565C0]"
+                    >
+                      <Pencil className="w-2.5 h-2.5" />
+                      Edit clinic details
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => openAddClinic('')}
+                      className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#1A5C2A] hover:text-[#0F5132]"
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                      Add a new clinic
+                    </button>
+                  )
                 )}
               </Mini>
             </div>
@@ -1738,16 +1799,26 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                   value={dentistId}
                   onChange={setDentistId}
                   allowCreate={isLab}
-                  onCreate={createDentist}
+                  onCreate={openAddDentist}
                 />
-                {isLab && selectedDentist && String(selectedDentist.id).startsWith('new-dentist-') && (
-                  <button
-                    onClick={() => setDentistDrawerOpen(true)}
-                    className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#4D8EF7] hover:text-[#1565C0]"
-                  >
-                    <Plus className="w-2.5 h-2.5" />
-                    Add dentist details
-                  </button>
+                {isLab && labId && (
+                  selectedDentist && String(selectedDentist.id).startsWith('new-dentist-') ? (
+                    <button
+                      onClick={openEditDentist}
+                      className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#4D8EF7] hover:text-[#1565C0]"
+                    >
+                      <Pencil className="w-2.5 h-2.5" />
+                      Edit dentist details
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => openAddDentist('')}
+                      className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#1A5C2A] hover:text-[#0F5132]"
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                      Add a new dentist
+                    </button>
+                  )
                 )}
               </Mini>
               <Mini label="Order Type">
@@ -2178,29 +2249,28 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         />
       )}
 
-      {/* ── New-clinic details drawer (lab portal) ── */}
-      {clinicDrawerOpen && selectedLab && (
-        <ClinicDetailsDrawer
-          value={customClinics.find(c => c.id === selectedLab.id) ?? { id: selectedLab.id, name: selectedLab.name }}
-          onChange={(patch) => setCustomClinics(prev => prev.map(c =>
-            c.id === selectedLab.id
-              ? { ...c, ...patch, categories: patch.city ? [patch.city] : c.categories }
-              : c
-          ))}
-          onClose={() => setClinicDrawerOpen(false)}
-        />
-      )}
+      {/* ── Add / Edit clinic — reuses the group-portal Add Practice modal ── */}
+      <AddPracticeModal
+        isOpen={practiceModalOpen}
+        onClose={() => { setPracticeModalOpen(false); setPracticeEditId(null); }}
+        initialData={practiceInitial as any}
+        defaultName={prefillName}
+        onSubmit={handlePracticeSubmit}
+      />
 
-      {/* ── New-dentist details drawer (lab portal) ── */}
-      {dentistDrawerOpen && selectedDentist && (
-        <DentistDetailsDrawer
-          value={customDentists.find(d => d.id === selectedDentist.id) ?? selectedDentist}
-          onChange={(patch) => setCustomDentists(prev => prev.map(d =>
-            d.id === selectedDentist.id ? { ...d, ...patch } : d
-          ))}
-          onClose={() => setDentistDrawerOpen(false)}
-        />
-      )}
+      {/* ── Add / Edit dentist — reuses the group-portal Add Staff modal ── */}
+      <AddStaffModal
+        isOpen={staffModalOpen}
+        onClose={() => { setStaffModalOpen(false); setStaffEditId(null); }}
+        practices={practicesForModal as any}
+        defaultPracticeId={labId}
+        lockPractice
+        lockStaffType
+        hideDraft
+        mode={staffEditId ? 'edit' : 'add'}
+        initialData={staffInitial as any}
+        onSubmit={handleStaffSubmit}
+      />
 
       {/* ── Combined service picker + details drawer ──
           One drawer with two panes: pick services on the left, fill in
@@ -2468,162 +2538,6 @@ function PatientExtrasDrawer({ value, onChange, onClose }: {
               </select>
               <ChevronDown className="w-4 h-4 text-[#A0A0B0] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
-          </Mini>
-        </div>
-        <div className="px-5 py-3 border-t border-[#F0EFF6] bg-[#F8F9FC] flex justify-end flex-shrink-0">
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 transition-opacity"
-          >
-            Done
-          </button>
-        </div>
-      </div>
-    </div>
-    </ModalPortal>
-  );
-}
-
-// ─── New-clinic details drawer (lab portal) ──────────────────────────────────
-// Mirrors PatientExtrasDrawer: optional contact fields for a clinic the lab
-// just created inline. Edits the custom clinic option in place.
-function ClinicDetailsDrawer({ value, onChange, onClose }: {
-  value: NewClinic;
-  onChange: (patch: Partial<NewClinic>) => void;
-  onClose: () => void;
-}) {
-  return (
-    <ModalPortal>
-    <div className="fixed inset-0 z-[100] flex">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative ml-auto bg-white shadow-2xl w-full max-w-md flex flex-col animate-in slide-in-from-right duration-200">
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#F0EFF6] flex-shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-[#F0FDF4] flex items-center justify-center flex-shrink-0">
-              <Building2 className="w-4 h-4 text-[#1A5C2A]" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-[#030213]">Clinic details</h3>
-              <p className="text-[11px] text-[#717182]">New clinic — fill what's available.</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182]">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          <Mini label="Clinic name">
-            <input
-              type="text"
-              value={value.name}
-              onChange={(e) => onChange({ name: e.target.value })}
-              placeholder="e.g. Riverside Dental Care"
-              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
-            />
-          </Mini>
-          <Mini label="City">
-            <input
-              type="text"
-              value={value.city ?? ''}
-              onChange={(e) => onChange({ city: e.target.value })}
-              placeholder="e.g. Leeds"
-              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
-            />
-          </Mini>
-          <Mini label="Phone">
-            <input
-              type="tel"
-              value={value.phone ?? ''}
-              onChange={(e) => onChange({ phone: e.target.value })}
-              placeholder="Phone number"
-              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
-            />
-          </Mini>
-          <Mini label="Email">
-            <input
-              type="email"
-              value={value.email ?? ''}
-              onChange={(e) => onChange({ email: e.target.value })}
-              placeholder="clinic@example.com"
-              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
-            />
-          </Mini>
-        </div>
-        <div className="px-5 py-3 border-t border-[#F0EFF6] bg-[#F8F9FC] flex justify-end flex-shrink-0">
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 transition-opacity"
-          >
-            Done
-          </button>
-        </div>
-      </div>
-    </div>
-    </ModalPortal>
-  );
-}
-
-// ─── New-dentist details drawer (lab portal) ─────────────────────────────────
-function DentistDetailsDrawer({ value, onChange, onClose }: {
-  value: typeof mockStaffMembers[number];
-  onChange: (patch: Partial<typeof mockStaffMembers[number]>) => void;
-  onClose: () => void;
-}) {
-  return (
-    <ModalPortal>
-    <div className="fixed inset-0 z-[100] flex">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative ml-auto bg-white shadow-2xl w-full max-w-md flex flex-col animate-in slide-in-from-right duration-200">
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#F0EFF6] flex-shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-[#F0FDF4] flex items-center justify-center flex-shrink-0">
-              <Stethoscope className="w-4 h-4 text-[#1A5C2A]" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-[#030213]">Dentist details</h3>
-              <p className="text-[11px] text-[#717182]">New dentist — fill what's available.</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182]">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          <Mini label="Dentist name">
-            <input
-              type="text"
-              value={value.name}
-              onChange={(e) => onChange({ name: e.target.value })}
-              placeholder="e.g. Dr. Amelia Hart"
-              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
-            />
-          </Mini>
-          <Mini label="Email">
-            <input
-              type="email"
-              value={value.email ?? ''}
-              onChange={(e) => onChange({ email: e.target.value })}
-              placeholder="dentist@example.com"
-              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
-            />
-          </Mini>
-          <Mini label="Performer code">
-            <input
-              type="text"
-              value={value.performerCode ?? ''}
-              onChange={(e) => onChange({ performerCode: e.target.value })}
-              placeholder="e.g. DEN-0123"
-              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
-            />
-          </Mini>
-          <Mini label="Phone">
-            <input
-              type="tel"
-              value={value.phone ?? ''}
-              onChange={(e) => onChange({ phone: e.target.value })}
-              placeholder="Phone number"
-              className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7]"
-            />
           </Mini>
         </div>
         <div className="px-5 py-3 border-t border-[#F0EFF6] bg-[#F8F9FC] flex justify-end flex-shrink-0">
@@ -4821,14 +4735,16 @@ function DentistSearchSelect({ dentists, value, onChange, allowCreate = false, o
             </div>
           </div>
           <div className="max-h-56 overflow-y-auto py-1">
-            {allowCreate && query.trim() && !dentists.some(d => d.name.toLowerCase() === query.trim().toLowerCase()) && (
+            {allowCreate && !dentists.some(d => d.name.toLowerCase() === query.trim().toLowerCase()) && (
               <button
                 type="button"
                 onClick={() => { onCreate?.(query.trim()); setOpen(false); setQuery(''); }}
                 className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left border-b border-[#F0EFF6] hover:bg-[#F0FDF4] transition-colors"
               >
                 <span className="w-5 h-5 rounded-full bg-[#F0FDF4] text-[#1A5C2A] flex items-center justify-center flex-shrink-0"><Plus className="w-3 h-3" /></span>
-                <p className="text-[11px] font-semibold text-[#1A5C2A] truncate">Add new dentist: "{query.trim()}"</p>
+                <p className="text-[11px] font-semibold text-[#1A5C2A] truncate">
+                  {query.trim() ? `Add new dentist: "${query.trim()}"` : 'Add a new dentist'}
+                </p>
               </button>
             )}
             {visible.length === 0 ? (
@@ -5009,7 +4925,7 @@ function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKe
           </div>
           {/* List */}
           <div className="max-h-72 overflow-y-auto py-1">
-            {allowCreate && query.trim() && !labs.some(l => l.name.toLowerCase() === query.trim().toLowerCase()) && (
+            {allowCreate && !labs.some(l => l.name.toLowerCase() === query.trim().toLowerCase()) && (
               <button
                 type="button"
                 onClick={() => { onCreate?.(query.trim()); setOpen(false); setQuery(''); }}
@@ -5017,7 +4933,9 @@ function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKe
               >
                 <span className="w-7 h-7 rounded-lg bg-[#F0FDF4] text-[#1A5C2A] flex items-center justify-center flex-shrink-0"><Plus className="w-3.5 h-3.5" /></span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-[#1A5C2A] truncate">Create new {noun}: "{query.trim()}"</p>
+                  <p className="text-xs font-semibold text-[#1A5C2A] truncate">
+                    {query.trim() ? `Create new ${noun}: "${query.trim()}"` : `Add a new ${noun}`}
+                  </p>
                   <p className="text-[10px] text-[#717182]">Added to this case — saved on submit</p>
                 </div>
               </button>
