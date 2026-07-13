@@ -1,9 +1,10 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import {
   Wallet, Clock, AlertTriangle, FileText, ArrowRight, CheckCircle2,
   TrendingUp, TrendingDown, Building2, Users, BarChart3,
-  ChevronRight, Info,
+  ChevronRight, ChevronDown, Check, Info, X,
 } from 'lucide-react';
+import ModalPortal from '../components/ModalPortal';
 
 // ─── Clinic Portal — Analytics ───────────────────────────────────────────────
 // Practice-scoped analytics, restyled to mirror the group/supplier portal
@@ -156,26 +157,96 @@ const DELIVERY_TREND = { onTime: [88, 90, 91, 89, 95, 98], delayed: [6, 7, 9, 9,
 // Lab performance — manager-requested KPIs. Every headline figure is computed
 // from this single per-lab table so the maths is self-consistent (and the
 // formula is shown in each card's sub-line).
-const LAB_PERFORMANCE = [
-  { name: 'S4S London',         orders: 42, turnaround: 5.2, spend: 4820, color: '#4D8EF7' },
-  { name: 'Kingsbridge Dental', orders: 31, turnaround: 6.8, spend: 3110, color: '#A59DFF' },
-  { name: 'Smile Ceramics',     orders: 28, turnaround: 6.1, spend: 2240, color: '#34D399' },
-  { name: 'Eurodontic Ltd',     orders: 26, turnaround: 8.4, spend: 1460, color: '#FB923C' },
-  { name: 'Apex Dental Lab',    orders: 22, turnaround: 7.0, spend: 850,  color: '#F87171' },
+// One per-lab table drives every lab card (orders / turnaround / spend /
+// remakes) AND the KPI row — so a lab's numbers match everywhere and each
+// ranking card can show a top-5 with a "See all" popup for the full list.
+const LABS = [
+  { name: 'S4S London',            orders: 42, turnaround: 5.2, spend: 4820, remakes: 9, color: '#4D8EF7' },
+  { name: 'Kingsbridge Dental',    orders: 31, turnaround: 6.8, spend: 3110, remakes: 6, color: '#A59DFF' },
+  { name: 'Smile Ceramics',        orders: 28, turnaround: 6.1, spend: 2240, remakes: 4, color: '#34D399' },
+  { name: 'Eurodontic Ltd',        orders: 26, turnaround: 8.4, spend: 1460, remakes: 7, color: '#FB923C' },
+  { name: 'Apex Dental Lab',       orders: 22, turnaround: 7.0, spend: 850,  remakes: 5, color: '#F87171' },
+  { name: 'Northgate Dental Lab',  orders: 18, turnaround: 6.4, spend: 1180, remakes: 3, color: '#22C55E' },
+  { name: 'Crown & Bridge Co',     orders: 15, turnaround: 7.6, spend: 920,  remakes: 3, color: '#93C5FD' },
+  { name: 'Precision Prosthetics', orders: 12, turnaround: 5.9, spend: 760,  remakes: 2, color: '#C4B5FD' },
+  { name: 'Aesthetic Labs',        orders: 9,  turnaround: 8.1, spend: 540,  remakes: 2, color: '#FDBA74' },
+  { name: 'Meridian Dental',       orders: 6,  turnaround: 6.7, spend: 410,  remakes: 1, color: '#FCA5A5' },
 ];
-const LAB_COUNT = LAB_PERFORMANCE.length;                                    // 5
-const TOTAL_ORDERS = LAB_PERFORMANCE.reduce((s, l) => s + l.orders, 0);      // 149
-const TOTAL_LAB_SPEND = LAB_PERFORMANCE.reduce((s, l) => s + l.spend, 0);    // 12,480
-const PAYMENT_PROCESSED = 21450;                                            // paid this period
+const LAB_COUNT = LABS.length;                                        // 10
+const TOTAL_ORDERS = LABS.reduce((s, l) => s + l.orders, 0);          // 209
+const TOTAL_LAB_SPEND = LABS.reduce((s, l) => s + l.spend, 0);        // 16,290
+const TOTAL_REMAKES = LABS.reduce((s, l) => s + l.remakes, 0);        // 42
+const PAYMENT_PROCESSED = 21450;                                     // paid this period
 const DELAYED_ORDERS = 7;
 const DELAYED_VALUE = 1850;
-const AVG_TURNAROUND = 6.5;                                                 // days, order → delivery
-const AVG_COST_PER_LAB = Math.round(TOTAL_LAB_SPEND / LAB_COUNT);            // 2,496
-const ORDERS_PER_LAB = (TOTAL_ORDERS / LAB_COUNT).toFixed(1);               // 29.8
-const AVG_ORDER_VALUE = Math.round(PAYMENT_PROCESSED / TOTAL_ORDERS);        // 144
-const PROJECTED_YEAR = TOTAL_LAB_SPEND * 12;                                // 149,760
-const ORDERS_MAX = Math.max(...LAB_PERFORMANCE.map(l => l.orders));
-const TURNAROUND_MAX = Math.max(...LAB_PERFORMANCE.map(l => l.turnaround));
+const AVG_TURNAROUND = 6.5;                                          // days, order → delivery
+const AVG_COST_PER_LAB = Math.round(TOTAL_LAB_SPEND / LAB_COUNT);     // 1,629
+const ORDERS_PER_LAB = (TOTAL_ORDERS / LAB_COUNT).toFixed(1);        // 20.9
+const AVG_ORDER_VALUE = Math.round(PAYMENT_PROCESSED / TOTAL_ORDERS); // 103
+const PROJECTED_YEAR = TOTAL_LAB_SPEND * 12;                         // 195,480
+
+// Remake case list — feeds the filterable "Remake cases" card (by doctor / lab).
+const REMAKE_DOCTORS = ['Dr. Webb', 'Dr. Sharma', 'Dr. Reid', 'Dr. Cole', 'Dr. Bell'];
+const REMAKE_CASE_LABS = ['S4S London', 'Eurodontic Ltd', 'Kingsbridge Dental', 'Apex Dental Lab', 'Smile Ceramics'];
+const REMAKE_CASES: { id: string; doctor: string; lab: string; reason: string; value: number }[] = [
+  { id: 'RMK-1001', doctor: 'Dr. Webb',   lab: 'S4S London',         reason: 'Shade mismatch', value: 180 },
+  { id: 'RMK-1002', doctor: 'Dr. Webb',   lab: 'Eurodontic Ltd',     reason: 'Poor fit',       value: 220 },
+  { id: 'RMK-1003', doctor: 'Dr. Sharma', lab: 'S4S London',         reason: 'Fracture',       value: 260 },
+  { id: 'RMK-1004', doctor: 'Dr. Reid',   lab: 'Kingsbridge Dental', reason: 'Contact point',  value: 150 },
+  { id: 'RMK-1005', doctor: 'Dr. Cole',   lab: 'Apex Dental Lab',    reason: 'Poor fit',       value: 190 },
+  { id: 'RMK-1006', doctor: 'Dr. Bell',   lab: 'Smile Ceramics',     reason: 'Margin issue',   value: 210 },
+  { id: 'RMK-1007', doctor: 'Dr. Webb',   lab: 'S4S London',         reason: 'Poor fit',       value: 175 },
+  { id: 'RMK-1008', doctor: 'Dr. Sharma', lab: 'Eurodontic Ltd',     reason: 'Shade mismatch', value: 200 },
+  { id: 'RMK-1009', doctor: 'Dr. Reid',   lab: 'Apex Dental Lab',    reason: 'Fracture',       value: 240 },
+  { id: 'RMK-1010', doctor: 'Dr. Cole',   lab: 'Kingsbridge Dental', reason: 'Margin issue',   value: 165 },
+  { id: 'RMK-1011', doctor: 'Dr. Bell',   lab: 'S4S London',         reason: 'Contact point',  value: 185 },
+  { id: 'RMK-1012', doctor: 'Dr. Webb',   lab: 'Eurodontic Ltd',     reason: 'Fracture',       value: 255 },
+  { id: 'RMK-1013', doctor: 'Dr. Sharma', lab: 'Kingsbridge Dental', reason: 'Poor fit',       value: 160 },
+  { id: 'RMK-1014', doctor: 'Dr. Reid',   lab: 'Smile Ceramics',     reason: 'Shade mismatch', value: 205 },
+  { id: 'RMK-1015', doctor: 'Dr. Cole',   lab: 'S4S London',         reason: 'Margin issue',   value: 195 },
+  { id: 'RMK-1016', doctor: 'Dr. Bell',   lab: 'Apex Dental Lab',    reason: 'Poor fit',       value: 180 },
+  { id: 'RMK-1017', doctor: 'Dr. Webb',   lab: 'Kingsbridge Dental', reason: 'Shade mismatch', value: 170 },
+  { id: 'RMK-1018', doctor: 'Dr. Sharma', lab: 'Apex Dental Lab',    reason: 'Contact point',  value: 230 },
+  { id: 'RMK-1019', doctor: 'Dr. Reid',   lab: 'Eurodontic Ltd',     reason: 'Margin issue',   value: 215 },
+  { id: 'RMK-1020', doctor: 'Dr. Cole',   lab: 'Smile Ceramics',     reason: 'Fracture',       value: 245 },
+  { id: 'RMK-1021', doctor: 'Dr. Bell',   lab: 'Kingsbridge Dental', reason: 'Shade mismatch', value: 155 },
+  { id: 'RMK-1022', doctor: 'Dr. Webb',   lab: 'Smile Ceramics',     reason: 'Poor fit',       value: 200 },
+];
+
+// ── Service-category analytics — orders / remakes / delays per category ───────
+// One deterministic (index-seeded, not random) case-level table drives all
+// three category cards, so filtering by doctor + lab stays consistent.
+const SVC_CATEGORIES = [
+  { name: 'Crowns & Bridges', color: '#4D8EF7' },
+  { name: 'Implants',         color: '#34D399' },
+  { name: 'Veneers',          color: '#EC4899' },
+  { name: 'Orthodontics',     color: '#FB923C' },
+  { name: 'Dentures',         color: '#A59DFF' },
+  { name: 'Night Guards',     color: '#F87171' },
+];
+const SVC_DOCTORS = REMAKE_DOCTORS;
+const SVC_LABS = REMAKE_CASE_LABS;
+type ServiceCase = { category: string; doctor: string; lab: string; remake: boolean; delayed: boolean };
+const SERVICE_CASES: ServiceCase[] = (() => {
+  const counts   = [40, 28, 22, 16, 15, 7];   // 128 orders total
+  const remakeN  = [3, 2, 1, 1, 1, 1];         // 9 remakes total
+  const delayedN = [0, 3, 0, 1, 2, 1];         // 7 delayed total (4 categories)
+  const out: ServiceCase[] = [];
+  let g = 0;
+  SVC_CATEGORIES.forEach((cat, ci) => {
+    for (let i = 0; i < counts[ci]; i++) {
+      out.push({
+        category: cat.name,
+        doctor: SVC_DOCTORS[g % SVC_DOCTORS.length],
+        lab: SVC_LABS[(g + ci) % SVC_LABS.length],
+        remake: i < remakeN[ci],
+        delayed: i >= counts[ci] - delayedN[ci],
+      });
+      g++;
+    }
+  });
+  return out;
+})();
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function ClinicAnalyticsPage({ onOpenInvoices }: {
@@ -539,15 +610,27 @@ export default function ClinicAnalyticsPage({ onOpenInvoices }: {
             </div>
           </section>
 
-          {/* Orders & turnaround per lab */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <Card title="Orders by Lab" subtitle="Order volume per lab this period">
-              <BarList rows={LAB_PERFORMANCE.map(l => ({ label: l.name, value: l.orders, color: l.color }))} max={ORDERS_MAX} formatValue={(v) => String(v)} />
-            </Card>
-            <Card title="Turnaround by Lab" subtitle="Avg days from order to delivery">
-              <BarList rows={LAB_PERFORMANCE.map(l => ({ label: l.name, value: l.turnaround, color: l.color }))} max={TURNAROUND_MAX} formatValue={(v) => `${v} days`} />
-            </Card>
+          {/* Orders / turnaround / remakes per lab — one row, top 5 + "See all" */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <LabRankCard
+              title="Orders by Lab" subtitle={`Top 5 of ${LAB_COUNT} labs`}
+              rows={LABS.map(l => ({ label: l.name, value: l.orders, color: l.color }))} formatValue={(v) => String(v)}
+            />
+            <LabRankCard
+              title="Turnaround by Lab" subtitle={`Slowest 5 of ${LAB_COUNT} · days`}
+              rows={LABS.map(l => ({ label: l.name, value: l.turnaround, color: l.color }))} formatValue={(v) => `${v} days`}
+            />
+            <LabRankCard
+              title="Remakes by Lab" subtitle={`Top 5 of ${LAB_COUNT} · ${TOTAL_REMAKES} total`}
+              rows={LABS.map(l => ({ label: l.name, value: l.remakes, color: l.color }))} formatValue={(v) => String(v)}
+            />
           </div>
+
+          {/* Service-category breakdowns — orders / remakes / delays, one row */}
+          <ServiceCategorySection />
+
+          {/* Remake cases — filterable case list */}
+          <RemakeCasesCard doctors={REMAKE_DOCTORS} labs={REMAKE_CASE_LABS} cases={REMAKE_CASES} />
 
           {/* Trends & performance */}
           <section>
@@ -635,6 +718,279 @@ function BarList({ rows, max, formatValue }: {
           <span className="text-xs font-bold text-[#030213] tabular-nums flex-shrink-0 w-16 text-right">{formatValue(r.value)}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ─── See-all button + modal (shared by the lab ranking cards) ───────────────
+function SeeAllButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="text-[11px] font-semibold text-[#4D8EF7] hover:text-[#1565C0] inline-flex items-center gap-0.5">
+      See all <ChevronRight className="w-3 h-3" />
+    </button>
+  );
+}
+
+function SeeAllModal({ title, subtitle, onClose, children }: {
+  title: string; subtitle?: string; onClose: () => void; children: ReactNode;
+}) {
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#F0EFF6] flex-shrink-0">
+            <div>
+              <p className="text-sm font-semibold text-[#030213]">{title}</p>
+              {subtitle && <p className="text-xs text-[#717182] mt-0.5">{subtitle}</p>}
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182]">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="p-5 overflow-y-auto">{children}</div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+// ─── Lab ranking card — top 5 bar list + "See all" popup with every lab ─────
+// Compact ranked bars — label + value on top, full-width thin bar below.
+// Reads far better than side-by-side horizontal bars in narrow (⅓-width) cards.
+function MiniBars({ rows, max, formatValue }: {
+  rows: { label: string; value: number; color: string }[];
+  max: number;
+  formatValue: (v: number) => string;
+}) {
+  return (
+    <div className="space-y-2.5">
+      {rows.map(r => (
+        <div key={r.label}>
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <span className="text-xs text-[#5A5568] truncate">{r.label}</span>
+            <span className="text-xs font-bold text-[#030213] tabular-nums flex-shrink-0">{formatValue(r.value)}</span>
+          </div>
+          <div className="h-2 bg-[#F3F3F5] rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(4, (r.value / max) * 100)}%`, background: r.color }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LabRankCard({ title, subtitle, rows, formatValue }: {
+  title: string; subtitle?: string;
+  rows: { label: string; value: number; color: string }[];
+  formatValue: (v: number) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const sorted = [...rows].sort((a, b) => b.value - a.value);
+  const max = Math.max(...sorted.map(r => r.value));
+  return (
+    <Card title={title} subtitle={subtitle} action={sorted.length > 5 ? <SeeAllButton onClick={() => setOpen(true)} /> : undefined}>
+      <MiniBars rows={sorted.slice(0, 5)} max={max} formatValue={formatValue} />
+      {open && (
+        <SeeAllModal title={title} subtitle={`All ${sorted.length} labs · this period`} onClose={() => setOpen(false)}>
+          <MiniBars rows={sorted} max={max} formatValue={formatValue} />
+        </SeeAllModal>
+      )}
+    </Card>
+  );
+}
+
+// ─── Multi-select dropdown — all options selected by default ────────────────
+function MultiSelect({ label, options, selected, onChange }: {
+  label: string; options: string[]; selected: string[]; onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const allOn = selected.length === options.length;
+  const summary = allOn ? 'All' : selected.length === 0 ? 'None' : `${selected.length} selected`;
+  const toggle = (o: string) => onChange(selected.includes(o) ? selected.filter(x => x !== o) : [...selected, o]);
+  return (
+    <div ref={ref} className="relative flex-1 min-w-0">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs text-left border rounded-lg bg-white transition-colors ${open ? 'border-[#4D8EF7]' : 'border-[#E0E0E6] hover:border-[#BFDBFE]'}`}
+      >
+        <span className="truncate"><span className="text-[#A0A0B0]">{label}: </span><span className="font-semibold text-[#030213]">{summary}</span></span>
+        <ChevronDown className={`w-3 h-3 text-[#A0A0B0] flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute z-40 mt-1 left-0 right-0 bg-white border border-[#E8EAF6] rounded-lg shadow-[0_10px_30px_rgba(77,142,247,0.15)] overflow-hidden">
+          <div className="max-h-56 overflow-y-auto py-1">
+            {/* "All" — always the top option; toggles the whole group */}
+            <button
+              onClick={() => onChange(allOn ? [] : [...options])}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-[#FAFBFF] transition-colors border-b border-[#F0EFF6]"
+            >
+              <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${allOn ? 'bg-[#4D8EF7] border-[#4D8EF7]' : selected.length > 0 ? 'bg-[#EEF4FF] border-[#4D8EF7]' : 'border-[#C8C8D0] bg-white'}`}>
+                {allOn ? <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} /> : selected.length > 0 ? <span className="w-1.5 h-[2px] bg-[#4D8EF7] rounded-full" /> : null}
+              </span>
+              <span className="text-xs font-semibold text-[#030213]">All</span>
+            </button>
+            {options.map(o => {
+              const on = selected.includes(o);
+              return (
+                <button key={o} onClick={() => toggle(o)} className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-[#FAFBFF] transition-colors">
+                  <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${on ? 'bg-[#4D8EF7] border-[#4D8EF7]' : 'border-[#C8C8D0] bg-white'}`}>
+                    {on && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
+                  </span>
+                  <span className={`text-xs truncate ${on ? 'font-semibold text-[#030213]' : 'text-[#5A5568]'}`}>{o}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A single remake-case row (shared by the card preview and the See-all popup).
+function RemakeRow({ c }: { c: { id: string; doctor: string; lab: string; reason: string } }) {
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="w-1.5 h-1.5 rounded-full bg-[#F87171] flex-shrink-0" />
+      <span className="font-semibold text-[#030213] flex-shrink-0 tabular-nums">{c.id}</span>
+      <span className="text-[#717182] truncate flex-1 min-w-0">{c.doctor} · {c.lab}</span>
+      <span className="text-[10px] text-[#A0A0B0] flex-shrink-0">{c.reason}</span>
+    </div>
+  );
+}
+
+// ─── Remake cases — dropdown filters (doctor / lab) + compact preview ───────
+function RemakeCasesCard({ doctors, labs, cases }: {
+  doctors: string[]; labs: string[];
+  cases: { id: string; doctor: string; lab: string; reason: string; value: number }[];
+}) {
+  const [selDoc, setSelDoc] = useState<string[]>(doctors);   // all selected by default
+  const [selLab, setSelLab] = useState<string[]>(labs);      // all selected by default
+  const [open, setOpen] = useState(false);
+  const filtered = cases.filter(c => selDoc.includes(c.doctor) && selLab.includes(c.lab));
+  const value = filtered.reduce((s, c) => s + c.value, 0);
+  const PREVIEW = 4;
+  const preview = filtered.slice(0, PREVIEW);
+
+  return (
+    <div className="bg-white border border-[#E0E0E6] rounded-xl">
+      <div className="px-5 py-4 border-b border-[#F0EFF6] flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-sm font-semibold text-[#030213]">Remake cases</p>
+          <p className="text-xs text-[#717182] mt-0.5">Filter by doctor and lab</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-[280px]">
+            <MultiSelect label="Doctor" options={doctors} selected={selDoc} onChange={setSelDoc} />
+            <MultiSelect label="Lab" options={labs} selected={selLab} onChange={setSelLab} />
+          </div>
+          {filtered.length > PREVIEW && <SeeAllButton onClick={() => setOpen(true)} />}
+        </div>
+      </div>
+      <div className="p-5">
+        {/* Filtered headline */}
+        <p className="text-2xl font-bold text-[#030213] leading-none">
+          {filtered.length}
+          <span className="text-[11px] font-normal text-[#717182] ml-2">remake case{filtered.length === 1 ? '' : 's'} · {fmt(value)}</span>
+        </p>
+
+        {/* Compact preview */}
+        <div className="mt-3 border-t border-[#F0EFF6] pt-3 space-y-1.5">
+          {filtered.length === 0
+            ? <p className="text-xs text-[#A0A0B0] italic text-center py-3">No remakes match the selected filters.</p>
+            : preview.map(c => <RemakeRow key={c.id} c={c} />)}
+          {filtered.length > PREVIEW && (
+            <button onClick={() => setOpen(true)} className="text-[11px] font-semibold text-[#4D8EF7] hover:text-[#1565C0] pt-1">
+              +{filtered.length - PREVIEW} more
+            </button>
+          )}
+        </div>
+      </div>
+
+      {open && (
+        <SeeAllModal title="Remake cases" subtitle={`${filtered.length} matching · ${fmt(value)}`} onClose={() => setOpen(false)}>
+          <div className="space-y-1.5">{filtered.map(c => <RemakeRow key={c.id} c={c} />)}</div>
+        </SeeAllModal>
+      )}
+    </div>
+  );
+}
+
+// ─── Service-category breakdowns — three compact cards in one row, sharing a
+// single Doctor + Lab filter. Minimal: label-over-thin-bar, no per-card chrome.
+function ServiceCategorySection() {
+  return (
+    <section>
+      <div className="flex items-center gap-1.5 mb-3">
+        <div className="w-0.5 h-3 rounded-full bg-gradient-to-b from-[#4D8EF7] to-[#A59DFF]" />
+        <h2 className="text-xs font-semibold text-[#030213] uppercase tracking-wide">By service category</h2>
+        <InfoTip text="Order volume, remakes and delays split by service category — filter each by doctor and lab." />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <MiniCategoryCard title="Orders" noun="orders" />
+        <MiniCategoryCard title="Remakes" noun="remakes" predicate={c => c.remake} />
+        <MiniCategoryCard title="Delayed" noun="delayed" predicate={c => c.delayed} />
+      </div>
+    </section>
+  );
+}
+
+function MiniCategoryCard({ title, noun, predicate }: {
+  title: string; noun: string; predicate?: (c: ServiceCase) => boolean;
+}) {
+  const [selDoc, setSelDoc] = useState<string[]>(SVC_DOCTORS);   // all selected by default
+  const [selLab, setSelLab] = useState<string[]>(SVC_LABS);      // all selected by default
+  const matched = SERVICE_CASES.filter(c =>
+    selDoc.includes(c.doctor) && selLab.includes(c.lab) && (!predicate || predicate(c))
+  );
+  const rows = SVC_CATEGORIES
+    .map(cat => ({ label: cat.name, value: matched.filter(c => c.category === cat.name).length, color: cat.color }))
+    .filter(r => r.value > 0)
+    .sort((a, b) => b.value - a.value);
+  const total = matched.length;
+  return (
+    <div className="bg-white border border-[#E0E0E6] rounded-xl p-4">
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <p className="text-sm font-semibold text-[#030213]">{title}</p>
+        <p className="text-[11px] text-[#717182]">{rows.length} categor{rows.length === 1 ? 'y' : 'ies'}</p>
+      </div>
+      {/* Per-card doctor + lab filters */}
+      <div className="flex items-center gap-2 mb-4">
+        <MultiSelect label="Doctor" options={SVC_DOCTORS} selected={selDoc} onChange={setSelDoc} />
+        <MultiSelect label="Lab" options={SVC_LABS} selected={selLab} onChange={setSelLab} />
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-xs text-[#A0A0B0] italic text-center py-8">None match.</p>
+      ) : (
+        <div className="flex flex-col items-center">
+          {/* Donut — distinct from the bar-ranking cards above */}
+          <div className="relative">
+            <Donut data={rows} size={124} thickness={18} />
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-xl font-bold text-[#030213] leading-none tabular-nums">{total}</span>
+              <span className="text-[10px] text-[#717182] mt-0.5">{noun}</span>
+            </div>
+          </div>
+          {/* Legend */}
+          <div className="mt-4 w-full space-y-1.5">
+            {rows.map(r => (
+              <div key={r.label} className="flex items-center gap-1.5 text-[11px]">
+                <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: r.color }} />
+                <span className="text-[#5A5568] truncate flex-1 min-w-0">{r.label}</span>
+                <span className="font-bold text-[#030213] tabular-nums flex-shrink-0">{r.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
