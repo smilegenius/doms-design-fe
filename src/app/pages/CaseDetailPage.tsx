@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, Fragment } from 'react';
 import {
-  ArrowLeft, ArrowRight, AlertTriangle, MessageSquare, ChevronDown, ChevronUp,
+  ArrowLeft, ArrowRight, AlertTriangle, MessageSquare, MessageCircle, ChevronDown, ChevronUp,
   FileText, MapPin, Download, Calendar, Lightbulb, Maximize2, Minimize2,
   StickyNote, X, Bold, Italic, Underline, Strikethrough, Code as CodeIcon,
   Superscript, Subscript, Undo2, Redo2, Paperclip, Eye, Plus, Minus,
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
-  Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send,
+  Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
 import { ScoreBadge } from '../components/ScoreBadge';
+import { AiSparkle } from '../components/AiSparkle';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import { useToast } from '../context/ToastContext';
 import { MISSING_INFO_EMAIL } from '../data/caseScoring';
@@ -1624,109 +1625,314 @@ function fillTemplate(text: string, vars: Record<string, string>) {
   return text.replace(/{{(\w+)}}/g, (_, k) => vars[k] ?? `{{${k}}}`);
 }
 
-function EmailBubble({ dir, name, initials, time, body }: {
-  dir: 'in' | 'out'; name: string; initials: string; time: string; body: string;
-}) {
-  const out = dir === 'out';
+// ── Multi-channel conversation (Email + WhatsApp) ────────────────────────────
+type Channel = 'email' | 'whatsapp';
+interface ConvMsg {
+  id: string; channel: Channel; dir: 'in' | 'out';
+  name: string; initials: string; date: string; time: string; body: string;
+}
+
+// Small tooltip (copied from the overview pages — no shared component exists).
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span
+      tabIndex={0}
+      title={text}
+      className="group relative inline-flex items-center justify-center w-4 h-4 rounded-full text-[#A0A0B0] hover:text-[#4D8EF7] focus:text-[#4D8EF7] focus:outline-none cursor-help"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <Info className="w-3 h-3" />
+      <span className="pointer-events-none absolute z-50 left-1/2 -translate-x-1/2 top-full mt-1 hidden group-hover:block group-focus:block bg-[#030213] text-white text-[10px] font-medium leading-snug px-2 py-1.5 rounded-md shadow-lg whitespace-normal w-48 text-center">
+        {text}
+      </span>
+    </span>
+  );
+}
+
+// A single conversation bubble — channel-aware (email = blue, whatsapp = green).
+function ChannelBubble({ msg, showChannel }: { msg: ConvMsg; showChannel?: boolean }) {
+  const out = msg.dir === 'out';
+  const wa = msg.channel === 'whatsapp';
+  const ChIcon = wa ? MessageCircle : Mail;
+  // WhatsApp bubbles are green (outbound a touch deeper); email = white (out) / blue (in).
+  const bubble = wa
+    ? (out ? 'bg-[#DCFCE7] border-[#A7F3C6]' : 'bg-[#F0FDF4] border-[#BBF7D0]')
+    : (out ? 'bg-white border-[#E0E0E6]' : 'bg-[#EEF4FF] border-[#DBEAFE]');
+  // Lab avatar keeps "SG"; the dentist (inbound) avatar shows the channel icon.
+  const avatar = out ? 'bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF]' : wa ? 'bg-[#25D366]' : 'bg-[#4D8EF7]';
   return (
     <div className="flex gap-2.5">
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 ${out ? 'bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF]' : 'bg-[#7C8DB5]'}`}>{initials}</div>
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 ${avatar}`}>
+        {out ? msg.initials : <ChIcon className="w-4 h-4" />}
+      </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs font-semibold text-[#030213]">{name}</span>
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <span className="text-xs font-semibold text-[#030213]">{msg.name}</span>
           <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-px rounded ${out ? 'bg-[#EEF4FF] text-[#1565C0]' : 'bg-[#F3F3F5] text-[#717182]'}`}>{out ? 'Lab' : 'Dentist'}</span>
-          <span className="text-[10px] text-[#A0A0B0]">{time}</span>
+          {showChannel && (
+            <span className={`inline-flex items-center gap-0.5 text-[9px] font-semibold ${wa ? 'text-[#15803D]' : 'text-[#1565C0]'}`}>
+              <ChIcon className="w-2.5 h-2.5" />{wa ? 'WhatsApp' : 'Email'}
+            </span>
+          )}
+          <span className="text-[10px] text-[#A0A0B0]">{msg.time}</span>
         </div>
-        <div className={`rounded-xl border px-3 py-2.5 ${out ? 'bg-white border-[#E0E0E6]' : 'bg-[#EEF4FF] border-[#DBEAFE]'}`}>
-          <pre className="text-xs text-[#030213] whitespace-pre-wrap font-sans leading-relaxed">{body}</pre>
+        <div className={`rounded-xl border px-3 py-2.5 ${bubble}`}>
+          <pre className="text-xs text-[#030213] whitespace-pre-wrap font-sans leading-relaxed">{msg.body}</pre>
         </div>
       </div>
     </div>
   );
 }
 
-function CommunicationsTab({ caseData, service, replied = false, onMarkReceived }: { caseData: CaseForDetail; service?: ServiceItem; replied?: boolean; onMarkReceived?: () => void }) {
+// Seed a mock email + WhatsApp conversation for the case (prototype — local).
+function buildConversation(caseData: CaseForDetail, replied: boolean, missing: string[]): ConvMsg[] {
+  const dentist = caseData.dentist;
+  const dInit = nameInitials(dentist);
+  const last = dentist.split(' ').filter(Boolean).slice(-1)[0] || dentist;
+  const vars = {
+    case_number: caseData.id, dentist_name: dentist,
+    missing_requirements: missing.map(m => '• ' + m).join('\n'), lab_name: 'Smile Genius Lab',
+  };
+  const emailBody = missing.length
+    ? fillTemplate(MISSING_INFO_EMAIL.body, vars)
+    : `Hello ${dentist},\n\nThanks — we've received the prescription for case ${caseData.id} and everything looks complete. We're starting production now.\n\nSmile Genius Lab`;
+  const msgs: ConvMsg[] = [
+    { id: 'em-1', channel: 'email', dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Yesterday', time: '09:12', body: emailBody },
+    { id: 'wa-1', channel: 'whatsapp', dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Yesterday', time: '10:40', body: `Hi Dr ${last}, just emailed you about case ${caseData.id} — happy to take the files over WhatsApp if that's quicker 👍` },
+    { id: 'wa-2', channel: 'whatsapp', dir: 'in', name: dentist, initials: dInit, date: 'Yesterday', time: '11:05', body: `Thanks! I'll get the outstanding bits over shortly.` },
+  ];
+  if (replied) {
+    msgs.push({ id: 'em-2', channel: 'email', dir: 'in', name: dentist, initials: dInit, date: 'Today', time: '08:30', body: `Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production.` });
+  } else {
+    msgs.push({ id: 'wa-3', channel: 'whatsapp', dir: 'in', name: dentist, initials: dInit, date: 'Today', time: '08:15', body: `Uploading now — should be done in 10 mins 🙌` });
+  }
+  return msgs;
+}
+
+function ConversationPanel({ caseData, service, replied = false, onMarkReceived }: { caseData: CaseForDetail; service?: ServiceItem; replied?: boolean; onMarkReceived?: () => void }) {
   const { scoreCase } = useCaseScoring();
-  // With a service → score that one (single-service case). Without → score the
-  // whole case (used at the Case Summary level for multi-service cases).
+  const { toast } = useToast();
+  // With a service → score that one; without → score the whole case.
   const items = service ? [service] : (caseData.serviceItems ?? []);
   const score = scoreCase({ ...caseData, serviceItems: items } as any);
   const missing = score.services.filter(s => s.configured).flatMap(s => s.fields.filter(f => !f.filled).map(f => f.label));
 
-  if (!score.applicable || missing.length === 0) {
+  const [activeTab, setActiveTab] = useState<'latest' | 'email' | 'whatsapp' | 'ai'>('latest');
+  const [msgs, setMsgs] = useState<ConvMsg[]>(() => buildConversation(caseData, replied, missing));
+  const [draft, setDraft] = useState('');
+  const [composeChannel, setComposeChannel] = useState<Channel>('email');
+  const idRef = useRef(0);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Open at the latest message; re-pin to the bottom when messages / tab change.
+  // Keep pinning each frame until the content height stops changing — late reflow
+  // (wrapping bubbles, the awaiting banner) grows scrollHeight a few frames after
+  // commit, so a single measure lands short of the true bottom.
+  useEffect(() => {
+    if (activeTab === 'ai') return;
+    const el = scrollRef.current;
+    if (!el) return;
+    let raf = 0, last = -1, tries = 0;
+    const loop = () => {
+      el.scrollTop = el.scrollHeight;
+      if (el.scrollHeight !== last && tries < 20) { last = el.scrollHeight; tries++; raf = requestAnimationFrame(loop); }
+    };
+    loop();
+    return () => cancelAnimationFrame(raf);
+  }, [msgs, activeTab]);
+
+  if (!score.applicable) {
     return (
       <div className="bg-white border border-[#E0E0E6] rounded-xl p-8 flex flex-col items-center text-center">
         <span className="w-10 h-10 rounded-full bg-[#F0FDF4] inline-flex items-center justify-center mb-3"><CheckCircle2 className="w-5 h-5 text-[#15803D]" /></span>
-        <p className="text-sm font-semibold text-[#030213]">No emails for this case</p>
-        <p className="text-xs text-[#717182] mt-1">{score.applicable ? 'The prescription is complete — nothing to chase.' : 'Scoring isn’t set up for this service type.'}</p>
+        <p className="text-sm font-semibold text-[#030213]">No conversation for this case</p>
+        <p className="text-xs text-[#717182] mt-1">Scoring isn’t set up for this service type.</p>
       </div>
     );
   }
 
-  const vars = {
-    case_number: caseData.id,
-    dentist_name: caseData.dentist,
-    missing_requirements: missing.map(m => '• ' + m).join('\n'),
-    lab_name: 'Smile Genius Lab',
+  const emailMsgs = msgs.filter(m => m.channel === 'email');
+  const waMsgs = msgs.filter(m => m.channel === 'whatsapp');
+  const shown = activeTab === 'email' ? emailMsgs : activeTab === 'whatsapp' ? waMsgs : msgs;
+  const hasReply = msgs.some(m => m.channel === 'email' && m.dir === 'in');
+
+  const send = () => {
+    const t = draft.trim();
+    if (!t) return;
+    setMsgs(prev => [...prev, { id: `new-${++idRef.current}`, channel: composeChannel, dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now', body: t }]);
+    setDraft('');
+    toast.success(`Sent via ${composeChannel === 'email' ? 'Email' : 'WhatsApp'}`);
   };
-  const subject = fillTemplate(MISSING_INFO_EMAIL.subject, vars);
-  const body = fillTemplate(MISSING_INFO_EMAIL.body, vars);
+  const simulateReply = () => {
+    setMsgs(prev => [...prev, { id: `reply-${++idRef.current}`, channel: 'email', dir: 'in', name: caseData.dentist, initials: nameInitials(caseData.dentist), date: 'Today', time: 'now', body: `Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production.` }]);
+    onMarkReceived?.();
+  };
+
+  // AI-derived summary + drafted reply (mock — from the case + conversation).
+  const summaryPoints = [
+    `Case ${caseData.id}${caseData.patientName ? ` · ${caseData.patientName}` : ''} — dentist ${caseData.dentist}.`,
+    missing.length
+      ? `Lab flagged ${missing.length} missing item${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}.`
+      : `Prescription is complete — no outstanding items.`,
+    hasReply
+      ? `${caseData.dentist} replied and uploaded the files — case ready for production.`
+      : `Awaiting ${caseData.dentist} to send the outstanding files (chased over email + WhatsApp).`,
+    `Fastest channel so far: WhatsApp — the dentist responded within the hour.`,
+  ];
+  const last = caseData.dentist.split(' ').filter(Boolean).slice(-1)[0] || caseData.dentist;
+  const draftReply = missing.length
+    ? `Hi Dr ${last},\n\nThanks for the update on ${caseData.id}. Could you confirm the ${missing.slice(0, 2).join(' and ')}${missing.length > 2 ? ' (and the remaining items)' : ''} when you get a moment? As soon as they're in we'll start production.\n\nThanks,\nSmile Genius Lab`
+    : `Hi Dr ${last},\n\nThanks — everything's in for ${caseData.id}. We've started production and will keep you posted on progress.\n\nSmile Genius Lab`;
+  const insertDraft = () => {
+    setDraft(draftReply);
+    setComposeChannel('email');
+    setActiveTab('latest');
+    toast.success('Draft inserted — review and send.');
+  };
+
+  const tabs: { id: 'latest' | 'email' | 'whatsapp' | 'ai'; label: string; count: number | null }[] = [
+    { id: 'latest', label: 'Latest', count: msgs.length },
+    { id: 'email', label: 'Email', count: emailMsgs.length },
+    { id: 'whatsapp', label: 'WhatsApp', count: waMsgs.length },
+    { id: 'ai', label: 'AI', count: null },
+  ];
+  const tabIcon = (id: string) =>
+    id === 'latest' ? <MessageSquare className="w-3 h-3" />
+    : id === 'email' ? <Mail className="w-3 h-3" />
+    : id === 'whatsapp' ? <MessageCircle className="w-3 h-3" />
+    : <AiSparkle />;
+
+  let prevDate = '';
 
   return (
-    <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-[#F0EFF6] flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-[#030213] truncate">{subject}</p>
-          <p className="text-[11px] text-[#717182]">Missing-info thread with {caseData.dentist}</p>
-        </div>
-        {replied ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#F0FDF4] text-[#15803D] border border-[#BBF7D0] flex-shrink-0">
-            <Check className="w-3 h-3" /> Dentist replied
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#FFF7ED] text-[#B45309] border border-[#FDE68A] flex-shrink-0">
-            <Clock className="w-3 h-3" /> Awaiting reply
-          </span>
-        )}
+    <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden flex flex-col flex-1 min-h-0">
+      {/* Channel tabs */}
+      <div className="flex items-center gap-1 p-1 m-3 mb-0 bg-[#F3F3F5] rounded-lg flex-shrink-0">
+        {tabs.map(t => {
+          const active = activeTab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              className={`flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-semibold transition-colors ${active ? 'bg-white text-[#030213] shadow-sm' : 'text-[#717182] hover:text-[#030213]'}`}
+            >
+              {tabIcon(t.id)}
+              {t.label}
+              {t.count != null && <span className={`text-[9px] tabular-nums ${active ? 'text-[#4D8EF7]' : 'text-[#A0A0B0]'}`}>{t.count}</span>}
+            </button>
+          );
+        })}
       </div>
 
-      {replied && (
-        /* The dentist's reply supplied the previously-missing items → surface it on top */
-        <div className="mx-4 mt-4 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-3 flex items-start gap-2.5">
-          <CheckCircle2 className="w-4 h-4 text-[#15803D] flex-shrink-0 mt-0.5" />
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-[#15803D]">Now received from {caseData.dentist}</p>
-            <p className="text-[11px] text-[#166534] mt-0.5 leading-relaxed">
-              {missing.join(', ')} — case score updated <span className="font-bold">{score.percent}% → 100%</span>.
-            </p>
+      {/* Body */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-4">
+        {activeTab === 'ai' ? (
+          <div className="space-y-4">
+            <div className="flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl border border-[#FECACA] bg-[#FEF2F2]">
+              <AiSparkle label title="" className="mt-px" />
+              <p className="text-[11px] text-[#5A5568] leading-snug">
+                <span className="font-semibold text-[#030213]">Smile Genius AI</span> summarised this conversation and drafted a reply. Review before sending.
+              </p>
+            </div>
+            <div className="bg-white border border-[#E0E0E6] rounded-xl p-4">
+              <div className="flex items-center gap-1.5 mb-2.5">
+                <p className="text-sm font-semibold text-[#030213]">Conversation summary</p>
+                <InfoTip text="An AI recap of the whole email + WhatsApp thread for this case." />
+              </div>
+              <ul className="space-y-1.5">
+                {summaryPoints.map((p, i) => (
+                  <li key={i} className="flex gap-2 text-xs text-[#5A5568] leading-relaxed"><span className="w-1.5 h-1.5 rounded-full bg-[#4D8EF7] mt-1.5 flex-shrink-0" />{p}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="bg-white border border-[#E0E0E6] rounded-xl p-4">
+              <div className="flex items-center gap-1.5 mb-2.5">
+                <p className="text-sm font-semibold text-[#030213]">Suggested reply</p>
+                <AiSparkle label />
+                <span className="text-[10px] text-[#717182]">· Email</span>
+              </div>
+              <div className="rounded-lg border border-[#FECACA] bg-[#FEF2F2] p-3">
+                <pre className="text-xs text-[#030213] whitespace-pre-wrap font-sans leading-relaxed">{draftReply}</pre>
+              </div>
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <button onClick={insertDraft} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity">
+                  <ArrowRight className="w-3.5 h-3.5" /> Insert into composer
+                </button>
+                <span className="text-[10px] text-[#A0A0B0]">AI-drafted — edit before sending.</span>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
-
-      <div className="p-4 space-y-4 bg-[#FAFBFC]">
-        <EmailBubble dir="out" name="Smile Genius Lab" initials="SG" time="just now" body={body} />
-        {replied ? (
-          <EmailBubble dir="in" name={caseData.dentist} initials={nameInitials(caseData.dentist)} time="moments ago" body={"Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production."} />
         ) : (
-          <div className="rounded-xl border border-dashed border-[#C8D8FC] bg-white px-4 py-5 flex flex-col items-center text-center gap-2">
-            <span className="w-9 h-9 rounded-full bg-[#FFF7ED] inline-flex items-center justify-center"><Clock className="w-4 h-4 text-[#B45309]" /></span>
-            <p className="text-xs font-medium text-[#030213]">Waiting for {caseData.dentist} to reply</p>
-            <p className="text-[11px] text-[#717182] max-w-sm">The missing-info email has been sent. When the dentist replies with the missing items, the case score updates automatically.</p>
-            {onMarkReceived && (
-              <button onClick={onMarkReceived} className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity">
-                <Check className="w-3.5 h-3.5" /> Simulate dentist reply
-              </button>
+          <div className="space-y-4">
+            {shown.length === 0 ? (
+              <p className="text-xs text-[#A0A0B0] italic text-center py-8">No {activeTab === 'email' ? 'emails' : activeTab === 'whatsapp' ? 'WhatsApp messages' : 'messages'} yet.</p>
+            ) : shown.map(m => {
+              const showSep = m.date !== prevDate;
+              prevDate = m.date;
+              return (
+                <Fragment key={m.id}>
+                  {showSep && (
+                    <div className="flex justify-center">
+                      <span className="px-3 py-1 text-[10px] font-medium text-[#717182] bg-white border border-[#E0E0E6] rounded-full">{m.date}</span>
+                    </div>
+                  )}
+                  <ChannelBubble msg={m} showChannel={activeTab === 'latest'} />
+                </Fragment>
+              );
+            })}
+
+            {/* Awaiting-reply nudge keeps the missing-info → score loop working */}
+            {!hasReply && missing.length > 0 && onMarkReceived && (
+              <div className="rounded-xl border border-dashed border-[#C8D8FC] bg-white px-4 py-4 flex flex-col items-center text-center gap-1.5">
+                <p className="text-[11px] text-[#717182] max-w-sm">Waiting on {caseData.dentist} for {missing.join(', ')}. When the reply lands, the case score updates to 100%.</p>
+                <button onClick={simulateReply} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity">
+                  <Check className="w-3.5 h-3.5" /> Simulate dentist reply
+                </button>
+              </div>
             )}
           </div>
         )}
       </div>
 
-      <div className="border-t border-[#F0EFF6] p-3">
-        <div className="flex items-center gap-2 border border-[#E0E0E6] rounded-xl px-3 py-2">
-          <input placeholder="Reply to the dentist…" className="flex-1 text-sm text-[#030213] bg-transparent outline-none placeholder-[#A0A0B0]" />
-          <button className="p-1.5 text-[#4D8EF7] hover:text-[#3578E5] rounded transition-colors"><Send className="w-4 h-4" /></button>
+      {/* Composer with channel toggle (hidden on the AI tab) */}
+      {activeTab !== 'ai' && (
+        <div className="border-t border-[#F0EFF6] p-3 flex-shrink-0 bg-white">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-1">
+              {(['email', 'whatsapp'] as Channel[]).map(ch => {
+                const on = composeChannel === ch;
+                const wa = ch === 'whatsapp';
+                const Icon = wa ? MessageCircle : Mail;
+                return (
+                  <button
+                    key={ch}
+                    onClick={() => setComposeChannel(ch)}
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border transition-colors ${on ? (wa ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]' : 'bg-[#EEF4FF] border-[#C8D8FC] text-[#1565C0]') : 'bg-white border-[#E0E0E6] text-[#717182] hover:border-[#BFDBFE]'}`}
+                  >
+                    <Icon className="w-3 h-3" />{wa ? 'WhatsApp' : 'Email'}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setDraft(draftReply)}
+              title="Fill the composer with the AI-suggested reply"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] hover:bg-[#FEE2E2] transition-colors"
+            >
+              <AiSparkle /> Fill with AI
+            </button>
+          </div>
+          <div className="flex items-center gap-2 border border-[#E0E0E6] rounded-xl px-3 py-2">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+              placeholder={`Message ${caseData.dentist} via ${composeChannel === 'email' ? 'email' : 'WhatsApp'}…`}
+              className="flex-1 text-sm text-[#030213] bg-transparent outline-none placeholder-[#A0A0B0]"
+            />
+            <button onClick={send} disabled={!draft.trim()} className="p-1.5 text-[#4D8EF7] hover:text-[#3578E5] rounded transition-colors disabled:opacity-40"><Send className="w-4 h-4" /></button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -2540,11 +2746,11 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           ) : emailSent ? (
             <button
               onClick={() => setThreadOpen(true)}
-              title="Open the email thread"
+              title="Open the conversation"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EEF2FF] border border-[#C7D2FE] text-[11px] font-medium text-[#4338CA] hover:bg-[#E0E7FF] transition-colors"
             >
-              <Mail className="w-3.5 h-3.5" />
-              Missing-info email sent · awaiting {caseData.dentist}
+              <MessageSquare className="w-3.5 h-3.5" />
+              Conversation hub · awaiting {caseData.dentist}
             </button>
           ) : null}
           {isIncomplete && !emailSent && !replyReceived && (
@@ -2636,15 +2842,15 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 : <Paperclip className="w-3 h-3 text-[#717182]" />}
               {receivedVia}
             </span>
-            {/* Email thread — opens the case-level side drawer (email/iTero cases) */}
+            {/* Conversation — opens the case-level side drawer (email + WhatsApp) */}
             {hasEmailThread && (
               <button
                 onClick={() => setThreadOpen(true)}
-                title="Open email thread with the dentist"
+                title="Open the conversation with the dentist (email + WhatsApp)"
                 className="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#1565C0] border border-[#C8D8FC] bg-[#EEF4FF] hover:bg-[#DBEAFE] transition-colors"
               >
-                <Mail className="w-3.5 h-3.5" />
-                Email thread
+                <MessageSquare className="w-3.5 h-3.5" />
+                Conversation hub
                 {!replyReceived && <span className="w-1.5 h-1.5 rounded-full bg-[#D4183D]" />}
               </button>
             )}
@@ -2815,26 +3021,29 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         })()
       )}
 
-      {/* Email-thread side drawer — same right-slide pattern as the dispute drawer */}
+      {/* Conversation side drawer — portalled so it covers the full viewport
+          (over the top bar + sidebar), same right-slide pattern as elsewhere. */}
       {threadOpen && (
-        <div className="fixed inset-0 z-[60] flex">
+        <ModalPortal>
+        <div className="fixed inset-0 z-[100] flex">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setThreadOpen(false)} />
           <div className="relative md:ml-auto flex flex-col bg-white shadow-2xl w-full md:w-[55%] md:max-w-[680px] h-full animate-in slide-in-from-right duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6] flex-shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="w-9 h-9 rounded-full bg-[#EEF4FF] flex items-center justify-center flex-shrink-0"><Mail className="w-4 h-4 text-[#4D8EF7]" /></div>
+                <div className="w-9 h-9 rounded-full bg-[#EEF4FF] flex items-center justify-center flex-shrink-0"><MessageSquare className="w-4 h-4 text-[#4D8EF7]" /></div>
                 <div className="min-w-0">
-                  <h3 className="text-base font-semibold text-[#030213] truncate">Email thread</h3>
+                  <h3 className="text-base font-semibold text-[#030213] truncate">Conversation hub</h3>
                   <p className="text-[11px] text-[#717182] truncate">{caseData.id} · {caseData.dentist}</p>
                 </div>
               </div>
               <button onClick={() => setThreadOpen(false)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors"><X className="w-4 h-4" /></button>
             </div>
-            <div className="flex-1 overflow-y-auto bg-[#FAFBFC] p-4">
-              <CommunicationsTab caseData={caseData} replied={replyReceived} onMarkReceived={markReplyReceived} />
+            <div className="flex-1 min-h-0 bg-[#FAFBFC] p-4 flex flex-col">
+              <ConversationPanel caseData={caseData} replied={replyReceived} onMarkReceived={markReplyReceived} />
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Lab Notes modal */}
