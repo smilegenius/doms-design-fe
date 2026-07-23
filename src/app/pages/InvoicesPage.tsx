@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { EXPENSE_CATEGORIES, mockSuppliers, GL_ACCOUNTS, Supplier } from '../data/suppliersData';
 import ModalPortal from '../components/ModalPortal';
-import InvoiceReviewOverlay from './InvoiceReviewOverlay';
+import InvoiceReviewOverlay, { lineMatchStateFor, LineMatchState } from './InvoiceReviewOverlay';
 import Button from '../components/Button';
 import SearchInput from '../components/SearchInput';
 import Pagination from '../components/Pagination';
@@ -532,7 +532,10 @@ export const INVOICES: Invoice[] = [
     ],
     lineItems: [
       { description: 'TRIOS 5 Wireless Scanner — bundle x1', qty: 1, unitPrice: 9800.00, total: 9800.00 },
-      { description: 'Annual care plan & training', qty: 1, unitPrice: 2650.00, total: 2650.00 },
+      { description: 'Annual care plan & training', qty: 1, unitPrice: 1200.00, total: 1200.00 },
+      { description: 'TRIOS Design Studio licence — 12 months', qty: 1, unitPrice: 850.00, total: 850.00 },
+      { description: 'Shade guide & try-in kit', qty: 1, unitPrice: 300.00, total: 300.00 },
+      { description: 'Delivery & installation fee', qty: 1, unitPrice: 300.00, total: 300.00 },
     ],
     activity: [
       { id: 'a-010-1', type: 'submitted', actor: 'System', ts: '17 May 2026, 15:42', note: 'Received via email from 3Shape — AI classified as Quote, not a payable invoice.' },
@@ -1757,6 +1760,31 @@ function CategoryPickerRow({
 // ─── Inline editable Line Items table ────────────────────────────────────────
 type LineItem = { description: string; qty: number; unitPrice: number; total: number; matchedCaseId?: string };
 
+// Per-line AI match status chip — mirrors the badge styles of the Case Matching
+// review screen (InvoiceReviewOverlay) and opens it on click. Status derives
+// from the shared lineMatchStateFor(index) so both surfaces agree.
+const LINE_MATCH_CHIP: Record<LineMatchState, { label: string; conf?: number; cls: string }> = {
+  'auto':          { label: 'Auto Match',      conf: 96, cls: 'text-[#2E7D32] bg-[#E7F6EC] border-[#C6E9CE]' },
+  'suggested':     { label: 'Suggested Match', conf: 82, cls: 'text-[#B45309] bg-[#FEF3C7] border-[#FDE68A]' },
+  'manual-review': { label: 'Manual Review',   conf: 61, cls: 'text-[#C62828] bg-[#FFF1F2] border-[#FECDD3]' },
+  'unmatched':     { label: 'Not Matched',               cls: 'text-[#717182] bg-[#F3F3F5] border-[#E0E0E6]' },
+};
+
+function LineMatchStatusChip({ index, onClick }: { index: number; onClick?: () => void }) {
+  const chip = LINE_MATCH_CHIP[lineMatchStateFor(index)];
+  return (
+    <button
+      onClick={onClick}
+      title="Review case matching for this line"
+      className={`inline-flex items-center gap-1 text-[10px] font-semibold border px-2 py-0.5 rounded-full hover:opacity-75 transition-opacity ${chip.cls}`}
+    >
+      <Zap className="w-2.5 h-2.5" />
+      {chip.label}
+      {chip.conf !== undefined && <span className="tabular-nums">{chip.conf}%</span>}
+    </button>
+  );
+}
+
 function EditableLineItems({ items, editable, onOpenCase, onOpenCaseMatch, onChange, compact = true }: {
   items: LineItem[];
   editable: boolean;
@@ -1986,9 +2014,12 @@ function EditableLineItems({ items, editable, onOpenCase, onOpenCaseMatch, onCha
                   </div>
                 </div>
               </div>
-              {/* Matched case + delete row */}
+              {/* Matched case + match status + delete row */}
               <div className="flex items-center justify-between gap-2">
-                {renderMatchControls(i, item)}
+                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                  {renderMatchControls(i, item)}
+                  {onOpenCaseMatch && <LineMatchStatusChip index={i} onClick={onOpenCaseMatch} />}
+                </div>
                 {editable && (
                   <button
                     onClick={() => remove(i)}
@@ -2026,7 +2057,10 @@ function EditableLineItems({ items, editable, onOpenCase, onOpenCaseMatch, onCha
           {items.map((item, i) => (
             <tr key={i} className="border-b border-[#F8F8F8] last:border-b-0 hover:bg-[#FAFBFF] transition-colors">
               <td className="px-4 py-2">
-                {renderMatchControls(i, item)}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {renderMatchControls(i, item)}
+                  {onOpenCaseMatch && <LineMatchStatusChip index={i} onClick={onOpenCaseMatch} />}
+                </div>
               </td>
               <td className="px-4 py-2 text-[#030213]">
                 {editable ? (

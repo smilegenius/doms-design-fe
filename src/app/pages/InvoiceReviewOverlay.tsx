@@ -44,37 +44,35 @@ function money(n: number, currency: string) {
 
 const NON_CLINICAL_RE = /\b(fee|rush|training|care\s*plan|shade\s*guide|try-?in|delivery|shipping|postage|admin)\b/i;
 
-// Deterministic seed of match rows from the invoice's line items. No randomness
-// (stable across renders); variety is driven purely by the line index so the
-// screen shows the full spread of match states like the reference design.
+// Shared deterministic per-line match state. The invoice overlay's line-item
+// status chips and this review screen must tell the same story, so both derive
+// the state purely from the line index — no randomness, stable across renders.
+export type LineMatchState = 'auto' | 'suggested' | 'manual-review' | 'unmatched';
+export function lineMatchStateFor(i: number): LineMatchState {
+  return (['auto', 'suggested', 'manual-review', 'unmatched'] as const)[i % 4];
+}
+
+// Deterministic seed of match rows from the invoice's line items. Cycling all
+// four states (and giving same-state lines the same case) shows the full
+// spread of scenarios like the reference design: Auto Match, Already Invoiced
+// + Suggested, Remake + Manual Review, and No Case Matched.
 function buildRows(invoice: Invoice): MatchRow[] {
   const items = invoice.lineItems ?? [];
-  return items.map((li, i) => {
-    // Group ~3 consecutive lines onto the same case, mirroring how one case
-    // usually spans several invoice lines.
-    const caseNo = 20341 + Math.floor(i / 3);
-    const caseId = `SG-${caseNo}`;
+  return items.map((li, i): MatchRow => {
+    const state = lineMatchStateFor(i);
+    const caseId = `SG-${20341 + (i % 4)}`;
     const nonClinical = NON_CLINICAL_RE.test(li.description);
-    const profile = i % 3;
-    if (profile === 0) {
-      return {
-        id: `row-${i}`, description: li.description, qty: li.qty, amount: li.total,
-        nonClinical, caseId, note: `Matched to ${li.description}`,
-        badges: ['auto'], confidence: 96,
-      };
+    const base = { id: `row-${i}`, description: li.description, qty: li.qty, amount: li.total, nonClinical };
+    switch (state) {
+      case 'auto':
+        return { ...base, caseId, note: `Matched to ${li.description}`, badges: ['auto'], confidence: 96 };
+      case 'suggested':
+        return { ...base, caseId, note: `Matched to ${li.description}`, badges: ['already-invoiced', 'suggested'], confidence: 82 };
+      case 'manual-review':
+        return { ...base, caseId, note: 'Not found on matched case', badges: ['remake', 'manual-review'], confidence: 61 };
+      default:
+        return { ...base, note: 'No case matched — search for one manually', badges: [] };
     }
-    if (profile === 1) {
-      return {
-        id: `row-${i}`, description: li.description, qty: li.qty, amount: li.total,
-        nonClinical, caseId, note: `Matched to ${li.description}`,
-        badges: ['already-invoiced', 'suggested'], confidence: 82,
-      };
-    }
-    return {
-      id: `row-${i}`, description: li.description, qty: li.qty, amount: li.total,
-      nonClinical, caseId, note: 'Not found on matched case',
-      badges: ['remake', 'manual-review'], confidence: 61,
-    };
   });
 }
 
