@@ -68,7 +68,7 @@ import OverviewIcon from './icons/OverviewIcon';
 import CasesIcon from './icons/CasesIcon';
 import {
   FilledPackage, FilledFileText, FilledBarChart,
-  FilledSliders, FilledGear,
+  FilledSliders, FilledGear, FilledScroll,
 } from './icons/FilledNavIcons';
 
 interface LayoutProps {
@@ -93,6 +93,7 @@ const supplierNavItems = [
   { id: 'cases',                label: 'Cases',         icon: CasesIcon,       isCustom: true  },
   { id: 'invoices',             label: 'Invoices',      icon: FilledFileText,  isCustom: false },
   { id: 'spend-analytics',      label: 'Analytics',     icon: FilledBarChart,  isCustom: false },
+  { id: 'vat-hub',              label: 'VAT Hub',       icon: FilledScroll,    isCustom: false },
   { id: 'spend-settings',       label: 'Configuration', icon: FilledSliders,   isCustom: false },
   { id: 'practice-management',  label: 'Practises',     icon: ClinicsIcon,     isCustom: true  },
   { id: 'staff',                label: 'Staff',         icon: StaffIcon,       isCustom: true  },

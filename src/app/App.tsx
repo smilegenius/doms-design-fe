@@ -16,6 +16,7 @@ import SupplierDetailPage from './pages/SupplierDetailPage';
 import InvoicesPage from './pages/InvoicesPage';
 import SpendAnalyticsPage from './pages/SpendAnalyticsPage';
 import SpendSettingsPage from './pages/SpendSettingsPage';
+import VatHubPage from './pages/VatHubPage';
 import PracticeManagementPage from './pages/PracticeManagementPage';
 import StaffManagementPage from './pages/StaffManagementPage';
 import PracticeDetailPage from './pages/PracticeDetailPage';
@@ -37,7 +38,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-type SupplierPage = 'overview' | 'cases' | 'practice-management' | 'staff' | 'practice-detail' | 'suppliers' | 'supplier-detail' | 'invoices' | 'spend-analytics' | 'spend-settings' | 'settings' | 'messages' | 'notifications';
+type SupplierPage = 'overview' | 'cases' | 'practice-management' | 'staff' | 'practice-detail' | 'suppliers' | 'supplier-detail' | 'invoices' | 'spend-analytics' | 'vat-hub' | 'spend-settings' | 'settings' | 'messages' | 'notifications';
 
 // ─── URL ↔ page mapping ──────────────────────────────────────────────────────
 // Source of truth: the URL under /supplier/*. Sidebar clicks and detail opens
@@ -50,6 +51,7 @@ const PAGE_TO_PATH: Record<Exclude<SupplierPage, 'practice-detail' | 'supplier-d
   suppliers: 'suppliers',
   invoices: 'invoices',
   'spend-analytics': 'analytics',
+  'vat-hub': 'vat',
   'spend-settings': 'spend-settings',
   settings: 'settings',
   messages: 'messages',
@@ -64,6 +66,7 @@ const PATH_TO_PAGE: Record<string, SupplierPage> = {
   suppliers: 'suppliers',
   invoices: 'invoices',
   analytics: 'spend-analytics',
+  vat: 'vat-hub',
   'spend-settings': 'spend-settings',
   settings: 'settings',
   messages: 'messages',
@@ -135,7 +138,7 @@ function SupplierApp() {
   const [staffEditTarget, setStaffEditTarget] = useState<StaffMember | null>(null);
 
   const handleNavigate = (page: string) => {
-    const valid: SupplierPage[] = ['overview', 'cases', 'practice-management', 'staff', 'suppliers', 'invoices', 'spend-analytics', 'spend-settings', 'settings', 'messages', 'notifications'];
+    const valid: SupplierPage[] = ['overview', 'cases', 'practice-management', 'staff', 'suppliers', 'invoices', 'spend-analytics', 'vat-hub', 'spend-settings', 'settings', 'messages', 'notifications'];
     if (valid.includes(page as SupplierPage)) {
       if (page !== 'invoices') {
         setInvoiceInitialSupplier(undefined);
@@ -312,6 +315,15 @@ function SupplierApp() {
         )}
         {activePage === 'spend-analytics' && (
           <SpendAnalyticsPage
+            onNavigateToInvoices={(filter, supplier) => {
+              setInvoiceInitialFilter(filter);
+              setInvoiceInitialSupplier(supplier);
+              setActivePage('invoices');
+            }}
+          />
+        )}
+        {activePage === 'vat-hub' && (
+          <VatHubPage
             onNavigateToInvoices={(filter, supplier) => {
               setInvoiceInitialFilter(filter);
               setInvoiceInitialSupplier(supplier);
