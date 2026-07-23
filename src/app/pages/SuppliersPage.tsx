@@ -293,6 +293,7 @@ export default function SuppliersPage({ onSupplierClick, initialStatusFilter, on
   }
 
   function clearFilters() {
+    setStatusFilter('all');
     setCategoryFilter('all');
     setGlFilter('all');
   }
@@ -308,6 +309,16 @@ export default function SuppliersPage({ onSupplierClick, initialStatusFilter, on
     { value: 'all', label: 'All' },
     { value: 'mapped', label: 'GL Mapped' },
     { value: 'unmapped', label: 'Unmapped' },
+  ];
+
+  // 'Archived' is intentionally absent — archived suppliers live behind the
+  // dedicated "View Archived" toggle, never the status filter.
+  const statusOptions = [
+    { value: 'all', label: 'All Statuses' },
+    { value: 'Active', label: 'Active' },
+    { value: 'On hold', label: 'On hold' },
+    { value: 'Not using', label: 'Not using' },
+    { value: 'Pending review', label: 'Pending review' },
   ];
 
   return (
@@ -670,6 +681,7 @@ export default function SuppliersPage({ onSupplierClick, initialStatusFilter, on
         isOpen={filterDrawerOpen}
         onClose={() => setFilterDrawerOpen(false)}
         filters={[
+          { label: 'Status', value: statusFilter, options: statusOptions, onChange: v => { setStatusFilter(v as SupplierRelationshipStatus | 'all'); setCurrentPage(1); } },
           { label: 'Category', value: categoryFilter, options: categoryOptions, onChange: v => { setCategoryFilter(v); setCurrentPage(1); } },
           { label: 'GL Mapping', value: glFilter, options: glOptions, onChange: v => { setGlFilter(v); setCurrentPage(1); } },
         ]}

@@ -213,7 +213,7 @@ export default function PortalSelectPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-5xl items-start">
           <PortalGroup
             icon={<Building2 className="w-6 h-6 text-[#4D8EF7]" />}
-            title="Dental Group Portal"
+            title="DSO Portal"
             description="Practices, staff, cases & billing."
             accent="#4D8EF7"
             accentSoft="#EEF4FF"

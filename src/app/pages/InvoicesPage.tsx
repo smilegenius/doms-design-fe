@@ -4259,6 +4259,11 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+  // Date-range drawer filters (YYYY-MM-DD strings; empty = no bound)
+  const [receivedFrom, setReceivedFrom] = useState('');
+  const [receivedTo, setReceivedTo] = useState('');
+  const [invoiceDateFrom, setInvoiceDateFrom] = useState('');
+  const [invoiceDateTo, setInvoiceDateTo] = useState('');
 
   // Sync local selection with URL when parent (or browser back/forward) changes initialInvoiceId
   useEffect(() => {
@@ -4312,6 +4317,12 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
       if (billedTo !== 'all' && inv.billedTo !== billedTo) return false;
       if (billedToEntity !== 'all' && inv.billedToName !== billedToEntity) return false;
       if (supplierFilter !== 'all' && inv.supplier !== supplierFilter) return false;
+      // Date ranges compare date-only YYYY-MM-DD strings — receivedAt carries a time suffix.
+      const receivedDay = (inv.receivedAt || inv.date).slice(0, 10);
+      if (receivedFrom && receivedDay < receivedFrom) return false;
+      if (receivedTo && receivedDay > receivedTo) return false;
+      if (invoiceDateFrom && inv.date < invoiceDateFrom) return false;
+      if (invoiceDateTo && inv.date > invoiceDateTo) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
         if (!inv.supplier.toLowerCase().includes(q) && !inv.number.toLowerCase().includes(q) && !inv.billedToName.toLowerCase().includes(q)) return false;
@@ -4331,17 +4342,26 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
       case 'status':          sorted.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) || tsOf(b) - tsOf(a)); break;
     }
     return sorted;
-  }, [invoices, activeTab, lowConfOnly, leftOverOnly, notApprovedOnly, unpaidOnly, overdueOnly, sourceFilter, search, billedTo, billedToEntity, supplierFilter, showArchived, sortBy]);
+  }, [invoices, activeTab, lowConfOnly, leftOverOnly, notApprovedOnly, unpaidOnly, overdueOnly, sourceFilter, search, billedTo, billedToEntity, supplierFilter, receivedFrom, receivedTo, invoiceDateFrom, invoiceDateTo, showArchived, sortBy]);
 
   const supplierOptions = useMemo(() => {
-    const names = Array.from(new Set(invoices.map(i => i.supplier))).sort();
+    // Skip blanks — un-extracted QC invoices carry empty supplier/bill-to names.
+    const names = Array.from(new Set(invoices.map(i => i.supplier).filter(n => n.trim()))).sort();
     return [{ value: 'all', label: 'All suppliers' }, ...names.map(n => ({ value: n, label: n }))];
   }, [invoices]);
 
+  // Entity list cascades from the selected bill-to type: pick Clinics and the
+  // dropdown only offers clinics, Dentists only dentists, etc.
   const billToEntityOptions = useMemo(() => {
-    const names = Array.from(new Set(invoices.map(i => i.billedToName))).sort();
-    return [{ value: 'all', label: 'All bill-to entities' }, ...names.map(n => ({ value: n, label: n }))];
-  }, [invoices]);
+    const pool = billedTo === 'all' ? invoices : invoices.filter(i => i.billedTo === billedTo);
+    const names = Array.from(new Set(pool.map(i => i.billedToName).filter(n => n.trim()))).sort();
+    const allLabel =
+      billedTo === 'clinic' ? 'All clinics'
+      : billedTo === 'dentist' ? 'All dentists'
+      : billedTo === 'group_hq' ? 'All Group HQ entities'
+      : 'All bill-to entities';
+    return [{ value: 'all', label: allLabel }, ...names.map(n => ({ value: n, label: n }))];
+  }, [invoices, billedTo]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
   const paginated = useMemo(
@@ -5327,12 +5347,6 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
             onChange: v => { setSupplierFilter(v); setCurrentPage(1); },
           },
           {
-            label: 'Bill to',
-            value: billedToEntity,
-            options: billToEntityOptions,
-            onChange: v => { setBilledToEntity(v); setCurrentPage(1); },
-          },
-          {
             label: 'Bill to type',
             value: billedTo,
             options: [
@@ -5341,7 +5355,14 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
               { value: 'dentist', label: 'Dentists' },
               { value: 'group_hq', label: 'Group HQ' },
             ],
-            onChange: v => { setBilledTo(v as BilledTo); setCurrentPage(1); },
+            // Changing type invalidates the entity pick, so it resets to 'all'.
+            onChange: v => { setBilledTo(v as BilledTo); setBilledToEntity('all'); setCurrentPage(1); },
+          },
+          {
+            label: 'Bill to',
+            value: billedToEntity,
+            options: billToEntityOptions,
+            onChange: v => { setBilledToEntity(v); setCurrentPage(1); },
           },
           {
             label: 'Source',
@@ -5355,22 +5376,24 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
             onChange: v => { setSourceFilter(v as 'all' | InvoiceSource); setCurrentPage(1); },
           },
           {
-            label: 'Special',
-            value: leftOverOnly ? 'left_over' : lowConfOnly ? 'low_confidence' : 'all',
-            options: [
-              { value: 'all', label: 'None' },
-              { value: 'left_over', label: 'Left Over · past extraction date' },
-              { value: 'low_confidence', label: 'QC · Needs Review' },
-            ],
-            onChange: v => {
-              setLeftOverOnly(v === 'left_over');
-              setLowConfOnly(v === 'low_confidence');
-              setCurrentPage(1);
-            },
+            type: 'daterange',
+            label: 'Received date',
+            from: receivedFrom,
+            to: receivedTo,
+            onFromChange: v => { setReceivedFrom(v); setCurrentPage(1); },
+            onToChange: v => { setReceivedTo(v); setCurrentPage(1); },
+          },
+          {
+            type: 'daterange',
+            label: 'Invoice date',
+            from: invoiceDateFrom,
+            to: invoiceDateTo,
+            onFromChange: v => { setInvoiceDateFrom(v); setCurrentPage(1); },
+            onToChange: v => { setInvoiceDateTo(v); setCurrentPage(1); },
           },
         ]}
         onApply={() => setFilterDrawerOpen(false)}
-        onReset={() => { setSourceFilter('all'); setBilledTo('all'); setBilledToEntity('all'); setSupplierFilter('all'); setLeftOverOnly(false); setLowConfOnly(false); setCurrentPage(1); }}
+        onReset={() => { setSourceFilter('all'); setBilledTo('all'); setBilledToEntity('all'); setSupplierFilter('all'); setReceivedFrom(''); setReceivedTo(''); setInvoiceDateFrom(''); setInvoiceDateTo(''); setLeftOverOnly(false); setLowConfOnly(false); setCurrentPage(1); }}
       />
 
       {uploadModalOpen && (
