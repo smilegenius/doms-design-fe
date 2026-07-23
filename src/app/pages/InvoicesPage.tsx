@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { EXPENSE_CATEGORIES, mockSuppliers, GL_ACCOUNTS, Supplier } from '../data/suppliersData';
 import ModalPortal from '../components/ModalPortal';
+import InvoiceReviewOverlay from './InvoiceReviewOverlay';
 import Button from '../components/Button';
 import SearchInput from '../components/SearchInput';
 import Pagination from '../components/Pagination';
@@ -1756,10 +1757,11 @@ function CategoryPickerRow({
 // ─── Inline editable Line Items table ────────────────────────────────────────
 type LineItem = { description: string; qty: number; unitPrice: number; total: number; matchedCaseId?: string };
 
-function EditableLineItems({ items, editable, onOpenCase, onChange, compact = true }: {
+function EditableLineItems({ items, editable, onOpenCase, onOpenCaseMatch, onChange, compact = true }: {
   items: LineItem[];
   editable: boolean;
   onOpenCase?: (id: string) => void;
+  onOpenCaseMatch?: () => void;
   onChange: (next: LineItem[]) => void;
   // Card-per-line is the canonical layout now. The legacy 5-column table is
   // still kept behind `compact={false}` so anyone who explicitly opts back in
@@ -1918,6 +1920,15 @@ function EditableLineItems({ items, editable, onOpenCase, onChange, compact = tr
         <span className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest">Line Items</span>
         <div className="flex items-center gap-3">
           <span className="text-[10px] text-[#A0A0B0]">{items.length} {items.length === 1 ? 'line' : 'lines'}</span>
+          {onOpenCaseMatch && (
+            <button
+              onClick={onOpenCaseMatch}
+              title="Review AI case matches for every line and reconcile against cases"
+              className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#1565C0] border border-[#C8D8FC] bg-[#EEF4FF] hover:bg-[#DBEAFE] px-2 py-0.5 rounded-full transition-colors"
+            >
+              <Zap className="w-3 h-3" /> Case matching
+            </button>
+          )}
           {editable && (
             <button
               onClick={add}
@@ -2394,6 +2405,7 @@ function InvoiceOverlay({ invoice, onClose, onApprove, onArchive, onUnarchive, o
   onPatch?:   (id: string, patch: Partial<Invoice>) => void;
 }) {
   const [editOpen, setEditOpen] = useState(false);
+  const [caseMatchOpen, setCaseMatchOpen] = useState(false);
   const { toast } = useToast();
   // Default source panel to hidden on small screens — the body stacks vertically
   // on mobile so showing source on top forces a long scroll before the AI summary.
@@ -2615,6 +2627,13 @@ function InvoiceOverlay({ invoice, onClose, onApprove, onArchive, onUnarchive, o
         invoice={invoice}
         onClose={() => setEditOpen(false)}
         onSave={(patch) => { onEdit(invoice.id, patch); setEditOpen(false); }}
+      />
+    )}
+    {caseMatchOpen && (
+      <InvoiceReviewOverlay
+        invoice={invoice}
+        onClose={() => setCaseMatchOpen(false)}
+        onOpenCase={onOpenCase}
       />
     )}
     <ModalPortal>
@@ -3281,6 +3300,7 @@ function InvoiceOverlay({ invoice, onClose, onApprove, onArchive, onUnarchive, o
                   items={invoice.lineItems}
                   editable={!!onPatch}
                   onOpenCase={onOpenCase}
+                  onOpenCaseMatch={() => setCaseMatchOpen(true)}
                   onChange={(next) => {
                     const subtotal = next.reduce((s, li) => s + li.total, 0);
                     const amount = +(subtotal + invoice.vatAmount).toFixed(2);
