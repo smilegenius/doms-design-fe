@@ -1254,12 +1254,40 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // Validation gate
   const canSubmit = patientName.trim().length > 0 && !!labId && selections.length > 0;
 
+  // Teeth tapped on the aggregated chart before any service exists. They're
+  // applied to the first service the user adds (teeth-first flow), so the
+  // chart works both ways: service → teeth or teeth → service.
+  const [pendingTeeth, setPendingTeeth] = useState<string[]>([]);
+
+  function toggleChartTooth(code: string) {
+    if (selections.length === 0) {
+      setPendingTeeth(prev => prev.includes(code) ? prev.filter(t => t !== code) : [...prev, code]);
+      return;
+    }
+    // With services present, route the tap to the service being edited, or
+    // the most recently added one.
+    const targetId = activeDetailsId ?? selections[selections.length - 1].itemId;
+    setSelections(prev => prev.map(s => {
+      if (s.itemId !== targetId) return s;
+      const teeth = s.teeth ?? [];
+      return { ...s, teeth: teeth.includes(code) ? teeth.filter(t => t !== code) : [...teeth, code] };
+    }));
+  }
+
   function toggleService(itemId: string) {
-    setSelections(prev => {
-      const exists = prev.find(s => s.itemId === itemId);
-      if (exists) return prev.filter(s => s.itemId !== itemId);
-      return [...prev, { itemId, expanded: false }];
-    });
+    const exists = selections.some(s => s.itemId === itemId);
+    if (exists) {
+      setSelections(prev => prev.filter(s => s.itemId !== itemId));
+      return;
+    }
+    // Teeth-first flow: teeth tapped on the chart before any service existed
+    // attach to the first service added.
+    const seedTeeth = selections.length === 0 && pendingTeeth.length > 0 ? pendingTeeth : undefined;
+    setSelections(prev => [...prev, { itemId, expanded: false, ...(seedTeeth ? { teeth: seedTeeth } : {}) }]);
+    if (seedTeeth) {
+      setPendingTeeth([]);
+      toast.success(`${seedTeeth.length} pre-selected ${seedTeeth.length === 1 ? 'tooth' : 'teeth'} applied to the service`);
+    }
   }
   function updateService(itemId: string, patch: Partial<ServiceSelection>) {
     setSelections(prev => prev.map(s => s.itemId === itemId ? { ...s, ...patch } : s));
@@ -1575,48 +1603,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
-                {/* Case Source — moved to the header so file uploads sit
-                    next to View 3D Model / View Order Form, the other
-                    case-level actions. */}
-                {/* Case Source — styled as a dropdown trigger. Closed: shows
-                    a greyed placeholder + chevron, looks like an unset select.
-                    Once a method is picked: switches to the teal accent so the
-                    user can see at a glance what's set. Click opens the
-                    method-picker popup; if files are attached, a small count
-                    badge sits between the value and the chevron. */}
-                {(() => {
-                  const fileCount = Object.values(caseSourceFiles).filter(Boolean).length + caseSourceExtraFiles.length;
-                  return (
-                    <button
-                      onClick={() => setCaseSourceOpen(true)}
-                      className={`inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 rounded-lg text-xs font-semibold transition-colors min-w-[160px] ${
-                        caseSource
-                          ? 'text-[#0F766E] border border-[#A5F3FC] bg-[#ECFEFF] hover:bg-[#CFFAFE] hover:border-[#67E8F9]'
-                          : 'text-[#A0A0B0] border border-[#E0E0E6] bg-white hover:border-[#4D8EF7] hover:text-[#1565C0]'
-                      }`}
-                      title="Choose how the case data is delivered + attach files"
-                    >
-                      <UploadCloud className={`w-3.5 h-3.5 flex-shrink-0 ${caseSource ? '' : 'text-[#A0A0B0]'}`} />
-                      <span className={`flex-1 text-left truncate ${caseSource ? '' : 'font-medium italic'}`}>
-                        {caseSource
-                          ? (isIteroEmail
-                              ? `Scanner · ${prefillDraft?.scanner ?? 'iTero'}`
-                              : caseSource === 'Via Scanner' && caseSourceScanner
-                                ? `Via Scanner · ${caseSourceScanner}`
-                                : caseSource === 'Impressions (By Post)' && caseSourceCourier
-                                  ? `Impressions · ${caseSourceCourier}`
-                                  : caseSource)
-                          : 'Case Source'}
-                      </span>
-                      {fileCount > 0 && (
-                        <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-white text-[9px] font-bold text-[#0F766E] border border-[#A5F3FC] flex-shrink-0">
-                          {fileCount}
-                        </span>
-                      )}
-                      <ChevronDown className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
-                    </button>
-                  );
-                })()}
                 <button
                   onClick={() => has3DFiles ? setModel3DOpen(true) : setCaseSourceOpen(true)}
                   className={`md:hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
@@ -1844,6 +1830,47 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             </div>
           </div>
 
+          {/* ── Case Source — sits directly above the Services card so the
+              delivery method + file uploads are picked before services.
+              Styled as a dropdown trigger: greyed placeholder when unset,
+              teal accent once a method is picked; a small count badge shows
+              attached files. Click opens the method-picker popup. ── */}
+          <div className="order-2 flex">
+            {(() => {
+              const fileCount = Object.values(caseSourceFiles).filter(Boolean).length + caseSourceExtraFiles.length;
+              return (
+                <button
+                  onClick={() => setCaseSourceOpen(true)}
+                  className={`inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 rounded-lg text-xs font-semibold transition-colors min-w-[160px] ${
+                    caseSource
+                      ? 'text-[#0F766E] border border-[#A5F3FC] bg-[#ECFEFF] hover:bg-[#CFFAFE] hover:border-[#67E8F9]'
+                      : 'text-[#A0A0B0] border border-[#E0E0E6] bg-white hover:border-[#4D8EF7] hover:text-[#1565C0]'
+                  }`}
+                  title="Choose how the case data is delivered + attach files"
+                >
+                  <UploadCloud className={`w-3.5 h-3.5 flex-shrink-0 ${caseSource ? '' : 'text-[#A0A0B0]'}`} />
+                  <span className={`flex-1 text-left truncate ${caseSource ? '' : 'font-medium italic'}`}>
+                    {caseSource
+                      ? (isIteroEmail
+                          ? `Scanner · ${prefillDraft?.scanner ?? 'iTero'}`
+                          : caseSource === 'Via Scanner' && caseSourceScanner
+                            ? `Via Scanner · ${caseSourceScanner}`
+                            : caseSource === 'Impressions (By Post)' && caseSourceCourier
+                              ? `Impressions · ${caseSourceCourier}`
+                              : caseSource)
+                      : 'Case Source'}
+                  </span>
+                  {fileCount > 0 && (
+                    <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-white text-[9px] font-bold text-[#0F766E] border border-[#A5F3FC] flex-shrink-0">
+                      {fileCount}
+                    </span>
+                  )}
+                  <ChevronDown className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
+                </button>
+              );
+            })()}
+          </div>
+
           {/* ── Services — multi-select with cards. Card background uses the
               same soft pink→teal wash as the sidebar so the SERVICES surface
               feels like the focal panel of the form. ── */}
@@ -1947,7 +1974,9 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                 </p>
                               )}
                             </div>
-                            <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 text-[#A0A0B0] group-hover:text-[#4D8EF7] transition-colors" />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-[#BFDBFE] bg-white text-[10px] font-semibold text-[#4D8EF7] group-hover:bg-[#EEF4FF] transition-colors flex-shrink-0">
+                              <Pencil className="w-2.5 h-2.5" /> Edit
+                            </span>
                           </button>
                           {/* Remove button — its own bordered zone */}
                           <div className="w-px bg-[#E8EAF6]" />
@@ -2171,7 +2200,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           </div>
           {/* ── RIGHT COLUMN — aggregated teeth map across all services ── */}
           <aside className="lg:order-2 lg:sticky lg:top-4 lg:self-start">
-            <AggregatedTeethChart selections={selections} />
+            <AggregatedTeethChart selections={selections} pendingTeeth={pendingTeeth} onToggleTooth={toggleChartTooth} />
           </aside>
         </div>
       </div>
@@ -4372,7 +4401,13 @@ const FDI_TEETH: Record<string, { cx: number; cy: number; rx: number; ry: number
   '38': { cx: 277, cy: 333, rx: 21, ry: 18 },
 };
 
-function AggregatedTeethChart({ selections }: { selections: ServiceSelection[] }) {
+function AggregatedTeethChart({ selections, pendingTeeth = [], onToggleTooth }: {
+  selections: ServiceSelection[];
+  // Teeth tapped before any service exists — rendered dashed-blue, applied to
+  // the first added service by the parent.
+  pendingTeeth?: string[];
+  onToggleTooth?: (code: string) => void;
+}) {
   // Map FDI code → list of {service color + label} entries that include it.
   const teethMap = useMemo(() => {
     const map = new Map<string, { color: string; label: string }[]>();
@@ -4388,7 +4423,7 @@ function AggregatedTeethChart({ selections }: { selections: ServiceSelection[] }
     return map;
   }, [selections]);
 
-  const totalTeeth = teethMap.size;
+  const totalTeeth = teethMap.size + pendingTeeth.filter(t => !teethMap.has(t)).length;
   // SVG gradient defs for multi-service teeth — one per multi-hit tooth.
   const multiHits = useMemo(() => {
     return Array.from(teethMap.entries()).filter(([, hits]) => hits.length > 1);
@@ -4409,106 +4444,129 @@ function AggregatedTeethChart({ selections }: { selections: ServiceSelection[] }
         </span>
       </div>
 
-      {selections.length === 0 ? (
-        /* Disabled / dimmed FDI chart with a clear "pick a service" prompt
-           overlaid so the user knows the chart is here, just inactive. */
+      {/* Tooth chart — FDI SVG, always interactive: every tooth is a click
+          target. With no services yet, taps collect "pending" teeth (dashed
+          blue) that attach to the first service added — so the flow works
+          both ways: service → teeth or teeth → service. */}
+      <div className="flex justify-center">
+        <div
+          className="relative select-none w-full max-w-xs"
+          style={{ aspectRatio: '327 / 555' }}
+        >
+          {/* Static FDI background */}
+          <img
+            src="/FDI.svg"
+            alt="FDI dental chart"
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+            draggable={false}
+          />
+          {/* Overlay — coloured ellipse per used tooth */}
+          <svg
+            viewBox="0 0 327 555"
+            className="absolute inset-0 w-full h-full"
+          >
+            {/* Defs — one linear gradient per multi-service tooth so each
+                service's colour gets an equal horizontal band. */}
+            <defs>
+              {multiHits.map(([code, hits]) => {
+                const gid = `agg-grad-${code}`;
+                const stops: React.ReactNode[] = [];
+                hits.forEach((hit, i) => {
+                  const start = (i / hits.length) * 100;
+                  const end   = ((i + 1) / hits.length) * 100;
+                  stops.push(
+                    <stop key={`${i}-a`} offset={`${start}%`} stopColor={hit.color} stopOpacity={0.85} />,
+                    <stop key={`${i}-b`} offset={`${end}%`}   stopColor={hit.color} stopOpacity={0.85} />,
+                  );
+                });
+                return (
+                  <linearGradient key={gid} id={gid} x1="0%" y1="0%" x2="100%" y2="0%">
+                    {stops}
+                  </linearGradient>
+                );
+              })}
+            </defs>
+            {Object.entries(FDI_TEETH).map(([id, { cx, cy, rx, ry }]) => {
+              const hits = teethMap.get(id);
+              const isPending = pendingTeeth.includes(id);
+              const isMulti = (hits?.length ?? 0) > 1;
+              const clickable = !!onToggleTooth;
+              const common = {
+                cx, cy, rx, ry,
+                onClick: clickable ? () => onToggleTooth!(id) : undefined,
+                style: { cursor: clickable ? 'pointer' : 'help' } as React.CSSProperties,
+              };
+              if (hits) {
+                const fill = isMulti ? `url(#agg-grad-${id})` : hits[0].color;
+                const stroke = isMulti ? '#030213' : hits[0].color;
+                return (
+                  <ellipse
+                    key={id}
+                    {...common}
+                    fill={fill}
+                    fillOpacity={isMulti ? 1 : 0.65}
+                    stroke={stroke}
+                    strokeWidth={isMulti ? 1.2 : 1.5}
+                    strokeOpacity={isMulti ? 0.6 : 1}
+                  >
+                    <title>{`Tooth ${id} — ${hits.map(h => h.label).join(', ')}${clickable ? ' · click to toggle' : ''}`}</title>
+                  </ellipse>
+                );
+              }
+              if (isPending) {
+                return (
+                  <ellipse
+                    key={id}
+                    {...common}
+                    fill="#4D8EF7"
+                    fillOpacity={0.35}
+                    stroke="#4D8EF7"
+                    strokeWidth={1.5}
+                    strokeDasharray="3 2"
+                  >
+                    <title>{`Tooth ${id} — pending, attaches to the first service you add`}</title>
+                  </ellipse>
+                );
+              }
+              // Invisible hit target so unmarked teeth can be tapped too.
+              if (!clickable) return null;
+              return (
+                <ellipse
+                  key={id}
+                  {...common}
+                  fill="transparent"
+                  className="hover:fill-[#4D8EF7]/20 transition-[fill]"
+                >
+                  <title>{`Tooth ${id} — click to select`}</title>
+                </ellipse>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+
+      {/* Teeth-first hint — shown until the first service is added */}
+      {selections.length === 0 && (
         <div className="flex flex-col items-center">
-          <div className="relative select-none opacity-40 pointer-events-none w-full max-w-xs" style={{ aspectRatio: '327 / 555' }}>
-            <img
-              src="/FDI.svg"
-              alt="FDI dental chart"
-              className="absolute inset-0 w-full h-full object-contain pointer-events-none grayscale"
-              draggable={false}
-            />
-          </div>
-          <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#FFFBEB] border border-[#FCD34D] text-[11px] font-semibold text-[#92400E]">
+          <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#EEF4FF] border border-[#BFDBFE] text-[11px] font-semibold text-[#1565C0]">
             <Stethoscope className="w-3 h-3" />
-            Add a service first
+            {pendingTeeth.length > 0
+              ? `${pendingTeeth.length} ${pendingTeeth.length === 1 ? 'tooth' : 'teeth'} selected — now add a service`
+              : 'Tap teeth or add a service'}
           </div>
           <p className="text-[10px] text-[#A0A0B0] mt-1 text-center max-w-[200px]">
-            Pick a service from the Services card, then tap teeth on its chart — they'll show up here colour-coded.
+            {pendingTeeth.length > 0
+              ? 'They\'ll attach to the first service you add from the Services card.'
+              : 'Works both ways — tap teeth here first, or pick a service and add its teeth.'}
           </p>
         </div>
-      ) : (
-        <>
-          {/* Tooth chart — FDI SVG with per-tooth coloured ellipses overlaid */}
-          <div className="flex justify-center">
-            <div
-              className="relative select-none w-full max-w-xs"
-              style={{ aspectRatio: '327 / 555' }}
-            >
-              {/* Static FDI background */}
-              <img
-                src="/FDI.svg"
-                alt="FDI dental chart"
-                className="absolute inset-0 w-full h-full object-contain pointer-events-none"
-                draggable={false}
-              />
-              {/* Overlay — coloured ellipse per used tooth */}
-              <svg
-                viewBox="0 0 327 555"
-                className="absolute inset-0 w-full h-full"
-              >
-                {/* Defs — one linear gradient per multi-service tooth so each
-                    service's colour gets an equal horizontal band. */}
-                <defs>
-                  {multiHits.map(([code, hits]) => {
-                    const gid = `agg-grad-${code}`;
-                    const stops: React.ReactNode[] = [];
-                    hits.forEach((hit, i) => {
-                      const start = (i / hits.length) * 100;
-                      const end   = ((i + 1) / hits.length) * 100;
-                      stops.push(
-                        <stop key={`${i}-a`} offset={`${start}%`} stopColor={hit.color} stopOpacity={0.85} />,
-                        <stop key={`${i}-b`} offset={`${end}%`}   stopColor={hit.color} stopOpacity={0.85} />,
-                      );
-                    });
-                    return (
-                      <linearGradient key={gid} id={gid} x1="0%" y1="0%" x2="100%" y2="0%">
-                        {stops}
-                      </linearGradient>
-                    );
-                  })}
-                </defs>
-                {Object.entries(FDI_TEETH).map(([id, { cx, cy, rx, ry }]) => {
-                  const hits = teethMap.get(id);
-                  if (!hits) return null;
-                  const isMulti = hits.length > 1;
-                  const fill = isMulti
-                    ? `url(#agg-grad-${id})`
-                    : hits[0].color;
-                  const stroke = isMulti ? '#030213' : hits[0].color;
-                  return (
-                    <ellipse
-                      key={id}
-                      cx={cx}
-                      cy={cy}
-                      rx={rx}
-                      ry={ry}
-                      fill={fill}
-                      fillOpacity={isMulti ? 1 : 0.65}
-                      stroke={stroke}
-                      strokeWidth={isMulti ? 1.2 : 1.5}
-                      strokeOpacity={isMulti ? 0.6 : 1}
-                      style={{ cursor: 'help' }}
-                    >
-                      <title>
-                        {`Tooth ${id} — ${hits.map(h => h.label).join(', ')}`}
-                      </title>
-                    </ellipse>
-                  );
-                })}
-              </svg>
-            </div>
-          </div>
+      )}
 
-          {/* Multi-service hint */}
-          {multiHits.length > 0 && (
-            <p className="text-[10px] text-[#717182] italic text-center mt-2">
-              {multiHits.length} {multiHits.length === 1 ? 'tooth is' : 'teeth are'} shared across services — hover to see which.
-            </p>
-          )}
-        </>
+      {/* Multi-service hint */}
+      {multiHits.length > 0 && (
+        <p className="text-[10px] text-[#717182] italic text-center mt-2">
+          {multiHits.length} {multiHits.length === 1 ? 'tooth is' : 'teeth are'} shared across services — hover to see which.
+        </p>
       )}
 
       {/* Legend — colour swatch + service name + tooth count */}
@@ -4600,12 +4658,33 @@ function PatientSearchSelect({ value, onChange, onPickExisting }: {
           <Search className="w-3 h-3" />
         </button>
       </div>
-      {/* Status pill under the input — confirm an existing-patient match. */}
+      {/* Patient summary under the input — confirms an existing-patient match
+          and shows their record details at a glance. */}
       {value.trim().length > 0 && exactMatch && (
-        <p className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-[#1A5C2A]">
-          <Check className="w-2.5 h-2.5" strokeWidth={3} />
-          {exactMatch.patientId}
-        </p>
+        <div className="mt-1.5 px-2.5 py-2 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0]">
+          <p className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#1A5C2A]">
+            <Check className="w-2.5 h-2.5" strokeWidth={3} />
+            {exactMatch.patientId}
+          </p>
+          <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-[#5A5568]">
+            <span>
+              <span className="text-[#8A8A99]">DOB: </span>
+              {new Date(exactMatch.dob).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+            </span>
+            <span className="capitalize">
+              <span className="text-[#8A8A99]">Gender: </span>
+              {exactMatch.gender}
+            </span>
+            <span className="col-span-2 truncate">
+              <span className="text-[#8A8A99]">Email: </span>
+              {exactMatch.email}
+            </span>
+            <span className="col-span-2">
+              <span className="text-[#8A8A99]">Phone: </span>
+              {exactMatch.phoneCountry} {exactMatch.phoneNumber}
+            </span>
+          </div>
+        </div>
       )}
       {open && (
         <div className="absolute z-30 mt-1 left-0 right-0 bg-white border border-[#E8EAF6] rounded-xl shadow-[0_10px_30px_rgba(77,142,247,0.15)] overflow-hidden">

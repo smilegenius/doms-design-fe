@@ -4,7 +4,11 @@ import {
   AlertTriangle, TrendingUp, TrendingDown, Building2,
   Users, UserCheck, ChevronRight, ArrowUpRight, Calendar, X,
   CheckCircle2, Send, XCircle, Download,
+  Sparkles, Package, PiggyBank, ChevronDown, ArrowRight,
 } from 'lucide-react';
+import { INVOICES } from './InvoicesPage';
+import { mockCases } from './CasesPage';
+import { AiSparkle } from '../components/AiSparkle';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(n: number) {
@@ -342,16 +346,275 @@ function Card({ title, subtitle, action, children }: { title: string; subtitle?:
 }
 
 // ─── Sub-tabs ─────────────────────────────────────────────────────────────────
-type AnalyticsTab = 'intelligence' | 'spend' | 'suppliers';
+type AnalyticsTab = 'intelligence' | 'spend' | 'suppliers' | 'ai';
 
-const TABS: { id: AnalyticsTab; label: string }[] = [
+const TABS: { id: AnalyticsTab; label: string; icon?: React.ReactNode }[] = [
   { id: 'intelligence', label: 'Invoice Intelligence' },
   { id: 'spend',        label: 'Spend' },
   { id: 'suppliers',    label: 'Suppliers' },
+  { id: 'ai',           label: 'AI Insights', icon: <Sparkles className="w-3.5 h-3.5" /> },
 ];
 
 // ─── Period filter ─────────────────────────────────────────────────────────────
 const PERIODS = ['Month', 'Quarter', 'Year'];
+
+// ─── AI Insights data ──────────────────────────────────────────────────────────
+// Derived once at module scope (INVOICES / mockCases are static mock constants,
+// matching how every other dataset on this page is built).
+
+// 1. Purchase catalogue — what clinics & dentists are buying, per supplier.
+type CatalogueItem = { description: string; qty: number; unitPrice: number; total: number; buyers: string[] };
+type SupplierCatalogue = { supplier: string; categories: string[]; totalSpend: number; buyers: string[]; items: CatalogueItem[] };
+
+function buildCatalogue(): SupplierCatalogue[] {
+  const bySupplier = new Map<string, { categories: Set<string>; items: Map<string, CatalogueItem & { buyerSet: Set<string> }> }>();
+  for (const inv of INVOICES) {
+    if (!inv.supplier?.trim() || !inv.lineItems?.length) continue;
+    let entry = bySupplier.get(inv.supplier);
+    if (!entry) { entry = { categories: new Set(), items: new Map() }; bySupplier.set(inv.supplier, entry); }
+    inv.categories.forEach(c => entry!.categories.add(c));
+    for (const li of inv.lineItems) {
+      // Refunds / statement balances aren't purchasable catalogue items.
+      if (li.unitPrice <= 0 || /refund|statement/i.test(li.description)) continue;
+      let item = entry.items.get(li.description);
+      if (!item) {
+        item = { description: li.description, qty: 0, unitPrice: li.unitPrice, total: 0, buyers: [], buyerSet: new Set() };
+        entry.items.set(li.description, item);
+      }
+      item.qty += li.qty;
+      item.total += li.total;
+      item.unitPrice = li.unitPrice;
+      if (inv.billedToName?.trim()) item.buyerSet.add(inv.billedToName);
+    }
+  }
+  return Array.from(bySupplier.entries())
+    .map(([supplier, e]) => {
+      const items = Array.from(e.items.values())
+        .map(({ buyerSet, ...item }) => ({ ...item, buyers: Array.from(buyerSet) }))
+        .sort((a, b) => b.total - a.total);
+      return {
+        supplier,
+        categories: Array.from(e.categories),
+        totalSpend: items.reduce((s, it) => s + it.total, 0),
+        buyers: Array.from(new Set(items.flatMap(it => it.buyers))),
+        items,
+      };
+    })
+    .filter(s => s.items.length > 0)
+    .sort((a, b) => b.totalSpend - a.totalSpend);
+}
+const CATALOGUE = buildCatalogue();
+const CATALOGUE_ITEM_COUNT = CATALOGUE.reduce((s, c) => s + c.items.length, 0);
+
+// 2. Routing mix — where practices/dentists send their lab work (from cases).
+type LabShare = { lab: string; count: number; pct: number; color: string };
+type PracticeRouting = { practice: string; total: number; topLab: string; topLabPct: number; segments: LabShare[] };
+
+function buildLabMix(): LabShare[] {
+  const counts = new Map<string, number>();
+  mockCases.forEach(c => counts.set(c.lab, (counts.get(c.lab) ?? 0) + 1));
+  const total = mockCases.length;
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([lab, count], i) => ({
+      lab, count,
+      pct: Math.round((count / total) * 100),
+      color: TOP_SUPPLIER_COLORS[i % TOP_SUPPLIER_COLORS.length],
+    }));
+}
+const LAB_MIX = buildLabMix();
+
+function buildPracticeRouting(): PracticeRouting[] {
+  const byPractice = new Map<string, Map<string, number>>();
+  mockCases.forEach(c => {
+    if (!byPractice.has(c.practice)) byPractice.set(c.practice, new Map());
+    const labs = byPractice.get(c.practice)!;
+    labs.set(c.lab, (labs.get(c.lab) ?? 0) + 1);
+  });
+  const labColor = (lab: string) => LAB_MIX.find(l => l.lab === lab)?.color ?? '#E0E0E6';
+  return Array.from(byPractice.entries())
+    .map(([practice, labs]) => {
+      const total = Array.from(labs.values()).reduce((a, b) => a + b, 0);
+      const segments = Array.from(labs.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([lab, count]) => ({ lab, count, pct: Math.round((count / total) * 100), color: labColor(lab) }));
+      return { practice, total, topLab: segments[0].lab, topLabPct: segments[0].pct, segments };
+    })
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+}
+const PRACTICE_ROUTING = buildPracticeRouting();
+
+function buildRoutingInsights(): string[] {
+  const insights: string[] = [];
+  const topPractice = PRACTICE_ROUTING[0];
+  if (topPractice) insights.push(`${topPractice.practice} sends ${topPractice.topLabPct}% of its cases to ${topPractice.topLab}.`);
+  const topLab = LAB_MIX[0];
+  if (topLab) insights.push(`${topLab.lab} handles ${topLab.pct}% of all lab work across the group — your biggest routing dependency.`);
+  // Busiest dentist and where their work goes.
+  const byDentist = new Map<string, Map<string, number>>();
+  mockCases.forEach(c => {
+    if (!byDentist.has(c.dentist)) byDentist.set(c.dentist, new Map());
+    const labs = byDentist.get(c.dentist)!;
+    labs.set(c.lab, (labs.get(c.lab) ?? 0) + 1);
+  });
+  const dentists = Array.from(byDentist.entries())
+    .map(([dentist, labs]) => {
+      const total = Array.from(labs.values()).reduce((a, b) => a + b, 0);
+      const [lab, count] = Array.from(labs.entries()).sort((a, b) => b[1] - a[1])[0];
+      return { dentist, total, lab, pct: Math.round((count / total) * 100) };
+    })
+    .sort((a, b) => b.total - a.total);
+  if (dentists[0]) insights.push(`${dentists[0].dentist} routes ${dentists[0].pct}% of ${dentists[0].total} cases to ${dentists[0].lab}.`);
+  return insights;
+}
+const ROUTING_INSIGHTS = buildRoutingInsights();
+
+// 3. Savings recommendations — curated per-unit benchmarks vs. catalogue prices.
+//    Every £ figure is derived (qty × price delta) so cards stay internally
+//    consistent; only the alternative unit prices are curated.
+type Benchmark = { match: RegExp; altSupplier: string; altKind: 'lab' | 'supplier'; altUnitPrice: number };
+const PRICE_BENCHMARKS: Benchmark[] = [
+  { match: /full ceramic crown/i,      altSupplier: 'Smile Genius Lab',     altKind: 'lab',      altUnitPrice: 79.50 },
+  { match: /zirconia bridge/i,         altSupplier: 'Smile Genius Lab',     altKind: 'lab',      altUnitPrice: 118.00 },
+  { match: /implant crown pfm/i,       altSupplier: 'Smile Genius Lab',     altKind: 'lab',      altUnitPrice: 185.00 },
+  { match: /nightguard splint/i,       altSupplier: 'Smile Genius Lab',     altKind: 'lab',      altUnitPrice: 188.50 },
+  { match: /composite resin/i,         altSupplier: 'Henry Schein Dental',  altKind: 'supplier', altUnitPrice: 84.00 },
+  { match: /sterilisation pouches/i,   altSupplier: 'Henry Schein Dental',  altKind: 'supplier', altUnitPrice: 96.00 },
+  { match: /gloves nitrile/i,          altSupplier: 'Henry Schein Dental',  altKind: 'supplier', altUnitPrice: 255.00 },
+  { match: /implant abutments/i,       altSupplier: 'Eurodontic Ltd',       altKind: 'lab',      altUnitPrice: 192.00 },
+  { match: /healing caps/i,            altSupplier: 'Eurodontic Ltd',       altKind: 'lab',      altUnitPrice: 57.00 },
+];
+
+type SavingsRow = { description: string; qty: number; currentSupplier: string; currentUnit: number; altUnit: number; saving: number };
+type Recommendation = { altSupplier: string; altKind: 'lab' | 'supplier'; rows: SavingsRow[]; monthlySaving: number; annualSaving: number };
+
+function buildRecommendations(): Recommendation[] {
+  const byAlt = new Map<string, Recommendation>();
+  for (const sup of CATALOGUE) {
+    for (const item of sup.items) {
+      const bm = PRICE_BENCHMARKS.find(b => b.match.test(item.description) && item.unitPrice > b.altUnitPrice);
+      if (!bm || bm.altSupplier === sup.supplier) continue;
+      let rec = byAlt.get(bm.altSupplier);
+      if (!rec) { rec = { altSupplier: bm.altSupplier, altKind: bm.altKind, rows: [], monthlySaving: 0, annualSaving: 0 }; byAlt.set(bm.altSupplier, rec); }
+      const saving = +(item.qty * (item.unitPrice - bm.altUnitPrice)).toFixed(2);
+      rec.rows.push({
+        description: item.description, qty: item.qty,
+        currentSupplier: sup.supplier, currentUnit: item.unitPrice,
+        altUnit: bm.altUnitPrice, saving,
+      });
+      rec.monthlySaving = +(rec.monthlySaving + saving).toFixed(2);
+    }
+  }
+  return Array.from(byAlt.values())
+    .map(r => ({ ...r, annualSaving: Math.round(r.monthlySaving * 12) }))
+    .sort((a, b) => b.annualSaving - a.annualSaving);
+}
+const RECOMMENDATIONS = buildRecommendations();
+const TOTAL_ANNUAL_SAVINGS = RECOMMENDATIONS.reduce((s, r) => s + r.annualSaving, 0);
+
+// ─── AI Insights components ─────────────────────────────────────────────────────
+
+// Accordion row: one supplier's purchased-item catalogue.
+function SupplierCatalogueRow({ data, color, defaultOpen = false }: { data: SupplierCatalogue; color: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border border-[#E0E0E6] rounded-lg overflow-hidden bg-white">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-[#F8F9FC] transition-colors text-left"
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+          <span className="text-sm font-semibold text-[#030213] truncate">{data.supplier}</span>
+          <span className="hidden sm:flex items-center gap-1">
+            {data.categories.slice(0, 2).map(c => (
+              <span key={c} className="text-[10px] px-1.5 py-px rounded-full bg-[#F3F3F5] text-[#717182]">{c}</span>
+            ))}
+          </span>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <span className="text-xs text-[#717182]">
+            {data.items.length} {data.items.length === 1 ? 'item' : 'items'} · <span className="font-bold text-[#030213]">{fmt(data.totalSpend)}</span>
+          </span>
+          <span className="hidden sm:inline text-[10px] text-[#A0A0B0]">
+            {data.buyers.length} {data.buyers.length === 1 ? 'buyer' : 'buyers'}
+          </span>
+          <ChevronDown className={`w-4 h-4 text-[#717182] transition-transform ${open ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+      {open && (
+        <div className="border-t border-[#F0EFF6] px-4 py-3">
+          <div className="grid grid-cols-[1.8fr_auto_auto_auto] gap-3 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest pb-2 border-b border-[#F0EFF6]">
+            <span>Item</span>
+            <span className="text-right w-10">Qty</span>
+            <span className="text-right w-16">Unit</span>
+            <span className="text-right w-20">Total</span>
+          </div>
+          {data.items.map(item => (
+            <div key={item.description} className="grid grid-cols-[1.8fr_auto_auto_auto] gap-3 py-2.5 border-b border-[#F8F8F8] last:border-b-0 items-start">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-[#030213] break-words">{item.description}</p>
+                {item.buyers.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {item.buyers.map(b => (
+                      <span key={b} className="text-[10px] px-1.5 py-px rounded-full bg-[#F3F3F5] text-[#717182]">{b}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <span className="text-xs text-[#717182] text-right w-10 tabular-nums">{item.qty}</span>
+              <span className="text-xs text-[#717182] text-right w-16 tabular-nums">{fmt(item.unitPrice)}</span>
+              <span className="text-xs font-bold text-[#030213] text-right w-20 tabular-nums">{fmt(item.total)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One AI savings recommendation: "move these items to X and save £Y/yr".
+function RecommendationCard({ rec }: { rec: Recommendation }) {
+  return (
+    <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
+      <div className="px-5 py-3.5 bg-[#E7F6EC] border-b border-[#C6E9CE] flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="w-8 h-8 rounded-lg bg-white/70 flex items-center justify-center flex-shrink-0">
+            <PiggyBank className="w-4 h-4 text-[#2E7D32]" />
+          </span>
+          <p className="text-sm text-[#1B5E20]">
+            Save <span className="font-bold">{fmt(rec.annualSaving)}/yr</span> by moving {rec.rows.length} {rec.rows.length === 1 ? 'item' : 'items'} to{' '}
+            <span className="font-bold">{rec.altSupplier}</span> ({rec.altKind})
+          </p>
+        </div>
+        <AiSparkle label title="Savings identified by AI from cross-supplier price benchmarks" />
+      </div>
+      <div className="px-5 py-2">
+        {rec.rows.map(row => (
+          <div key={row.description} className="flex items-center justify-between gap-3 py-2.5 border-b border-[#F8F8F8] last:border-b-0">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-[#030213] truncate">{row.description}</p>
+              <p className="text-[10px] text-[#A0A0B0] mt-0.5">Qty {row.qty} · currently {row.currentSupplier}</p>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0 text-xs tabular-nums">
+              <span className="text-[#A0A0B0] line-through">{fmt(row.currentUnit)}</span>
+              <ArrowRight className="w-3 h-3 text-[#A0A0B0]" />
+              <span className="font-semibold text-[#2E7D32]">{fmt(row.altUnit)}</span>
+            </div>
+            <span className="text-xs font-bold text-[#2E7D32] w-20 text-right tabular-nums flex-shrink-0">−{fmt(row.saving)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="px-5 py-3 border-t border-[#F0EFF6] flex items-center justify-between gap-3">
+        <span className="text-[11px] text-[#717182]">{fmt(rec.monthlySaving)}/mo at current run-rate</span>
+        <button className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity">
+          Review recommendation
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ─── Main component ────────────────────────────────────────────────────────────
 export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigateToInvoices?: (filter?: string, supplier?: string) => void } = {}) {
@@ -492,7 +755,7 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
                   : 'text-[#717182] hover:text-[#030213] hover:bg-[#F3F3F5]'
               }`}
             >
-              {t.label}
+              <span className="inline-flex items-center gap-1.5">{t.icon}{t.label}</span>
             </button>
           ))}
         </div>
@@ -999,6 +1262,103 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
                 })}
               </div>
             </Card>
+          </>
+        )}
+
+        {/* ── AI INSIGHTS TAB ── */}
+        {tab === 'ai' && (
+          <>
+            {/* KPI row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <KpiCard accent="#4D8EF7" icon={<Package className="w-5 h-5 text-[#4D8EF7]" />}   label="Catalogued Items"    value={CATALOGUE_ITEM_COUNT} sub="from invoice line items" />
+              <KpiCard accent="#A59DFF" icon={<Building2 className="w-5 h-5 text-[#A59DFF]" />} label="Suppliers Covered"   value={CATALOGUE.length}     sub="with purchase history" />
+              <KpiCard accent="#FB923C" icon={<BarChart3 className="w-5 h-5 text-[#FB923C]" />} label="Labs in Routing Mix" value={LAB_MIX.length}       sub={`${mockCases.length} cases analysed`} />
+              <KpiCard accent="#2E7D32" icon={<PiggyBank className="w-5 h-5 text-[#2E7D32]" />} label="Potential Savings"   value={fmt(TOTAL_ANNUAL_SAVINGS)} sub="per year, AI-identified" />
+            </div>
+
+            {/* Section 1 — What you're purchasing */}
+            <Card
+              title="What you're purchasing"
+              subtitle="AI-built catalogue from clinic & dentist purchases, grouped by supplier"
+              action={<AiSparkle label title="Catalogue auto-built from invoice line items by AI" />}
+            >
+              <div className="space-y-2">
+                {CATALOGUE.map((s, i) => (
+                  <SupplierCatalogueRow
+                    key={s.supplier}
+                    data={s}
+                    color={TOP_SUPPLIER_COLORS[i % TOP_SUPPLIER_COLORS.length]}
+                    defaultOpen={i === 0}
+                  />
+                ))}
+              </div>
+            </Card>
+
+            {/* Section 2 — AI Decisions */}
+            <div className="flex items-center gap-2 pt-1">
+              <Sparkles className="w-4 h-4 text-[#A59DFF]" />
+              <span className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest">AI Decisions</span>
+            </div>
+
+            <Card title="Where your purchasing goes" subtitle="Case routing across labs by practice">
+              <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6 items-center">
+                {/* Lab mix donut */}
+                <div className="flex flex-col items-center justify-center">
+                  <div className="relative">
+                    <Donut data={LAB_MIX.map(l => ({ label: l.lab, value: l.count, color: l.color }))} />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-[10px] text-[#A0A0B0] uppercase tracking-wider">Cases</span>
+                      <span className="text-sm font-bold text-[#030213]">{mockCases.length}</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-1 w-full">
+                    {LAB_MIX.map(l => (
+                      <div key={l.lab} className="flex items-center gap-1.5 text-[10px] text-[#717182]">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: l.color }} />
+                        <span className="truncate flex-1">{l.lab}</span>
+                        <span className="font-semibold text-[#030213] tabular-nums">{l.pct}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Per-practice routing bars */}
+                <div className="space-y-4">
+                  {PRACTICE_ROUTING.map(p => (
+                    <div key={p.practice}>
+                      <div className="flex items-center justify-between gap-3 mb-1.5">
+                        <p className="text-xs font-semibold text-[#030213] truncate">{p.practice}</p>
+                        <p className="text-[11px] text-[#717182] flex-shrink-0">
+                          <span className="font-bold text-[#030213]">{p.topLabPct}%</span> → {p.topLab}
+                        </p>
+                      </div>
+                      <div className="flex h-2.5 rounded-full overflow-hidden bg-[#F3F3F5]">
+                        {p.segments.map(seg => (
+                          <div key={seg.lab} title={`${seg.lab} — ${seg.pct}%`} style={{ width: `${seg.pct}%`, background: seg.color }} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Derived insights */}
+              <div className="mt-5 pt-4 border-t border-[#F0EFF6] space-y-2">
+                {ROUTING_INSIGHTS.map(text => (
+                  <div key={text} className="flex items-start gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-[#A59DFF] flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-[#5A5568]">{text}</p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            {/* Savings recommendations */}
+            <div className="space-y-4">
+              {RECOMMENDATIONS.map(rec => (
+                <RecommendationCard key={rec.altSupplier} rec={rec} />
+              ))}
+            </div>
           </>
         )}
 
