@@ -1835,7 +1835,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
               Styled as a dropdown trigger: greyed placeholder when unset,
               teal accent once a method is picked; a small count badge shows
               attached files. Click opens the method-picker popup. ── */}
-          <div className="order-2 flex">
+          <div className="order-2 flex justify-end">
             {(() => {
               const fileCount = Object.values(caseSourceFiles).filter(Boolean).length + caseSourceExtraFiles.length;
               return (
