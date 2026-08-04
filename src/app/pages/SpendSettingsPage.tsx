@@ -7,6 +7,8 @@ import {
   Building2, Users, UserCheck, Layers, Circle, Sliders,
   CalendarClock, Info, Upload, Download, Send,
   Link2, ClipboardCheck, Beaker, Package,
+  User, FileText, Stethoscope, CalendarDays, EyeOff,
+  Brain, Wand2, RotateCcw,
 } from 'lucide-react';
 import { useSupplierFields, OrgSupplierField } from '../context/SupplierFieldsContext';
 import { useToast } from '../context/ToastContext';
@@ -1444,6 +1446,339 @@ function ApprovalWorkflowTab() {
 // matching for (a) lab invoices and (b) everything else. When enabled, the
 // invoice pipeline will block an item from leaving QC until an approved PO
 // with matching supplier / lines / amount is attached.
+// ─────────────────────────────────────────────────────────────────────────────
+// Case matching configuration — lives inside the PO Matching tab. Weights
+// control how much each signal contributes when AI scores a candidate case
+// against an invoice line item; weights must total exactly 100 to save.
+// ─────────────────────────────────────────────────────────────────────────────
+interface MatchFactor {
+  key: string; label: string; hint: string;
+  icon: React.ReactNode; tileBg: string;
+}
+
+const MATCH_FACTORS: MatchFactor[] = [
+  { key: 'patientName',  label: 'Patient Name',        hint: 'Fuzzy name match against the case patient',   icon: <User className="w-4 h-4 text-[#1565C0]" />,        tileBg: 'bg-[#EEF4FF]' },
+  { key: 'labName',      label: 'Lab Name',            hint: 'Supplier / lab identity match',               icon: <Beaker className="w-4 h-4 text-[#7C3AED]" />,      tileBg: 'bg-[#F5F3FF]' },
+  { key: 'serviceName',  label: 'Service Name',        hint: 'Line-item service vs case service',           icon: <FileText className="w-4 h-4 text-[#2E7D32]" />,    tileBg: 'bg-[#F0FDF4]' },
+  { key: 'doctorName',   label: 'Doctor Name',         hint: 'Prescribing dentist match',                   icon: <Stethoscope className="w-4 h-4 text-[#E65100]" />, tileBg: 'bg-[#FFF7ED]' },
+  { key: 'practiceName', label: 'Practice Name',       hint: 'Billing practice / clinic match',             icon: <Building2 className="w-4 h-4 text-[#AD1457]" />,   tileBg: 'bg-[#FCE4EC]' },
+  { key: 'orderDate',    label: 'Order Creation Date', hint: 'Proximity of case date to invoice date',      icon: <CalendarDays className="w-4 h-4 text-[#00838F]" />, tileBg: 'bg-[#E0F7FA]' },
+];
+
+const DEFAULT_MATCH_WEIGHTS: Record<string, number> = {
+  patientName: 25, labName: 10, serviceName: 30, doctorName: 15, practiceName: 10, orderDate: 10,
+};
+
+// Example candidate used by the preview card — how strongly each signal matches.
+const PREVIEW_MATCH_STRENGTH: Record<string, number> = {
+  patientName: 1, labName: 0.9, serviceName: 1, doctorName: 0.8, practiceName: 0.4, orderDate: 0.7,
+};
+
+interface NonClinicalRule {
+  key: string; pattern: string; scope: string; match: string;
+  learnedFrom: string; learnedBy: string; learnedOn: string;
+  appliedCount: number; lastApplied: string; enabled: boolean;
+}
+
+const INITIAL_NON_CLINICAL_RULES: NonClinicalRule[] = [
+  { key: 'rush',    pattern: 'Rush fee',           scope: 'All labs',              match: 'Exact description',                  learnedFrom: 'INV-2026-0987', learnedBy: 'Emma Wilson',   learnedOn: '6 May 2026',  appliedCount: 14, lastApplied: '11 Jul 2026', enabled: true  },
+  { key: 'courier', pattern: 'Courier delivery',   scope: 'Dental Excellence Lab', match: 'Description contains "courier"',     learnedFrom: 'INV-2026-1002', learnedBy: 'Daniel Foster', learnedOn: '19 May 2026', appliedCount: 6,  lastApplied: '12 Jul 2026', enabled: true  },
+  { key: 'admin',   pattern: 'Account adjustment', scope: 'All labs',              match: 'Description starts with "account"',  learnedFrom: 'INV-2026-1018', learnedBy: 'Priya Shah',    learnedOn: '28 May 2026', appliedCount: 3,  lastApplied: '9 Jul 2026',  enabled: false },
+];
+
+const CONFIDENCE_TIERS = [
+  { label: 'Auto Match',      range: '≥ 90%',           badgeClass: 'bg-[#E8F5E9] text-[#2E7D32] border-[#A5D6A7]' },
+  { label: 'Suggested Match', range: '70–89%',          badgeClass: 'bg-[#FFF3E0] text-[#E65100] border-[#FFCC80]' },
+  { label: 'Manual Review',   range: '40–69%',          badgeClass: 'bg-[#FFEBEE] text-[#C62828] border-[#EF9A9A]' },
+  { label: 'Match Case',      range: '< 40% or no data', badgeClass: 'bg-[#F3F3F5] text-[#717182] border-[#E0E0E6]' },
+];
+
+function CaseMatchingSection() {
+  const { toast } = useToast();
+  const [weights, setWeights] = useState<Record<string, number>>({ ...DEFAULT_MATCH_WEIGHTS });
+  const [savedWeights, setSavedWeights] = useState<Record<string, number>>({ ...DEFAULT_MATCH_WEIGHTS });
+  const [learnEnabled, setLearnEnabled] = useState(true);
+  const [memoryRules, setMemoryRules] = useState<NonClinicalRule[]>(INITIAL_NON_CLINICAL_RULES);
+
+  const totalWeight = MATCH_FACTORS.reduce((sum, f) => sum + (weights[f.key] ?? 0), 0);
+  const isValidTotal = totalWeight === 100;
+  const isDirty = MATCH_FACTORS.some(f => weights[f.key] !== savedWeights[f.key]);
+
+  function setWeight(key: string, value: number) {
+    const v = Math.max(0, Math.min(100, Math.round(value) || 0));
+    setWeights(prev => ({ ...prev, [key]: v }));
+  }
+  function autoBalance() {
+    const base = Math.floor(100 / MATCH_FACTORS.length);
+    const remainder = 100 - base * MATCH_FACTORS.length;
+    const next: Record<string, number> = {};
+    MATCH_FACTORS.forEach((f, i) => { next[f.key] = base + (i < remainder ? 1 : 0); });
+    setWeights(next);
+    toast.success('Weights auto-balanced to an even split');
+  }
+  function resetDefaults() {
+    setWeights({ ...DEFAULT_MATCH_WEIGHTS });
+    toast.success('Weights reset to defaults');
+  }
+  function cancelEdits() {
+    setWeights({ ...savedWeights });
+  }
+  function saveWeights() {
+    setSavedWeights({ ...weights });
+    toast.success('Case matching weights saved');
+  }
+  function toggleRule(key: string) {
+    const rule = memoryRules.find(r => r.key === key);
+    setMemoryRules(prev => prev.map(r => r.key === key ? { ...r, enabled: !r.enabled } : r));
+    if (rule) toast.success(rule.enabled ? `"${rule.pattern}" paused — those lines go to case matching again` : `"${rule.pattern}" resumed`);
+  }
+  function forgetRule(key: string) {
+    const rule = memoryRules.find(r => r.key === key);
+    setMemoryRules(prev => prev.filter(r => r.key !== key));
+    if (rule) toast.success(`Forgot "${rule.pattern}"`);
+  }
+
+  // Preview — contribution of each factor for the example candidate.
+  const previewRows = MATCH_FACTORS.map(f => {
+    const weight = weights[f.key] ?? 0;
+    const contribution = Math.round(weight * (PREVIEW_MATCH_STRENGTH[f.key] ?? 1));
+    const pct = weight > 0 ? Math.round((contribution / weight) * 100) : 0;
+    return { label: f.label, contribution, pct };
+  });
+  const previewTotal = previewRows.reduce((sum, r) => sum + r.contribution, 0);
+  const previewTone =
+    previewTotal >= 90 ? 'text-[#2E7D32]'
+  : previewTotal >= 70 ? 'text-[#E65100]'
+  :                      'text-[#C62828]';
+
+  return (
+    <div className="space-y-4">
+      {/* ── Weights card — gradient hero + slider rows ── */}
+      <div className="rounded-2xl overflow-hidden border border-[#E0E0E6]">
+        <div className="bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] px-6 py-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+            <Link2 className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-white/70 uppercase tracking-widest">Case Matching</p>
+            <p className="text-sm font-semibold text-white mt-0.5">Configure how much each field contributes when AI scores a candidate case against an invoice line item. Weights must total 100.</p>
+          </div>
+        </div>
+
+        <div className="bg-white divide-y divide-[#F8F9FC]">
+          {MATCH_FACTORS.map(f => (
+            <div key={f.key} className="px-6 py-4 flex items-center gap-4">
+              <div className={`w-9 h-9 rounded-lg ${f.tileBg} flex items-center justify-center flex-shrink-0`}>
+                {f.icon}
+              </div>
+              <div className="w-44 flex-shrink-0">
+                <p className="text-sm font-semibold text-[#030213] leading-snug">{f.label}</p>
+                <p className="text-[11px] text-[#717182] mt-0.5 leading-snug">{f.hint}</p>
+              </div>
+              <div className="flex-1 min-w-0">
+                <Slider value={weights[f.key] ?? 0} min={0} max={100} onChange={v => setWeight(f.key, v)} color="#4D8EF7" />
+              </div>
+              <div className="flex items-center border border-[#E0E0E6] rounded-lg overflow-hidden flex-shrink-0">
+                <input
+                  type="number" min={0} max={100}
+                  value={weights[f.key] ?? 0}
+                  onChange={e => setWeight(f.key, Number(e.target.value))}
+                  className="w-14 px-2 py-1.5 text-xs text-right text-[#030213] tabular-nums focus:outline-none"
+                />
+                <span className="px-2 py-1.5 text-xs text-[#717182] bg-[#F8F9FC] border-l border-[#E0E0E6]">%</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Total + balance controls */}
+        <div className="bg-[#FAFBFC] border-t border-[#F0EFF6] px-6 py-3.5 flex flex-wrap items-center gap-3">
+          <span className="text-sm text-[#717182]">Total weight</span>
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold tabular-nums ${
+            isValidTotal ? 'bg-[#E8F5E9] text-[#2E7D32]' : 'bg-[#FFEBEE] text-[#C62828]'
+          }`}>
+            {totalWeight}%
+          </span>
+          {!isValidTotal && <span className="text-xs font-medium text-[#C62828]">Must equal 100% to save</span>}
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={autoBalance}
+              className="flex items-center gap-1.5 text-xs font-medium text-[#5A5568] border border-[#E0E0E6] bg-white px-3 py-1.5 rounded-lg hover:bg-[#F8F9FC] transition-colors"
+            >
+              <Wand2 className="w-3 h-3" /> Auto-Balance
+            </button>
+            <button
+              onClick={resetDefaults}
+              className="flex items-center gap-1.5 text-xs font-medium text-[#5A5568] border border-[#E0E0E6] bg-white px-3 py-1.5 rounded-lg hover:bg-[#F8F9FC] transition-colors"
+            >
+              <RotateCcw className="w-3 h-3" /> Reset to Defaults
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Non-clinical memory ── */}
+      <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
+        <div className="p-5 border-b border-[#F0EFF6] flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#F5F3FF] border border-[#EDE9FE] flex items-center justify-center flex-shrink-0">
+              <Brain className="w-5 h-5 text-[#7C3AED]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[#030213]">Non-clinical memory</h3>
+              <p className="text-xs text-[#717182] mt-0.5 max-w-2xl leading-relaxed">
+                When someone marks an invoice line non-clinical, SmileGenius saves the correction and applies it to matching lines on future invoices — before case matching runs.
+              </p>
+            </div>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer select-none flex-shrink-0">
+            <span className="text-xs text-[#717182] whitespace-nowrap">Learn from corrections</span>
+            <Toggle on={learnEnabled} onChange={v => { setLearnEnabled(v); toast.success(`Learning from corrections ${v ? 'enabled' : 'paused'}`); }} />
+          </label>
+        </div>
+
+        {memoryRules.length === 0 ? (
+          <div className="px-6 py-10 text-center">
+            <p className="text-sm font-semibold text-[#030213]">Nothing learned yet</p>
+            <p className="text-xs text-[#717182] mt-1 max-w-md mx-auto leading-relaxed">
+              Mark an invoice line as non-clinical during review and choose "Remember". Saved corrections appear here, where you can review or forget them at any time.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#F0EFF6] bg-[#FAFAFA]">
+                  {['Line Item', 'Rule', 'Learned From', 'Applied', 'Last Used', ''].map((h, i) => (
+                    <th key={i} className="text-left text-[10px] font-semibold text-[#A0A0B0] uppercase tracking-wider py-3 px-4 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#F8F9FC]">
+                {memoryRules.map(r => (
+                  <tr key={r.key} className={`transition-opacity ${r.enabled ? '' : 'opacity-45'}`}>
+                    <td className="py-3.5 px-4">
+                      <p className="text-xs font-semibold text-[#030213]">{r.pattern}</p>
+                      <p className="text-[10px] text-[#717182] mt-0.5">{r.scope}</p>
+                    </td>
+                    <td className="py-3.5 px-4 text-xs text-[#5A5568]">{r.match}</td>
+                    <td className="py-3.5 px-4">
+                      <p className="text-xs text-[#030213] font-mono">{r.learnedFrom}</p>
+                      <p className="text-[10px] text-[#717182] mt-0.5">{r.learnedBy} · {r.learnedOn}</p>
+                    </td>
+                    <td className="py-3.5 px-4 text-xs font-semibold text-[#030213] whitespace-nowrap">{r.appliedCount} invoices</td>
+                    <td className="py-3.5 px-4 text-xs text-[#5A5568] whitespace-nowrap">{r.lastApplied}</td>
+                    <td className="py-3.5 px-4">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => toggleRule(r.key)}
+                          title={r.enabled ? 'Pause this rule' : 'Resume this rule'}
+                          className="p-1.5 rounded-lg text-[#A0A0B0] hover:text-[#4D8EF7] hover:bg-[#F8F9FC] transition-colors"
+                        >
+                          {r.enabled ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          onClick={() => forgetRule(r.key)}
+                          title="Forget this rule"
+                          className="p-1.5 rounded-lg text-[#A0A0B0] hover:text-[#C62828] hover:bg-[#FFF1F2] transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Confidence tiers ── */}
+      <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
+        <div className="p-5 border-b border-[#F0EFF6] flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#EEF4FF] border border-[#DBEAFE] flex items-center justify-center flex-shrink-0">
+            <Layers className="w-5 h-5 text-[#4D8EF7]" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-[#030213]">Confidence tiers</h3>
+            <p className="text-xs text-[#717182] mt-0.5">How the resulting score maps to a match tier and badge shown on candidate cases.</p>
+          </div>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[#F0EFF6] bg-[#FAFAFA]">
+              {['Tier', 'Score', 'Badge'].map(h => (
+                <th key={h} className="text-left text-[10px] font-semibold text-[#A0A0B0] uppercase tracking-wider py-3 px-5 whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#F8F9FC]">
+            {CONFIDENCE_TIERS.map(t => (
+              <tr key={t.label}>
+                <td className="py-3.5 px-5 text-xs font-semibold text-[#030213]">{t.label}</td>
+                <td className="py-3.5 px-5 text-xs text-[#5A5568] font-mono">{t.range}</td>
+                <td className="py-3.5 px-5">
+                  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${t.badgeClass}`}>{t.label}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ── Preview: example candidate ── */}
+      <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
+        <div className="p-5 border-b border-[#F0EFF6] flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] flex items-center justify-center flex-shrink-0">
+            <Zap className="w-5 h-5 text-[#2E7D32]" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-[#030213]">Preview: example candidate</h3>
+            <p className="text-xs text-[#717182] mt-0.5">How a candidate with these signal matches would score under your current weights.</p>
+          </div>
+        </div>
+        <div className="p-5 space-y-3">
+          {previewRows.map(r => (
+            <div key={r.label} className="flex items-center gap-3">
+              <span className="w-36 text-xs text-[#5A5568] flex-shrink-0">{r.label}</span>
+              <div className="flex-1 h-2 bg-[#F0EFF6] rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] transition-all duration-300"
+                  style={{ width: `${r.pct}%` }}
+                />
+              </div>
+              <span className="w-10 text-right text-xs font-semibold text-[#030213] tabular-nums flex-shrink-0">{r.contribution}%</span>
+            </div>
+          ))}
+        </div>
+        <div className="px-5 py-3.5 border-t border-[#F0EFF6] bg-[#FAFBFC] flex items-center justify-between">
+          <span className="text-sm font-semibold text-[#030213]">Resulting confidence</span>
+          <span className={`text-base font-bold tabular-nums ${previewTone}`}>{previewTotal}%</span>
+        </div>
+      </div>
+
+      {/* ── Save bar ── */}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={cancelEdits}
+          disabled={!isDirty}
+          className="px-4 py-2 text-sm font-medium text-[#5A5568] border border-[#E0E0E6] bg-white rounded-lg hover:bg-[#F8F9FC] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={saveWeights}
+          disabled={!isValidTotal}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Check className="w-4 h-4" /> Save Weights
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function POMatchingTab() {
   const [enforceLab, setEnforceLab] = useState(true);
   const [enforceOther, setEnforceOther] = useState(false);
@@ -1583,6 +1918,9 @@ function POMatchingTab() {
           PO matching uses the supplier, line-item description, and the invoice total. Tolerances are configured per supplier on the Supplier Detail page. Disabled categories skip the PO check entirely but still run through RAG scoring and Rules Engine.
         </p>
       </div>
+
+      {/* Case matching configuration — weights, memory, tiers, preview */}
+      <CaseMatchingSection />
     </div>
   );
 }
