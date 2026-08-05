@@ -84,8 +84,9 @@ interface CaseForDetail {
   requestedDelivery: string | null;
   hasAlert: boolean;
   /** How the case arrived — drives whether the Emails thread is shown (only
-      for email / iTero-sourced cases). */
-  source?: 'scanner' | 'email' | 'manual';
+      for email / iTero-sourced cases) and the Sent-via-Post order-form
+      treatment (print-instruction toast + printable Case URL). */
+  source?: 'scanner' | 'email' | 'manual' | 'post';
   /** Scanner brand (when scanner-captured or an iTero email export). */
   scanner?: string;
   /** Demo seed — the dentist already replied to the missing-info email, so the
@@ -115,7 +116,21 @@ function receivedViaLabel(c: CaseForDetail): string {
   if (c.source === 'manual') return 'Manual upload';
   if (c.source === 'scanner') return `Scanner · ${c.scanner ?? '—'}`;
   if (c.source === 'email') return hasScans ? `Email · ${c.scanner ?? 'scan'}` : 'Email';
+  if (c.source === 'post') return 'Sent via Post';
   return 'Manual upload';
+}
+
+// Public case link printed on the order form — labs receiving a posted case
+// can type/scan it to open the digital record.
+function caseUrl(c: CaseForDetail): string {
+  return `https://app.smilegenius.co.uk/cases/${c.id}`;
+}
+
+// "Submitted by" username shown on the order form — derived from the practice
+// name the way production renders it (PracticeManager_<site>).
+function submittedByLabel(c: CaseForDetail): string {
+  const site = c.practice.replace(/^Smile Genius\s*/i, '').replace(/\s+/g, '') || c.practice;
+  return `PracticeManager_${site}`;
 }
 
 // When the dentist's reply supplies the missing prescription info, the case
@@ -639,7 +654,6 @@ export function OrderFormModal({ caseData, onClose }: {
   onClose: () => void;
 }) {
   const [orderTab, setOrderTab] = useState<'order-form' | 'lab-documents'>('order-form');
-  const selectedUpper = [11, 12, 13, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28];
 
   return (
     <ModalPortal>
@@ -686,33 +700,8 @@ export function OrderFormModal({ caseData, onClose }: {
           {/* Body */}
           {orderTab === 'order-form' ? (
             <div className="flex-1 overflow-y-auto p-5 space-y-5">
-              <Section title="Details">
-                <KV label="Lab" value="Smile Genius Lab" />
-                <KV label="Clinic" value={caseData.practice} />
-                <KV label="Dentist" value={caseData.dentist} />
-                <KV label="Dentist Contact" value="+44 20 7946 0000" />
-              </Section>
-              <Section title="Patient">
-                <KV label="Patient" value={caseData.patientName} />
-                <KV label="DOB / Gender" value="— / —" />
-                <KV label="Ship to Address" value="—" />
-                <KV label="SG Case ID" value={caseData.id} />
-              </Section>
-              <Section title="Case Instructions">
-                <p className="text-xs text-[#A0A0B0]">No additional instructions provided.</p>
-              </Section>
-              <Section title={caseData.services[0] ?? 'Service'}>
-                <KV label="FDI" value={selectedUpper.join(', ')} />
-                <KV label="Order Type" value="NHS" />
-                <KV label="Material" value="—" muted />
-                <KV label="Brand" value="—" muted />
-              </Section>
-              <Section title="Scan Files">
-                <p className="text-xs text-[#A0A0B0]">No scan files attached.</p>
-              </Section>
-              <Section title="Attachments">
-                <p className="text-xs text-[#A0A0B0]">No attachments.</p>
-              </Section>
+              {caseData.source === 'post' && <PostPrintBanner />}
+              <OrderFormBody caseData={caseData} />
             </div>
           ) : (
             <div className="flex-1 p-5 flex flex-col items-center justify-center text-center gap-3">
@@ -739,7 +728,6 @@ export function FullViewModal({ caseData, onClose, onOpenNotes }: {
 }) {
   const [viewerFormat, setViewerFormat] = useState<ViewerFormat>('3D');
   const [orderTab, setOrderTab] = useState<'order-form' | 'lab-documents'>('order-form');
-  const selectedUpper = [11,12,13,17,18,21,22,23,24,25,26,27,28];
 
   return (
     <ModalPortal>
@@ -837,64 +825,9 @@ export function FullViewModal({ caseData, onClose, onOpenNotes }: {
 
           {orderTab === 'order-form' ? (
             <div className="flex-1 overflow-y-auto">
-              {/* Two-column body inside the Order form panel:
-                  form fields on the left, Creation + Teeth Chart on the right. */}
-              <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-6 p-5">
-                {/* Form sections */}
-                <div className="space-y-5">
-                  <Section title="Details">
-                    <KV label="Lab" value="Smile Genius Lab" />
-                    <KV label="Clinic" value={caseData.practice} />
-                    <KV label="Dentist" value={caseData.dentist} />
-                    <KV label="Dentist Contact" value="+44 20 7946 0000" />
-                  </Section>
-                  <Section title="Patient">
-                    <KV label="Patient" value={caseData.patientName} />
-                    <KV label="DOB / Gender" value="— / —" />
-                    <KV label="Ship to Address" value="—" />
-                    <KV label="SG Case ID" value={caseData.id} />
-                  </Section>
-                  <Section title="Case Instructions">
-                    <p className="text-xs text-[#A0A0B0]">No additional instructions provided.</p>
-                  </Section>
-                  <Section title={caseData.services[0] ?? 'Service'}>
-                    <KV label="FDI" value={selectedUpper.join(', ')} />
-                    <KV label="Order Type" value="NHS" />
-                    <KV label="Material" value="—" muted />
-                    <KV label="Brand" value="—" muted />
-                  </Section>
-                  <Section title="Scan Files">
-                    <p className="text-xs text-[#A0A0B0]">No scan files attached.</p>
-                  </Section>
-                  <Section title="Attachments">
-                    <p className="text-xs text-[#A0A0B0]">No attachments.</p>
-                  </Section>
-                </div>
-
-                {/* Creation + Teeth Chart — still inside the same Order form panel */}
-                <div className="space-y-5">
-                  <Section title="Creation">
-                    <KV label="Case Created" value={caseData.createdAt} />
-                    <KV label="Delivery Date" value={caseData.requestedDelivery ?? '—'} />
-                    <KV label="Submitted by" value={caseData.practice} />
-                    <KV label="Received Via" value={receivedViaLabel(caseData)} />
-                  </Section>
-
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="w-0.5 h-3 bg-[#4D8EF7] rounded-full" />
-                      <p className="text-[11px] font-bold text-[#4D8EF7] uppercase tracking-wide">Teeth Chart</p>
-                    </div>
-                    <div className="flex justify-center">
-                      <img
-                        src="/dental-arch.svg"
-                        alt="Dental arch chart"
-                        className="w-full max-w-[240px] h-auto select-none pointer-events-none"
-                        draggable={false}
-                      />
-                    </div>
-                  </div>
-                </div>
+              <div className="p-5 space-y-4">
+                {caseData.source === 'post' && <PostPrintBanner />}
+                <OrderFormBody caseData={caseData} wide />
               </div>
             </div>
           ) : (
@@ -998,29 +931,9 @@ function PrescriptionTab({ caseData, onOpenNotes, onOpenFullView }: {
           </div>
 
           {orderTab === 'order-form' ? (
-            <div className="p-4 space-y-4 overflow-y-auto max-h-[340px]">
-              <Section title="Details">
-                <KV label="Lab Name" value="Smile Genius Lab" />
-                <KV label="Clinic Name" value={caseData.practice} />
-                <KV label="Dentist Name" value={caseData.dentist} />
-                <KV label="Dentist Contact Number" value="—" />
-              </Section>
-              <Section title="Patient">
-                <KV label="Patient Name" value={caseData.patientName} />
-                <KV label="DOB / Gender" value="— / —" />
-                <KV label="Ship to Address" value="—" />
-                <KV label="SG Case ID" value={caseData.id} />
-              </Section>
-              <Section title="Case Instructions">
-                <p className="text-xs text-[#A0A0B0]">—</p>
-              </Section>
-              <Section title={caseData.services[0] ?? 'Service'}>
-                <KV label="FDI" value={selectedTeeth.join(', ')} />
-                <KV label="Order Type" value="NHS" />
-              </Section>
-              <Section title="Scan Files">
-                <p className="text-xs text-[#A0A0B0]">No scan files attached.</p>
-              </Section>
+            <div className="p-4 space-y-4 overflow-y-auto max-h-[420px]">
+              {caseData.source === 'post' && <PostPrintBanner />}
+              <OrderFormBody caseData={caseData} />
             </div>
           ) : (
             <div className="p-4 flex flex-col items-center justify-center text-center gap-3 min-h-[300px]">
@@ -2187,35 +2100,9 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
                 </div>
 
                 {orderTab === 'order-form' ? (
-                  <div className="p-4 space-y-4 overflow-y-auto max-h-[340px]">
-                    <Section title="Details">
-                      <KV label="Lab Name" value="Smile Genius Lab" />
-                      <KV label="Clinic Name" value={caseData.practice} />
-                      <KV label="Dentist Name" value={caseData.dentist} />
-                      <KV label="Dentist Contact Number" value="—" />
-                    </Section>
-                    <Section title="Patient">
-                      <KV label="Patient Name" value={caseData.patientName} />
-                      <KV label="DOB / Gender" value="— / —" />
-                      <KV label="Ship to Address" value="—" />
-                      <KV label="SG Case ID" value={caseData.id} />
-                    </Section>
-                    <Section title="Case Instructions">
-                      {service.instructions
-                        ? <p className="text-xs text-[#030213] leading-relaxed">{service.instructions}</p>
-                        : <p className="text-xs text-[#A0A0B0]">—</p>}
-                    </Section>
-                    <Section title={service.name}>
-                      <KV label="FDI" value={fdiLabel} muted={fdiList.length === 0} />
-                      <KV label="Material"    value={service.material  ?? '—'} muted={!service.material} />
-                      <KV label="Tooth Shade" value={service.shade     ?? '—'} muted={!service.shade} />
-                      <KV label="Order Type"  value={service.orderType ?? '—'} muted={!service.orderType} />
-                    </Section>
-                    <Section title="Scan Files">
-                      {scanCount > 0
-                        ? <p className="text-xs text-[#030213]">{scanCount} scan {scanCount === 1 ? 'file' : 'files'} attached.</p>
-                        : <p className="text-xs text-[#A0A0B0]">No scan files attached.</p>}
-                    </Section>
+                  <div className="p-4 space-y-4 overflow-y-auto max-h-[420px]">
+                    {caseData.source === 'post' && <PostPrintBanner />}
+                    <OrderFormBody caseData={caseData} service={service} />
                   </div>
                 ) : (
                   <div className="p-4 flex flex-col items-center justify-center text-center gap-3 min-h-[300px]">
@@ -2404,6 +2291,128 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
       )}
     </div>
   );
+}
+
+// ─── Order form body — shared, matches the production printable form ─────────
+// One Details block with hairline group dividers (lab/practice/dentist ·
+// patient · shipping/IDs), the creation/meta block (Created On, Created by,
+// Submitted by, Received Via), per-service prescription, Scan Files,
+// Attachment and the Teeth Chart. Used by the compact Order form panels, the
+// Order Form modal and the Full View overlay (`wide` = two-column layout).
+function OrderFormBody({ caseData, service, wide = false }: {
+  caseData: CaseForDetail;
+  service?: ServiceItem | null;
+  wide?: boolean;
+}) {
+  const svc = service ?? caseData.serviceItems?.[0] ?? null;
+  const svcName = svc?.name ?? caseData.services[0] ?? 'Service';
+  const fdiList = svc?.fdi ?? [];
+  const fdiLabel = fdiList.length ? fdiList.join(', ') : '—';
+  const scanCount = svc?.scanFileCount ?? 0;
+  const attachCount = svc?.attachmentCount ?? 0;
+  const instructions = svc?.instructions?.trim() ?? '';
+  const url = caseUrl(caseData);
+
+  const formSections = (
+    <>
+      <Section title="Details">
+        <KV label="Lab Name" value="Smile Genius Lab" />
+        <KV label="Practice Name" value={caseData.practice} />
+        <KV label="Dentist Name" value={caseData.dentist} />
+        <KV label="Dentist Contact Number" value="—" muted />
+        <GroupDivider />
+        <KV label="Patient Name" value={caseData.patientName} />
+        <KV label="DOB / Gender" value="— / —" muted />
+        <GroupDivider />
+        <KV label="Ship to Address" value="—" muted />
+        <KV label="SG Case ID" value={caseData.id} />
+        <div className="text-xs flex items-baseline gap-2 min-w-0">
+          <span className="text-[#A0A0B0] flex-shrink-0">Case URL:</span>
+          <a href={url} target="_blank" rel="noreferrer" className="truncate text-[#4D8EF7] font-medium hover:underline">
+            {url}
+          </a>
+        </div>
+      </Section>
+      <Section title="Case Instructions">
+        {instructions
+          ? <p className="text-xs text-[#030213] leading-relaxed">{instructions}</p>
+          : <p className="text-xs text-[#A0A0B0]">—</p>}
+      </Section>
+      <Section title={svcName}>
+        <KV label="FDI" value={fdiLabel} muted={fdiList.length === 0} />
+        <KV label="Order Type" value={svc?.orderType ?? '—'} muted={!svc?.orderType} />
+        {svc?.material && <KV label="Material" value={svc.material} />}
+        {svc?.shade && <KV label="Tooth Shade" value={svc.shade} />}
+      </Section>
+      <Section title="Scan Files">
+        {scanCount > 0
+          ? <p className="text-xs text-[#030213]">{scanCount} scan file{scanCount === 1 ? '' : 's'} included in this order.</p>
+          : <p className="text-xs text-[#A0A0B0]">No scan files included in this order.</p>}
+      </Section>
+      <Section title="Attachment">
+        {attachCount > 0
+          ? <p className="text-xs text-[#030213]">{attachCount} additional attachment{attachCount === 1 ? '' : 's'}.</p>
+          : <p className="text-xs text-[#A0A0B0]">No additional attachments.</p>}
+      </Section>
+    </>
+  );
+
+  const metaSections = (
+    <>
+      <Section title="Creation">
+        <KV label="Created On" value={caseData.createdAt} />
+        <KV label="Requested Delivery Date" value={caseData.requestedDelivery ?? '—'} muted={!caseData.requestedDelivery} />
+        <GroupDivider />
+        <KV label="Created by" value={caseData.practice} />
+        <KV label="Submitted by" value={submittedByLabel(caseData)} />
+        <KV label="Received Via" value={receivedViaLabel(caseData)} />
+      </Section>
+      <Section title="Teeth Chart">
+        <ToothChart compact={!wide} />
+      </Section>
+    </>
+  );
+
+  if (wide) {
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-6">
+        <div className="space-y-5">{formSections}</div>
+        <div className="space-y-5">{metaSections}</div>
+      </div>
+    );
+  }
+  return <>{formSections}{metaSections}</>;
+}
+
+// Sticky instructional toast floating above the order form for post-received
+// cases — the practice must print the form and ship it with the physical case.
+// Not part of the order form itself, so it sits outside the form sections and
+// stays pinned while the form scrolls beneath it.
+function PostPrintBanner() {
+  return (
+    <div className="sticky top-0 z-10">
+      <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-[#FFF8E1] border border-[#FDE68A] shadow-sm">
+        <span className="w-7 h-7 rounded-lg bg-[#FDE68A]/70 flex items-center justify-center flex-shrink-0">
+          <Printer className="w-3.5 h-3.5 text-[#A16207]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold text-[#A16207] uppercase tracking-wider">Case sent via post</p>
+          <p className="text-[11px] text-[#7A5C0E] leading-snug">
+            Please print this order form and include it when sending the case to the lab.
+          </p>
+        </div>
+        <button className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#A16207] text-white text-[11px] font-semibold hover:bg-[#8A5306] transition-colors">
+          <Printer className="w-3 h-3" />
+          Print
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Hairline divider between the grouped rows inside an order-form Section.
+function GroupDivider() {
+  return <div className="border-t border-[#F0EFF6]" />;
 }
 
 // Small layout helpers used in the order form panel

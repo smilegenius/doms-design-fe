@@ -59,7 +59,7 @@ type Scanner = 'iTero' | '3Shape' | 'Medit' | 'Carestream';
 //   scanner — captured by a chairside intra-oral scanner
 //   email   — auto-fetched from the practice inbox with a prescription PDF
 //   manual  — typed by a clinic user (optionally from an uploaded prescription)
-export type CaseSource = 'scanner' | 'email' | 'manual';
+export type CaseSource = 'scanner' | 'email' | 'manual' | 'post';
 
 // Metadata for an email-sourced case. Surfaces on the case detail header AND
 // in the preview pane when the user opens the case-creation full-screen view.
@@ -163,6 +163,17 @@ function SourceIcon({ source, scanner, size = 32 }: { source: CaseSource; scanne
       </span>
     );
   }
+  if (source === 'post') {
+    return (
+      <span
+        title="Sent via post"
+        style={{ width: size, height: size, minWidth: size }}
+        className="flex-shrink-0 rounded-full bg-[#FFF8E1] border border-[#FDE68A] inline-flex items-center justify-center"
+      >
+        <Package className="w-4 h-4 text-[#A16207]" />
+      </span>
+    );
+  }
   return (
     <span
       title="Manual entry"
@@ -180,6 +191,7 @@ function SourceIcon({ source, scanner, size = 32 }: { source: CaseSource; scanne
 export function sourceLabel(source: CaseSource, scanner: Scanner, hasScanFiles = false): string {
   if (source === 'scanner') return scanner;
   if (source === 'email')   return hasScanFiles ? `Email · ${scanner}` : 'Email';
+  if (source === 'post')    return 'Post';
   return 'Manual';
 }
 
@@ -611,6 +623,34 @@ export const scannerIncompleteCases: Case[] = [
   },
 ];
 mockCases.unshift(...scannerIncompleteCases);
+
+// ── Post-received case ───────────────────────────────────────────────────────
+// Physical impressions posted to the lab — no scans. Opens the Case Detail
+// page with the "Sent via Post" order-form treatment: sticky print-instruction
+// toast floating above the order form + the printable Case URL on the form.
+export const postReceivedCase: Case = {
+  id: 'CASE-054',
+  patientName: 'Harry Lewis',
+  practice: 'Smile Genius Cardiff',
+  dentist: 'Dr. Evans',
+  lab: 'Smile Genius Lab',
+  services: ['Crown'],
+  serviceItems: [{
+    id: 'post-s1', name: 'Crown', status: 'new', deliveryDate: '10-Jul-2026',
+    fdi: [16], material: 'Zirconia', shade: 'A3', orderType: 'Private',
+    instructions: 'Impressions sent by Royal Mail — tracking RM 1234 5678 9GB.',
+    scanFileCount: 0,
+    attachmentCount: 0,
+  }],
+  status: 'new',
+  createdAt: '20-Jun-2026',
+  updatedAt: '20-Jun-2026',
+  requestedDelivery: '10-Jul-2026',
+  hasAlert: false,
+  scanner: 'iTero',   // unused for post-sourced rows (SourceIcon shows the parcel tile)
+  source: 'post',
+};
+mockCases.unshift(postReceivedCase);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -4,6 +4,7 @@ import {
   Plus, X, Check, ChevronDown, ChevronRight,
   Pencil, Zap, Star, Upload, UploadCloud, Box, Image as ImageIcon,
   AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen, Copy, ExternalLink, Building2,
+  CloudOff,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
@@ -26,6 +27,11 @@ export interface CounterpartyOption {
   categories?: string[];
   initials?: string;
   avatarColor?: string;
+  /** Labs that are not on Smile Genius. 'low_potential' labs may be onboarded
+      one day; 'non_participating' labs never will be. Either way the case is
+      handled offline — the lab never sees it on the platform, so the clinic
+      owns status updates and the order form goes out by email/print. */
+  platformStatus?: 'low_potential' | 'non_participating';
 }
 // Soft avatar palette for clinic options (mockClinics has no avatarColor).
 const CLINIC_AVATAR_COLORS = [
@@ -36,6 +42,23 @@ const CLINIC_AVATAR_COLORS = [
   'bg-[#FFF1F2] text-[#BE123C]',
   'bg-[#ECFEFF] text-[#0F766E]',
 ];
+// Offline labs the clinic still works with but that live outside Smile Genius.
+// They appear in the lab picker (flagged with an "Offline" pill) so the clinic
+// can keep its case records in one place — the create flow explains the
+// offline handling the moment one is selected.
+const OFFLINE_DEMO_LABS: CounterpartyOption[] = [
+  {
+    id: 'offline-lab-1', name: 'Harbour Dental Ceramics', country: 'IE',
+    categories: ['Crown & Bridge', 'Ceramics'], initials: 'HD',
+    avatarColor: 'bg-[#FFF7ED] text-[#C2410C]', platformStatus: 'low_potential',
+  },
+  {
+    id: 'offline-lab-2', name: 'Westport Denture Works', country: 'IE',
+    categories: ['Dentures', 'Acrylics'], initials: 'WD',
+    avatarColor: 'bg-[#F3F4F6] text-[#4B5563]', platformStatus: 'non_participating',
+  },
+];
+
 // A newly-created clinic (lab portal) carries a few extra contact fields the
 // details drawer captures. Extends the picker option shape.
 type NewClinic = CounterpartyOption & { city?: string; phone?: string; email?: string };
@@ -1147,7 +1170,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // Picker options — labs (clinic portal) or active clinics (lab portal),
   // mapped into the shared CounterpartyOption shape the searchable picker reads.
   const labOptions: CounterpartyOption[] = useMemo(() => {
-    if (!isLab) return mockSuppliers;
+    if (!isLab) return [...mockSuppliers, ...OFFLINE_DEMO_LABS];
     const base = mockClinics
       .filter(c => c.status === 'active')
       .map(c => ({
@@ -1305,6 +1328,11 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
     // Successful submission — discard any pending draft and move on.
     clearDraft();
     toast.success(`Case created for ${patientName}`);
+    // Offline lab: one last nudge that the case lives on the clinic's side —
+    // the lab won't see it on the platform or move the status along.
+    if (!isLab && selectedLab?.platformStatus) {
+      toast.info(`${selectedLab.name} is an offline lab — send them the order form and update the case status from your side.`);
+    }
     onSubmitted();
   }
 
@@ -1776,6 +1804,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 )}
               </Mini>
             </div>
+            {/* Offline-lab notice — surfaces as soon as a Low Potential or
+                Non-participating lab is picked, before the clinic invests in
+                the rest of the form. */}
+            {!isLab && selectedLab?.platformStatus && <OfflineLabNotice lab={selectedLab} />}
             {/* Row 2 — case-level metadata (Case Source moved to the header
                 action bar at the top of the page). */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-[#F0EFF6]">
@@ -4859,6 +4891,60 @@ function DentistSearchSelect({ dentists, value, onChange, allowCreate = false, o
   );
 }
 
+// ─── Offline-lab notice ──────────────────────────────────────────────────────
+// Shown in the Case Details card the moment the clinic picks a lab that isn't
+// on Smile Genius (Low Potential or Non-participating). The case can still be
+// created and tracked here, but the lab never sees it on the platform — so the
+// notice sets expectations up front: order form goes out manually, status
+// updates are owned by the clinic, and in-app collaboration is off.
+function OfflineLabNotice({ lab }: { lab: CounterpartyOption }) {
+  const nonPart = lab.platformStatus === 'non_participating';
+  const points = [
+    {
+      icon: Mail,
+      text: <>The order form isn't sent digitally — <span className="font-semibold">email or print it</span> and share it with the lab yourself.</>,
+    },
+    {
+      icon: Pencil,
+      text: <>The lab can't update the case on Smile Genius — <span className="font-semibold">you'll update the status from your side</span> as the work progresses (e.g. In Production → Ready → Delivered).</>,
+    },
+    {
+      icon: AlertCircle,
+      text: <>Case messaging, digital file delivery and lab notifications <span className="font-semibold">aren't available</span> for this lab.</>,
+    },
+  ];
+  return (
+    <div className="mb-3 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3.5 py-3">
+      <div className="flex items-start gap-2.5">
+        <span className="w-6 h-6 rounded-lg bg-[#FEF3C7] text-[#B45309] flex items-center justify-center flex-shrink-0 mt-0.5">
+          <CloudOff className="w-3.5 h-3.5" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-bold text-[#92400E]">
+            {nonPart ? `${lab.name} doesn't use Smile Genius` : `${lab.name} isn't on Smile Genius yet`}
+          </p>
+          <p className="text-[11px] text-[#A16207] leading-relaxed mt-0.5">
+            {nonPart
+              ? 'This lab has chosen not to join the platform, so its cases are always handled offline.'
+              : 'This lab hasn\'t been onboarded to the platform yet, so this case will be handled offline.'}
+            {' '}You can still create the case and keep the full record here — here's what to expect:
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {points.map((p, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span className="w-4 h-4 rounded bg-white border border-[#FDE68A] text-[#B45309] flex items-center justify-center flex-shrink-0 mt-px">
+                  <p.icon className="w-2.5 h-2.5" />
+                </span>
+                <p className="text-[11px] text-[#92400E] leading-snug">{p.text}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Lab search select — searchable dropdown with Favourites tab ─────────────
 // Behaves like a native <select> but with three upgrades:
 //   1. Search input filters the list as you type.
@@ -4939,8 +5025,15 @@ function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKe
         }`}
       >
         {selected ? (
-          <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${selected.avatarColor || 'bg-[#030213] text-white'}`}>
-            {selected.initials || selected.name.slice(0, 2).toUpperCase()}
+          <div className="relative flex-shrink-0">
+            <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold ${selected.avatarColor || 'bg-[#030213] text-white'}`}>
+              {selected.initials || selected.name.slice(0, 2).toUpperCase()}
+            </div>
+            {noun === 'lab' && !selected.platformStatus && (
+              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#16A34A] border border-white flex items-center justify-center">
+                <Check className="w-1.5 h-1.5 text-white" strokeWidth={4} />
+              </span>
+            )}
           </div>
         ) : (
           <div className="w-5 h-5 rounded-md bg-[#F3F3F5] flex items-center justify-center flex-shrink-0">
@@ -4950,7 +5043,15 @@ function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKe
         <div className="flex-1 min-w-0">
           {selected ? (
             <>
-              <p className="text-xs font-semibold text-[#030213] truncate leading-tight">{selected.name}</p>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <p className="text-xs font-semibold text-[#030213] truncate leading-tight">{selected.name}</p>
+                {selected.platformStatus && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[9px] font-bold bg-[#FEF3C7] text-[#B45309] border border-[#FDE68A] flex-shrink-0">
+                    <CloudOff className="w-2.5 h-2.5" />
+                    Offline
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-[#717182] truncate leading-tight">
                 {(selected.categories?.slice(0, 3).join(' · ')) || selected.country || ''}
               </p>
@@ -5046,13 +5147,34 @@ function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKe
                       }}
                       className="flex-1 min-w-0 flex items-center gap-2.5 text-left"
                     >
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${lab.avatarColor || 'bg-[#030213] text-white'}`}>
-                        {lab.initials || lab.name.slice(0, 2).toUpperCase()}
+                      {/* Avatar — onboarded labs get a green tick so the
+                          clinic can tell at a glance which labs receive the
+                          case digitally vs. the Offline (manual) ones. */}
+                      <div
+                        className="relative flex-shrink-0"
+                        title={noun === 'lab' ? (lab.platformStatus ? 'Offline lab — handled manually' : 'On Smile Genius — receives cases digitally') : undefined}
+                      >
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold ${lab.avatarColor || 'bg-[#030213] text-white'}`}>
+                          {lab.initials || lab.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        {noun === 'lab' && !lab.platformStatus && (
+                          <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#16A34A] border border-white flex items-center justify-center">
+                            <Check className="w-2 h-2 text-white" strokeWidth={4} />
+                          </span>
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className={`text-xs truncate ${isSelected ? 'font-bold text-[#1565C0]' : 'font-semibold text-[#030213]'}`}>
-                          {lab.name}
-                        </p>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <p className={`text-xs truncate ${isSelected ? 'font-bold text-[#1565C0]' : 'font-semibold text-[#030213]'}`}>
+                            {lab.name}
+                          </p>
+                          {lab.platformStatus && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[9px] font-bold bg-[#FEF3C7] text-[#B45309] border border-[#FDE68A] flex-shrink-0">
+                              <CloudOff className="w-2.5 h-2.5" />
+                              Offline
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[10px] text-[#717182] truncate">
                           {(lab.categories?.slice(0, 3).join(' · ')) || lab.country || ''}
                         </p>
