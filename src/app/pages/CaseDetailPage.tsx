@@ -8,6 +8,7 @@ import {
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
+import { OfflineLabNotice, offlineLabStatusFor } from '../components/OfflineLabNotice';
 import { ScoreBadge } from '../components/ScoreBadge';
 import { AiSparkle } from '../components/AiSparkle';
 import { useCaseScoring } from '../context/CaseScoringContext';
@@ -77,6 +78,9 @@ interface CaseForDetail {
   patientName: string;
   practice: string;
   dentist: string;
+  /** Lab name — resolves the offline-lab notice (Low Potential /
+      Non-participating labs are handled outside Smile Genius). */
+  lab?: string;
   services: string[];
   status: CaseStatus;
   createdAt: string;
@@ -2729,6 +2733,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const service = caseData.services[0] ?? 'Service';
   const iconStyle = SERVICE_ICON_COLOR[service] ?? { bg: '#FFF7ED', color: '#F59E0B' };
   const missingDeliveryDate = !deliveryDate.trim();
+  // Offline lab (Low Potential / Non-participating) — the lab never sees this
+  // case on the platform, so a pinned notice keeps the manual handling visible.
+  const offlineLabStatus = offlineLabStatusFor(caseData.lab);
 
   return (
     <div className="flex flex-col h-full bg-[#F8F9FC]">
@@ -2801,6 +2808,15 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           )}
         </div>
       </div>
+
+      {/* ── Offline-lab notice — sits ABOVE the scroll area (like the back nav
+          and identity card), so it stays pinned while the case content
+          scrolls underneath. ── */}
+      {offlineLabStatus && caseData.lab && (
+        <div className="mx-6 mt-1">
+          <OfflineLabNotice labName={caseData.lab} status={offlineLabStatus} />
+        </div>
+      )}
 
       {/* ── Identity card (with compact timeline pill in the header row) ── */}
       <div className="mx-6 mt-2 bg-white border border-[#E0E0E6] rounded-xl">

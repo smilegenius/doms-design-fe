@@ -9,6 +9,7 @@ import {
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import ModalPortal from '../components/ModalPortal';
+import { OFFLINE_LABS, OfflineLabNotice } from '../components/OfflineLabNotice';
 import AddPracticeModal from '../components/AddPracticeModal';
 import AddStaffModal from '../components/AddStaffModal';
 import { mockSuppliers } from '../data/suppliersData';
@@ -42,23 +43,6 @@ const CLINIC_AVATAR_COLORS = [
   'bg-[#FFF1F2] text-[#BE123C]',
   'bg-[#ECFEFF] text-[#0F766E]',
 ];
-// Offline labs the clinic still works with but that live outside Smile Genius.
-// They appear in the lab picker (flagged with an "Offline" pill) so the clinic
-// can keep its case records in one place — the create flow explains the
-// offline handling the moment one is selected.
-const OFFLINE_DEMO_LABS: CounterpartyOption[] = [
-  {
-    id: 'offline-lab-1', name: 'Harbour Dental Ceramics', country: 'IE',
-    categories: ['Crown & Bridge', 'Ceramics'], initials: 'HD',
-    avatarColor: 'bg-[#FFF7ED] text-[#C2410C]', platformStatus: 'low_potential',
-  },
-  {
-    id: 'offline-lab-2', name: 'Westport Denture Works', country: 'IE',
-    categories: ['Dentures', 'Acrylics'], initials: 'WD',
-    avatarColor: 'bg-[#F3F4F6] text-[#4B5563]', platformStatus: 'non_participating',
-  },
-];
-
 // A newly-created clinic (lab portal) carries a few extra contact fields the
 // details drawer captures. Extends the picker option shape.
 type NewClinic = CounterpartyOption & { city?: string; phone?: string; email?: string };
@@ -1170,7 +1154,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // Picker options — labs (clinic portal) or active clinics (lab portal),
   // mapped into the shared CounterpartyOption shape the searchable picker reads.
   const labOptions: CounterpartyOption[] = useMemo(() => {
-    if (!isLab) return [...mockSuppliers, ...OFFLINE_DEMO_LABS];
+    if (!isLab) return [...mockSuppliers, ...OFFLINE_LABS];
     const base = mockClinics
       .filter(c => c.status === 'active')
       .map(c => ({
@@ -1727,6 +1711,16 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           );
         })()}
 
+        {/* ── Offline-lab notice — appears the moment a Low Potential or
+            Non-participating lab is picked and STAYS pinned to the top of
+            the scroll area, so the offline handling is never out of sight
+            while the clinic fills the rest of the form. ── */}
+        {!isLab && selectedLab?.platformStatus && (
+          <div className="sticky top-0 z-30 max-w-6xl mx-auto mb-3 -mt-1 pt-1 pb-1 bg-[#F8F9FC]">
+            <OfflineLabNotice labName={selectedLab.name} status={selectedLab.platformStatus} />
+          </div>
+        )}
+
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
           {/* ── LEFT COLUMN — main form. Uses flex+order so Patient+Lab
               renders first visually while Case Details stays second in
@@ -1804,10 +1798,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 )}
               </Mini>
             </div>
-            {/* Offline-lab notice — surfaces as soon as a Low Potential or
-                Non-participating lab is picked, before the clinic invests in
-                the rest of the form. */}
-            {!isLab && selectedLab?.platformStatus && <OfflineLabNotice lab={selectedLab} />}
             {/* Row 2 — case-level metadata (Case Source moved to the header
                 action bar at the top of the page). */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-[#F0EFF6]">
@@ -4887,60 +4877,6 @@ function DentistSearchSelect({ dentists, value, onChange, allowCreate = false, o
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// ─── Offline-lab notice ──────────────────────────────────────────────────────
-// Shown in the Case Details card the moment the clinic picks a lab that isn't
-// on Smile Genius (Low Potential or Non-participating). The case can still be
-// created and tracked here, but the lab never sees it on the platform — so the
-// notice sets expectations up front: order form goes out manually, status
-// updates are owned by the clinic, and in-app collaboration is off.
-function OfflineLabNotice({ lab }: { lab: CounterpartyOption }) {
-  const nonPart = lab.platformStatus === 'non_participating';
-  const points = [
-    {
-      icon: Mail,
-      text: <>The order form isn't sent digitally — <span className="font-semibold">email or print it</span> and share it with the lab yourself.</>,
-    },
-    {
-      icon: Pencil,
-      text: <>The lab can't update the case on Smile Genius — <span className="font-semibold">you'll update the status from your side</span> as the work progresses (e.g. In Production → Ready → Delivered).</>,
-    },
-    {
-      icon: AlertCircle,
-      text: <>Case messaging, digital file delivery and lab notifications <span className="font-semibold">aren't available</span> for this lab.</>,
-    },
-  ];
-  return (
-    <div className="mb-3 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3.5 py-3">
-      <div className="flex items-start gap-2.5">
-        <span className="w-6 h-6 rounded-lg bg-[#FEF3C7] text-[#B45309] flex items-center justify-center flex-shrink-0 mt-0.5">
-          <CloudOff className="w-3.5 h-3.5" />
-        </span>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-bold text-[#92400E]">
-            {nonPart ? `${lab.name} doesn't use Smile Genius` : `${lab.name} isn't on Smile Genius yet`}
-          </p>
-          <p className="text-[11px] text-[#A16207] leading-relaxed mt-0.5">
-            {nonPart
-              ? 'This lab has chosen not to join the platform, so its cases are always handled offline.'
-              : 'This lab hasn\'t been onboarded to the platform yet, so this case will be handled offline.'}
-            {' '}You can still create the case and keep the full record here — here's what to expect:
-          </p>
-          <ul className="mt-2 space-y-1.5">
-            {points.map((p, i) => (
-              <li key={i} className="flex items-start gap-2">
-                <span className="w-4 h-4 rounded bg-white border border-[#FDE68A] text-[#B45309] flex items-center justify-center flex-shrink-0 mt-px">
-                  <p.icon className="w-2.5 h-2.5" />
-                </span>
-                <p className="text-[11px] text-[#92400E] leading-snug">{p.text}</p>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
     </div>
   );
 }

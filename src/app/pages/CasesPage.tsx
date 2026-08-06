@@ -119,7 +119,10 @@ const ALL_SERVICES = ['Clear Aligners', 'Night Guard', 'Retainer', 'Veneers', 'C
 const PRACTICES = ['Smile Genius Belfast', 'Smile Genius Birmingham 1', 'Smile Genius Birmingham 2', 'Smile Genius Manchester', 'Smile Genius London Central', 'Smile Genius Glasgow', 'Smile Genius Leeds'];
 const DENTISTS = ['Dr. Anderson', 'Dr. Campbell', 'Dr. Davies', 'Dr. Murphy', 'Dr. White', 'Sophie Wilson'];
 // Lab/supplier the case was sent to — pulled from the same supplier registry the rest of the app uses.
-const LABS = ['Smile Genius Lab', 'Kingsbridge Dental Lab', 'Patterson Dental UK', 'Eurodontic Ltd', 'Smile Ceramics Studio', 'Dentsply Sirona Lab'];
+// The last two are OFFLINE labs (Low Potential / Non-participating — see
+// components/OfflineLabNotice.tsx): cases naming them get the offline-lab
+// notice pinned to the top of the case detail view.
+const LABS = ['Smile Genius Lab', 'Kingsbridge Dental Lab', 'Patterson Dental UK', 'Eurodontic Ltd', 'Smile Ceramics Studio', 'Dentsply Sirona Lab', 'Harbour Dental Ceramics', 'Westport Denture Works'];
 // STATUSES intentionally excludes 'draft' — mock generator + service items
 // shouldn't randomly produce drafts; the draft-status seed cases below are
 // hand-rolled and live in `draftCases`.
