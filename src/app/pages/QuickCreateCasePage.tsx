@@ -4999,9 +4999,11 @@ function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKe
         <ChevronDown className={`w-3.5 h-3.5 text-[#A0A0B0] flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {/* Panel — search + tabs + list */}
+      {/* Panel — search + tabs + list. min-w keeps the panel readable when
+          the trigger column is squeezed (names/tabs were truncating); it
+          overhangs the trigger to the right like a normal dropdown. */}
       {open && (
-        <div className="absolute z-30 mt-1 left-0 right-0 bg-white border border-[#E8EAF6] rounded-xl shadow-[0_10px_30px_rgba(77,142,247,0.15)] overflow-hidden">
+        <div className="absolute z-30 mt-1 left-0 right-0 min-w-[320px] max-w-[calc(100vw-2rem)] bg-white border border-[#E8EAF6] rounded-xl shadow-[0_10px_30px_rgba(77,142,247,0.15)] overflow-hidden">
           {/* Search */}
           <div className="px-3 py-2.5 border-b border-[#F0EFF6]">
             <div className="relative">
@@ -5024,7 +5026,7 @@ function LabSearchSelect({ labs, selectedId, onSelect, noun = 'lab', favoritesKe
                 <button
                   key={t}
                   onClick={() => setTab(t)}
-                  className={`inline-flex items-center gap-1 px-2.5 py-1 -mb-px text-[11px] font-semibold border-b-2 transition-colors ${
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 -mb-px text-[11px] font-semibold border-b-2 whitespace-nowrap transition-colors ${
                     tab === t
                       ? 'text-[#030213] border-[#030213]'
                       : 'text-[#717182] border-transparent hover:text-[#030213]'

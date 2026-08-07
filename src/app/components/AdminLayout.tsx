@@ -1,7 +1,7 @@
 import { ReactNode, useState } from 'react';
 import { ChevronRight, LogOut, Menu } from 'lucide-react';
 import {
-  FilledPackage, FilledGear,
+  FilledPackage, FilledGear, FilledDashboard,
 } from './icons/FilledNavIcons';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -27,6 +27,7 @@ const SmileGeniusLogo = () => (
 );
 
 const navItems = [
+  { id: 'overview',  label: 'Overview',  icon: FilledDashboard },
   { id: 'suppliers', label: 'Suppliers', icon: FilledPackage },
 ];
 

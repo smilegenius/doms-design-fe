@@ -184,6 +184,7 @@ export default function ClinicApp() {
           initialCaseId={caseInitialId}
           onCreateCase={() => setActivePage('quick-create-case')}
           onOpenDraft={(c) => navigate(`/clinic/cases/quick-new/${encodeURIComponent(c.id)}`)}
+          showOfflineLabNotice
         />
       )}
       {activePage === 'invoices' && (

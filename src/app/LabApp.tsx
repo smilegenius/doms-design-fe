@@ -143,6 +143,7 @@ export default function LabApp() {
           initialInvoiceId={invoiceInitialId}
           initialFilter={invoiceFilter as any}
           showMonthlyExports={false}
+          showScopeNotice
           onOpenCase={(caseId) => { setActivePage('cases', caseId); toast.success(`Opening ${caseId}`); }}
           onInvoiceSelected={(invoiceId) => {
             if (invoiceId) setActivePage('invoices', invoiceId);

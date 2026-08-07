@@ -43,14 +43,41 @@ export function offlineLabStatusFor(labName?: string): OfflineLabStatus | undefi
 }
 
 // ─── The notice ──────────────────────────────────────────────────────────────
-// Slim single-card banner, designed to sit stickied at the top of a page:
-// bold headline states the fact, three crisp fragments state the consequences.
-export function OfflineLabNotice({ labName, status, className = '' }: {
+// Two variants, one card style:
+//   'compact'  — slim one-liner + crisp fragments; stickied atop the create-
+//                case form while the clinic fills the rest in.
+//   'detailed' — the Case Details banner (clinic users only). Copy comes from
+//                the PM ticket verbatim for Non-Participating labs; the Low
+//                Potential wording mirrors it with "not yet onboarded".
+export function OfflineLabNotice({ labName, status, variant = 'compact', className = '' }: {
   labName: string;
   status: OfflineLabStatus;
+  variant?: 'compact' | 'detailed';
   className?: string;
 }) {
   const nonPart = status === 'non_participating';
+  if (variant === 'detailed') {
+    return (
+      <div className={`rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3 shadow-[0_4px_14px_rgba(180,83,9,0.10)] ${className}`}>
+        <div className="flex items-start gap-2.5">
+          <span className="w-6 h-6 rounded-lg bg-[#FEF3C7] text-[#B45309] flex items-center justify-center flex-shrink-0 mt-0.5">
+            <CloudOff className="w-3.5 h-3.5" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-[#92400E]">
+              {nonPart ? 'Non-Participating Lab' : 'Low Potential Lab'}
+              <span className="font-medium text-[#A16207]"> · {labName}</span>
+            </p>
+            <p className="text-[11px] text-[#A16207] leading-relaxed mt-0.5">
+              {nonPart
+                ? 'This case has been assigned to a Non-Participating Lab. As this lab does not use Smile Genius, case status updates and notifications will not be available through the platform. Please contact the lab directly for the latest progress on your case.'
+                : 'This case has been assigned to a Low Potential Lab. As this lab is not yet onboarded on Smile Genius, case status updates and notifications will not be available through the platform. Please contact the lab directly for the latest progress on your case.'}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={`rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3.5 py-2.5 shadow-[0_4px_14px_rgba(180,83,9,0.10)] ${className}`}>
       <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">

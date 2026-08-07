@@ -168,6 +168,10 @@ interface CaseDetailPageProps {
   /** Directly set the status (no override gate) — used by the in-case
       missing-info email flow (Sent for Review → Submitted). */
   onSetStatus?: (toStatus: CaseStatus) => void;
+  /** Clinic portal only — show the offline-lab (Low Potential /
+      Non-participating) notice when this case's lab isn't on Smile Genius.
+      The lab and DSO portals never pass it, so they never see the banner. */
+  showOfflineLabNotice?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -2641,7 +2645,7 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
-export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus }: CaseDetailPageProps) {
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus, showOfflineLabNotice }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState(caseData.requestedDelivery ?? '');
@@ -2735,7 +2739,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const missingDeliveryDate = !deliveryDate.trim();
   // Offline lab (Low Potential / Non-participating) — the lab never sees this
   // case on the platform, so a pinned notice keeps the manual handling visible.
-  const offlineLabStatus = offlineLabStatusFor(caseData.lab);
+  // Clinic-only: the host passes showOfflineLabNotice; informational only, no
+  // effect on status, notifications, or any other workflow.
+  const offlineLabStatus = showOfflineLabNotice ? offlineLabStatusFor(caseData.lab) : undefined;
 
   return (
     <div className="flex flex-col h-full bg-[#F8F9FC]">
@@ -2814,7 +2820,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           scrolls underneath. ── */}
       {offlineLabStatus && caseData.lab && (
         <div className="mx-6 mt-1">
-          <OfflineLabNotice labName={caseData.lab} status={offlineLabStatus} />
+          <OfflineLabNotice labName={caseData.lab} status={offlineLabStatus} variant="detailed" />
         </div>
       )}
 

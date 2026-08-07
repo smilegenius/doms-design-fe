@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ShieldCheck, Building, Users, DollarSign, Activity } from 'lucide-react';
 import AdminLayout from '../../components/AdminLayout';
 import AdminSuppliersContent from './AdminSuppliersContent';
+import AdminOrganizationsContent from './AdminOrganizationsContent';
 
 function StatCard({ label, value, icon, color, bgColor }: {
   label: string; value: string; icon: React.ReactNode; color: string; bgColor: string;
@@ -82,11 +83,12 @@ function PlaceholderContent({ title, description }: { title: string; description
 }
 
 export default function AdminDashboardPage() {
-  const [activePage, setActivePage] = useState('suppliers');
+  const [activePage, setActivePage] = useState('overview');
 
   return (
     <AdminLayout activePage={activePage} onNavigate={setActivePage}>
       {activePage === 'dashboard'     && <DashboardContent />}
+      {activePage === 'overview'      && <AdminOrganizationsContent />}
       {activePage === 'suppliers'     && <AdminSuppliersContent />}
       {activePage === 'practices'     && <PlaceholderContent title="Practices" description="Manage tenant practice locations across all organisations." />}
       {activePage === 'organizations' && <PlaceholderContent title="Organisations" description="Manage tenant accounts, plans, and billing." />}

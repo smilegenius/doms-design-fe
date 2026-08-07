@@ -901,7 +901,7 @@ function UpgradeModal({ onUpgrade, onBack }: { onUpgrade: () => void; onBack: ()
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit }: {
+export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice }: {
   initialCaseId?: string;
   onCreateCase?: () => void;
   // Called when the user clicks a draft case (status === 'draft'). The host
@@ -916,6 +916,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // session. Opening a further (distinct) case shows the upgrade paywall. Demo:
   // with a limit of 2, the 3rd case opened triggers it.
   caseViewLimit?: number;
+  // Clinic portal only — surface the offline-lab (Low Potential /
+  // Non-participating) notice on the Case Details page. Lab + DSO portals
+  // omit it, so the banner never shows there.
+  showOfflineLabNotice?: boolean;
 } = {}) {
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
@@ -1219,6 +1223,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           onArchiveToggle={() => toggleArchive(selectedCase)}
           onRequestStatusChange={() => setStatusModalCase(selectedCase)}
           onSetStatus={(toStatus) => applyStatusChange(selectedCase, toStatus)}
+          showOfflineLabNotice={showOfflineLabNotice}
         />
         {statusModalCase && (
           <StatusChangeModal

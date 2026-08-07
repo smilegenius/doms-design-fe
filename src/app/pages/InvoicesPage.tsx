@@ -8,7 +8,7 @@ import {
   UserCheck, Filter, RefreshCw, MessageSquare, Zap,
   SlidersHorizontal, Grid3x3, List, Trash2,
   Send, CheckCheck, Pencil, Save, Check, FolderOpen, Star, FileSpreadsheet,
-  ExternalLink, ArrowLeft,
+  ExternalLink, ArrowLeft, Info,
 } from 'lucide-react';
 import { EXPENSE_CATEGORIES, mockSuppliers, GL_ACCOUNTS, Supplier } from '../data/suppliersData';
 import ModalPortal from '../components/ModalPortal';
@@ -4256,7 +4256,7 @@ function UploadInvoiceModal({ onClose, onComplete }: {
 }
 
 // ─── Main page ─────────────────────────────────────────────────────────────────
-export default function InvoicesPage({ initialFilter, initialInvoiceId, initialSupplier, onOpenCase, onInvoiceSelected, onUpdateSupplier, showMonthlyExports = true }: { initialFilter?: InvoiceStatus | 'low_confidence' | 'left_over' | 'not_approved' | 'unpaid' | 'overdue'; initialInvoiceId?: string; initialSupplier?: string; onOpenCase?: (caseId: string) => void; onInvoiceSelected?: (id: string | null) => void; onUpdateSupplier?: (supplierId: string, patch: Partial<Supplier>) => void; showMonthlyExports?: boolean }) {
+export default function InvoicesPage({ initialFilter, initialInvoiceId, initialSupplier, onOpenCase, onInvoiceSelected, onUpdateSupplier, showMonthlyExports = true, showScopeNotice = false }: { initialFilter?: InvoiceStatus | 'low_confidence' | 'left_over' | 'not_approved' | 'unpaid' | 'overdue'; initialInvoiceId?: string; initialSupplier?: string; onOpenCase?: (caseId: string) => void; onInvoiceSelected?: (id: string | null) => void; onUpdateSupplier?: (supplierId: string, patch: Partial<Supplier>) => void; showMonthlyExports?: boolean; /** Lab portal only — informational banner explaining that only invoices issued to Smile Genius clinics appear here. Render-only, no effect on listing/filters/workflows. */ showScopeNotice?: boolean }) {
   const [invoices, setInvoices] = useState<Invoice[]>(INVOICES);
   const isLowConfFilter = initialFilter === 'low_confidence';
   const isLeftOverFilter = initialFilter === 'left_over';
@@ -4787,6 +4787,27 @@ export default function InvoicesPage({ initialFilter, initialInvoiceId, initialS
             </Button>
           </div>
         </div>
+
+        {/* ── Invoice-scope notice (lab portal only) — this page only holds
+            invoices issued to Smile Genius clinics/DSOs, so labs shouldn't
+            read it as their complete invoicing history. Informational only;
+            copy from the PM ticket verbatim. ── */}
+        {showScopeNotice && (
+          <div className="mb-6 rounded-xl border border-[#BFDBFE] bg-[#EEF4FF] px-4 py-3">
+            <div className="flex items-start gap-2.5">
+              <span className="w-6 h-6 rounded-lg bg-white border border-[#BFDBFE] text-[#1565C0] flex items-center justify-center flex-shrink-0 mt-0.5">
+                <Info className="w-3.5 h-3.5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-[#1565C0]">Invoices Shown in Smile Genius</p>
+                <p className="text-[11px] text-[#3B6BAE] leading-relaxed mt-0.5">
+                  This page displays only invoices issued to clinics that are onboarded to Smile Genius.
+                  Invoices for customers who are not using Smile Genius are not displayed here.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Stats Cards — pipeline view */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
