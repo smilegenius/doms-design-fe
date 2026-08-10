@@ -549,8 +549,10 @@ function SupplierCatalogueRow({ data, color, defaultOpen = false }: { data: Supp
       {/* Item table scrolls inside a capped height so one expanded supplier
           never balloons the catalogue card; the header row stays pinned. */}
       {open && (
-        <div className="border-t border-[#F0EFF6] px-4 py-3 max-h-44 overflow-y-auto">
-          <div className="sticky top-0 z-10 bg-white grid grid-cols-[1.8fr_auto_auto_auto] gap-3 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest pb-2 border-b border-[#F0EFF6]">
+        <div className="border-t border-[#F0EFF6] px-4 pb-3 max-h-44 overflow-y-auto">
+          {/* Top padding lives on the sticky header (not the container) so
+              rows can't peek through above it while scrolling. */}
+          <div className="sticky top-0 z-10 bg-white grid grid-cols-[1.8fr_auto_auto_auto] gap-3 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest pt-3 pb-2 border-b border-[#F0EFF6]">
             <span>Item</span>
             <span className="text-right w-10">Qty</span>
             <span className="text-right w-16">Unit</span>
