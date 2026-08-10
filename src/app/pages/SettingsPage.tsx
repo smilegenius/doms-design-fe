@@ -17,8 +17,12 @@ import {
   Archive,
   X,
   MoreVertical,
+  FlaskConical,
+  Trash2,
 } from 'lucide-react';
 import InviteUsersModal, { InviteUserRow } from '../components/InviteUsersModal';
+import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
+import { useCustomServices, removeCustomService } from '../data/customServices';
 import { useToast } from '../context/ToastContext';
 import SearchInput from '../components/SearchInput';
 import SortDropdown from '../components/SortDropdown';
@@ -26,13 +30,14 @@ import FilterDrawer from '../components/FilterDrawer';
 import Pagination from '../components/Pagination';
 import Button from '../components/Button';
 
-type TabId = 'personal' | 'dso' | 'users' | 'notifications';
+type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications';
 
 const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
-  { id: 'personal',      label: 'Personal Info',   description: 'Your account profile',  icon: User },
-  { id: 'dso',           label: 'DSO Info',        description: 'Organization details',  icon: Building2 },
-  { id: 'users',         label: 'User Management', description: 'Team members & roles',  icon: Users },
-  { id: 'notifications', label: 'Notifications',   description: 'Email & system alerts', icon: Bell },
+  { id: 'personal',      label: 'Personal Info',   description: 'Your account profile',    icon: User },
+  { id: 'dso',           label: 'DSO Info',        description: 'Organization details',    icon: Building2 },
+  { id: 'services',      label: 'Custom Services', description: 'Your own catalogue items', icon: FlaskConical },
+  { id: 'users',         label: 'User Management', description: 'Team members & roles',    icon: Users },
+  { id: 'notifications', label: 'Notifications',   description: 'Email & system alerts',   icon: Bell },
 ];
 
 // Mock configured-tabs set — wire to real persistence later
@@ -131,6 +136,11 @@ export default function SettingsPage() {
   // Team members — seeded from the mock list, appended on invite.
   const [members, setMembers] = useState<Member[]>(mockMembers);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
+
+  // Custom services — shared store; the same modal opens inline from the
+  // case-creation service picker.
+  const customServices = useCustomServices();
+  const [serviceModalOpen, setServiceModalOpen] = useState(false);
 
   // ── User Management page-state — mirrors the Staff page experience ──
   const [userViewMode, setUserViewMode] = useState<'grid' | 'table'>('grid');
@@ -362,6 +372,60 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <Field label="Postal Code" value="SW1A 1AA" />
           </div>
+        </SectionCard>
+      )}
+
+      {/* ─── Custom Services — the clinic's own catalogue entries ────────── */}
+      {activeTab === 'services' && (
+        <SectionCard
+          title="Custom Services"
+          actions={
+            <button
+              onClick={() => setServiceModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 transition-opacity"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Create Custom Service
+            </button>
+          }
+        >
+          {customServices.length === 0 ? (
+            <div className="py-8 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#EEF4FF] to-[#F3EEFF] flex items-center justify-center mx-auto mb-3">
+                <FlaskConical className="w-5 h-5 text-[#7C3AED]" />
+              </div>
+              <p className="text-sm font-semibold text-[#030213] mb-1">No custom services yet</p>
+              <p className="text-xs text-[#717182] max-w-sm mx-auto">
+                Services you create appear in the case-creation catalogue under
+                <span className="font-semibold"> Custom Services</span>. You can also create one
+                without leaving case creation.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[#F0EFF6]">
+              {customServices.map(svc => (
+                <div key={svc.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#EEF4FF] to-[#F3EEFF] flex items-center justify-center flex-shrink-0">
+                    <FlaskConical className="w-4 h-4 text-[#7C3AED]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-[#030213] truncate">{svc.name}</p>
+                    <p className="text-xs text-[#717182] truncate">
+                      {svc.description || 'No description'}
+                      <span className="text-[#A0A0B0]"> · Added {new Date(svc.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => { removeCustomService(svc.id); toast.success(`Custom service "${svc.name}" removed`); }}
+                    title="Remove this custom service"
+                    className="p-1.5 rounded-lg text-[#A0A0B0] hover:text-[#C62828] hover:bg-[#FFEBEE] transition-colors flex-shrink-0"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </SectionCard>
       )}
 
@@ -765,6 +829,13 @@ export default function SettingsPage() {
           onConfirm={handleInviteConfirm}
         />
       )}
+
+      {/* Same modal the case-creation service picker opens inline. */}
+      <CreateCustomServiceModal
+        isOpen={serviceModalOpen}
+        onClose={() => setServiceModalOpen(false)}
+      />
+
 
       <FilterDrawer
         isOpen={userFilterDrawerOpen}

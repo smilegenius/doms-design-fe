@@ -4,11 +4,14 @@ import {
   AlertTriangle, TrendingUp, TrendingDown, Building2,
   Users, UserCheck, ChevronRight, ArrowUpRight, Calendar, X,
   CheckCircle2, Send, XCircle, Download,
-  Sparkles, Package, PiggyBank, ChevronDown, ArrowRight,
+  Sparkles, PiggyBank, ChevronDown, ArrowRight,
 } from 'lucide-react';
 import { INVOICES } from './InvoicesPage';
 import { mockCases } from './CasesPage';
 import { AiSparkle } from '../components/AiSparkle';
+import Modal from '../components/Modal';
+import Button from '../components/Button';
+import { useToast } from '../context/ToastContext';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(n: number) {
@@ -543,9 +546,11 @@ function SupplierCatalogueRow({ data, color, defaultOpen = false }: { data: Supp
           <ChevronDown className={`w-4 h-4 text-[#717182] transition-transform ${open ? 'rotate-180' : ''}`} />
         </div>
       </button>
+      {/* Item table scrolls inside a capped height so one expanded supplier
+          never balloons the catalogue card; the header row stays pinned. */}
       {open && (
-        <div className="border-t border-[#F0EFF6] px-4 py-3">
-          <div className="grid grid-cols-[1.8fr_auto_auto_auto] gap-3 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest pb-2 border-b border-[#F0EFF6]">
+        <div className="border-t border-[#F0EFF6] px-4 py-3 max-h-44 overflow-y-auto">
+          <div className="sticky top-0 z-10 bg-white grid grid-cols-[1.8fr_auto_auto_auto] gap-3 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest pb-2 border-b border-[#F0EFF6]">
             <span>Item</span>
             <span className="text-right w-10">Qty</span>
             <span className="text-right w-16">Unit</span>
@@ -574,44 +579,130 @@ function SupplierCatalogueRow({ data, color, defaultOpen = false }: { data: Supp
   );
 }
 
-// One AI savings recommendation: "move these items to X and save £Y/yr".
-function RecommendationCard({ rec }: { rec: Recommendation }) {
+// One AI savings suggestion inside the hero card — a slim collapsed row
+// ("move N items to X → save £Y/yr") that expands into the per-item price
+// comparison. Collapsed by default so the hero reads at a glance.
+function SavingsSuggestionRow({ rec, defaultOpen = false }: { rec: Recommendation; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  // Demo accept flow — no backend, so "accepting" marks the row and toasts.
+  // Accepting first asks for confirmation because the switch applies to every
+  // clinic in the group, not just the practice that raised the purchases.
+  const [accepted, setAccepted] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const { toast } = useToast();
+
+  function confirmAccept() {
+    setAccepted(true);
+    setConfirmOpen(false);
+    toast.success(`Recommendation accepted for all clinics — est. ${fmt(rec.annualSaving)}/yr saving`);
+  }
   return (
-    <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
-      <div className="px-5 py-3.5 bg-[#E7F6EC] border-b border-[#C6E9CE] flex items-center justify-between gap-3">
+    <div className="bg-white border border-[#D9EFDE] rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-[#FAFDF9] transition-colors"
+      >
         <div className="flex items-center gap-2.5 min-w-0">
-          <span className="w-8 h-8 rounded-lg bg-white/70 flex items-center justify-center flex-shrink-0">
-            <PiggyBank className="w-4 h-4 text-[#2E7D32]" />
+          <span className="w-7 h-7 rounded-lg bg-[#E7F6EC] flex items-center justify-center flex-shrink-0">
+            <PiggyBank className="w-3.5 h-3.5 text-[#2E7D32]" />
           </span>
-          <p className="text-sm text-[#1B5E20]">
-            Save <span className="font-bold">{fmt(rec.annualSaving)}/yr</span> by moving {rec.rows.length} {rec.rows.length === 1 ? 'item' : 'items'} to{' '}
-            <span className="font-bold">{rec.altSupplier}</span> ({rec.altKind})
+          <p className="text-xs text-[#5A5568] truncate">
+            Move <span className="font-semibold text-[#030213]">{rec.rows.length} {rec.rows.length === 1 ? 'item' : 'items'}</span> to{' '}
+            <span className="font-semibold text-[#030213]">{rec.altSupplier}</span>
+            <span className="hidden sm:inline text-[#A0A0B0]"> · {rec.altKind}</span>
           </p>
         </div>
-        <AiSparkle label title="Savings identified by AI from cross-supplier price benchmarks" />
-      </div>
-      <div className="px-5 py-2">
-        {rec.rows.map(row => (
-          <div key={row.description} className="flex items-center justify-between gap-3 py-2.5 border-b border-[#F8F8F8] last:border-b-0">
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium text-[#030213] truncate">{row.description}</p>
-              <p className="text-[10px] text-[#A0A0B0] mt-0.5">Qty {row.qty} · currently {row.currentSupplier}</p>
-            </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0 text-xs tabular-nums">
-              <span className="text-[#A0A0B0] line-through">{fmt(row.currentUnit)}</span>
-              <ArrowRight className="w-3 h-3 text-[#A0A0B0]" />
-              <span className="font-semibold text-[#2E7D32]">{fmt(row.altUnit)}</span>
-            </div>
-            <span className="text-xs font-bold text-[#2E7D32] w-20 text-right tabular-nums flex-shrink-0">−{fmt(row.saving)}</span>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {accepted && (
+            <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[10px] font-semibold bg-[#E7F6EC] text-[#2E7D32] border border-[#C6E9CE]">
+              <CheckCircle2 className="w-3 h-3" />
+              Accepted
+            </span>
+          )}
+          <span className="text-sm font-bold text-[#2E7D32] tabular-nums">{fmt(rec.annualSaving)}<span className="text-[10px] font-semibold text-[#7BAE85]">/yr</span></span>
+          <ChevronDown className={`w-4 h-4 text-[#A0A0B0] transition-transform ${open ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+      {open && (
+        <>
+          {/* Item list scrolls inside a capped height so an expanded tile
+              never balloons the hero card; the footer stays pinned below. */}
+          <div className="border-t border-[#F0EFF6] px-4 py-1.5 max-h-44 overflow-y-auto">
+            {rec.rows.map(row => (
+              <div key={row.description} className="flex items-center justify-between gap-3 py-2.5 border-b border-[#F8F8F8] last:border-b-0">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-[#030213] truncate">{row.description}</p>
+                  <p className="text-[10px] text-[#A0A0B0] mt-0.5">Qty {row.qty} · currently {row.currentSupplier}</p>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0 text-xs tabular-nums">
+                  <span className="text-[#A0A0B0] line-through">{fmt(row.currentUnit)}</span>
+                  <ArrowRight className="w-3 h-3 text-[#A0A0B0]" />
+                  <span className="font-semibold text-[#2E7D32]">{fmt(row.altUnit)}</span>
+                </div>
+                <span className="text-xs font-bold text-[#2E7D32] w-20 text-right tabular-nums flex-shrink-0">−{fmt(row.saving)}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div className="px-5 py-3 border-t border-[#F0EFF6] flex items-center justify-between gap-3">
-        <span className="text-[11px] text-[#717182]">{fmt(rec.monthlySaving)}/mo at current run-rate</span>
-        <button className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity">
-          Review recommendation
-        </button>
-      </div>
+          <div className="px-4 py-2.5 border-t border-[#F0EFF6] flex items-center justify-between gap-3">
+            <span className="text-[11px] text-[#717182]">{fmt(rec.monthlySaving)}/mo at current run-rate</span>
+            {accepted ? (
+              <span className="inline-flex items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1 font-semibold text-[#2E7D32]">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Accepted — procurement notified
+                </span>
+                <button
+                  onClick={() => setAccepted(false)}
+                  className="text-[11px] text-[#717182] underline hover:text-[#030213]"
+                >
+                  Undo
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => setConfirmOpen(true)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
+              >
+                Accept recommendation
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Confirmation — the switch applies group-wide, so spell that out
+          before committing. */}
+      <Modal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title="Apply to all clinics?"
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button onClick={confirmAccept}>Confirm for all clinics</Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-[#5A5568]">
+            This moves <span className="font-semibold text-[#030213]">{rec.rows.length} {rec.rows.length === 1 ? 'item' : 'items'}</span> to{' '}
+            <span className="font-semibold text-[#030213]">{rec.altSupplier}</span> for{' '}
+            <span className="font-semibold text-[#030213]">every clinic in your group</span> — future orders across all
+            practices will use the new supplier.
+          </p>
+          <div className="rounded-lg bg-[#E7F6EC] border border-[#C6E9CE] px-3 py-2.5 flex items-center justify-between gap-3">
+            <span className="text-xs text-[#1B5E20]">Estimated saving</span>
+            <span className="text-sm font-bold text-[#2E7D32] tabular-nums">
+              {fmt(rec.annualSaving)}/yr
+              <span className="text-[11px] font-semibold text-[#7BAE85]"> · {fmt(rec.monthlySaving)}/mo</span>
+            </span>
+          </div>
+          <p className="text-[11px] text-[#A0A0B0]">
+            Procurement is notified and can revert the switch at any time.
+          </p>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -619,6 +710,9 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
 // ─── Main component ────────────────────────────────────────────────────────────
 export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigateToInvoices?: (filter?: string, supplier?: string) => void } = {}) {
   const [tab, setTab] = useState<AnalyticsTab>('intelligence');
+  // AI Insights — purchasing catalogue shows a handful of suppliers so the
+  // card stays level with the savings hero; "See more" reveals the rest.
+  const [showAllSuppliers, setShowAllSuppliers] = useState(false);
   const [period, setPeriod] = useState('Month');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
@@ -1268,31 +1362,73 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
         {/* ── AI INSIGHTS TAB ── */}
         {tab === 'ai' && (
           <>
-            {/* KPI row */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <KpiCard accent="#4D8EF7" icon={<Package className="w-5 h-5 text-[#4D8EF7]" />}   label="Catalogued Items"    value={CATALOGUE_ITEM_COUNT} sub="from invoice line items" />
-              <KpiCard accent="#A59DFF" icon={<Building2 className="w-5 h-5 text-[#A59DFF]" />} label="Suppliers Covered"   value={CATALOGUE.length}     sub="with purchase history" />
-              <KpiCard accent="#FB923C" icon={<BarChart3 className="w-5 h-5 text-[#FB923C]" />} label="Labs in Routing Mix" value={LAB_MIX.length}       sub={`${mockCases.length} cases analysed`} />
-              <KpiCard accent="#2E7D32" icon={<PiggyBank className="w-5 h-5 text-[#2E7D32]" />} label="Potential Savings"   value={fmt(TOTAL_ANNUAL_SAVINGS)} sub="per year, AI-identified" />
+            {/* Top row — savings hero + purchasing catalogue side by side on
+                wide screens, stacked on narrow ones. items-start keeps each
+                card its natural height. */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+
+            {/* Savings suggestions — the headline of this tab. One hero card
+                with the annual total up top and each suggestion as a slim
+                collapsed row underneath. */}
+            <div className="bg-gradient-to-br from-[#E7F6EC] to-[#F4FBF2] border border-[#C6E9CE] rounded-xl p-5">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center flex-shrink-0 shadow-sm">
+                    <PiggyBank className="w-5 h-5 text-[#2E7D32]" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold text-[#2E7D32] uppercase tracking-widest">Suggested savings</p>
+                    <p className="text-2xl font-semibold text-[#030213] leading-tight">
+                      {fmt(TOTAL_ANNUAL_SAVINGS)}
+                      <span className="text-sm font-normal text-[#717182]"> / year</span>
+                    </p>
+                  </div>
+                </div>
+                <AiSparkle label title="Savings identified by AI from cross-supplier price benchmarks" />
+              </div>
+              <div className="space-y-2">
+                {RECOMMENDATIONS.map(rec => (
+                  <SavingsSuggestionRow key={rec.altSupplier} rec={rec} />
+                ))}
+              </div>
             </div>
 
-            {/* Section 1 — What you're purchasing */}
+            {/* Section — What you're purchasing. All suppliers collapsed so
+                the catalogue reads as a quiet index, not a wall of tables. */}
             <Card
               title="What you're purchasing"
               subtitle="AI-built catalogue from clinic & dentist purchases, grouped by supplier"
               action={<AiSparkle label title="Catalogue auto-built from invoice line items by AI" />}
             >
               <div className="space-y-2">
-                {CATALOGUE.map((s, i) => (
+                {(showAllSuppliers ? CATALOGUE : CATALOGUE.slice(0, 5)).map((s, i) => (
                   <SupplierCatalogueRow
                     key={s.supplier}
                     data={s}
                     color={TOP_SUPPLIER_COLORS[i % TOP_SUPPLIER_COLORS.length]}
-                    defaultOpen={i === 0}
                   />
                 ))}
+                {CATALOGUE.length > 5 && (
+                  <button
+                    onClick={() => setShowAllSuppliers(v => !v)}
+                    className="w-full flex items-center justify-center gap-1 py-2 text-xs font-semibold text-[#4D8EF7] hover:text-[#1565C0] transition-colors"
+                  >
+                    {showAllSuppliers ? 'Show less' : `See all ${CATALOGUE.length} suppliers`}
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAllSuppliers ? 'rotate-180' : ''}`} />
+                  </button>
+                )}
               </div>
             </Card>
+
+            </div>
+
+            {/* Coverage stats — one quiet line instead of a KPI card row. */}
+            <p className="px-1 text-xs text-[#717182]">
+              Based on <span className="font-semibold text-[#030213]">{CATALOGUE_ITEM_COUNT}</span> catalogued items
+              {' · '}<span className="font-semibold text-[#030213]">{CATALOGUE.length}</span> suppliers
+              {' · '}<span className="font-semibold text-[#030213]">{LAB_MIX.length}</span> labs
+              {' · '}<span className="font-semibold text-[#030213]">{mockCases.length}</span> cases analysed
+            </p>
 
             {/* Section 2 — AI Decisions */}
             <div className="flex items-center gap-2 pt-1">
@@ -1353,12 +1489,6 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
               </div>
             </Card>
 
-            {/* Savings recommendations */}
-            <div className="space-y-4">
-              {RECOMMENDATIONS.map(rec => (
-                <RecommendationCard key={rec.altSupplier} rec={rec} />
-              ))}
-            </div>
           </>
         )}
 

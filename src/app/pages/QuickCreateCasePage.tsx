@@ -89,7 +89,10 @@ import {
   ToothGlyph,
   getCategoryForItem,
   getApplianceConfig,
+  findServiceItem,
 } from './CreateCasePage';
+import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
+import { useCustomServices } from '../data/customServices';
 
 // ── Per-category visibility + completeness rules ────────────────────────────
 // Some categories don't ask for material/shade (Orthodontics, Appliances) —
@@ -151,7 +154,7 @@ function isSelectionComplete(sel: ServiceSelection): boolean {
 // picker chip, the page card, the legend, the aggregated chart, and the
 // order-form preview all agree.
 function getServiceDisplayName(sel: ServiceSelection): string {
-  const item = SERVICE_CATEGORIES.flatMap(c => c.items).find(i => i.id === sel.itemId);
+  const item = findServiceItem(sel.itemId);
   const cat = getCategoryForItem(sel.itemId);
   const fallback = item?.label ?? sel.itemId;
   if (cat === 'others') {
@@ -1131,6 +1134,12 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   const [patientDrawerOpen, setPatientDrawerOpen] = useState(false);
   const [pickerOpen, setPickerOpen]               = useState(false);
   const [activeDetailsId, setActiveDetailsId]     = useState<string | null>(null);
+  // "Custom service" action in the Services section header — opens the same
+  // Create Custom Service modal as Settings without leaving the page.
+  const [customServiceModalOpen, setCustomServiceModalOpen] = useState(false);
+  // Subscribe to the custom-services store so renames/creates made while this
+  // page is mounted resolve immediately in every service-name lookup.
+  useCustomServices();
   // Header preview modals — small screens only; on md+ the same previews
   // live in the left pane tabs.
   const [model3DOpen, setModel3DOpen]             = useState(false);
@@ -1911,13 +1920,24 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                   </span>
                 )}
               </div>
-              <button
-                onClick={() => setPickerOpen(true)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 transition-opacity"
-              >
-                <Plus className="w-3 h-3" />
-                Add services
-              </button>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {/* Inline create — the same Create Custom Service modal that
+                    lives in Settings, so the case flow never breaks. */}
+                <button
+                  onClick={() => setCustomServiceModalOpen(true)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#1565C0] bg-white/70 border border-[#C8D8FC] hover:border-[#4D8EF7] hover:bg-white transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                  Custom service
+                </button>
+                <button
+                  onClick={() => setPickerOpen(true)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 transition-opacity"
+                >
+                  <Plus className="w-3 h-3" />
+                  Add services
+                </button>
+              </div>
             </div>
             {selections.length === 0 ? (
               <button
@@ -1942,7 +1962,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                     incomplete = amber tint + "Add details" call-out. */}
                 <div className="space-y-2">
                   {selections.map((sel, idx) => {
-                    const item = SERVICE_CATEGORIES.flatMap(c => c.items).find(i => i.id === sel.itemId);
+                    const item = findServiceItem(sel.itemId);
                     if (!item) return null;
                     const hasDetails = isSelectionComplete(sel);
                     const partiallyFilled = !hasDetails && hasAnyData(sel);
@@ -2345,6 +2365,17 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         />
       )}
 
+      {/* ── Create Custom Service — page-level entry point ──
+          Same modal as Settings → Custom Services. On save the service is
+          added to the catalogue AND auto-selected for this case, so the
+          user keeps building the case without a trip to Settings. */}
+      <CreateCustomServiceModal
+        isOpen={customServiceModalOpen}
+        onClose={() => setCustomServiceModalOpen(false)}
+        onCreated={(svc) => toggleService(svc.id)}
+      />
+
+
       {/* ── Case Source popup ── method selector + optional file uploads ── */}
       {caseSourceOpen && (
         <CaseSourcePopup
@@ -2634,6 +2665,9 @@ function ServicePickerWithDetails({
   onClose: () => void;
 }) {
   const [search, setSearch] = useState('');
+  // Inline "Create Custom Service" — same modal as Settings → Custom Services.
+  const [createOpen, setCreateOpen] = useState(false);
+  const customServices = useCustomServices();
   // Active service in the right pane. Defaults to the explicitly-opened
   // chip's id (when the user tapped a chip on the page), then falls back
   // to the most recently added selection.
@@ -2654,12 +2688,20 @@ function ServicePickerWithDetails({
   }, [activeId, selectedIds, selections]);
 
   const q = search.trim().toLowerCase();
+  // Static catalogue + the user's own custom services as a trailing group.
+  const allCats = useMemo(() => {
+    if (customServices.length === 0) return SERVICE_CATEGORIES;
+    return [
+      ...SERVICE_CATEGORIES,
+      { id: 'custom', label: 'Custom Services', items: customServices.map(s => ({ id: s.id, label: s.name })) },
+    ];
+  }, [customServices]);
   const filteredCats = useMemo(() => {
-    if (!q) return SERVICE_CATEGORIES;
-    return SERVICE_CATEGORIES
+    if (!q) return allCats;
+    return allCats
       .map(cat => ({ ...cat, items: cat.items.filter(i => i.label.toLowerCase().includes(q) || cat.label.toLowerCase().includes(q)) }))
       .filter(cat => cat.items.length > 0);
-  }, [q]);
+  }, [q, allCats]);
 
   function handlePick(itemId: string) {
     const exists = selectedIds.includes(itemId);
@@ -2706,7 +2748,16 @@ function ServicePickerWithDetails({
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-4">
               {filteredCats.length === 0 ? (
-                <p className="text-center text-xs text-[#A0A0B0] italic py-6">No service matches "{search}".</p>
+                <div className="py-6 text-center space-y-3">
+                  <p className="text-xs text-[#A0A0B0] italic">No service matches "{search}".</p>
+                  <button
+                    onClick={() => setCreateOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#1565C0] border border-[#C8D8FC] bg-[#F5F8FF] hover:border-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors"
+                  >
+                    <Plus className="w-3 h-3" strokeWidth={2.5} />
+                    Create "{search.trim()}" as a custom service
+                  </button>
+                </div>
               ) : filteredCats.map(cat => (
                 <div key={cat.id}>
                   <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-1.5 px-1">{cat.label}</p>
@@ -2747,6 +2798,17 @@ function ServicePickerWithDetails({
                   </div>
                 </div>
               ))}
+              {/* Persistent inline-create entry point — a service missing from
+                  the catalogue shouldn't force a detour to Settings. */}
+              {filteredCats.length > 0 && (
+                <button
+                  onClick={() => setCreateOpen(true)}
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-semibold text-[#1565C0] border border-dashed border-[#C8D8FC] bg-white hover:border-[#4D8EF7] hover:bg-[#F5F8FF] transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  Create custom service
+                </button>
+              )}
             </div>
           </div>
 
@@ -2788,6 +2850,19 @@ function ServicePickerWithDetails({
           </button>
         </div>
       </div>
+
+      {/* Same Create Custom Service modal as Settings. On save the new
+          service lands in the Custom Services group, is added to the case,
+          and becomes the active service in the right pane. */}
+      <CreateCustomServiceModal
+        isOpen={createOpen}
+        onClose={() => setCreateOpen(false)}
+        defaultName={search.trim()}
+        onCreated={(svc) => {
+          handlePick(svc.id);
+          setSearch('');
+        }}
+      />
     </div>
     </ModalPortal>
   );
@@ -3078,7 +3153,7 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
   caseInstructions: string;
   onCaseInstructionsChange: (v: string) => void;
 }) {
-  const item = SERVICE_CATEGORIES.flatMap(c => c.items).find(i => i.id === selection.itemId);
+  const item = findServiceItem(selection.itemId);
   const teeth = selection.teeth ?? [];
   const category    = getCategoryForItem(selection.itemId);
   const isBridge    = category === 'bridge';
@@ -3326,7 +3401,7 @@ function ServiceDetailsDrawer({ selection, onUpdate, onClose }: {
   onUpdate: (patch: Partial<ServiceSelection>) => void;
   onClose: () => void;
 }) {
-  const item = SERVICE_CATEGORIES.flatMap(c => c.items).find(i => i.id === selection.itemId);
+  const item = findServiceItem(selection.itemId);
   const teeth = selection.teeth ?? [];
   const category    = getCategoryForItem(selection.itemId);
   const isBridge    = category === 'bridge';
@@ -5534,7 +5609,7 @@ function OrderFormSheet({
               ) : (
                 <div className="space-y-2">
                   {selections.map(sel => {
-                    const item = SERVICE_CATEGORIES.flatMap(c => c.items).find(i => i.id === sel.itemId);
+                    const item = findServiceItem(sel.itemId);
                     if (!item) return null;
                     const teethCount = sel.teeth?.length ?? 0;
                     const cat = getCategoryForItem(sel.itemId);

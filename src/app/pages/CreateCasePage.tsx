@@ -9,6 +9,7 @@ import { useToast } from '../context/ToastContext';
 import ModalPortal from '../components/ModalPortal';
 import { mockSuppliers } from '../data/suppliersData';
 import { mockStaffMembers } from '../data/clinicsData';
+import { findCustomService, isCustomServiceId } from '../data/customServices';
 
 // ─── Create Case — 3-step wizard ─────────────────────────────────────────────
 // Mirrors the production flow the clinic team is already using:
@@ -286,11 +287,23 @@ export function getApplianceConfig(itemId: string): { label: string; options: st
 
 // Look up the category id for a service item id — handy when the per-service
 // drawer needs to render category-specific fields (Bridge → Brand, etc.).
+// User-created services all map to the 'custom' category, which renders the
+// generic detail form (teeth + material + shade) with no category extras.
 export function getCategoryForItem(itemId: string): string | null {
+  if (isCustomServiceId(itemId)) return 'custom';
   for (const cat of SERVICE_CATEGORIES) {
     if (cat.items.find(i => i.id === itemId)) return cat.id;
   }
   return null;
+}
+
+// Resolve a service item (id + label) from the static catalogue OR the
+// user-created custom services. Every lookup of a selection's catalogue entry
+// should go through this so custom services render everywhere a built-in does.
+export function findServiceItem(itemId: string): ServiceItem | undefined {
+  const custom = findCustomService(itemId);
+  if (custom) return { id: custom.id, label: custom.name };
+  return SERVICE_CATEGORIES.flatMap(c => c.items).find(i => i.id === itemId);
 }
 
 // ── Per-service-selection shape ──────────────────────────────────────────────
@@ -1198,7 +1211,7 @@ function ServiceDetailsStep({
     return selections.find(s => s.expanded) ?? selections[selections.length - 1] ?? null;
   }, [selections]);
   const activeServiceLabel = activeService
-    ? SERVICE_CATEGORIES.flatMap(c => c.items).find(i => i.id === activeService.itemId)?.label
+    ? findServiceItem(activeService.itemId)?.label
     : null;
 
   // Find the catalogue entry + parent category for the active service so we
@@ -1710,7 +1723,7 @@ function CaseSummaryCard({
         ) : (
           <div className="space-y-1.5 mb-2">
             {selections.map(sel => {
-              const item = SERVICE_CATEGORIES.flatMap(c => c.items).find(i => i.id === sel.itemId);
+              const item = findServiceItem(sel.itemId);
               if (!item) return null;
               const teethCount = sel.teeth?.length ?? 0;
               const isActive = sel.expanded;
