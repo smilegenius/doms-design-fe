@@ -51,6 +51,7 @@ function initialsFor(name: string): string {
   return (letters || name.slice(0, 2)).toUpperCase();
 }
 import type { Case, EmailPrescription } from './CasesPage';
+import { LAB_POSTAL_ADDRESSES } from './CaseDetailPage';
 import { ScoreBadge } from '../components/ScoreBadge';
 import { AiSparkle } from '../components/AiSparkle';
 import {
@@ -4662,13 +4663,18 @@ function PatientSearchSelect({ value, onChange, onPickExisting }: {
   return (
     <div ref={wrapperRef} className="relative">
       <div className="relative">
+        {/* Leading icon chip mirrors the Lab trigger so both Row-1 fields sit
+            at the same height; h-[38px] matches the trigger's computed size. */}
+        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md bg-[#F3F3F5] flex items-center justify-center pointer-events-none">
+          <User className="w-3 h-3 text-[#A0A0B0]" />
+        </span>
         <input
           type="text"
           value={value}
           onChange={(e) => { onChange(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           placeholder="Search existing or type new patient name"
-          className="w-full px-3 py-2 pr-7 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/20"
+          className="w-full h-[38px] pl-9 py-2 pr-7 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/20"
         />
         {/* Search icon on the right doubles as the dropdown affordance */}
         <button
@@ -4697,11 +4703,13 @@ function PatientSearchSelect({ value, onChange, onPickExisting }: {
               <span className="text-[#8A8A99]">Gender: </span>
               {exactMatch.gender}
             </span>
-            <span className="col-span-2 truncate">
+            {/* Email + Phone share one row; min-w-0 lets each cell shrink so
+                a long address ellipsizes instead of stretching the card. */}
+            <span className="truncate min-w-0" title={exactMatch.email}>
               <span className="text-[#8A8A99]">Email: </span>
               {exactMatch.email}
             </span>
-            <span className="col-span-2">
+            <span className="truncate min-w-0">
               <span className="text-[#8A8A99]">Phone: </span>
               {exactMatch.phoneCountry} {exactMatch.phoneNumber}
             </span>
@@ -5480,7 +5488,13 @@ function OrderFormSheet({
             {/* Patient + Lab + Dentist grid */}
             <div className={compact ? 'grid grid-cols-2 gap-3 text-sm' : 'grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm'}>
               <FormField label="Patient" value={patientName || '—'} />
-              <FormField label={partyLabel} value={lab?.name || '—'} />
+              {/* Clinic portal: the lab's postal address rides along so a
+                  printed/posted order form carries its destination. */}
+              <FormField
+                label={partyLabel}
+                value={lab?.name || '—'}
+                sub={partyLabel === 'Lab' && lab ? LAB_POSTAL_ADDRESSES[lab.name] : undefined}
+              />
               <FormField label="Dentist" value={dentist?.name || '—'} />
               <FormField label="Requested Delivery" value={deliveryDate || '—'} />
               <FormField
