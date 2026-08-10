@@ -130,6 +130,26 @@ function caseUrl(c: CaseForDetail): string {
   return `https://app.smilegenius.co.uk/cases/${c.id}`;
 }
 
+// Postal addresses for the mock labs — printed on the order form so posted
+// cases carry their destination. Keyed by the lab name on the case record.
+export const LAB_POSTAL_ADDRESSES: Record<string, string> = {
+  'Smile Genius Lab':        '48 Borough High Street, London SE1 1XF',
+  'Kingsbridge Dental Lab':  '20 Church Lane, Belfast BT1 4QN',
+  'Patterson Dental UK':     '84 Salthouse Road, Northampton NN4 7EX',
+  'Eurodontic Ltd':          '2 Napier Court, Sheffield S11 8HA',
+  'Smile Ceramics Studio':   '14 Ormond Quay, Dublin D01 X2P4',
+  'Dentsply Sirona Lab':     'Building 3, Chiswick Park, London W4 5YA',
+  'S4S London':              '58 Marylebone High Street, London W1U 5HT',
+  'Harbour Dental Ceramics': '5 Quay Street, Galway H91 F8K2',
+  'Westport Denture Works':  '12 Bridge Street, Westport F28 KV82',
+  'Henry Schein':            'Medcare House, Centurion Close, Gillingham ME8 0SB',
+  'DD Group':                'Ninth Avenue, Burton-on-Trent DE14 3JZ',
+  'Dental Directory':        '6 Perry Way, Witham CM8 3SX',
+  '3Shape':                  'Holmens Kanal 7, 1060 Copenhagen',
+  'Ivoclar':                 'Meridian South, Leicester LE19 1WY',
+  'Wrights':                 'Dunn Square, Paisley PA1 1JB',
+};
+
 // "Submitted by" username shown on the order form — derived from the practice
 // name the way production renders it (PracticeManager_<site>).
 function submittedByLabel(c: CaseForDetail): string {
@@ -2324,7 +2344,12 @@ function OrderFormBody({ caseData, service, wide = false }: {
   const formSections = (
     <>
       <Section title="Details">
-        <KV label="Lab Name" value="Smile Genius Lab" />
+        <KV label="Lab Name" value={caseData.lab ?? 'Smile Genius Lab'} />
+        <KV
+          label="Lab Postal Address"
+          value={LAB_POSTAL_ADDRESSES[caseData.lab ?? 'Smile Genius Lab'] ?? '—'}
+          muted={!LAB_POSTAL_ADDRESSES[caseData.lab ?? 'Smile Genius Lab']}
+        />
         <KV label="Practice Name" value={caseData.practice} />
         <KV label="Dentist Name" value={caseData.dentist} />
         <KV label="Dentist Contact Number" value="—" muted />
