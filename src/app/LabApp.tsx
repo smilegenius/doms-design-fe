@@ -152,7 +152,7 @@ export default function LabApp() {
         />
       )}
       {activePage === 'configuration' && <LabScoringSettingsPage />}
-      {activePage === 'settings' && <SettingsPage />}
+      {activePage === 'settings' && <SettingsPage portal="lab" />}
       {activePage === 'notifications' && (
         <NotificationsPage onOpenSettings={() => setActivePage('settings')} />
       )}

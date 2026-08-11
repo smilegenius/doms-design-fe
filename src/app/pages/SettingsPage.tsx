@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import InviteUsersModal, { InviteUserRow } from '../components/InviteUsersModal';
 import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
+import NotificationPreferences from './NotificationPreferencesPage';
+import Toggle from '../components/Toggle';
 import { useCustomServices, removeCustomService } from '../data/customServices';
 import { useToast } from '../context/ToastContext';
 import SearchInput from '../components/SearchInput';
@@ -86,24 +88,6 @@ function Field({ label, value, fallback = '—' }: { label: string; value?: Reac
   );
 }
 
-function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
-  return (
-    <button
-      onClick={onChange}
-      className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
-        on ? 'bg-[#4D8EF7]' : 'bg-[#D4CEE1]'
-      }`}
-      role="switch"
-      aria-checked={on}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform ${
-          on ? 'translate-x-5' : 'translate-x-0'
-        }`}
-      />
-    </button>
-  );
-}
 
 function StatusPill({ status }: { status: Member['status'] }) {
   const map = {
@@ -121,7 +105,7 @@ function StatusPill({ status }: { status: Member['status'] }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function SettingsPage() {
+export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' | 'lab' } = {}) {
   const [activeTab, setActiveTab] = useState<TabId>('personal');
   const { toast } = useToast();
 
@@ -763,7 +747,13 @@ export default function SettingsPage() {
       )}
 
       {/* ─── Notifications ────────────────────────────────────────────────── */}
-      {activeTab === 'notifications' && (
+      {/* Lab portal: full per-notification preference centre (categories,
+          per-channel toggles, bulk actions, search). Clinic keeps the
+          original status tables unchanged. */}
+      {activeTab === 'notifications' && portal === 'lab' && (
+        <NotificationPreferences />
+      )}
+      {activeTab === 'notifications' && portal === 'clinic' && (
         <div className="space-y-4">
           {/* Order status */}
           <div className="bg-white rounded-xl border border-[#E0E0E6] overflow-hidden">

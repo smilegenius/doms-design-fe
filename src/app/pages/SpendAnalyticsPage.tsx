@@ -1365,9 +1365,9 @@ export default function SpendAnalyticsPage({ onNavigateToInvoices }: { onNavigat
         {tab === 'ai' && (
           <>
             {/* Top row — savings hero + purchasing catalogue side by side on
-                wide screens, stacked on narrow ones. items-start keeps each
-                card its natural height. */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+                wide screens, stacked on narrow ones. Cards stretch to the
+                same height so neither leaves a gap beneath it. */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
             {/* Savings suggestions — the headline of this tab. One hero card
                 with the annual total up top and each suggestion as a slim
