@@ -370,6 +370,22 @@ const SERVICE_NAME_TO_CATALOG_ID: Record<string, string> = {
   'Full Denture':    'de-full-denture',
 };
 
+// Reverse lookup for the live case score: the scoring config keys off the
+// Cases-page service names ('Veneers', 'Bridge'), NOT the catalogue labels
+// ('Veneer', 'Abutment'), so form selections must be translated back before
+// they can be scored.
+const CATALOG_ID_TO_SERVICE_NAME: Record<string, string> = Object.fromEntries(
+  Object.entries(SERVICE_NAME_TO_CATALOG_ID).map(([name, id]) => [id, name])
+);
+
+// Score fields that belong to the CASE (shared inputs), not to one service —
+// used to dedupe the pinned missing-requirements list when several services
+// all miss the same case-level input (e.g. every service wants a Bite Scan).
+const CASE_LEVEL_SCORE_FIELDS = new Set([
+  'scans', 'scan_upper', 'scan_lower', 'scan_bite', 'scan_bite2',
+  'instructions', 'attachments', 'delivery', 'orderType',
+]);
+
 // FDI numeric (16, 26, etc.) → in-app tooth code (UR6, UL6) used by the
 // teeth chart + per-tooth field grids. First digit is the quadrant; second
 // digit is the tooth position from the midline.
@@ -1403,6 +1419,79 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   const scanFileCount = Object.values(caseSourceFiles).filter(Boolean).length;
   const has3DFiles = scanFileCount > 0;
 
+  // ── Live case score ────────────────────────────────────────────────────────
+  // Rebuilt from form state on every render so the pinned score strip tracks
+  // the form as it's filled (unlike the old prefillDraft strip, which was a
+  // one-shot snapshot of the incoming draft). Selections are translated back
+  // to scoring service names — the config keys off those, not catalogue labels.
+  const liveScore = scoreCase({
+    id: 'draft',
+    serviceItems: selections.map(sel => ({
+      name: CATALOG_ID_TO_SERVICE_NAME[sel.itemId] ?? getServiceDisplayName(sel),
+      fdi: sel.teeth ?? [],
+      material: sel.material,
+      shade: sel.shade,
+      orderType,
+      instructions: caseInstructions,
+      scanFileCount,
+      attachmentCount: caseInstructionsFiles.length + caseSourceExtraFiles.length,
+      stages: sel.stages,
+    })),
+    requestedDelivery: deliveryDate,
+  } as any);
+
+  // Missing requirements with their click targets. Case-level inputs (scans,
+  // instructions, delivery…) dedupe across services; per-service fields keep
+  // the service name in the label when more than one service is being scored.
+  const scoredServiceCount = liveScore.services.filter(s => s.configured).length;
+  const missingRequirements: { key: string; fieldId: string; serviceName: string; label: string }[] = [];
+  {
+    const seen = new Set<string>();
+    for (const svc of liveScore.services.filter(s => s.configured)) {
+      for (const fld of svc.fields.filter(f => !f.filled)) {
+        const caseLevel = CASE_LEVEL_SCORE_FIELDS.has(fld.id);
+        const key = caseLevel ? fld.id : `${svc.serviceName}:${fld.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        missingRequirements.push({
+          key,
+          fieldId: fld.id,
+          serviceName: svc.serviceName,
+          label: caseLevel || scoredServiceCount === 1 ? fld.label : `${fld.label} · ${svc.serviceName}`,
+        });
+      }
+    }
+  }
+
+  // Clicking a missing requirement jumps to the field that fills it: inline
+  // fields scroll into view + flash; fields living inside the Case Source
+  // popup or a service's details drawer open that surface directly.
+  // (Same ref + flash pattern as the invoice drawer's required-field list.)
+  const scoreFieldRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [flashedField, setFlashedField] = useState<string | null>(null);
+  // Click-popover on the heading score widget listing the missing requirements.
+  const [scoreMenuOpen, setScoreMenuOpen] = useState(false);
+  const flashField = (key: string) => {
+    const el = scoreFieldRefs.current[key];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlashedField(key);
+    setTimeout(() => setFlashedField(prev => (prev === key ? null : prev)), 1800);
+  };
+  const flashCls = (key: string) =>
+    flashedField === key ? 'ring-2 ring-[#DC2626] rounded-lg animate-pulse' : '';
+  const goToRequirement = (m: { fieldId: string; serviceName: string }) => {
+    if (m.fieldId === 'delivery')  { flashField('delivery');  return; }
+    if (m.fieldId === 'orderType') { flashField('orderType'); return; }
+    if (m.fieldId === 'instructions' || m.fieldId === 'attachments') { flashField('instructions'); return; }
+    // Upper / Lower / Bite Scan slots live inside the Case Source popup.
+    if (m.fieldId.startsWith('scan')) { setCaseSourceOpen(true); return; }
+    // Teeth / Material / Shade / Stages live inside the service's details drawer.
+    const catalogId = SERVICE_NAME_TO_CATALOG_ID[m.serviceName];
+    const sel = selections.find(s => s.itemId === catalogId);
+    if (sel) setActiveDetailsId(sel.itemId);
+  };
+
   // Left-pane primary tab — exactly ONE of Order Form / iTero / Email / Add
   // Prescription, depending on how the case data arrives:
   //   • Case Source "Via Scanner" → live Order Form preview (no email here)
@@ -1625,6 +1714,70 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                {/* ── Live case score — recomputed from form state on every
+                    keystroke. The chevron reveals the missing requirements;
+                    clicking one jumps to (and flashes) the field that fills
+                    it, or opens the drawer/popup that owns it. ── */}
+                {liveScore.applicable && (() => {
+                  const tint =
+                    liveScore.band === 'green' ? 'bg-[#ECFDF5] border-[#A7F3D0]'
+                    : liveScore.band === 'amber' ? 'bg-[#FFF8E1] border-[#FDE68A]'
+                    : 'bg-[#FEF2F2] border-[#FECACA]';
+                  const tierCls =
+                    liveScore.band === 'green' ? 'text-[#15803D]'
+                    : liveScore.band === 'amber' ? 'text-[#B45309]'
+                    : 'text-[#B91C1C]';
+                  return (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => missingRequirements.length > 0 && setScoreMenuOpen(o => !o)}
+                        title={missingRequirements.length > 0 ? 'Show missing requirements' : 'All requirements complete'}
+                        className={`flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-xl border transition-colors ${tint} ${missingRequirements.length > 0 ? 'cursor-pointer hover:shadow-sm' : 'cursor-default'}`}
+                      >
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#717182]">Case score</span>
+                        <ScoreBadge score={liveScore} size="xs" />
+                        <span className={`text-[11px] font-semibold ${tierCls}`}>{liveScore.tierLabel}</span>
+                        {missingRequirements.length > 0 ? (
+                          <>
+                            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-white text-[9px] font-bold text-[#B45309] border border-[#FDE68A]">
+                              {missingRequirements.length}
+                            </span>
+                            <ChevronDown className={`w-3 h-3 text-[#717182] transition-transform ${scoreMenuOpen ? 'rotate-180' : ''}`} />
+                          </>
+                        ) : (
+                          <Check className="w-3 h-3 text-[#15803D]" strokeWidth={3} />
+                        )}
+                      </button>
+                      {scoreMenuOpen && missingRequirements.length > 0 && (
+                        <>
+                          <span className="fixed inset-0 z-20" onClick={() => setScoreMenuOpen(false)} />
+                          <div className="absolute top-full right-0 mt-1 z-30 w-64 rounded-lg border border-[#E0E0E6] bg-white shadow-lg p-2.5">
+                            <span className="block text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0] mb-1">Missing requirements</span>
+                            <div className="space-y-0.5">
+                              {missingRequirements.map(m => (
+                                <button
+                                  key={m.key}
+                                  type="button"
+                                  onClick={() => { setScoreMenuOpen(false); goToRequirement(m); }}
+                                  title={`Jump to ${m.label}`}
+                                  className="group w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[11px] text-[#5A5568] hover:bg-[#FFF8E1] hover:text-[#92610A] text-left transition-colors"
+                                >
+                                  <span className="w-1 h-1 rounded-full bg-[#B45309] flex-shrink-0" />
+                                  <span className="flex-1 truncate">{m.label}</span>
+                                  <ChevronRight className="w-3 h-3 text-[#B45309] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                                </button>
+                              ))}
+                            </div>
+                            <p className="mt-1.5 pt-1.5 border-t border-[#F0EFF6] text-[10px] text-[#A0A0B0]">
+                              Click an item to jump to the field that fills it.
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
                 <button
                   onClick={() => has3DFiles ? setModel3DOpen(true) : setCaseSourceOpen(true)}
                   className={`md:hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
@@ -1693,33 +1846,15 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           </div>
         )}
 
-        {/* ── Case score + (conditional) AI extraction notice. For auto-fetched
-            cases (email / iTero / scanned drafts) the AI box sits to the LEFT of
-            the score box; otherwise the score box stands alone. ── */}
-        {prefillDraft && (() => {
-          const score = scoreCase(prefillDraft as any);
-          const tint = !score.applicable
-            ? 'bg-[#F8F9FC] border-[#E0E0E6]'
-            : score.band === 'green' ? 'bg-[#ECFDF5] border-[#A7F3D0]'
-            : score.band === 'amber' ? 'bg-[#FFF8E1] border-[#FDE68A]'
-            : 'bg-[#FEF2F2] border-[#FECACA]';
-          return (
-            <div className="max-w-6xl mx-auto mb-3 flex flex-col md:flex-row items-stretch gap-3">
-              {aiPrefilled && (
-                <div className="flex-1 flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl border border-[#FECACA] bg-[#FEF2F2]">
-                  <AiSparkle label title="" className="mt-px" />
-                  <p className="text-[11px] text-[#5A5568] leading-snug">
-                    <span className="font-semibold text-[#030213]">Smile Genius</span> has automatically extracted prescription information from the provided files. Verify all details before submitting the case.
-                  </p>
-                </div>
-              )}
-              <div className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl border ${tint} ${aiPrefilled ? 'md:flex-shrink-0' : 'flex-1'}`}>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[#717182] flex-shrink-0">Case score</span>
-                <ScoreBadge score={score} withDetails compact />
-              </div>
-            </div>
-          );
-        })()}
+        {/* ── AI extraction notice (auto-fetched cases only). ── */}
+        {aiPrefilled && (
+          <div className="max-w-6xl mx-auto mb-3 flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl border border-[#FECACA] bg-[#FEF2F2]">
+            <AiSparkle label title="" className="mt-px" />
+            <p className="text-[11px] text-[#5A5568] leading-snug">
+              <span className="font-semibold text-[#030213]">Smile Genius</span> has automatically extracted prescription information from the provided files. Verify all details before submitting the case.
+            </p>
+          </div>
+        )}
 
         {/* ── Offline-lab notice — appears the moment a Low Potential or
             Non-participating lab is picked and STAYS pinned to the top of
@@ -1839,26 +1974,30 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                   )
                 )}
               </Mini>
-              <Mini label="Order Type">
-                <div className="relative">
-                  <select
-                    value={orderType}
-                    onChange={(e) => setOrderType(e.target.value)}
-                    className="w-full appearance-none px-2.5 py-1.5 pr-7 text-xs text-[#030213] border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7] cursor-pointer"
-                  >
-                    {ORDER_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                  <ChevronDown className="w-3 h-3 text-[#A0A0B0] absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
-              </Mini>
-              <Mini label="Delivery">
-                <input
-                  type="date"
-                  value={deliveryDate}
-                  onChange={(e) => setDeliveryDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs text-[#030213] border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7]"
-                />
-              </Mini>
+              <div ref={el => { scoreFieldRefs.current.orderType = el; }} className={`transition-all ${flashCls('orderType')}`}>
+                <Mini label="Order Type">
+                  <div className="relative">
+                    <select
+                      value={orderType}
+                      onChange={(e) => setOrderType(e.target.value)}
+                      className="w-full appearance-none px-2.5 py-1.5 pr-7 text-xs text-[#030213] border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7] cursor-pointer"
+                    >
+                      {ORDER_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                    <ChevronDown className="w-3 h-3 text-[#A0A0B0] absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                </Mini>
+              </div>
+              <div ref={el => { scoreFieldRefs.current.delivery = el; }} className={`transition-all ${flashCls('delivery')}`}>
+                <Mini label="Delivery">
+                  <input
+                    type="date"
+                    value={deliveryDate}
+                    onChange={(e) => setDeliveryDate(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs text-[#030213] border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7]"
+                  />
+                </Mini>
+              </div>
             </div>
           </div>
 
@@ -2185,7 +2324,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
               The same text is editable here and inside any service's details
               drawer ("Instructions for the lab"); switching services keeps it
               filled. File uploads are general supporting docs. ── */}
-          <div className="bg-white border border-[#E0E0E6] rounded-2xl p-4 order-4">
+          <div
+            ref={el => { scoreFieldRefs.current.instructions = el; }}
+            className={`bg-white border border-[#E0E0E6] rounded-2xl p-4 order-4 transition-all ${flashCls('instructions')}`}
+          >
             <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
               <div className="flex items-center gap-1.5">
                 <span className="w-5 h-5 rounded-md bg-[#EEF4FF] text-[#4D8EF7] flex items-center justify-center">
