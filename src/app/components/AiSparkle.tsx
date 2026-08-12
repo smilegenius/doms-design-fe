@@ -1,13 +1,25 @@
 // Marks a value that was auto-extracted from a document (prescription PDF /
-// email / scan) by AI, so the user knows it wasn't typed by hand and should be
-// reviewed. Shown in light red, consistent across every field.
-//   • default → just the twinkling sparkle
-//   • label   → a small "✨ AI" pill (sparkle merged with an AI tag)
+// email / scan) or from natural-language case instructions by AI, so the user
+// knows it wasn't typed by hand and should be reviewed. Shown in light red,
+// consistent across every field.
+//   • default      → just the twinkling sparkle
+//   • label        → a small "✨ AI" pill (sparkle merged with an AI tag)
+//   • confidence   → (label pill only) appends "· N%", coloured by the same
+//                    thresholds as the invoice AiConfidenceBar (≥85 green,
+//                    ≥60 amber, else red)
 export function AiSparkle({
-  title = 'Auto-filled from the prescription by AI — please review',
+  title,
   className = '',
   label = false,
-}: { title?: string; className?: string; label?: boolean }) {
+  confidence,
+}: { title?: string; className?: string; label?: boolean; confidence?: number }) {
+  const resolvedTitle = title ?? (confidence != null
+    ? `Extracted from your instructions by AI (${confidence}% confidence) — please review`
+    : 'Auto-filled from the prescription by AI — please review');
+  const confidenceColor = confidence == null ? undefined
+    : confidence >= 85 ? '#16A34A'
+    : confidence >= 60 ? '#D97706'
+    : '#DC2626';
   const sparkleSvg = (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -32,19 +44,24 @@ export function AiSparkle({
   if (label) {
     return (
       <span
-        title={title}
+        title={resolvedTitle}
         className={`inline-flex items-center gap-0.5 px-1 py-px rounded-full border border-[#FECACA] bg-[#FEF2F2] text-[#EF4444] align-middle flex-shrink-0 ${className}`}
         aria-label="Auto-filled by AI"
       >
         {sparkleSvg}
         <span className="text-[8px] font-bold tracking-wide leading-none text-[#DC2626]">AI</span>
+        {confidence != null && (
+          <span className="text-[8px] font-bold leading-none tabular-nums" style={{ color: confidenceColor }}>
+            · {confidence}%
+          </span>
+        )}
       </span>
     );
   }
 
   return (
     <span
-      title={title}
+      title={resolvedTitle}
       className={`inline-flex items-center justify-center flex-shrink-0 align-middle text-[#EF4444] ${className}`}
       aria-label="Auto-filled by AI"
     >

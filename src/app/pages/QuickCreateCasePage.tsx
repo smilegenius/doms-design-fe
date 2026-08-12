@@ -4,10 +4,11 @@ import {
   Plus, X, Check, ChevronDown, ChevronRight,
   Pencil, Zap, Star, Upload, UploadCloud, Box, Image as ImageIcon,
   AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen, Copy, ExternalLink, Building2,
-  CloudOff,
+  CloudOff, Loader2,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
+import { extractCaseEntities } from '../data/instructionExtraction';
 import ModalPortal from '../components/ModalPortal';
 import { OFFLINE_LABS, OfflineLabNotice } from '../components/OfflineLabNotice';
 import AddPracticeModal from '../components/AddPracticeModal';
@@ -1146,6 +1147,38 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // uploads. These are general supporting docs (photos, x-rays, refs).
   const [caseInstructionsFiles, setCaseInstructionsFiles] = useState<string[]>(draft?.caseInstructionsFiles ?? []);
 
+  // ── Natural-language instruction extraction (mock AI) ─────────────────────
+  // The Case Instructions textarea doubles as a case entry point: on blur or
+  // the explicit "Read instructions" action, extractCaseEntities() pre-fills
+  // the structured fields. AI suggests, the user confirms — fill-empty-only,
+  // never submits, never rewrites the instruction text.
+  //
+  // aiFields is the per-field provenance map (fieldKey → confidence %) that
+  // drives the "AI · N%" pills; editing a field deletes its key. Keys:
+  //   'patientName' | 'delivery' | 'orderType'
+  //   `service:${itemId}` (teeth) | `service:${itemId}:material` | `:shade`
+  // (Markers are session-only — intentionally not persisted into SavedDraft.)
+  const [aiFields, setAiFields] = useState<Record<string, number>>({});
+  const [aiFilledCount, setAiFilledCount] = useState(0);   // review strip; 0 = hidden
+  const [readingInstructions, setReadingInstructions] = useState(false);
+  const lastParsedRef = useRef('');          // blur only re-runs when text changed
+  // Delivery + order type carry non-empty defaults, so "user touched it" must
+  // be tracked separately from "has a value".
+  const deliveryTouchedRef = useRef(!!draft?.deliveryDate);
+  const orderTypeTouchedRef = useRef(!!draft?.orderType);
+  const preExtractSnapshotRef = useRef<null | {
+    patientName: string; deliveryDate: string; orderType: string; selections: ServiceSelection[];
+  }>(null);
+
+  function clearAiMark(...keys: string[]) {
+    setAiFields(prev => {
+      if (!keys.some(k => k in prev)) return prev;
+      const next = { ...prev };
+      keys.forEach(k => delete next[k]);
+      return next;
+    });
+  }
+
   // Drawer state
   const [patientDrawerOpen, setPatientDrawerOpen] = useState(false);
   const [pickerOpen, setPickerOpen]               = useState(false);
@@ -1305,6 +1338,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       const teeth = s.teeth ?? [];
       return { ...s, teeth: teeth.includes(code) ? teeth.filter(t => t !== code) : [...teeth, code] };
     }));
+    clearAiMark(`service:${targetId}`);
   }
 
   function toggleService(itemId: string) {
@@ -1324,10 +1358,115 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   }
   function updateService(itemId: string, patch: Partial<ServiceSelection>) {
     setSelections(prev => prev.map(s => s.itemId === itemId ? { ...s, ...patch } : s));
+    // Every drawer edit funnels through here (extraction deliberately doesn't),
+    // so a user edit of an AI-filled field clears its provenance marker.
+    const cleared: string[] = [];
+    if ('material' in patch) cleared.push(`service:${itemId}:material`);
+    if ('shade' in patch) cleared.push(`service:${itemId}:shade`);
+    if ('teeth' in patch) cleared.push(`service:${itemId}`);
+    if (cleared.length) clearAiMark(...cleared);
   }
   function removeService(itemId: string) {
     setSelections(prev => prev.filter(s => s.itemId !== itemId));
     if (activeDetailsId === itemId) setActiveDetailsId(null);
+    clearAiMark(`service:${itemId}`, `service:${itemId}:material`, `service:${itemId}:shade`);
+  }
+
+  // ── Instruction-extraction runner ──────────────────────────────────────────
+  // Applies extracted entities fill-empty-only: user-entered values are never
+  // overwritten, the textarea is never rewritten, nothing is ever submitted.
+  function applyExtraction(text: string) {
+    const ex = extractCaseEntities(text);
+    preExtractSnapshotRef.current = {
+      patientName, deliveryDate, orderType, selections: selections.map(s => ({ ...s })),
+    };
+    let filled = 0;
+    const marks: Record<string, number> = {};
+
+    if (ex.patientName && !patientName.trim()) {
+      setPatientName(ex.patientName.value);
+      marks.patientName = ex.patientName.confidence;
+      filled++;
+    }
+    if (ex.deliveryISO && !deliveryTouchedRef.current) {
+      setDeliveryDate(ex.deliveryISO.value);
+      marks.delivery = ex.deliveryISO.confidence;
+      filled++;
+    }
+    if (ex.orderType && !orderTypeTouchedRef.current && ex.orderType.value !== orderType) {
+      setOrderType(ex.orderType.value);
+      marks.orderType = ex.orderType.confidence;
+      filled++;
+    }
+
+    // Service target: the extracted service, or — when only teeth/material/
+    // shade were found — the single existing selection (ambiguous → skip).
+    const targetId = ex.service?.itemId
+      ?? (selections.length === 1 && (ex.teeth || ex.material || ex.shade) ? selections[0].itemId : undefined);
+    if (targetId) {
+      const existing = selections.find(s => s.itemId === targetId);
+      const fillTeeth = ex.teeth && (existing ? (existing.teeth?.length ?? 0) === 0 : true);
+      const fillMaterial = ex.material && (existing ? !existing.material : true);
+      const fillShade = ex.shade && (existing ? !existing.shade : true);
+      if (!existing) {
+        setSelections(prev => [...prev, {
+          itemId: targetId,
+          expanded: false,
+          sameForAllTeeth: true,
+          ...(fillTeeth ? { teeth: ex.teeth!.codes } : {}),
+          ...(fillMaterial ? { material: ex.material!.value } : {}),
+          ...(fillShade ? { shade: ex.shade!.value } : {}),
+        }]);
+        marks[`service:${targetId}`] = ex.teeth && fillTeeth ? ex.teeth.confidence : ex.service!.confidence;
+        filled++;
+      } else if (fillTeeth || fillMaterial || fillShade) {
+        // Direct setSelections (NOT updateService — that's the user-edit
+        // choke point that clears markers).
+        setSelections(prev => prev.map(s => s.itemId !== targetId ? s : {
+          ...s,
+          ...(fillTeeth ? { teeth: ex.teeth!.codes } : {}),
+          ...(fillMaterial ? { material: ex.material!.value } : {}),
+          ...(fillShade ? { shade: ex.shade!.value } : {}),
+        }));
+        if (fillTeeth) { marks[`service:${targetId}`] = ex.teeth!.confidence; filled++; }
+      }
+      if (fillMaterial) { marks[`service:${targetId}:material`] = ex.material!.confidence; filled++; }
+      if (fillShade) { marks[`service:${targetId}:shade`] = ex.shade!.confidence; filled++; }
+    }
+
+    if (filled === 0) {
+      preExtractSnapshotRef.current = null;
+      toast.info('Nothing new to fill — details already set or not recognised.');
+      return;
+    }
+    setAiFields(prev => ({ ...prev, ...marks }));
+    setAiFilledCount(filled);
+  }
+
+  function runInstructionExtraction(trigger: 'blur' | 'button') {
+    const text = caseInstructions.trim();
+    if (!text || readingInstructions) return;   // also swallows blur→click double-fire
+    if (trigger === 'blur' && text === lastParsedRef.current) return;
+    lastParsedRef.current = text;
+    setReadingInstructions(true);
+    window.setTimeout(() => {
+      setReadingInstructions(false);
+      applyExtraction(text);
+    }, 700);
+  }
+
+  function undoExtraction() {
+    const snap = preExtractSnapshotRef.current;
+    if (!snap) return;
+    setPatientName(snap.patientName);
+    setDeliveryDate(snap.deliveryDate);
+    setOrderType(snap.orderType);
+    setSelections(snap.selections);
+    preExtractSnapshotRef.current = null;
+    setAiFields({});
+    setAiFilledCount(0);
+    lastParsedRef.current = '';   // allow a later blur to re-run
+    toast.info('Extraction undone — the form is back to how it was.');
   }
 
   function handleSubmit() {
@@ -1885,12 +2024,17 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             </div>
             {/* Row 1 — Patient + Lab (the headline who/where) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-              <Mini label="Patient" required accessory={aiPrefilled && patientName ? <AiSparkle label /> : undefined}>
+              <Mini label="Patient" required accessory={
+                aiPrefilled && patientName ? <AiSparkle label />
+                : aiFields.patientName != null && patientName ? <AiSparkle label confidence={aiFields.patientName} />
+                : undefined
+              }>
                 <PatientSearchSelect
                   value={patientName}
-                  onChange={setPatientName}
+                  onChange={(v) => { setPatientName(v); clearAiMark('patientName'); }}
                   onPickExisting={(p) => {
                     setPatientName(p.name);
+                    clearAiMark('patientName');
                     setPatientExtras({
                       patientId:    p.patientId,
                       email:        p.email,
@@ -1975,11 +2119,13 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 )}
               </Mini>
               <div ref={el => { scoreFieldRefs.current.orderType = el; }} className={`transition-all ${flashCls('orderType')}`}>
-                <Mini label="Order Type">
+                <Mini label="Order Type" accessory={
+                  aiFields.orderType != null ? <AiSparkle label confidence={aiFields.orderType} /> : undefined
+                }>
                   <div className="relative">
                     <select
                       value={orderType}
-                      onChange={(e) => setOrderType(e.target.value)}
+                      onChange={(e) => { setOrderType(e.target.value); orderTypeTouchedRef.current = true; clearAiMark('orderType'); }}
                       className="w-full appearance-none px-2.5 py-1.5 pr-7 text-xs text-[#030213] border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7] cursor-pointer"
                     >
                       {ORDER_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
@@ -1989,11 +2135,13 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </Mini>
               </div>
               <div ref={el => { scoreFieldRefs.current.delivery = el; }} className={`transition-all ${flashCls('delivery')}`}>
-                <Mini label="Delivery">
+                <Mini label="Delivery" accessory={
+                  aiFields.delivery != null ? <AiSparkle label confidence={aiFields.delivery} /> : undefined
+                }>
                   <input
                     type="date"
                     value={deliveryDate}
-                    onChange={(e) => setDeliveryDate(e.target.value)}
+                    onChange={(e) => { setDeliveryDate(e.target.value); deliveryTouchedRef.current = true; clearAiMark('delivery'); }}
                     className="w-full px-2.5 py-1.5 text-xs text-[#030213] border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7]"
                   />
                 </Mini>
@@ -2140,6 +2288,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                   {cat}
                                 </span>
                                 {aiPrefilled && hasDetails && <AiSparkle label title="Teeth, material & shade extracted from the prescription by AI — please review" />}
+                                {!aiPrefilled && aiFields[`service:${sel.itemId}`] != null && <AiSparkle label confidence={aiFields[`service:${sel.itemId}`]} />}
                               </div>
                               {hasDetails ? (
                                 <p className="text-[10px] text-[#1A5C2A] font-medium mt-0.5 truncate">
@@ -2298,10 +2447,12 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                   <span className="flex items-center gap-1 text-[10px] font-semibold text-[#030213] min-w-0">
                                     <span className="truncate">{sel.material || <span className="text-[#A0A0B0] italic font-normal">—</span>}</span>
                                     {aiPrefilled && sel.material && <AiSparkle label />}
+                                    {!aiPrefilled && sel.material && aiFields[`service:${sel.itemId}:material`] != null && <AiSparkle label confidence={aiFields[`service:${sel.itemId}:material`]} />}
                                   </span>
                                   <span className="flex items-center gap-1 text-[10px] font-semibold text-[#030213] min-w-0">
                                     <span className="truncate">{sel.shade || <span className="text-[#A0A0B0] italic font-normal">—</span>}</span>
                                     {aiPrefilled && sel.shade && <AiSparkle label />}
+                                    {!aiPrefilled && sel.shade && aiFields[`service:${sel.itemId}:shade`] != null && <AiSparkle label confidence={aiFields[`service:${sel.itemId}:shade`]} />}
                                   </span>
                                 </div>
                               </div>
@@ -2337,18 +2488,56 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 <span className="text-[10px] text-[#A0A0B0] italic">— optional</span>
                 {aiPrefilled && caseInstructions.trim().length > 0 && <AiSparkle label title="Pulled from the prescription email by AI — please review" />}
               </div>
-              {(caseInstructions.trim().length > 0 || caseInstructionsFiles.length > 0) && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#16A34A] uppercase tracking-wider">
-                  <Check className="w-3 h-3" strokeWidth={3} />
-                  Added
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {/* Explicit extraction trigger — blur also runs it, but only
+                    when the text changed since the last run. */}
+                <button
+                  type="button"
+                  onClick={() => runInstructionExtraction('button')}
+                  disabled={!caseInstructions.trim() || readingInstructions}
+                  title="Read the instructions and pre-fill the case fields — you review before creating"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] hover:bg-[#FEE2E2] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {readingInstructions
+                    ? <><Loader2 className="w-3 h-3 animate-spin" /> Reading…</>
+                    : <><AiSparkle title="" /> Read instructions</>}
+                </button>
+                {(caseInstructions.trim().length > 0 || caseInstructionsFiles.length > 0) && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#16A34A] uppercase tracking-wider">
+                    <Check className="w-3 h-3" strokeWidth={3} />
+                    Added
+                  </span>
+                )}
+              </div>
             </div>
+            {/* Review strip — extraction never commits silently: it reports
+                what it filled and offers Undo. Field edits don't dismiss it
+                (the user is mid-review); Undo / × do. */}
+            {aiFilledCount > 0 && (
+              <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-[#FECACA] bg-[#FEF2F2]">
+                <AiSparkle label title="" />
+                <p className="flex-1 text-[11px] text-[#5A5568] leading-snug">
+                  Filled <span className="font-bold text-[#030213]">{aiFilledCount} field{aiFilledCount === 1 ? '' : 's'}</span> from
+                  your instructions — review before creating.
+                </p>
+                <button
+                  type="button"
+                  onClick={undoExtraction}
+                  className="text-[10px] font-semibold text-[#DC2626] hover:underline flex-shrink-0"
+                >
+                  Undo
+                </button>
+                <button type="button" onClick={() => setAiFilledCount(0)} title="Dismiss" className="flex-shrink-0">
+                  <X className="w-3 h-3 text-[#A0A0B0] hover:text-[#5A5568]" />
+                </button>
+              </div>
+            )}
             <textarea
               value={caseInstructions}
               onChange={(e) => setCaseInstructions(e.target.value)}
+              onBlur={() => runInstructionExtraction('blur')}
               rows={2}
-              placeholder="Anything the lab should know — shade matching, fit notes, patient sensitivities…"
+              placeholder="Describe the case in plain language — e.g. “Emax crown on 26, shade A2, patient Sarah Whitfield, deliver by 12 Aug” — and we'll fill the form for review."
               className="w-full px-3 py-2 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] resize-none mb-2"
             />
             {/* Upload zone — clicking adds a fake attachment for the demo.
