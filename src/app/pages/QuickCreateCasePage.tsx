@@ -1856,8 +1856,22 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 {/* ── Live case score — recomputed from form state on every
                     keystroke. The chevron reveals the missing requirements;
                     clicking one jumps to (and flashes) the field that fills
-                    it, or opens the drawer/popup that owns it. ── */}
-                {liveScore.applicable && (() => {
+                    it, or opens the drawer/popup that owns it. Before any
+                    scoreable service is picked the widget shows a neutral
+                    placeholder so the feature is discoverable from the start. ── */}
+                {(() => {
+                  if (!liveScore.applicable) {
+                    return (
+                      <div
+                        title="The case score starts once you add a service — it tracks how complete the prescription is as you fill the form"
+                        className="flex items-center gap-2 pl-3 pr-3 py-1.5 rounded-xl border bg-[#F8F9FC] border-[#E0E0E6]"
+                      >
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#717182]">Case score</span>
+                        <ScoreBadge score={liveScore} size="xs" />
+                        <span className="text-[11px] font-medium text-[#A0A0B0]">Add a service to start scoring</span>
+                      </div>
+                    );
+                  }
                   const tint =
                     liveScore.band === 'green' ? 'bg-[#ECFDF5] border-[#A7F3D0]'
                     : liveScore.band === 'amber' ? 'bg-[#FFF8E1] border-[#FDE68A]'
