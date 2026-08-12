@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   User,
   Building2,
@@ -19,10 +20,12 @@ import {
   MoreVertical,
   FlaskConical,
   Trash2,
+  ShieldAlert,
 } from 'lucide-react';
 import InviteUsersModal, { InviteUserRow } from '../components/InviteUsersModal';
 import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
 import NotificationPreferences from './NotificationPreferencesPage';
+import EscalationMatrix from './EscalationMatrixPage';
 import Toggle from '../components/Toggle';
 import { useCustomServices, removeCustomService } from '../data/customServices';
 import { useToast } from '../context/ToastContext';
@@ -39,7 +42,7 @@ const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'dso',           label: 'DSO Info',        description: 'Organization details',    icon: Building2 },
   { id: 'services',      label: 'Custom Services', description: 'Your own catalogue items', icon: FlaskConical },
   { id: 'users',         label: 'User Management', description: 'Team members & roles',    icon: Users },
-  { id: 'notifications', label: 'Notifications',   description: 'Email & system alerts',   icon: Bell },
+  { id: 'notifications', label: 'Notifications',   description: 'Alerts & escalations',    icon: Bell },
 ];
 
 // Mock configured-tabs set — wire to real persistence later
@@ -106,7 +109,31 @@ function StatusPill({ status }: { status: Member['status'] }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' | 'lab' } = {}) {
-  const [activeTab, setActiveTab] = useState<TabId>('personal');
+  // Tabs are URL-driven (?tab=…&sub=…) so every settings section is
+  // deep-linkable and survives refresh/back — e.g.
+  //   /lab/settings?tab=notifications&sub=escalations
+  // The portal shells parse only the pathname, so query params pass through.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab') as TabId | null;
+  const activeTab: TabId = tabParam && TABS.some(t => t.id === tabParam) ? tabParam : 'personal';
+  // Notifications tab is split: the existing notification toggles on one
+  // sub-tab, the Escalation Matrix on the other.
+  const notifSubTab: 'preferences' | 'escalations' =
+    searchParams.get('sub') === 'escalations' ? 'escalations' : 'preferences';
+
+  const setActiveTab = (id: TabId) => {
+    const next = new URLSearchParams(searchParams);
+    if (id === 'personal') next.delete('tab'); else next.set('tab', id);
+    next.delete('sub');
+    setSearchParams(next);
+  };
+  const setNotifSubTab = (sub: 'preferences' | 'escalations') => {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', 'notifications');
+    if (sub === 'escalations') next.set('sub', 'escalations'); else next.delete('sub');
+    setSearchParams(next);
+  };
+
   const { toast } = useToast();
 
   // Notification toggles
@@ -747,13 +774,40 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
       )}
 
       {/* ─── Notifications ────────────────────────────────────────────────── */}
-      {/* Lab portal: full per-notification preference centre (categories,
-          per-channel toggles, bulk actions, search). Clinic keeps the
-          original status tables unchanged. */}
-      {activeTab === 'notifications' && portal === 'lab' && (
-        <NotificationPreferences />
-      )}
-      {activeTab === 'notifications' && portal === 'clinic' && (
+      {/* Two sub-tabs: "Notification Preferences" keeps the existing toggles
+          (lab: per-notification preference centre; clinic: the original
+          status tables), "Escalation Matrix" routes unresolved alerts to a
+          designated contact. Portal-agnostic — clinics and labs both
+          configure escalation contacts. */}
+      {activeTab === 'notifications' && (
+        <div className="space-y-4">
+          <div className="inline-flex items-center gap-1 p-1 bg-[#F3F3F5] rounded-lg">
+            <button
+              onClick={() => setNotifSubTab('preferences')}
+              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                notifSubTab === 'preferences' ? 'bg-white text-[#030213] shadow-sm' : 'text-[#717182] hover:text-[#030213]'
+              }`}
+            >
+              <Bell className="w-3.5 h-3.5" />
+              Notification Preferences
+            </button>
+            <button
+              onClick={() => setNotifSubTab('escalations')}
+              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                notifSubTab === 'escalations' ? 'bg-white text-[#030213] shadow-sm' : 'text-[#717182] hover:text-[#030213]'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              Escalation Matrix
+            </button>
+          </div>
+
+          {notifSubTab === 'escalations' && <EscalationMatrix />}
+
+          {notifSubTab === 'preferences' && portal === 'lab' && (
+            <NotificationPreferences />
+          )}
+          {notifSubTab === 'preferences' && portal === 'clinic' && (
         <div className="space-y-4">
           {/* Order status */}
           <div className="bg-white rounded-xl border border-[#E0E0E6] overflow-hidden">
@@ -806,6 +860,8 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
               ))}
             </div>
           </div>
+        </div>
+          )}
         </div>
       )}
 

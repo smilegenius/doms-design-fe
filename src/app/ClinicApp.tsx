@@ -208,7 +208,7 @@ export default function ClinicApp() {
       {activePage === 'spend-settings' && <SpendSettingsPage />}
       {activePage === 'settings' && <SettingsPage />}
       {activePage === 'notifications' && (
-        <NotificationsPage onOpenSettings={() => setActivePage('settings')} />
+        <NotificationsPage onOpenSettings={() => navigate('/clinic/settings?tab=notifications')} />
       )}
     </Layout>
   );

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Settings as SettingsIcon, Clock, Bell, AlertTriangle } from 'lucide-react';
+import { Search, Settings as SettingsIcon, Clock, Bell, AlertTriangle, ShieldAlert } from 'lucide-react';
 
 export interface NotificationItem {
   id: string;
@@ -8,8 +8,10 @@ export interface NotificationItem {
   timestamp: string;
   read: boolean;
   // Urgent chat notifications (immediate + 2/4/6/8h reminders) render with a
-  // red alert chip; everything else keeps the neutral bell.
-  type?: 'urgent-message' | 'urgent-reminder';
+  // red alert chip; escalations (reminders exhausted, routed to the contact
+  // from the Escalation Matrix) get an orange shield; everything else keeps
+  // the neutral bell.
+  type?: 'urgent-message' | 'urgent-reminder' | 'escalation';
 }
 
 // Icon chip per notification type — shared by this page and the bell popover.
@@ -17,10 +19,21 @@ export function notificationIcon(type?: NotificationItem['type']) {
   if (type === 'urgent-message' || type === 'urgent-reminder') {
     return { Icon: AlertTriangle, bg: '#FEF2F2', color: '#DC2626' };
   }
+  if (type === 'escalation') {
+    return { Icon: ShieldAlert, bg: '#FFF7ED', color: '#E65100' };
+  }
   return { Icon: Bell, bg: '#F3F3F5', color: '#717182' };
 }
 
 export const MOCK_NOTIFICATIONS: NotificationItem[] = [
+  {
+    id: 'n0-escalation',
+    type: 'escalation',
+    title: 'Escalation: Action Required for Scanner Disconnected',
+    body: 'An unresolved Scanner Disconnected event has been escalated to you. Please review and take the necessary action. Reference: iTero Element 5D · Laburnum Dental.',
+    timestamp: '20-May-2026, 02:00 PM',
+    read: false,
+  },
   {
     id: 'n0-reminder',
     type: 'urgent-reminder',
