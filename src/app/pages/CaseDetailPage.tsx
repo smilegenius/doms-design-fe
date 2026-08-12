@@ -8,6 +8,8 @@ import {
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
+import UrgentBadge from '../components/UrgentBadge';
+import UrgentConfirmModal from '../components/UrgentConfirmModal';
 import { OfflineLabNotice, offlineLabStatusFor } from '../components/OfflineLabNotice';
 import { ScoreBadge } from '../components/ScoreBadge';
 import { AiSparkle } from '../components/AiSparkle';
@@ -1571,6 +1573,9 @@ type Channel = 'email' | 'whatsapp';
 interface ConvMsg {
   id: string; channel: Channel; dir: 'in' | 'out';
   name: string; initials: string; date: string; time: string; body: string;
+  // Flagged urgent by the sender — badged in the thread and (in the real app)
+  // escalates reminder notifications until the recipient replies.
+  urgent?: boolean;
 }
 
 // Small tooltip (copied from the overview pages — no shared component exists).
@@ -1596,9 +1601,12 @@ function ChannelBubble({ msg, showChannel }: { msg: ConvMsg; showChannel?: boole
   const wa = msg.channel === 'whatsapp';
   const ChIcon = wa ? MessageCircle : Mail;
   // WhatsApp bubbles are green (outbound a touch deeper); email = white (out) / blue (in).
-  const bubble = wa
-    ? (out ? 'bg-[#DCFCE7] border-[#A7F3C6]' : 'bg-[#F0FDF4] border-[#BBF7D0]')
-    : (out ? 'bg-white border-[#E0E0E6]' : 'bg-[#EEF4FF] border-[#DBEAFE]');
+  // Urgent overrides the channel tint — the red must read at a glance.
+  const bubble = msg.urgent
+    ? 'bg-[#FEF2F2] border-[#FECACA]'
+    : wa
+      ? (out ? 'bg-[#DCFCE7] border-[#A7F3C6]' : 'bg-[#F0FDF4] border-[#BBF7D0]')
+      : (out ? 'bg-white border-[#E0E0E6]' : 'bg-[#EEF4FF] border-[#DBEAFE]');
   // Lab avatar keeps "SG"; the dentist (inbound) avatar shows the channel icon.
   const avatar = out ? 'bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF]' : wa ? 'bg-[#25D366]' : 'bg-[#4D8EF7]';
   return (
@@ -1610,6 +1618,7 @@ function ChannelBubble({ msg, showChannel }: { msg: ConvMsg; showChannel?: boole
         <div className="flex items-center gap-2 mb-1 flex-wrap">
           <span className="text-xs font-semibold text-[#030213]">{msg.name}</span>
           <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-px rounded ${out ? 'bg-[#EEF4FF] text-[#1565C0]' : 'bg-[#F3F3F5] text-[#717182]'}`}>{out ? 'Lab' : 'Dentist'}</span>
+          {msg.urgent && <UrgentBadge />}
           {showChannel && (
             <span className={`inline-flex items-center gap-0.5 text-[9px] font-semibold ${wa ? 'text-[#15803D]' : 'text-[#1565C0]'}`}>
               <ChIcon className="w-2.5 h-2.5" />{wa ? 'WhatsApp' : 'Email'}
@@ -1662,6 +1671,10 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
   const [msgs, setMsgs] = useState<ConvMsg[]>(() => buildConversation(caseData, replied, missing));
   const [draft, setDraft] = useState('');
   const [composeChannel, setComposeChannel] = useState<Channel>('email');
+  // "Mark as Urgent" arms the next send; confirmed via the reminder-schedule
+  // dialog before the message goes out.
+  const [urgentArmed, setUrgentArmed] = useState(false);
+  const [confirmUrgentOpen, setConfirmUrgentOpen] = useState(false);
   const idRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Open at the latest message; re-pin to the bottom when messages / tab change.
@@ -1696,12 +1709,19 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
   const shown = activeTab === 'email' ? emailMsgs : activeTab === 'whatsapp' ? waMsgs : msgs;
   const hasReply = msgs.some(m => m.channel === 'email' && m.dir === 'in');
 
+  const deliver = (t: string, isUrgent: boolean) => {
+    setMsgs(prev => [...prev, { id: `new-${++idRef.current}`, channel: composeChannel, dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now', body: t, urgent: isUrgent || undefined }]);
+    setDraft('');
+    setUrgentArmed(false);
+    toast.success(isUrgent
+      ? 'Urgent message sent — the recipient has been notified.'
+      : `Sent via ${composeChannel === 'email' ? 'Email' : 'WhatsApp'}`);
+  };
   const send = () => {
     const t = draft.trim();
     if (!t) return;
-    setMsgs(prev => [...prev, { id: `new-${++idRef.current}`, channel: composeChannel, dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now', body: t }]);
-    setDraft('');
-    toast.success(`Sent via ${composeChannel === 'email' ? 'Email' : 'WhatsApp'}`);
+    if (urgentArmed) { setConfirmUrgentOpen(true); return; }
+    deliver(t, false);
   };
   const simulateReply = () => {
     setMsgs(prev => [...prev, { id: `reply-${++idRef.current}`, channel: 'email', dir: 'in', name: caseData.dentist, initials: nameInitials(caseData.dentist), date: 'Today', time: 'now', body: `Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production.` }]);
@@ -1853,6 +1873,13 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
                   </button>
                 );
               })}
+              <button
+                onClick={() => setUrgentArmed(u => !u)}
+                title={urgentArmed ? 'This message will be sent as urgent' : 'Mark as Urgent — the recipient is reminded until they reply'}
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border transition-colors ${urgentArmed ? 'bg-[#FEF2F2] border-[#FECACA] text-[#DC2626]' : 'bg-white border-[#E0E0E6] text-[#717182] hover:text-[#DC2626] hover:border-[#FECACA]'}`}
+              >
+                <AlertTriangle className="w-3 h-3" /> Urgent
+              </button>
             </div>
             <button
               onClick={() => setDraft(draftReply)}
@@ -1862,7 +1889,7 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
               <AiSparkle /> Fill with AI
             </button>
           </div>
-          <div className="flex items-center gap-2 border border-[#E0E0E6] rounded-xl px-3 py-2">
+          <div className={`flex items-center gap-2 border rounded-xl px-3 py-2 transition-colors ${urgentArmed ? 'border-[#FECACA] ring-1 ring-[#FECACA]/40' : 'border-[#E0E0E6]'}`}>
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -1870,10 +1897,22 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
               placeholder={`Message ${caseData.dentist} via ${composeChannel === 'email' ? 'email' : 'WhatsApp'}…`}
               className="flex-1 text-sm text-[#030213] bg-transparent outline-none placeholder-[#A0A0B0]"
             />
-            <button onClick={send} disabled={!draft.trim()} className="p-1.5 text-[#4D8EF7] hover:text-[#3578E5] rounded transition-colors disabled:opacity-40"><Send className="w-4 h-4" /></button>
+            <button onClick={send} disabled={!draft.trim()} className={`p-1.5 rounded transition-colors disabled:opacity-40 ${urgentArmed ? 'text-[#DC2626] hover:text-[#B91C1C]' : 'text-[#4D8EF7] hover:text-[#3578E5]'}`}><Send className="w-4 h-4" /></button>
           </div>
+          {urgentArmed && (
+            <p className="flex items-center gap-1 mt-1.5 px-1 text-[10px] text-[#B91C1C]">
+              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+              Will be sent as urgent — the recipient gets reminders at 2, 4, 6 and 8 hours until they reply.
+            </p>
+          )}
         </div>
       )}
+
+      <UrgentConfirmModal
+        isOpen={confirmUrgentOpen}
+        onCancel={() => setConfirmUrgentOpen(false)}
+        onConfirm={() => { setConfirmUrgentOpen(false); deliver(draft.trim(), true); }}
+      />
     </div>
   );
 }

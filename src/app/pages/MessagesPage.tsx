@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import { ArrowLeft, Search, Plus, Paperclip, Send, Download, Eye, Info, Building2, Package } from 'lucide-react';
+import { ArrowLeft, Search, Plus, Paperclip, Send, Download, Eye, Info, Building2, Package, AlertTriangle } from 'lucide-react';
+import UrgentBadge from '../components/UrgentBadge';
+import UrgentConfirmModal from '../components/UrgentConfirmModal';
+import { useToast } from '../context/ToastContext';
 
 type ConversationType = 'Clinic' | 'Lab' | 'Supplier';
 
@@ -15,6 +18,11 @@ interface Message {
   text?: string;
   attachment?: Attachment;
   dateLabel?: string;
+  // Urgency applies to the individual message, not the conversation. Urgent
+  // messages are badged and trigger reminder notifications until replied to.
+  urgent?: boolean;
+  // Messages sent from the composer render right-aligned with a blue tint.
+  self?: boolean;
 }
 
 interface Conversation {
@@ -37,7 +45,7 @@ const CONVERSATIONS: Conversation[] = [
     name: 'Laburnum Dental',
     type: 'Clinic',
     unread: 14,
-    lastMessage: 'hahfsd',
+    lastMessage: 'The crown for CASE-051 arrived damaged — we need a remake before Friday\'s fitting. Please confirm ASAP.',
     lastDate: '12/8/2025',
     initials: 'LD',
     email: 'ttt-test-clinic-2@yopmail.com',
@@ -50,6 +58,7 @@ const CONVERSATIONS: Conversation[] = [
       { dateLabel: 'Mon, Dec 8' },
       { id: 'm4', fromName: 'Laburnum Dental', time: '12:19 PM', attachment: { filename: 'Untitled.pages', sizeKb: 90.4 } },
       { id: 'm5', fromName: 'Laburnum Dental', time: '12:27 PM', text: 'hahfsd' },
+      { id: 'm6', fromName: 'Laburnum Dental', time: '01:15 PM', text: 'The crown for CASE-051 arrived damaged — we need a remake before Friday\'s fitting. Please confirm ASAP.', urgent: true },
     ],
   },
   {
@@ -82,20 +91,48 @@ interface MessagesPageProps {
 }
 
 export default function MessagesPage({ onClose }: MessagesPageProps) {
+  const { toast } = useToast();
+  const [conversations, setConversations] = useState<Conversation[]>(CONVERSATIONS);
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<'all' | 'unread'>('all');
   const [activeId, setActiveId] = useState<string>(CONVERSATIONS[0].id);
   const [draft, setDraft] = useState('');
   const [contactInfoOpen, setContactInfoOpen] = useState(false);
+  // "Mark as Urgent" arms the next send; the confirm dialog explains the
+  // reminder schedule before the message actually goes out.
+  const [urgent, setUrgent] = useState(false);
+  const [confirmUrgentOpen, setConfirmUrgentOpen] = useState(false);
 
-  const filtered = CONVERSATIONS.filter(c => {
+  const filtered = conversations.filter(c => {
     if (tab === 'unread' && c.unread === 0) return false;
     if (search.trim() && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
-  const active = CONVERSATIONS.find(c => c.id === activeId)!;
-  const unreadCount = CONVERSATIONS.filter(c => c.unread > 0).length;
+  const active = conversations.find(c => c.id === activeId)!;
+  const unreadCount = conversations.filter(c => c.unread > 0).length;
+
+  const appendMessage = (isUrgent: boolean) => {
+    const text = draft.trim();
+    if (!text) return;
+    const time = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    setConversations(prev => prev.map(c => c.id === activeId
+      ? {
+          ...c,
+          lastMessage: text,
+          messages: [...c.messages, { id: `sent-${Date.now()}`, fromName: 'You', time, text, self: true, urgent: isUrgent || undefined }],
+        }
+      : c));
+    setDraft('');
+    setUrgent(false);
+    if (isUrgent) toast.success('Urgent message sent — the recipient has been notified.');
+  };
+
+  const handleSend = () => {
+    if (!draft.trim()) return;
+    if (urgent) setConfirmUrgentOpen(true);
+    else appendMessage(false);
+  };
 
   return (
     <div className="flex flex-col h-screen bg-[#F8F9FC]">
@@ -163,6 +200,9 @@ export default function MessagesPage({ onClose }: MessagesPageProps) {
         <div className="flex-1 overflow-y-auto">
           {filtered.map(c => {
             const isActive = c.id === activeId;
+            // A conversation with an unanswered urgent message gets flagged in
+            // the list so it stands out before it's even opened.
+            const hasUrgent = c.messages.some(m => 'id' in m && (m as Message).urgent && !(m as Message).self);
             return (
               <button
                 key={c.id}
@@ -191,7 +231,10 @@ export default function MessagesPage({ onClose }: MessagesPageProps) {
                     </div>
                     <span className="text-[10px] text-[#A0A0B0] flex-shrink-0">{c.lastDate}</span>
                   </div>
-                  <p className="text-xs text-[#717182] truncate mt-0.5">{c.lastMessage}</p>
+                  <div className="flex items-center gap-1 mt-0.5 min-w-0">
+                    {hasUrgent && <AlertTriangle className="w-3 h-3 text-[#DC2626] flex-shrink-0" />}
+                    <p className="text-xs text-[#717182] truncate">{c.lastMessage}</p>
+                  </div>
                 </div>
               </button>
             );
@@ -235,13 +278,21 @@ export default function MessagesPage({ onClose }: MessagesPageProps) {
               );
             }
             const msg = m as Message;
+            // Urgent messages get the red badge + tinted bubble for both the
+            // sender and the recipient; own messages sit right with a blue tint.
+            const bubble = msg.urgent
+              ? 'bg-[#FEF2F2] border-[#FECACA]'
+              : msg.self
+                ? 'bg-[#EEF4FF] border-[#DBEAFE]'
+                : 'bg-white border-[#E0E0E6]';
             return (
-              <div key={msg.id} className="max-w-md">
-                <div className="flex items-center gap-2 mb-1">
+              <div key={msg.id} className={`max-w-md ${msg.self ? 'ml-auto' : ''}`}>
+                <div className={`flex items-center gap-2 mb-1 ${msg.self ? 'justify-end' : ''}`}>
                   <span className="text-xs font-medium text-[#5A5568]">{msg.fromName}</span>
+                  {msg.urgent && <UrgentBadge />}
                   <span className="text-[10px] text-[#A0A0B0]">{msg.time}</span>
                 </div>
-                <div className="bg-white border border-[#E0E0E6] rounded-xl px-3 py-2.5">
+                <div className={`border rounded-xl px-3 py-2.5 ${bubble}`}>
                   {msg.text && <p className="text-sm text-[#030213]">{msg.text}</p>}
                   {msg.attachment && (
                     <div>
@@ -274,27 +325,55 @@ export default function MessagesPage({ onClose }: MessagesPageProps) {
 
         {/* Composer */}
         <div className="flex-shrink-0 border-t border-[#F0EFF6] p-3">
-          <div className="flex items-center gap-2 border border-[#E0E0E6] rounded-xl px-3 py-2">
+          <div className={`flex items-center gap-2 border rounded-xl px-3 py-2 transition-colors ${
+            urgent ? 'border-[#FECACA] ring-1 ring-[#FECACA]/40' : 'border-[#E0E0E6]'
+          }`}>
             <input
               type="text"
               value={draft}
               onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleSend(); }}
               placeholder="Write a message..."
               className="flex-1 text-sm text-[#030213] bg-transparent outline-none placeholder-[#A0A0B0]"
             />
+            <button
+              onClick={() => setUrgent(u => !u)}
+              title={urgent ? 'This message will be sent as urgent' : 'Mark as Urgent'}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border transition-colors ${
+                urgent
+                  ? 'bg-[#FEF2F2] border-[#FECACA] text-[#DC2626]'
+                  : 'bg-white border-[#E0E0E6] text-[#717182] hover:text-[#DC2626] hover:border-[#FECACA]'
+              }`}
+            >
+              <AlertTriangle className="w-3 h-3" /> Urgent
+            </button>
             <button className="p-1.5 text-[#717182] hover:text-[#030213] rounded transition-colors">
               <Paperclip className="w-4 h-4" />
             </button>
             <button
               disabled={!draft.trim()}
-              onClick={() => setDraft('')}
-              className="p-1.5 text-[#4D8EF7] hover:text-[#3578E5] rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={handleSend}
+              className={`p-1.5 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                urgent ? 'text-[#DC2626] hover:text-[#B91C1C]' : 'text-[#4D8EF7] hover:text-[#3578E5]'
+              }`}
             >
               <Send className="w-4 h-4" />
             </button>
           </div>
+          {urgent && (
+            <p className="flex items-center gap-1 mt-1.5 px-1 text-[10px] text-[#B91C1C]">
+              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+              Will be sent as urgent — the recipient gets reminders at 2, 4, 6 and 8 hours until they reply.
+            </p>
+          )}
         </div>
       </section>
+
+      <UrgentConfirmModal
+        isOpen={confirmUrgentOpen}
+        onCancel={() => setConfirmUrgentOpen(false)}
+        onConfirm={() => { setConfirmUrgentOpen(false); appendMessage(true); }}
+      />
 
       {/* Contact info — collapsed by default, toggle via Info button */}
       {contactInfoOpen && (

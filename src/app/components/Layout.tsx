@@ -3,7 +3,7 @@ import { ChevronRight, ChevronLeft as ChevronLeftIcon, PanelLeftClose, PanelLeft
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import PageLoader from './PageLoader';
-import { MOCK_NOTIFICATIONS } from '../pages/NotificationsPage';
+import { MOCK_NOTIFICATIONS, notificationIcon } from '../pages/NotificationsPage';
 
 function NotificationsPopover({ onClose: _onClose, onViewAll }: { onClose: () => void; onViewAll: () => void }) {
   const [tab, setTab] = useState<'all' | 'unread'>('all');
@@ -36,11 +36,13 @@ function NotificationsPopover({ onClose: _onClose, onViewAll }: { onClose: () =>
         {items.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-[#717182]">No notifications</p>
         ) : (
-          items.map(n => (
+          items.map(n => {
+            const { Icon, bg, color } = notificationIcon(n.type);
+            return (
             <div key={n.id} className="px-5 py-3.5 border-b border-[#F0EFF6] last:border-b-0 flex items-start gap-3">
               <div className="relative flex-shrink-0">
-                <div className="w-8 h-8 rounded-full bg-[#F3F3F5] flex items-center justify-center text-[10px] font-semibold text-[#5A5568]">
-                  R
+                <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: bg }}>
+                  <Icon className="w-3.5 h-3.5" style={{ color }} />
                 </div>
                 {!n.read && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#D4183D]" />}
               </div>
@@ -50,7 +52,8 @@ function NotificationsPopover({ onClose: _onClose, onViewAll }: { onClose: () =>
                 <p className="text-[10px] text-[#A0A0B0] mt-1.5">{n.timestamp}</p>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
       <button

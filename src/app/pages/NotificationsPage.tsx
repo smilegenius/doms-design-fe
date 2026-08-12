@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Settings as SettingsIcon, Clock } from 'lucide-react';
+import { Search, Settings as SettingsIcon, Clock, Bell, AlertTriangle } from 'lucide-react';
 
 export interface NotificationItem {
   id: string;
@@ -7,9 +7,36 @@ export interface NotificationItem {
   body: string;
   timestamp: string;
   read: boolean;
+  // Urgent chat notifications (immediate + 2/4/6/8h reminders) render with a
+  // red alert chip; everything else keeps the neutral bell.
+  type?: 'urgent-message' | 'urgent-reminder';
+}
+
+// Icon chip per notification type — shared by this page and the bell popover.
+export function notificationIcon(type?: NotificationItem['type']) {
+  if (type === 'urgent-message' || type === 'urgent-reminder') {
+    return { Icon: AlertTriangle, bg: '#FEF2F2', color: '#DC2626' };
+  }
+  return { Icon: Bell, bg: '#F3F3F5', color: '#717182' };
 }
 
 export const MOCK_NOTIFICATIONS: NotificationItem[] = [
+  {
+    id: 'n0-reminder',
+    type: 'urgent-reminder',
+    title: 'Reminder: Urgent message awaiting your response',
+    body: 'An urgent message from Laburnum Dental is still awaiting your response. Please respond as soon as possible to ensure timely communication.',
+    timestamp: '20-May-2026, 01:15 PM',
+    read: false,
+  },
+  {
+    id: 'n0-urgent',
+    type: 'urgent-message',
+    title: 'Urgent message received from Laburnum Dental',
+    body: 'You have received an urgent message from Laburnum Dental regarding Case CASE-051. Please review and respond as soon as possible.',
+    timestamp: '20-May-2026, 11:15 AM',
+    read: false,
+  },
   {
     id: 'n1',
     title: '7 days till monthly pay period auto-extraction',
@@ -137,21 +164,30 @@ export default function NotificationsPage({ onOpenSettings }: NotificationsPageP
             <p className="text-sm text-[#717182]">No notifications found</p>
           </div>
         ) : (
-          filtered.map(n => (
-            <div
-              key={n.id}
-              className="bg-white rounded-lg border border-[#E0E0E6] px-5 py-4 flex items-start justify-between gap-4 hover:shadow-sm transition-shadow"
-            >
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-[#030213] mb-1">{n.title}</p>
-                <p className="text-xs text-[#717182] leading-relaxed">{n.body}</p>
+          filtered.map(n => {
+            const { Icon, bg, color } = notificationIcon(n.type);
+            return (
+              <div
+                key={n.id}
+                className="bg-white rounded-lg border border-[#E0E0E6] px-5 py-4 flex items-start justify-between gap-4 hover:shadow-sm transition-shadow"
+              >
+                <div
+                  className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: bg }}
+                >
+                  <Icon className="w-4 h-4" style={{ color }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[#030213] mb-1">{n.title}</p>
+                  <p className="text-xs text-[#717182] leading-relaxed">{n.body}</p>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-[#A0A0B0] flex-shrink-0 whitespace-nowrap">
+                  <Clock className="w-3.5 h-3.5" />
+                  {n.timestamp}
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 text-xs text-[#A0A0B0] flex-shrink-0 whitespace-nowrap">
-                <Clock className="w-3.5 h-3.5" />
-                {n.timestamp}
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

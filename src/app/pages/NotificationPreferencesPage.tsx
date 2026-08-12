@@ -75,7 +75,7 @@ const CATEGORIES: NotificationCategory[] = [
     iconBg: '#F3EEFF', iconColor: '#7C3AED',
     items: [
       { id: 'msg-new',      label: 'New Chat Message',     description: 'Notify me about new messages in my case chats.',       supports: BOTH },
-      { id: 'msg-urgent',   label: 'Urgent Chat Message',  description: 'A message was flagged urgent by the sender.',          supports: IN_APP_ONLY },
+      { id: 'msg-urgent',   label: 'Urgent Chat Message',  description: 'A message was flagged urgent by the sender. Reminders repeat at 2, 4, 6 and 8 hours until you reply.', supports: BOTH },
       { id: 'msg-mention',  label: 'Someone Mentioned You', description: 'Notify me when I am @-mentioned in a conversation.',  supports: BOTH },
       { id: 'msg-reminder', label: 'Chat Reminder',        description: 'A digest of chats still waiting on your reply.',       supports: EMAIL_ONLY },
     ],
