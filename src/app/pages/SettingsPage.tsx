@@ -78,8 +78,6 @@ const mockMembers: Member[] = [
   { id: '4', name: 'Dr. Murphy',       email: 'murphy@smilegenius.com',                employeeId: 'EMP-011', role: 'Dentist',        department: 'Clinical',       status: 'invited' },
 ];
 
-const orderStatuses = ['New Order', 'In Production', 'Quality Check', 'Shipped', 'Delivered', 'Refinement', 'On Hold'];
-const paymentStatuses = ['Awaiting Settlement', 'Settled', 'Failed', 'Refund Issued'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -156,14 +154,6 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
   };
 
   const { toast } = useToast();
-
-  // Notification toggles
-  const [orderNotif, setOrderNotif] = useState<Record<string, { email: boolean; system: boolean }>>(
-    Object.fromEntries(orderStatuses.map((s, i) => [s, { email: i % 2 === 0, system: true }]))
-  );
-  const [paymentNotif, setPaymentNotif] = useState<Record<string, { email: boolean; system: boolean }>>(
-    Object.fromEntries(paymentStatuses.map((s) => [s, { email: false, system: true }]))
-  );
 
   // Team members — seeded from the mock list, appended on invite.
   const [members, setMembers] = useState<Member[]>(mockMembers);
@@ -823,65 +813,14 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
             </button>
           </div>
 
-          {notifSubTab === 'escalations' && <EscalationMatrix />}
+          {notifSubTab === 'escalations' && <EscalationMatrix portal={portal} />}
 
-          {notifSubTab === 'preferences' && portal === 'lab' && (
-            <NotificationPreferences />
-          )}
-          {notifSubTab === 'preferences' && portal === 'clinic' && (
-        <div className="space-y-4">
-          {/* Order status */}
-          <div className="bg-white rounded-xl border border-[#E0E0E6] overflow-hidden">
-            <div className="grid grid-cols-[1fr_140px_140px] gap-4 px-6 py-3 bg-[#F8F9FC] border-b border-[#F0EFF6]">
-              <h3 className="text-sm font-semibold text-[#030213]">Order Status</h3>
-              <div className="text-[11px] font-medium text-[#717182] uppercase tracking-wide flex items-center gap-1.5 justify-center">
-                <Mail className="w-3.5 h-3.5" /> Email
-              </div>
-              <div className="text-[11px] font-medium text-[#717182] uppercase tracking-wide flex items-center gap-1.5 justify-center">
-                <Bell className="w-3.5 h-3.5" /> System
-              </div>
-            </div>
-            <div className="divide-y divide-[#F0EFF6]">
-              {orderStatuses.map((s) => (
-                <div key={s} className="grid grid-cols-[1fr_140px_140px] gap-4 px-6 py-3 items-center">
-                  <span className="text-sm text-[#030213]">{s}</span>
-                  <div className="flex justify-center">
-                    <Toggle on={orderNotif[s].email} onChange={() => setOrderNotif({ ...orderNotif, [s]: { ...orderNotif[s], email: !orderNotif[s].email } })} />
-                  </div>
-                  <div className="flex justify-center">
-                    <Toggle on={orderNotif[s].system} onChange={() => setOrderNotif({ ...orderNotif, [s]: { ...orderNotif[s], system: !orderNotif[s].system } })} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Payment status */}
-          <div className="bg-white rounded-xl border border-[#E0E0E6] overflow-hidden">
-            <div className="grid grid-cols-[1fr_140px_140px] gap-4 px-6 py-3 bg-[#F8F9FC] border-b border-[#F0EFF6]">
-              <h3 className="text-sm font-semibold text-[#030213]">Payment Status</h3>
-              <div className="text-[11px] font-medium text-[#717182] uppercase tracking-wide flex items-center gap-1.5 justify-center">
-                <Mail className="w-3.5 h-3.5" /> Email
-              </div>
-              <div className="text-[11px] font-medium text-[#717182] uppercase tracking-wide flex items-center gap-1.5 justify-center">
-                <Bell className="w-3.5 h-3.5" /> System
-              </div>
-            </div>
-            <div className="divide-y divide-[#F0EFF6]">
-              {paymentStatuses.map((s) => (
-                <div key={s} className="grid grid-cols-[1fr_140px_140px] gap-4 px-6 py-3 items-center">
-                  <span className="text-sm text-[#030213]">{s}</span>
-                  <div className="flex justify-center">
-                    <Toggle on={paymentNotif[s].email} onChange={() => setPaymentNotif({ ...paymentNotif, [s]: { ...paymentNotif[s], email: !paymentNotif[s].email } })} />
-                  </div>
-                  <div className="flex justify-center">
-                    <Toggle on={paymentNotif[s].system} onChange={() => setPaymentNotif({ ...paymentNotif, [s]: { ...paymentNotif[s], system: !paymentNotif[s].system } })} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+          {/* Per-portal preference centre — only non-critical notifications
+              are configurable; each portal carries its own catalogue. The
+              clinic's old Order/Payment status toggle tables were replaced by
+              the shared preference centre with the clinic catalogue. */}
+          {notifSubTab === 'preferences' && (
+            <NotificationPreferences portal={portal} />
           )}
         </div>
       )}

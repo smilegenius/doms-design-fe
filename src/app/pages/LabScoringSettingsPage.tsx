@@ -196,6 +196,15 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
     return total > 0 && total !== 100;
   });
 
+  // ── Dirty tracking for the save bar ──
+  // Signature of everything this page edits; Save is inactive until it drifts
+  // from the last-saved snapshot (taken at mount, refreshed on each save).
+  // Case Scoring Emails is excluded — that module persists live and hides the
+  // save bar entirely.
+  const stateSignature = JSON.stringify({ config, thresholds, prescription, serviceOffered });
+  const [savedSignature, setSavedSignature] = useState(stateSignature);
+  const isDirty = stateSignature !== savedSignature;
+
   return (
     <div className={embedded ? 'space-y-5' : 'p-4 sm:p-6 lg:p-8 space-y-5'}>
       {/* Header — title tracks the locked section when this page is embedded
@@ -640,13 +649,27 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
             </>
           )}
 
-          {/* Save bar — sticks to the bottom of the viewport on long pages */}
+          {/* Save bar — sticks to the bottom of the viewport on long pages.
+              Inactive until something actually changed; hidden on the Case
+              Scoring Emails tab, which persists every change instantly. */}
+          {!(section === 'scoring' && scoringTab === 'email') && (
           <div className="sticky bottom-0 z-20 flex items-center justify-between gap-3 bg-white border border-[#E0E0E6] rounded-xl px-5 py-3.5 shadow-[0_-4px_16px_-8px_rgba(0,0,0,0.15)]">
             <div className="flex items-center gap-2 text-xs text-[#717182]">
-              <CheckCircle2 className="w-4 h-4 text-[#15803D]" />
-              Changes apply live — the form and scores update across the lab and clinic instantly.
+              {isDirty ? (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-[#F59E0B] animate-pulse flex-shrink-0" />
+                  Unsaved changes — they already apply live across the lab and clinic; Save confirms them.
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-[#15803D]" />
+                  All changes saved — the form and scores are live across the lab and clinic.
+                </>
+              )}
             </div>
             <button
+              disabled={!isDirty}
+              title={isDirty ? undefined : 'No changes to save'}
               onClick={() => {
                 if (invalidScoringServices.length > 0) {
                   toast.error(`Weights must total 100 before saving. Fix: ${invalidScoringServices.join(', ')}.`);
@@ -654,14 +677,16 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
                   setActiveService(invalidScoringServices[0]);
                   return;
                 }
+                setSavedSignature(stateSignature);
                 toast.success('Configuration saved');
               }}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:opacity-45"
             >
               <Save className="w-4 h-4" />
               Save changes
             </button>
           </div>
+          )}
         </section>
       </div>
 

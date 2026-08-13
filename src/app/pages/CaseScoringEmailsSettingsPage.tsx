@@ -1,17 +1,41 @@
 import { useState } from 'react';
 import {
   Mail, CheckCircle2, Plus, X, Eye, Pencil, Trash2, Copy, RefreshCw,
-  AlertTriangle, Loader2, FileText, Sparkles, Ban, ChevronDown,
+  AlertTriangle, Loader2, FileText, Sparkles, Ban, ChevronDown, Bell, ShieldAlert,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
 import Toggle from '../components/Toggle';
 import { useToast } from '../context/ToastContext';
+import { RecipientSearchSelect, CLINIC_MEMBERS } from './EscalationMatrixPage';
 import {
   useCaseScoringEmails, connectEmail, disconnectEmail, reconnectEmail,
   setAutomationEnabled, selectTemplate, addCustomTemplate, updateCustomTemplate, removeCustomTemplate,
+  setEscalation, ESCALATION_TIMEFRAMES,
   DEFAULT_TEMPLATES, PROVIDER_META, CATEGORY_META, SCORING_EMAIL_PLACEHOLDERS, MOCK_LAB_EMAIL,
 } from '../data/caseScoringEmails';
-import type { EmailProvider, ScoringEmailCategory, ScoringEmailTemplate } from '../data/caseScoringEmails';
+import type { EmailProvider, EscalationTimeframe, ScoringEmailCategory, ScoringEmailTemplate } from '../data/caseScoringEmails';
+
+// ── Case Scoring escalation copy — the product spec's, verbatim. The "Email
+// Sent" row carries the required "date and time the original Case Scoring
+// email was sent". ──
+const ESCALATION_EMAIL_SUBJECT = 'Escalation: Case Scoring Request Requires Attention';
+const ESCALATION_EMAIL_BODY = `Hi {{Recipient Name}},
+
+This case has been escalated because no response has been received, or the requested updates have not been made following the Case Scoring email.
+
+Patient: {{Patient Name}}
+Case ID: {{Case ID}}
+Case Scoring Result: {{Needs Review / Incomplete}}
+Due Date: {{Due Date}}
+Email Sent: {{Sent Date & Time}}
+
+Please review the case and follow up to ensure the required information is provided before the due date.
+
+View Case: {{Case Link}}
+
+Thank you,
+{{Lab Name}}`;
+const ESCALATION_IN_APP = 'Case {{Case ID}} has been escalated because no response has been received or the requested updates have not been made following the Case Scoring email.';
 
 // ─── Settings → Case Scoring Emails (lab portal) ─────────────────────────────
 // Everything the Automated Case Scoring Emails feature configures, in one
@@ -91,8 +115,10 @@ type EditorState = {
 
 export default function CaseScoringEmailsSettings() {
   const { toast } = useToast();
-  const { connection, automation, customTemplates } = useCaseScoringEmails();
+  const { connection, automation, escalation, customTemplates } = useCaseScoringEmails();
   const connected = connection.status === 'connected';
+  // Case Scoring escalation preview modal (email + in-app), per outcome.
+  const [escPreview, setEscPreview] = useState<ScoringEmailCategory | null>(null);
 
   // Connect flow: pick a provider → mock OAuth consent → connecting → done.
   const [consentProvider, setConsentProvider] = useState<EmailProvider | null>(null);
@@ -101,7 +127,14 @@ export default function CaseScoringEmailsSettings() {
   const [pickerOverride, setPickerOverride] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
 
-  const [preview, setPreview] = useState<ScoringEmailTemplate | null>(null);
+  // Preview modal: which template is shown + (when opened from an outcome's
+  // picker) the category context — it scopes the modal's switcher dropdown
+  // and enables the "Use for …" action.
+  const [preview, setPreview] = useState<{ tpl: ScoringEmailTemplate; category?: ScoringEmailCategory } | null>(null);
+  // The preview modal's template-switcher dropdown (same pattern as the
+  // outcome pickers: radio rows with tone + subject).
+  const [previewMenuOpen, setPreviewMenuOpen] = useState(false);
+  const closePreview = () => { setPreview(null); setPreviewMenuOpen(false); };
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ScoringEmailTemplate | null>(null);
   // Which category's template-picker dropdown is open (null = none).
@@ -393,7 +426,7 @@ export default function CaseScoringEmailsSettings() {
                             </span>
                           </button>
                           <button
-                            onClick={() => { setTemplateMenuFor(null); setPreview(t); }}
+                            onClick={() => { setTemplateMenuFor(null); setPreview({ tpl: t, category: cat }); }}
                             className="p-1 rounded-md text-[#717182] hover:text-[#4D8EF7] hover:bg-white transition-colors flex-shrink-0"
                             title={`Preview "${t.name}"`}
                           >
@@ -447,7 +480,7 @@ export default function CaseScoringEmailsSettings() {
                           )}
                         </div>
                         <button
-                          onClick={() => setPreview(selectedTpl)}
+                          onClick={() => setPreview({ tpl: selectedTpl, category: cat })}
                           className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg text-[11px] font-medium text-[#4D8EF7] border border-[#C8D8FC] bg-[#F5F8FF] hover:bg-[#EEF4FF] transition-colors flex-shrink-0"
                           title={`Preview "${selectedTpl.name}"`}
                         >
@@ -486,7 +519,145 @@ export default function CaseScoringEmailsSettings() {
         </div>
       </Card>
 
-      {/* ── 3 · Custom Templates — create & manage the lab's own wording ── */}
+      {/* ── 3 · Escalation — unresolved Case Scoring requests ── */}
+      {/* When the dentist neither replies to the Case Scoring email nor
+          updates the case within the configured timeframe, the request
+          escalates to a clinic user associated with the case, who receives an
+          Email + In-App notification. Available for Needs Review and
+          Incomplete only — Complete never sends an email, so there is
+          nothing to escalate. */}
+      <Card title="Escalation">
+        <p className="text-xs text-[#717182] leading-relaxed mb-4">
+          If the dentist does not respond to the Case Scoring email — and the case is not updated — the request is
+          escalated to a clinic contact so someone can intervene before the case due date and prevent delays in
+          production.
+        </p>
+        <div className="space-y-4">
+          {CATEGORIES.map(cat => {
+            const meta = CATEGORY_META[cat];
+            const esc = escalation[cat];
+            const contact = CLINIC_MEMBERS.find(m => m.id === esc.contactId);
+            const prereqMissing = esc.enabled && (!connected || !automation[cat].enabled);
+            return (
+              <div key={cat} className="border border-[#E0E0E6] rounded-xl">
+                {/* Outcome header — status + Enable Escalation toggle */}
+                <div className="flex items-center justify-between gap-3 px-4 py-3 bg-[#FAFBFC] border-b border-[#F0EFF6] rounded-t-xl">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: meta.dot }} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[#030213] flex items-center gap-2 flex-wrap">
+                        {meta.label}
+                        {esc.enabled && esc.contactId && (
+                          <span className="inline-flex items-center px-1.5 py-px rounded-full bg-[#F0FDF4] border border-[#BBF7D0] text-[9px] font-bold uppercase tracking-wider text-[#15803D]">Active</span>
+                        )}
+                        {esc.enabled && !esc.contactId && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full bg-[#FFF8E1] border border-[#FDE68A] text-[9px] font-bold uppercase tracking-wider text-[#B45309]">
+                            <AlertTriangle className="w-2.5 h-2.5" /> Contact required
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[11px] text-[#717182] leading-relaxed mt-0.5">
+                        Escalates unresolved {meta.label} emails to a clinic contact.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className={`text-[11px] font-semibold ${esc.enabled ? 'text-[#15803D]' : 'text-[#A0A0B0]'}`}>
+                      {esc.enabled ? 'Escalation enabled' : 'Escalation disabled'}
+                    </span>
+                    <Toggle
+                      on={esc.enabled}
+                      onChange={() => {
+                        setEscalation(cat, { enabled: !esc.enabled });
+                        toast.success(`${meta.label} escalation ${esc.enabled ? 'disabled' : 'enabled'}`);
+                      }}
+                      title="Enable Escalation"
+                    />
+                  </div>
+                </div>
+
+                {esc.enabled && (
+                  <div className="px-4 py-3">
+                    {prereqMissing && (
+                      <div className="mb-3 flex items-start gap-2 px-3 py-2 rounded-lg border border-[#FDE68A] bg-[#FFFBEB]">
+                        <AlertTriangle className="w-3.5 h-3.5 text-[#B45309] flex-shrink-0 mt-0.5" />
+                        <p className="text-[11px] text-[#A16207] leading-relaxed">
+                          Escalation starts from the moment a Case Scoring email is successfully sent —{' '}
+                          {!connected
+                            ? 'connect your business email above so the emails can go out.'
+                            : `enable the ${meta.label} email automation above so there is an email to escalate.`}
+                        </p>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4">
+                      {/* Escalation Contact */}
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0]">Escalation Contact</p>
+                        <p className="text-xs text-[#717182] mt-0.5 mb-2">
+                          Select the escalation contact from the existing clinic users associated with the case.
+                        </p>
+                        <RecipientSearchSelect
+                          members={CLINIC_MEMBERS}
+                          selected={contact}
+                          onChange={(memberId) => setEscalation(cat, { contactId: memberId })}
+                        />
+                        <button
+                          onClick={() => setEscPreview(cat)}
+                          className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:text-[#3578E5] transition-colors"
+                        >
+                          <Eye className="w-3 h-3" /> Preview email &amp; in-app notification
+                        </button>
+                      </div>
+
+                      {/* Escalation Trigger */}
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0]">Escalation Trigger</p>
+                        <p className="text-xs text-[#717182] mt-0.5 mb-2">
+                          Escalate if no response has been received from the dentist — and no updates have been made to
+                          the case — within:
+                        </p>
+                        <select
+                          value={esc.timeframe}
+                          onChange={(e) => setEscalation(cat, { timeframe: e.target.value as EscalationTimeframe })}
+                          className="w-full max-w-xs px-3 py-2 text-xs font-medium text-[#030213] bg-white border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] cursor-pointer"
+                        >
+                          {ESCALATION_TIMEFRAMES.map(t => (
+                            <option key={t.id} value={t.id}>{t.label}</option>
+                          ))}
+                        </select>
+                        <p className="text-[11px] text-[#A0A0B0] leading-relaxed mt-2">
+                          If the case due date is closer than this timeframe when the Case Scoring email is sent, the
+                          escalation triggers immediately. If the dentist responds or the case is updated before the
+                          timeframe expires, no escalation is sent.
+                        </p>
+                        <div className="mt-2">
+                          <p className="text-[11px] font-semibold text-[#5A5568]">Escalation only occurs when:</p>
+                          <ul className="mt-1 space-y-0.5">
+                            {[
+                              `The Case Scoring result is ${meta.label}.`,
+                              'A Case Scoring email has been successfully sent to the dentist.',
+                              'No response has been received, or no updates have been made to the case.',
+                              'The case has not been completed.',
+                              'The case has not been cancelled.',
+                            ].map(c => (
+                              <li key={c} className="flex items-start gap-1.5 text-[11px] text-[#717182]">
+                                <span className="w-1 h-1 rounded-full bg-[#A0A0B0] mt-1.5 flex-shrink-0" />
+                                {c}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* ── 4 · Custom Templates — create & manage the lab's own wording ── */}
       <Card
         title="Custom Templates"
         actions={
@@ -535,7 +706,7 @@ export default function CaseScoringEmailsSettings() {
                     </p>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
-                    <button onClick={() => setPreview(t)} title="Preview" className="p-1.5 rounded-lg text-[#717182] hover:text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors">
+                    <button onClick={() => setPreview({ tpl: t })} title="Preview" className="p-1.5 rounded-lg text-[#717182] hover:text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors">
                       <Eye className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => openEdit(t)} title="Edit" className="p-1.5 rounded-lg text-[#717182] hover:text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors">
@@ -638,47 +809,137 @@ export default function CaseScoringEmailsSettings() {
         </ModalPortal>
       )}
 
-      {/* ── Template preview ── */}
-      {preview && (
+      {/* ── Template preview — the title is a switcher dropdown, so other
+          templates can be compared without closing the modal. Opened from an
+          outcome's picker, the list is scoped to that outcome (its defaults +
+          customs) and the footer offers "Use for …" to select right here. ── */}
+      {preview && (() => {
+        const groups: { label: string; items: ScoringEmailTemplate[] }[] = preview.category
+          ? [
+              { label: 'Default templates', items: DEFAULT_TEMPLATES[preview.category] },
+              ...(customTemplates.length ? [{ label: 'Custom templates', items: customTemplates }] : []),
+            ]
+          : [
+              { label: 'Needs Review · defaults', items: DEFAULT_TEMPLATES['needs-review'] },
+              { label: 'Incomplete · defaults', items: DEFAULT_TEMPLATES.incomplete },
+              ...(customTemplates.length ? [{ label: 'Custom templates', items: customTemplates }] : []),
+            ];
+        const isSelected = !!preview.category && automation[preview.category].templateId === preview.tpl.id;
+        return (
         <ModalPortal>
           <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setPreview(null)} />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={closePreview} />
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
               <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#F0EFF6] flex-shrink-0">
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
                   <span className="w-8 h-8 rounded-lg bg-[#EEF4FF] flex items-center justify-center flex-shrink-0">
                     <Eye className="w-4 h-4 text-[#4D8EF7]" />
                   </span>
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-semibold text-[#030213] truncate flex items-center gap-1.5">
-                      {preview.name} <ToneChip tone={preview.tone} />
-                    </h3>
-                    <p className="text-[11px] text-[#717182]">Template preview</p>
+                  <div className="min-w-0 flex-1">
+                    {/* Switcher — identical pattern to the outcome pickers:
+                        trigger with name + tone chip, panel of radio rows. */}
+                    <div className="relative min-w-0">
+                      <button
+                        onClick={() => setPreviewMenuOpen(o => !o)}
+                        aria-haspopup="listbox"
+                        aria-expanded={previewMenuOpen}
+                        title="Switch the previewed template"
+                        className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-white transition-colors text-left ${
+                          previewMenuOpen ? 'border-[#4D8EF7] ring-2 ring-[#4D8EF7]/15' : 'border-[#E0E0E6] hover:border-[#C8D8FC]'
+                        }`}
+                      >
+                        <span className="text-sm font-semibold text-[#030213] truncate">{preview.tpl.name}</span>
+                        <ToneChip tone={preview.tpl.tone} />
+                        <ChevronDown className={`w-3.5 h-3.5 text-[#717182] ml-auto flex-shrink-0 transition-transform ${previewMenuOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {previewMenuOpen && (
+                        <>
+                          <span className="fixed inset-0 z-20" onClick={() => setPreviewMenuOpen(false)} />
+                          <div className="absolute top-full left-0 right-0 mt-1 z-30 rounded-xl border border-[#E0E0E6] bg-white shadow-lg" role="listbox">
+                            <div className="max-h-64 overflow-y-auto p-1.5">
+                              {groups.map(g => (
+                                <div key={g.label}>
+                                  <p className="px-2 pt-1 pb-0.5 text-[9px] font-bold uppercase tracking-wider text-[#A0A0B0]">{g.label}</p>
+                                  {g.items.map(t => {
+                                    const active = t.id === preview.tpl.id;
+                                    return (
+                                      <button
+                                        key={t.id}
+                                        role="option"
+                                        aria-selected={active}
+                                        onClick={() => { setPreview({ ...preview, tpl: t }); setPreviewMenuOpen(false); }}
+                                        title={`Preview "${t.name}"`}
+                                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors ${active ? 'bg-[#EEF4FF]' : 'hover:bg-[#F8F9FC]'}`}
+                                      >
+                                        <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${active ? 'border-[#4D8EF7]' : 'border-[#D4CEE1]'}`}>
+                                          {active && <span className="w-1.5 h-1.5 rounded-full bg-[#4D8EF7]" />}
+                                        </span>
+                                        <span className="min-w-0">
+                                          <span className="flex items-center gap-1.5 flex-wrap">
+                                            <span className={`text-xs font-semibold ${active ? 'text-[#1565C0]' : 'text-[#030213]'}`}>{t.name}</span>
+                                            <ToneChip tone={t.tone} />
+                                          </span>
+                                          <span className="block text-[10px] text-[#A0A0B0] truncate mt-px">{t.subject}</span>
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-[#717182] mt-0.5">
+                      Template preview{preview.category ? ` · ${CATEGORY_META[preview.category].label}` : ''}
+                    </p>
                   </div>
                 </div>
-                <button onClick={() => setPreview(null)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors flex-shrink-0">
+                <button onClick={closePreview} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors flex-shrink-0">
                   <X className="w-4 h-4" />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0] mb-1">Subject</p>
-                  <p className="text-sm font-medium text-[#030213]"><MergeText text={preview.subject} /></p>
+                  <p className="text-sm font-medium text-[#030213]"><MergeText text={preview.tpl.subject} /></p>
                 </div>
                 <div className="border-t border-[#F0EFF6] pt-3">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0] mb-1.5">Body</p>
-                  <MergeText text={preview.body} block />
+                  <MergeText text={preview.tpl.body} block />
                 </div>
               </div>
-              <div className="px-5 py-3 bg-[#F8F9FC] border-t border-[#F0EFF6] flex-shrink-0">
+              <div className="px-5 py-3 bg-[#F8F9FC] border-t border-[#F0EFF6] flex-shrink-0 flex items-center justify-between gap-3">
                 <p className="text-[10px] text-[#A0A0B0]">
                   Placeholders are filled automatically from the case when the email is sent.
                 </p>
+                {preview.category && (
+                  isSelected ? (
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#15803D] flex-shrink-0">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Selected for {CATEGORY_META[preview.category].label}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        selectTemplate(preview.category!, preview.tpl.id);
+                        toast.success(`"${preview.tpl.name}" selected for ${CATEGORY_META[preview.category!].label}`);
+                        closePreview();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity flex-shrink-0"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Use for {CATEGORY_META[preview.category].label}
+                    </button>
+                  )
+                )}
               </div>
             </div>
           </div>
         </ModalPortal>
-      )}
+        );
+      })()}
 
       {/* ── Custom template editor (create + edit) ── */}
       {editor && (
@@ -795,6 +1056,69 @@ export default function CaseScoringEmailsSettings() {
           </div>
         </ModalPortal>
       )}
+
+      {/* ── Case Scoring escalation preview — email + in-app, PM copy verbatim ── */}
+      {escPreview && (() => {
+        const meta = CATEGORY_META[escPreview];
+        const contact = CLINIC_MEMBERS.find(m => m.id === escalation[escPreview].contactId);
+        const body = ESCALATION_EMAIL_BODY.replace('{{Recipient Name}}', contact?.name ?? '{{Recipient Name}}');
+        return (
+          <ModalPortal>
+            <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setEscPreview(null)} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#F0EFF6] flex-shrink-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-8 h-8 rounded-lg bg-[#FFF8E1] flex items-center justify-center flex-shrink-0">
+                      <ShieldAlert className="w-4 h-4 text-[#B45309]" />
+                    </span>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold text-[#030213] truncate">{meta.label} — escalation preview</h3>
+                      <p className="text-[11px] text-[#717182]">Sent when the Case Scoring email goes unanswered</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setEscPreview(null)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors flex-shrink-0">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                  {/* Email */}
+                  <div>
+                    <p className="flex items-center gap-1.5 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-1.5">
+                      <Mail className="w-3 h-3" /> Email
+                    </p>
+                    <div className="rounded-lg bg-[#F8F9FC] border border-[#F0EFF6] px-4 py-2.5 mb-3">
+                      <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-0.5">Subject</p>
+                      <p className="text-sm font-semibold text-[#030213]">{ESCALATION_EMAIL_SUBJECT}</p>
+                    </div>
+                    <MergeText text={body} block />
+                  </div>
+                  {/* In-app */}
+                  <div className="border-t border-[#F0EFF6] pt-3">
+                    <p className="flex items-center gap-1.5 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-1.5">
+                      <Bell className="w-3 h-3" /> In-App Notification
+                    </p>
+                    <div className="rounded-lg border border-[#E0E0E6] px-4 py-3 flex items-start gap-2.5">
+                      <span className="w-7 h-7 rounded-lg bg-[#FFF8E1] flex items-center justify-center flex-shrink-0">
+                        <ShieldAlert className="w-3.5 h-3.5 text-[#B45309]" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-xs text-[#030213] leading-relaxed"><MergeText text={ESCALATION_IN_APP} /></p>
+                        <p className="text-[11px] font-semibold text-[#4D8EF7] mt-1">Action: View Case</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="px-5 py-3 bg-[#F8F9FC] border-t border-[#F0EFF6] flex-shrink-0">
+                  <p className="text-[10px] text-[#A0A0B0]">
+                    Placeholders are filled automatically from the case when the escalation is sent.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
+        );
+      })()}
 
       {/* ── Delete-template confirmation ── */}
       {confirmDelete && (

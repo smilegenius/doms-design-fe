@@ -248,9 +248,32 @@ export interface CategoryAutomation {
   templateId: string;
 }
 
+// ── Case Scoring escalation ──────────────────────────────────────────────────
+// If the dentist neither responds to the Case Scoring email nor updates the
+// case within the configured timeframe, the request escalates to a clinic
+// contact so someone can intervene before the due date. Configured per
+// outcome (Needs Review / Incomplete); never for Complete.
+export type EscalationTimeframe = '12h' | '24h' | '48h' | '72h';
+
+export const ESCALATION_TIMEFRAMES: { id: EscalationTimeframe; label: string }[] = [
+  { id: '12h', label: '12 hours of sending the Case Scoring email' },
+  { id: '24h', label: '24 hours of sending the Case Scoring email' },
+  { id: '48h', label: '48 hours of sending the Case Scoring email' },
+  { id: '72h', label: '72 hours of sending the Case Scoring email' },
+];
+
+export interface CategoryEscalation {
+  enabled: boolean;
+  /** An existing clinic user associated with the case. */
+  contactId: string;
+  /** No response AND no case updates within this window → escalate. */
+  timeframe: EscalationTimeframe;
+}
+
 export interface CaseScoringEmailSettings {
   connection: EmailConnection;
   automation: Record<ScoringEmailCategory, CategoryAutomation>;
+  escalation: Record<ScoringEmailCategory, CategoryEscalation>;
   customTemplates: ScoringEmailTemplate[];
 }
 
@@ -259,6 +282,10 @@ const DEFAULT_SETTINGS: CaseScoringEmailSettings = {
   automation: {
     'needs-review': { enabled: true, templateId: 'nr-default-1' },
     incomplete:     { enabled: true, templateId: 'inc-default-1' },
+  },
+  escalation: {
+    'needs-review': { enabled: false, contactId: '', timeframe: '24h' },
+    incomplete:     { enabled: false, contactId: '', timeframe: '24h' },
   },
   customTemplates: [],
 };
@@ -276,6 +303,10 @@ function load(): CaseScoringEmailSettings {
       automation: {
         'needs-review': { ...DEFAULT_SETTINGS.automation['needs-review'], ...(parsed.automation?.['needs-review'] ?? {}) },
         incomplete:     { ...DEFAULT_SETTINGS.automation.incomplete,      ...(parsed.automation?.incomplete ?? {}) },
+      },
+      escalation: {
+        'needs-review': { ...DEFAULT_SETTINGS.escalation['needs-review'], ...(parsed.escalation?.['needs-review'] ?? {}) },
+        incomplete:     { ...DEFAULT_SETTINGS.escalation.incomplete,      ...(parsed.escalation?.incomplete ?? {}) },
       },
       customTemplates: Array.isArray(parsed.customTemplates) ? parsed.customTemplates : [],
     };
@@ -347,6 +378,14 @@ export function selectTemplate(category: ScoringEmailCategory, templateId: strin
   commit({
     ...settings,
     automation: { ...settings.automation, [category]: { ...settings.automation[category], templateId } },
+  });
+}
+
+// ── Escalation config ─────────────────────────────────────────────────────────
+export function setEscalation(category: ScoringEmailCategory, patch: Partial<CategoryEscalation>) {
+  commit({
+    ...settings,
+    escalation: { ...settings.escalation, [category]: { ...settings.escalation[category], ...patch } },
   });
 }
 

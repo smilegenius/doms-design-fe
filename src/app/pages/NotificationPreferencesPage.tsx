@@ -1,26 +1,31 @@
 import { useMemo, useState } from 'react';
 import {
-  ChevronDown, FolderOpen, MessageSquare, ShieldCheck,
+  ChevronDown, CreditCard, FolderOpen, MessageSquare, ShieldCheck,
 } from 'lucide-react';
 import Toggle from '../components/Toggle';
 import SearchInput from '../components/SearchInput';
 import EmptyState from '../components/EmptyState';
 
-// ─── Lab Notification Preferences ────────────────────────────────────────────
+// ─── Notification Preferences (lab + clinic) ─────────────────────────────────
 // Per-notification In-App + Email controls, grouped by category, rendered as
-// the Notifications tab of Lab Settings. Built entirely from the app's base
-// components (Toggle, Button, SearchInput, EmptyState) — the PO reference
-// design informed layout/behaviour only.
+// the Notifications tab of Settings in BOTH portals — each portal gets its own
+// catalogue of configurable notifications and its own persistence key, while
+// the page structure (channels, bulk actions, search, tooltips) is shared.
 //
 // ONLY non-critical (informational) notifications are configurable, and only
 // they appear here. Business-critical notifications — anything requiring
-// immediate action to prevent operational disruption (Scanner Disconnected,
-// Scanner Token Expiry Reminders, Scanner Connection Expired, Clinic Responded
-// to an On Hold Request, 5% Plan Buffer Reached, Grace Period Started, …) —
-// are always enabled, cannot be disabled, and are deliberately ABSENT from
-// this page. The footer note below the categories explains that to the user.
+// immediate action to prevent operational disruption — are always enabled,
+// cannot be disabled, and are deliberately ABSENT from this page:
+//   • Lab:    Scanner Disconnected, Scanner Token Expiry Reminders, Scanner
+//             Connection Expired, Clinic Responded to an On Hold Request,
+//             5% Plan Buffer Reached, Grace Period Started, …
+//   • Clinic: Lab Put Case On Hold, Additional Information Requested, Case
+//             Cancelled, Urgent Chat Message (clinical) + any invoice
+//             exception or workflow that requires action by the DSO or
+//             another responsible party (financial).
+// The note above the categories explains that to the user.
 //
-// The catalogue below is data-driven: adding a notification (or a whole
+// The catalogues below are data-driven: adding a notification (or a whole
 // category) is a new array entry — the page structure, bulk actions, search,
 // and persistence all pick it up untouched.
 //
@@ -53,12 +58,9 @@ const BOTH: Record<Channel, boolean> = { inApp: true, email: true };
 const IN_APP_ONLY: Record<Channel, boolean> = { inApp: true, email: false };
 const EMAIL_ONLY: Record<Channel, boolean> = { inApp: false, email: true };
 
-// Configurable (non-critical) notifications ONLY. Business-critical types —
-// Scanner Disconnected, Scanner Token Expiry Reminders, Scanner Connection
-// Expired, Clinic Responded to an On Hold Request, 5% Plan Buffer Reached,
-// Grace Period Started, and anything else requiring immediate action — are
-// always delivered and intentionally have no entry here.
-const CATEGORIES: NotificationCategory[] = [
+// Configurable (non-critical) notifications ONLY, per portal. Business-critical
+// types are always delivered and intentionally have no entry here.
+const LAB_CATEGORIES: NotificationCategory[] = [
   {
     id: 'messages', label: 'Messages', icon: MessageSquare,
     description: 'Chat activity across your cases.',
@@ -83,17 +85,58 @@ const CATEGORIES: NotificationCategory[] = [
   },
 ];
 
+const CLINIC_CATEGORIES: NotificationCategory[] = [
+  {
+    id: 'messages', label: 'Messages', icon: MessageSquare,
+    description: 'Chat activity across your cases.',
+    iconBg: '#F3EEFF', iconColor: '#7C3AED',
+    items: [
+      { id: 'msg-new',     label: 'New Chat Message',      description: 'Notify me about new messages in my case chats.',      supports: BOTH },
+      { id: 'msg-mention', label: 'Someone Mentioned You', description: 'Notify me when I am @-mentioned in a conversation.',  supports: BOTH },
+    ],
+  },
+  {
+    id: 'case-updates', label: 'Case Updates', icon: FolderOpen,
+    description: 'Receive notifications about case lifecycle changes.',
+    iconBg: '#EEF4FF', iconColor: '#4D8EF7',
+    items: [
+      { id: 'case-created',    label: 'Case Created',        description: 'Notify me when a new case is created.',                      supports: BOTH },
+      { id: 'case-accepted',   label: 'Case Accepted',       description: 'Notify me when the lab accepts a case.',                     supports: BOTH },
+      { id: 'case-rejected',   label: 'Case Rejected',       description: 'Notify me when the lab rejects a case.',                     supports: BOTH },
+      { id: 'case-due-change', label: 'Due Date Changed',    description: 'Notify me when a case due date moves.',                      supports: BOTH },
+      { id: 'case-shipped',    label: 'Case Shipped',        description: 'Notify me when a case ships from the lab.',                  supports: BOTH },
+      { id: 'case-delivered',  label: 'Case Delivered',      description: 'Notify me when a case is delivered to the practice.',        supports: BOTH },
+      { id: 'case-general',    label: 'General Case Updates', description: 'Case activity not covered by the notification types above.', supports: IN_APP_ONLY },
+    ],
+  },
+  {
+    id: 'invoices', label: 'Invoice & Billing', icon: CreditCard,
+    description: 'Invoices received and payments processed.',
+    iconBg: '#F0FDF4', iconColor: '#2E7D32',
+    items: [
+      { id: 'inv-received',  label: 'New Invoice Received', description: 'Notify me when a lab invoice arrives.',      supports: BOTH },
+      { id: 'inv-processed', label: 'Payment Processed',    description: 'Notify me when a payment goes through.',     supports: BOTH },
+    ],
+  },
+];
+
+type Portal = 'lab' | 'clinic';
+const PORTAL_CATALOGUE: Record<Portal, { categories: NotificationCategory[]; lsKey: string }> = {
+  lab:    { categories: LAB_CATEGORIES,    lsKey: 'lab.notificationPrefs' },
+  clinic: { categories: CLINIC_CATEGORIES, lsKey: 'clinic.notificationPrefs' },
+};
+
 // ── Preference state — persisted immediately on every change ─────────────────
 type Prefs = Record<string, Record<Channel, boolean>>;
-const LS_KEY = 'lab.notificationPrefs';
 
 // Default: every supported channel enabled. Stored values overlay defaults, so
 // notifications added to the catalogue later simply start at their default.
-function loadPrefs(): Prefs {
+function loadPrefs(portal: Portal): Prefs {
+  const { categories, lsKey } = PORTAL_CATALOGUE[portal];
   let stored: Prefs = {};
-  try { stored = JSON.parse(localStorage.getItem(LS_KEY) ?? '{}') ?? {}; } catch { /* corrupt — fall back to defaults */ }
+  try { stored = JSON.parse(localStorage.getItem(lsKey) ?? '{}') ?? {}; } catch { /* corrupt — fall back to defaults */ }
   const prefs: Prefs = {};
-  for (const cat of CATEGORIES) {
+  for (const cat of categories) {
     for (const item of cat.items) {
       prefs[item.id] = {
         inApp: item.supports.inApp && (stored[item.id]?.inApp ?? true),
@@ -111,15 +154,16 @@ function unsupportedTooltip(supportedChannel: Channel): string {
   return `This notification is only available via ${CHANNEL_LABEL[supportedChannel]} notifications.`;
 }
 
-export default function NotificationPreferences() {
-  const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
+export default function NotificationPreferences({ portal = 'lab' }: { portal?: Portal } = {}) {
+  const { categories, lsKey } = PORTAL_CATALOGUE[portal];
+  const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs(portal));
   const [search, setSearch] = useState('');
   // First category open by default; the rest start collapsed.
-  const [openIds, setOpenIds] = useState<string[]>([CATEGORIES[0].id]);
+  const [openIds, setOpenIds] = useState<string[]>([categories[0].id]);
 
   function persist(next: Prefs) {
     setPrefs(next);
-    try { localStorage.setItem(LS_KEY, JSON.stringify(next)); } catch { /* storage blocked — keep in-memory */ }
+    try { localStorage.setItem(lsKey, JSON.stringify(next)); } catch { /* storage blocked — keep in-memory */ }
   }
 
   function setChannel(itemId: string, channel: Channel, value: boolean) {
@@ -151,11 +195,11 @@ export default function NotificationPreferences() {
   // Search filters notifications by name; matching categories auto-expand.
   const q = search.trim().toLowerCase();
   const visibleCats = useMemo(() => {
-    if (!q) return CATEGORIES;
-    return CATEGORIES
+    if (!q) return categories;
+    return categories
       .map(cat => ({ ...cat, items: cat.items.filter(i => i.label.toLowerCase().includes(q)) }))
       .filter(cat => cat.items.length > 0);
-  }, [q]);
+  }, [q, categories]);
 
   return (
     <div className="space-y-4">
@@ -171,6 +215,44 @@ export default function NotificationPreferences() {
           <SearchInput value={search} onChange={setSearch} placeholder="Search notifications..." />
         </div>
       </div>
+
+      {/* Business-critical notifications are always on — they don't appear in
+          the categories below, and this note explains their absence up front
+          so users don't hunt for the missing toggles. Hidden while searching
+          (it would read as a confusing non-result). */}
+      {!q && (
+        <div className="rounded-xl border border-[#BFDBFE] bg-[#EEF4FF] px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <span className="w-6 h-6 rounded-lg bg-white border border-[#BFDBFE] text-[#1565C0] flex items-center justify-center flex-shrink-0 mt-0.5">
+              <ShieldCheck className="w-3.5 h-3.5" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-[#1565C0]">Business-critical notifications are always on</p>
+              {portal === 'lab' ? (
+                <p className="text-[11px] text-[#3B6BAE] leading-relaxed mt-0.5">
+                  Notifications that require immediate action to prevent operational disruption — such as{' '}
+                  <span className="font-semibold">Scanner Disconnected</span>,{' '}
+                  <span className="font-semibold">Scanner Token Expiry Reminders</span>,{' '}
+                  <span className="font-semibold">Scanner Connection Expired</span>,{' '}
+                  <span className="font-semibold">Clinic Responded to an On Hold Request</span>,{' '}
+                  <span className="font-semibold">5% Plan Buffer Reached</span> and{' '}
+                  <span className="font-semibold">Grace Period Started</span> — are always delivered and cannot be
+                  disabled, so they aren't listed here.
+                </p>
+              ) : (
+                <p className="text-[11px] text-[#3B6BAE] leading-relaxed mt-0.5">
+                  Notifications that require immediate action are always delivered and cannot be disabled, so they
+                  aren't listed here. Clinical: <span className="font-semibold">Lab Put Case On Hold</span>,{' '}
+                  <span className="font-semibold">Additional Information Requested</span>,{' '}
+                  <span className="font-semibold">Case Cancelled</span> and{' '}
+                  <span className="font-semibold">Urgent Chat Message</span>. Financial: any invoice exception or
+                  workflow that requires action by the DSO or another responsible party.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {visibleCats.length === 0 && (
         <div className="bg-white rounded-xl border border-[#E0E0E6]">
@@ -287,33 +369,6 @@ export default function NotificationPreferences() {
           </div>
         );
       })}
-
-      {/* Business-critical notifications are always on — they don't appear
-          above, and this note explains their absence so users don't hunt for
-          the missing toggles. Hidden while searching (it would read as a
-          confusing non-result). */}
-      {!q && (
-        <div className="rounded-xl border border-[#BFDBFE] bg-[#EEF4FF] px-4 py-3">
-          <div className="flex items-start gap-2.5">
-            <span className="w-6 h-6 rounded-lg bg-white border border-[#BFDBFE] text-[#1565C0] flex items-center justify-center flex-shrink-0 mt-0.5">
-              <ShieldCheck className="w-3.5 h-3.5" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-[#1565C0]">Business-critical notifications are always on</p>
-              <p className="text-[11px] text-[#3B6BAE] leading-relaxed mt-0.5">
-                Notifications that require immediate action to prevent operational disruption — such as{' '}
-                <span className="font-semibold">Scanner Disconnected</span>,{' '}
-                <span className="font-semibold">Scanner Token Expiry Reminders</span>,{' '}
-                <span className="font-semibold">Scanner Connection Expired</span>,{' '}
-                <span className="font-semibold">Clinic Responded to an On Hold Request</span>,{' '}
-                <span className="font-semibold">5% Plan Buffer Reached</span> and{' '}
-                <span className="font-semibold">Grace Period Started</span> — are always delivered and cannot be
-                disabled, so they aren't listed here.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

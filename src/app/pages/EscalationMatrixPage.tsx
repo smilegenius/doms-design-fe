@@ -1,17 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Clock, Eye, FolderOpen, MessageSquare, Plug, Search, ShieldAlert, User, X } from 'lucide-react';
+import {
+  AlertTriangle, Bell, Check, CreditCard, Eye, FolderOpen, Mail,
+  MessageSquare, Plug, Search, ShieldAlert, User, X,
+} from 'lucide-react';
 import Modal from '../components/Modal';
 import Button from '../components/Button';
+import Toggle from '../components/Toggle';
 
-// ─── Escalation Matrix ────────────────────────────────────────────────────────
-// Settings → Notifications → Escalation Matrix. An administrator routes
-// business-critical events to a designated contact once every scheduled
-// reminder has been sent with no response. The catalogue mirrors the
-// Notification Preferences structure so new event types slot in without
-// layout changes (AC4): add an event to a category (or a new category) and it
-// renders with its own reminder schedule, recipient picker and email preview.
+// ─── Escalation Settings (lab + clinic) ──────────────────────────────────────
+// Settings → Notifications → Escalation Matrix, in BOTH portals. Escalations
+// are configured at the CATEGORY level (not per notification event): each
+// category carries
+//   • Enable Escalation  — the category on/off switch
+//   • Escalation Contact — an existing user within the organization
+//   • Escalation Trigger — where applicable (the lab's Case Management follows
+//     the product-defined reminder workflow and exposes no timing config)
+// Each portal has its own category catalogue, user roster, copy and
+// persistence key; the page structure is shared. When an escalation fires,
+// the contact receives an Email AND an In-App notification — escalations
+// notify the appropriate stakeholder, they do NOT transfer ownership of the
+// underlying task. Email + in-app copy below is the product spec's, verbatim.
 
-interface OrgMember {
+export interface OrgMember {
   id: string;
   name: string;
   role: string;
@@ -20,7 +30,7 @@ interface OrgMember {
 
 // Existing users within the organization (superset of Settings → User
 // Management roster — mock, self-contained per page convention).
-const ORG_MEMBERS: OrgMember[] = [
+const LAB_MEMBERS: OrgMember[] = [
   { id: '1', name: 'Riverdale Admin', role: 'Super Admin',      email: 'super_admin_riverdale_dev@yopmail.com' },
   { id: '2', name: 'Sajid Mahmood',   role: 'Admin',            email: 'sajid@smilegenius.com' },
   { id: '3', name: 'Sophie Wilson',   role: 'Practice Manager', email: 'sophie@smilegenius.com' },
@@ -31,95 +41,312 @@ const ORG_MEMBERS: OrgMember[] = [
   { id: '8', name: 'Elena Rossi',     role: 'Front Desk',       email: 'elena.rossi@smilegenius.com' },
 ];
 
+// Existing clinic users (mirrors the clinic's User Management roster). Also
+// used by the Case Scoring escalation config — the contact intervening when a
+// dentist doesn't respond is a clinic user associated with the case.
+export const CLINIC_MEMBERS: OrgMember[] = [
+  { id: '1', name: 'Riverdale Admin',  role: 'Super Admin',           email: 'super_admin_riverdale_dev@yopmail.com' },
+  { id: '2', name: 'Sajid Mahmood',    role: 'Admin',                 email: 'sajid@smilegenius.com' },
+  { id: '3', name: 'Sophie Wilson',    role: 'Practice Manager',      email: 'sophie@smilegenius.com' },
+  { id: '4', name: 'Dr. Murphy',       role: 'Dentist',               email: 'murphy@smilegenius.com' },
+  { id: '5', name: 'Dr. Amelia Hart',  role: 'Dentist',               email: 'amelia.hart@smilegenius.com' },
+  { id: '6', name: 'Grace Okafor',     role: 'Treatment Coordinator', email: 'grace.okafor@smilegenius.com' },
+  { id: '7', name: 'Daniel Reyes',     role: 'Practice Coordinator',  email: 'daniel.reyes@smilegenius.com' },
+  { id: '8', name: 'Elena Rossi',      role: 'Front Desk',            email: 'elena.rossi@smilegenius.com' },
+];
+
 function memberInitials(name: string) {
   return name.split(' ').filter(Boolean).map(p => p[0]).slice(0, 2).join('').toUpperCase();
 }
 
-interface EscalationEvent {
-  id: string;
-  label: string;
-  description: string;
-  // Human summary of the reminder schedule that must be exhausted first.
-  schedule: string;
-  // Example reference used in the escalation email preview.
-  reference: string;
-}
+// ─── Category catalogue ───────────────────────────────────────────────────────
+interface TriggerOption { id: string; label: string; }
 
-interface EscalationCategory {
+interface EscalationCategoryDef {
   id: string;
   label: string;
   description: string;
   icon: typeof Plug;
   iconBg: string;
   iconColor: string;
-  items: EscalationEvent[];
+  /** "Select the user responsible for …" — PM copy per category. */
+  contactHint: string;
+  /** Category trigger — a single-choice schedule, a fixed (product-defined)
+      workflow, or a set of independently-toggleable events (billing). */
+  trigger:
+    | { kind: 'select'; label: string; options: TriggerOption[]; defaultId: string; appliesTo?: { label: string; items: string[] }; notes?: string[]; conditions?: string[] }
+    | { kind: 'fixed'; text: string; examples: string[] }
+    | { kind: 'events'; label: string; options: TriggerOption[] };
+  email: {
+    subject: string;
+    intro: string;
+    fields: [string, string][];
+    /** Paragraphs after the fields; "Escalated Because:" gets bold treatment. */
+    lines: string[];
+    cta: string;
+    /** Sign-off lines rendered after the CTA (clinic emails only). */
+    closing?: string[];
+  };
+  inApp: { text: string; action: string };
 }
 
-const CATEGORIES: EscalationCategory[] = [
+const LAB_CATEGORIES: EscalationCategoryDef[] = [
   {
     id: 'scanner', label: 'Scanner & Integrations', icon: Plug,
-    description: 'Connection issues left unresolved after every reminder.',
+    description: 'Scanner connection and token issues left unresolved.',
     iconBg: '#ECFEFF', iconColor: '#0F766E',
-    items: [
-      {
-        id: 'scan-disconnected',
-        label: 'Scanner Disconnected',
-        description: 'Scanner disconnected and not reconnected after all reminder notifications.',
-        schedule: 'Escalates once the daily reconnect reminders go unanswered',
-        reference: 'iTero Element 5D · Laburnum Dental',
-      },
-      {
-        id: 'scan-token-expired',
-        label: 'Scanner Token Expired',
-        description: 'Scanner token expired and the connection was not reauthorised after all reminder notifications.',
-        schedule: 'Escalates after the 5, 3 and 1 business-day expiry warnings lapse',
-        reference: 'iTero Element 5D · Laburnum Dental',
-      },
-    ],
+    contactHint: 'Select the user responsible for scanner and integration issues.',
+    trigger: {
+      kind: 'select',
+      label: 'Escalate if the scanner has not been reconnected:',
+      options: [
+        { id: 'expiry-30d',  label: '30 days before token expiry' },
+        { id: 'expiry-15d',  label: '15 days before token expiry' },
+        { id: 'expiry-7d',   label: '7 days before token expiry' },
+        { id: 'expiry-5bd',  label: '5 business days before token expiry' },
+        { id: 'expiry-3bd',  label: '3 business days before token expiry' },
+        { id: 'expiry-1bd',  label: '1 business day before token expiry' },
+        { id: 'expiry-on',   label: 'On token expiry' },
+      ],
+      defaultId: 'expiry-7d',
+    },
+    email: {
+      subject: 'Action Required: Scanner Integration Issue Escalated',
+      intro: 'A scanner integration issue has remained unresolved and has now been escalated to you.',
+      fields: [
+        ['Lab', '{{Lab Name}}'],
+        ['Scanner', '{{Scanner Name}}'],
+        ['Issue', '{{Issue}}'],
+      ],
+      lines: [
+        'Escalated Because: The issue has not been resolved within the configured escalation timeframe.',
+        'Failure to resolve this issue may prevent your lab from receiving new scanner cases.',
+      ],
+      cta: 'View Scanner Settings',
+    },
+    inApp: {
+      text: 'Scanner integration issue escalated to you. Immediate action is recommended to avoid interruption to case imports.',
+      action: 'View Scanner Settings',
+    },
   },
   {
-    id: 'cases', label: 'Case Responses', icon: FolderOpen,
-    description: 'Case requests still waiting on the other side.',
+    id: 'cases', label: 'Case Management', icon: FolderOpen,
+    description: 'Case actions still outstanding after every reminder.',
     iconBg: '#FFF7ED', iconColor: '#E65100',
-    items: [
-      {
-        id: 'on-hold-no-response',
-        label: 'On Hold Request Unanswered',
-        description: 'Clinic has not responded to an On Hold request after all reminder notifications.',
-        schedule: 'Escalates after 5 days of reminder emails go unanswered',
-        reference: 'Case CASE-052 · Smile Genius Sheffield',
-      },
-    ],
+    contactHint: 'Select the user responsible for operational case management.',
+    trigger: {
+      kind: 'fixed',
+      text: 'Escalation occurs automatically after the configured reminder workflow has been exhausted. This timing is defined by the product and is not configurable.',
+      examples: [
+        'Clinic has not responded to an On Hold request.',
+        'Lab has not completed the required action after all reminder notifications.',
+      ],
+    },
+    email: {
+      subject: 'Action Required: Case Management Issue Escalated',
+      intro: 'A case management issue has remained unresolved and has now been escalated to you.',
+      fields: [
+        ['Case ID', '{{Case ID}}'],
+        ['Patient', '{{Patient Name}}'],
+        ['Current Status', '{{Status}}'],
+      ],
+      lines: [
+        'Escalated Because: The required action has not been completed within the configured escalation timeframe.',
+        'Please review the case to help prevent delays in treatment and delivery.',
+      ],
+      cta: 'View Case',
+    },
+    inApp: {
+      text: 'A case requiring attention has been escalated to you. Please review it to avoid further delays.',
+      action: 'View Case',
+    },
   },
   {
     id: 'messages', label: 'Messages', icon: MessageSquare,
-    description: 'Conversations that never received a reply.',
+    description: 'Conversations awaiting a response near the case due date.',
     iconBg: '#F3EEFF', iconColor: '#7C3AED',
-    items: [
-      {
-        id: 'msg-urgent-no-response',
-        label: 'Urgent Message Without Response',
-        description: 'Lab has not responded to an urgent message after all reminder notifications.',
-        schedule: 'Escalates after the 2, 4, 6 and 8-hour urgent reminders go unanswered',
-        reference: 'Case CASE-051 · Laburnum Dental',
-      },
-      {
-        id: 'msg-standard-no-response',
-        label: 'Standard Message Without Response',
-        description: 'Lab has not responded to a standard message after all reminder notifications.',
-        schedule: 'Escalates after 3 daily reminders go unanswered',
-        reference: 'Case CASE-054 · Harley Street Dental',
-      },
-    ],
+    contactHint: 'Select the user responsible for communication management.',
+    trigger: {
+      kind: 'select',
+      label: 'Escalate if a message requiring a response remains unanswered:',
+      options: [
+        { id: 'due-5d', label: '5 days before the case due date' },
+        { id: 'due-3d', label: '3 days before the case due date' },
+        { id: 'due-2d', label: '2 days before the case due date' },
+        { id: 'due-1d', label: '1 day before the case due date' },
+        { id: 'due-on', label: 'On the case due date' },
+      ],
+      defaultId: 'due-3d',
+      notes: [
+        'If the remaining time until the due date is already less than this threshold when the message is sent, the escalation occurs immediately.',
+      ],
+      conditions: [
+        'The message is still awaiting a response.',
+        'The case has not been completed.',
+        'The case has not been cancelled.',
+      ],
+    },
+    email: {
+      subject: 'Action Required: Unanswered Message Escalated',
+      intro: 'A conversation requiring a response has remained unanswered and has now been escalated to you.',
+      fields: [
+        ['Case ID', '{{Case ID}}'],
+        ['Sender', '{{Sender Name}}'],
+        ['Due Date', '{{Due Date}}'],
+      ],
+      lines: [
+        'This conversation is approaching the case due date and requires attention to help avoid delays in case completion.',
+      ],
+      cta: 'Open Conversation',
+    },
+    inApp: {
+      text: 'An unanswered conversation has been escalated to you because it is approaching the case due date.',
+      action: 'Open Conversation',
+    },
+  },
+  {
+    id: 'billing', label: 'Billing & Subscription', icon: CreditCard,
+    description: 'Plan usage and billing thresholds that risk service interruption.',
+    iconBg: '#F0FDF4', iconColor: '#2E7D32',
+    contactHint: 'Select the user responsible for subscription and billing management.',
+    trigger: {
+      kind: 'events',
+      label: 'Escalate when:',
+      options: [
+        { id: 'usage-5', label: 'Remaining plan usage reaches 5%' },
+        { id: 'grace',   label: 'Grace Period Starts' },
+      ],
+    },
+    email: {
+      subject: 'Action Required: Billing & Subscription Issue Escalated',
+      intro: 'A billing or subscription event has reached the configured escalation threshold.',
+      fields: [
+        ['Organisation', '{{Organisation Name}}'],
+        ['Event', '{{Event}}'],
+        ['Current Status', '{{Status}}'],
+      ],
+      lines: [
+        'Please review the account to help avoid any interruption to Smile Genius services.',
+      ],
+      cta: 'View Subscription',
+    },
+    inApp: {
+      text: 'A billing or subscription event has been escalated to you and requires your attention.',
+      action: 'View Subscription',
+    },
   },
 ];
 
+// Clinic catalogue — two reminder-driven workflow categories, both escalating
+// against the case due date. Copy is the clinic spec's, verbatim.
+const CLINIC_DUE_DATE_OPTIONS: TriggerOption[] = [
+  { id: 'due-5d', label: '5 days before the case due date' },
+  { id: 'due-3d', label: '3 days before the case due date' },
+  { id: 'due-2d', label: '2 days before the case due date' },
+  { id: 'due-1d', label: '1 day before the case due date' },
+  { id: 'due-on', label: 'On the case due date' },
+];
+
+const CLINIC_CATEGORIES: EscalationCategoryDef[] = [
+  {
+    id: 'cases', label: 'Case Management', icon: FolderOpen,
+    description: 'Reminder-driven case workflows still awaiting a clinic response.',
+    iconBg: '#FFF7ED', iconColor: '#E65100',
+    contactHint: 'Select the user responsible for case management escalations.',
+    trigger: {
+      kind: 'select',
+      label: 'Escalate unresolved case management workflows:',
+      options: CLINIC_DUE_DATE_OPTIONS,
+      defaultId: 'due-3d',
+      appliesTo: {
+        label: 'Applies to all reminder-driven case workflows, including but not limited to:',
+        items: [
+          'On Hold requests awaiting a clinic response.',
+          'Additional Information requests awaiting a clinic response.',
+          'Any future workflow requiring user action before the case due date.',
+        ],
+      },
+      notes: [
+        'If the remaining time until the case due date is already less than this threshold when the workflow begins, the escalation occurs immediately.',
+      ],
+      conditions: [
+        'The required response or action is still pending.',
+        'The case has not been completed.',
+        'The case has not been cancelled.',
+      ],
+    },
+    email: {
+      subject: 'Escalation: Case Requires Immediate Attention',
+      intro: 'A case has been escalated to you because the required action has not been completed within the configured escalation timeframe.',
+      fields: [
+        ['Case ID', '{{Case ID}}'],
+        ['Patient', '{{Patient Name}}'],
+        ['Current Status', '{{Case Status}}'],
+        ['Due Date', '{{Due Date}}'],
+      ],
+      lines: [
+        'Please review the case and take the necessary action to help prevent delays in treatment or delivery.',
+      ],
+      cta: 'View Case',
+      closing: ['Thank you,', 'Smile Genius Team'],
+    },
+    inApp: {
+      text: 'Case {{Case ID}} has been escalated to you because the required action is still pending. Please review the case to help prevent delays.',
+      action: 'View Case',
+    },
+  },
+  {
+    id: 'messages', label: 'Messages', icon: MessageSquare,
+    description: 'Conversations awaiting a response near the case due date.',
+    iconBg: '#F3EEFF', iconColor: '#7C3AED',
+    contactHint: 'Select the user responsible for communication escalations.',
+    trigger: {
+      kind: 'select',
+      label: 'Escalate unanswered messages:',
+      options: CLINIC_DUE_DATE_OPTIONS,
+      defaultId: 'due-3d',
+      notes: [
+        'If the remaining time until the case due date is already less than this threshold when the message is sent, the escalation occurs immediately.',
+      ],
+      conditions: [
+        'The message is still awaiting a response.',
+        'The case has not been completed.',
+        'The case has not been cancelled.',
+      ],
+    },
+    email: {
+      subject: 'Escalation: Conversation Awaiting Response',
+      intro: 'A conversation has been escalated to you because it remains unanswered and is approaching the configured escalation threshold.',
+      fields: [
+        ['Case ID', '{{Case ID}}'],
+        ['Message From', '{{Sender Name}}'],
+        ['Due Date', '{{Due Date}}'],
+      ],
+      lines: [
+        'Please review the conversation and ensure the required response is provided to avoid delays to the associated case.',
+      ],
+      cta: 'Open Conversation',
+      closing: ['Thank you,', 'Smile Genius Team'],
+    },
+    inApp: {
+      text: 'A conversation for Case {{Case ID}} has been escalated to you because it remains unanswered and requires attention.',
+      action: 'Open Conversation',
+    },
+  },
+];
+
+type Portal = 'lab' | 'clinic';
+const PORTALS: Record<Portal, { categories: EscalationCategoryDef[]; members: OrgMember[]; lsKey: string }> = {
+  lab:    { categories: LAB_CATEGORIES,    members: LAB_MEMBERS,    lsKey: 'org.escalationSettings' },
+  clinic: { categories: CLINIC_CATEGORIES, members: CLINIC_MEMBERS, lsKey: 'clinic.escalationSettings' },
+};
+
 // ─── Recipient search select ──────────────────────────────────────────────────
 // Searchable member picker — same pattern as the patient / dentist search
-// selects on Quick Create (a native <select> hides role + email and doesn't
-// scale to a real staff roster). Shows the selected member as a card with
-// their details; searching filters by name, role or email.
-function RecipientSearchSelect({ selected, onChange }: {
+// selects on Quick Create. Shows the selected member as a card with their
+// details; searching filters by name, role or email.
+export function RecipientSearchSelect({ members, selected, onChange }: {
+  members: OrgMember[];
   selected?: OrgMember;
   onChange: (memberId: string) => void;
 }) {
@@ -145,11 +372,11 @@ function RecipientSearchSelect({ selected, onChange }: {
 
   const q = query.trim().toLowerCase();
   const matches = useMemo(() => {
-    if (!q) return ORG_MEMBERS;
-    return ORG_MEMBERS.filter(m =>
+    if (!q) return members;
+    return members.filter(m =>
       m.name.toLowerCase().includes(q) || m.role.toLowerCase().includes(q) || m.email.toLowerCase().includes(q)
     );
-  }, [q]);
+  }, [q, members]);
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -241,180 +468,331 @@ function RecipientSearchSelect({ selected, onChange }: {
   );
 }
 
-// ── Assignment state — eventId → memberId, persisted on every change ─────────
-type Matrix = Record<string, string>;
-const LS_KEY = 'org.escalationMatrix';
+// ─── Per-category state — persisted on every change ──────────────────────────
+interface CategoryConfig {
+  enabled: boolean;
+  contactId: string;
+  /** Selected trigger option id — select-kind categories only. */
+  trigger?: string;
+  /** Enabled event ids — events-kind categories (billing) only. */
+  events?: string[];
+}
+type EscalationState = Record<string, CategoryConfig>;
 
-function loadMatrix(): Matrix {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) ?? '{}') ?? {}; } catch { return {}; }
+// Defaults derive from the catalogue: escalation off, no contact, the def's
+// default trigger option (select) or every event enabled (events).
+function defaultStateFor(categories: EscalationCategoryDef[]): EscalationState {
+  return Object.fromEntries(categories.map(c => [c.id, {
+    enabled: false,
+    contactId: '',
+    ...(c.trigger.kind === 'select' ? { trigger: c.trigger.defaultId } : {}),
+    ...(c.trigger.kind === 'events' ? { events: c.trigger.options.map(o => o.id) } : {}),
+  }]));
 }
 
-export default function EscalationMatrix() {
-  const [matrix, setMatrix] = useState<Matrix>(loadMatrix);
-  const [previewEvent, setPreviewEvent] = useState<EscalationEvent | null>(null);
+function loadState(portal: Portal): EscalationState {
+  const { categories, lsKey } = PORTALS[portal];
+  const defaults = defaultStateFor(categories);
+  let stored: Partial<EscalationState> = {};
+  try { stored = JSON.parse(localStorage.getItem(lsKey) ?? '{}') ?? {}; } catch { /* corrupt — fall back to defaults */ }
+  return Object.fromEntries(categories.map(c => [c.id, { ...defaults[c.id], ...(stored[c.id] ?? {}) }]));
+}
 
-  function assign(eventId: string, memberId: string) {
-    const next = { ...matrix, [eventId]: memberId };
-    setMatrix(next);
-    try { localStorage.setItem(LS_KEY, JSON.stringify(next)); } catch { /* storage blocked — keep in-memory */ }
+// Inline {{placeholder}} chip — same treatment as the case scoring email previews.
+function Placeholder({ text }: { text: string }) {
+  return (
+    <span className="px-1 py-px rounded bg-[#EEF4FF] border border-[#BFDBFE] text-[10px] font-mono font-semibold text-[#1565C0]">
+      {text}
+    </span>
+  );
+}
+
+// Text with inline {{placeholders}} rendered as chips (in-app notification copy).
+function MergeInline({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(\{\{[^}]+\}\})/g).map((p, i) =>
+        /^\{\{[^}]+\}\}$/.test(p) ? <Placeholder key={i} text={p} /> : <span key={i}>{p}</span>
+      )}
+    </>
+  );
+}
+
+export default function EscalationMatrix({ portal = 'lab' }: { portal?: Portal } = {}) {
+  const { categories, members, lsKey } = PORTALS[portal];
+  const [state, setState] = useState<EscalationState>(() => loadState(portal));
+  const [previewCat, setPreviewCat] = useState<EscalationCategoryDef | null>(null);
+
+  function update(id: string, patch: Partial<CategoryConfig>) {
+    const next = { ...state, [id]: { ...state[id], ...patch } };
+    setState(next);
+    try { localStorage.setItem(lsKey, JSON.stringify(next)); } catch { /* storage blocked — keep in-memory */ }
   }
 
-  const memberFor = (eventId: string) => ORG_MEMBERS.find(m => m.id === matrix[eventId]);
-  const totalEvents = CATEGORIES.reduce((n, c) => n + c.items.length, 0);
-  const configured = CATEGORIES.reduce((n, c) => n + c.items.filter(i => matrix[i.id]).length, 0);
+  const contactFor = (id: string) => members.find(m => m.id === state[id]?.contactId);
+  // A category counts as configured once it's enabled AND has a contact.
+  const activeCount = categories.filter(c => state[c.id].enabled && state[c.id].contactId).length;
 
-  const previewRecipient = previewEvent ? memberFor(previewEvent.id) : undefined;
-  const previewName = previewRecipient?.name ?? '{{Recipient Name}}';
+  const previewContact = previewCat ? contactFor(previewCat.id) : undefined;
 
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-[#030213]">Escalation Matrix</h2>
+          <h2 className="text-lg font-semibold text-[#030213]">Escalation Settings</h2>
           <p className="text-sm text-[#717182] mt-0.5">
-            Choose who is alerted when a critical event stays unresolved after every reminder. Changes save automatically.
+            {portal === 'lab'
+              ? 'Configure escalation contacts and triggers per business-critical category, so unresolved issues reach the right person before they impact day-to-day operations. Changes save automatically.'
+              : 'Configure escalation contacts and timing for critical workflows, so unresolved issues are escalated before they impact patient treatment or case delivery. Escalations notify the contact — they do not transfer ownership of the task. Changes save automatically.'}
           </p>
         </div>
         <span className={`self-start inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${
-          configured === totalEvents
+          activeCount === categories.length
             ? 'bg-[#F0FDF4] text-[#2E7D32] border-[#BBF7D0]'
             : 'bg-[#FFF8E1] text-[#B45309] border-[#FDE68A]'
         }`}>
           <ShieldAlert className="w-3.5 h-3.5" />
-          {configured}/{totalEvents} events configured
+          {activeCount}/{categories.length} categories active
         </span>
       </div>
 
-      {/* How escalation triggers — the rule every event below follows */}
-      <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl border border-[#FDE68A] bg-[#FFF8E1]">
-        <ShieldAlert className="w-4 h-4 text-[#B45309] flex-shrink-0 mt-0.5" />
-        <p className="text-xs text-[#92610A] leading-relaxed">
-          An escalation fires only after <span className="font-semibold">all reminder notifications have been sent</span> and
-          the event is <span className="font-semibold">still unresolved</span>. On the next scheduled cycle the escalation
-          contact receives an email and an in-app notification instead of another reminder to the original recipient.
+      {/* Notification behaviour — what the escalation contact receives */}
+      <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl border border-[#BFDBFE] bg-[#EEF4FF]">
+        <span className="w-6 h-6 rounded-lg bg-white border border-[#BFDBFE] text-[#1565C0] flex items-center justify-center flex-shrink-0 mt-0.5">
+          <Bell className="w-3.5 h-3.5" />
+        </span>
+        <p className="text-xs text-[#3B6BAE] leading-relaxed">
+          <span className="font-bold text-[#1565C0]">When an escalation is triggered</span> the contact receives an{' '}
+          <span className="font-semibold">Email</span> and an <span className="font-semibold">In-App notification</span>{' '}
+          {portal === 'lab'
+            ? 'that clearly identify the affected category, the impacted case, scanner or subscription, why the escalation occurred, the action required, and a direct link to the relevant screen.'
+            : 'that clearly communicate the workflow that has been escalated, the associated Case ID, the reason for escalation, the current status, the case due date, and a direct link to the case or conversation.'}
         </p>
       </div>
 
-      {CATEGORIES.map(cat => {
+      {categories.map(cat => {
         const Icon = cat.icon;
-        const catConfigured = cat.items.filter(i => matrix[i.id]).length;
+        const conf = state[cat.id];
+        const contact = contactFor(cat.id);
+        const needsContact = conf.enabled && !conf.contactId;
         return (
-          <div key={cat.id} className="bg-white rounded-xl border border-[#E0E0E6] overflow-hidden">
-            {/* Category header — same treatment as Notification Preferences */}
-            <div className="px-5 py-4 flex items-center justify-between gap-4">
+          <div key={cat.id} className="bg-white rounded-xl border border-[#E0E0E6]">
+            {/* Category header — name + status + Enable Escalation toggle */}
+            <div className="px-5 py-4 flex items-center justify-between gap-4 rounded-t-xl">
               <div className="flex items-center gap-3 min-w-0">
                 <span className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: cat.iconBg }}>
                   <Icon className="w-5 h-5" style={{ color: cat.iconColor }} />
                 </span>
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold text-[#030213] truncate">{cat.label}</h3>
-                    <span className="px-1.5 py-px rounded-full bg-[#F3F3F5] text-[10px] font-medium text-[#717182] tabular-nums">{cat.items.length}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-semibold text-[#030213]">{cat.label}</h3>
+                    {conf.enabled && conf.contactId && (
+                      <span className="inline-flex items-center px-1.5 py-px rounded-full bg-[#F0FDF4] border border-[#BBF7D0] text-[9px] font-bold uppercase tracking-wider text-[#15803D]">Active</span>
+                    )}
+                    {needsContact && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full bg-[#FFF8E1] border border-[#FDE68A] text-[9px] font-bold uppercase tracking-wider text-[#B45309]">
+                        <AlertTriangle className="w-2.5 h-2.5" /> Contact required
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-[#717182] truncate">{cat.description}</p>
                 </div>
               </div>
-              <span className="text-[11px] font-medium text-[#717182] tabular-nums flex-shrink-0">
-                {catConfigured}/{cat.items.length} configured
-              </span>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className={`text-[11px] font-semibold ${conf.enabled ? 'text-[#15803D]' : 'text-[#A0A0B0]'}`}>
+                  {conf.enabled ? 'Escalation enabled' : 'Escalation disabled'}
+                </span>
+                <Toggle on={conf.enabled} onChange={() => update(cat.id, { enabled: !conf.enabled })} title="Enable Escalation" />
+              </div>
             </div>
 
-            <div className="border-t border-[#F0EFF6]">
-              <div className="grid grid-cols-[1fr_280px] gap-3 px-5 py-2 bg-[#F8F9FC] border-b border-[#F0EFF6]">
-                <span className="text-[11px] font-medium text-[#717182] uppercase tracking-wide">Event</span>
-                <span className="text-[11px] font-medium text-[#717182] uppercase tracking-wide">Escalation contact</span>
-              </div>
-              <div className="divide-y divide-[#F0EFF6]">
-                {cat.items.map(event => {
-                  const assigned = memberFor(event.id);
-                  return (
-                    <div key={event.id} className="grid grid-cols-[1fr_280px] gap-3 px-5 py-3.5 items-start">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-medium text-[#030213]">{event.label}</p>
-                          {assigned ? (
-                            <span className="inline-flex items-center px-1.5 py-px rounded-full bg-[#F0FDF4] border border-[#BBF7D0] text-[9px] font-bold uppercase tracking-wider text-[#15803D]">Active</span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full bg-[#FFF8E1] border border-[#FDE68A] text-[9px] font-bold uppercase tracking-wider text-[#B45309]">
-                              <AlertTriangle className="w-2.5 h-2.5" /> Not configured
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-[#717182] mt-0.5">{event.description}</p>
-                        <p className="flex items-center gap-1 text-[11px] text-[#A0A0B0] mt-1">
-                          <Clock className="w-3 h-3 flex-shrink-0" />
-                          {event.schedule}
-                        </p>
-                      </div>
-                      <div className="space-y-1.5">
-                        <RecipientSearchSelect
-                          selected={assigned}
-                          onChange={(memberId) => assign(event.id, memberId)}
-                        />
-                        <button
-                          onClick={() => setPreviewEvent(event)}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:text-[#3578E5] transition-colors"
+            {conf.enabled && (
+              <div className="border-t border-[#F0EFF6] px-5 py-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4">
+                  {/* Escalation Contact */}
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0]">Escalation Contact</p>
+                    <p className="text-xs text-[#717182] mt-0.5 mb-2">{cat.contactHint}</p>
+                    <RecipientSearchSelect
+                      members={members}
+                      selected={contact}
+                      onChange={(memberId) => update(cat.id, { contactId: memberId })}
+                    />
+                    <button
+                      onClick={() => setPreviewCat(cat)}
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:text-[#3578E5] transition-colors"
+                    >
+                      <Eye className="w-3 h-3" /> Preview email &amp; in-app notification
+                    </button>
+                  </div>
+
+                  {/* Escalation Trigger */}
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0]">Escalation Trigger</p>
+                    {cat.trigger.kind === 'select' && (
+                      <>
+                        <p className="text-xs text-[#717182] mt-0.5 mb-2">{cat.trigger.label}</p>
+                        <select
+                          value={conf.trigger}
+                          onChange={(e) => update(cat.id, { trigger: e.target.value })}
+                          className="w-full max-w-xs px-3 py-2 text-xs font-medium text-[#030213] bg-white border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] cursor-pointer"
                         >
-                          <Eye className="w-3 h-3" /> Preview escalation email
-                        </button>
+                          {cat.trigger.options.map(o => (
+                            <option key={o.id} value={o.id}>{o.label}</option>
+                          ))}
+                        </select>
+                        {cat.trigger.appliesTo && (
+                          <div className="mt-2">
+                            <p className="text-[11px] font-semibold text-[#5A5568]">{cat.trigger.appliesTo.label}</p>
+                            <ul className="mt-1 space-y-0.5">
+                              {cat.trigger.appliesTo.items.map(item => (
+                                <li key={item} className="flex items-start gap-1.5 text-[11px] text-[#717182]">
+                                  <span className="w-1 h-1 rounded-full bg-[#A0A0B0] mt-1.5 flex-shrink-0" />
+                                  {item}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {cat.trigger.notes?.map(n => (
+                          <p key={n} className="text-[11px] text-[#A0A0B0] leading-relaxed mt-2">{n}</p>
+                        ))}
+                        {cat.trigger.conditions && (
+                          <div className="mt-2">
+                            <p className="text-[11px] font-semibold text-[#5A5568]">Escalation only occurs when:</p>
+                            <ul className="mt-1 space-y-0.5">
+                              {cat.trigger.conditions.map(c => (
+                                <li key={c} className="flex items-start gap-1.5 text-[11px] text-[#717182]">
+                                  <span className="w-1 h-1 rounded-full bg-[#A0A0B0] mt-1.5 flex-shrink-0" />
+                                  {c}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {cat.trigger.kind === 'fixed' && (
+                      <div className="mt-1.5 rounded-lg border border-[#F0EFF6] bg-[#F8F9FC] px-3 py-2.5">
+                        <p className="text-[11px] text-[#5A5568] leading-relaxed">{cat.trigger.text}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0] mt-2 mb-1">Examples</p>
+                        <ul className="space-y-0.5">
+                          {cat.trigger.examples.map(ex => (
+                            <li key={ex} className="flex items-start gap-1.5 text-[11px] text-[#717182]">
+                              <span className="w-1 h-1 rounded-full bg-[#A0A0B0] mt-1.5 flex-shrink-0" />
+                              {ex}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
-                    </div>
-                  );
-                })}
+                    )}
+                    {cat.trigger.kind === 'events' && (
+                      <>
+                        <p className="text-xs text-[#717182] mt-0.5 mb-2">{cat.trigger.label}</p>
+                        <div className="flex flex-wrap gap-2">
+                          {cat.trigger.options.map(o => {
+                            const on = conf.events?.includes(o.id) ?? false;
+                            return (
+                              <button
+                                key={o.id}
+                                onClick={() => update(cat.id, {
+                                  events: on ? (conf.events ?? []).filter(e => e !== o.id) : [...(conf.events ?? []), o.id],
+                                })}
+                                role="checkbox"
+                                aria-checked={on}
+                                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                  on ? 'bg-[#EEF4FF] text-[#1565C0] border-[#C8D8FC]' : 'bg-white text-[#717182] border-[#E0E0E6] hover:border-[#4D8EF7]'
+                                }`}
+                              >
+                                <span className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                                  on ? 'bg-[#4D8EF7] border-[#4D8EF7]' : 'bg-white border-[#D4CEE1]'
+                                }`}>
+                                  {on && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
+                                </span>
+                                {o.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         );
       })}
 
-      <p className="text-[11px] text-[#A0A0B0] px-1">
-        New event types can be added to this matrix as they are introduced — each event carries its own
-        reminder schedule and escalation contact.
-      </p>
-
-      {/* Escalation email preview — suggested template with the event filled in */}
+      {/* Escalation notification preview — email + in-app, PM copy verbatim */}
       <Modal
-        isOpen={previewEvent !== null}
-        onClose={() => setPreviewEvent(null)}
-        title="Escalation email preview"
+        isOpen={previewCat !== null}
+        onClose={() => setPreviewCat(null)}
+        title={previewCat ? `${previewCat.label} — escalation preview` : 'Escalation preview'}
         size="md"
-        footer={<Button variant="outline" onClick={() => setPreviewEvent(null)}>Close</Button>}
+        footer={<Button variant="outline" onClick={() => setPreviewCat(null)}>Close</Button>}
       >
-        {previewEvent && (
+        {previewCat && (
           <div className="space-y-4">
-            <div className="rounded-lg bg-[#F8F9FC] border border-[#F0EFF6] px-4 py-2.5">
-              <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-0.5">Subject</p>
-              <p className="text-sm font-semibold text-[#030213]">Escalation: Action Required for {previewEvent.label}</p>
-            </div>
-            <div className="text-sm text-[#030213] leading-relaxed space-y-3">
-              <p>Hi {previewName},</p>
-              <p className="text-[#5A5568]">
-                The following issue has remained unresolved despite all scheduled reminder notifications
-                and has now been escalated to you.
+            {/* Email */}
+            <div>
+              <p className="flex items-center gap-1.5 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-1.5">
+                <Mail className="w-3 h-3" /> Email
               </p>
-              <div className="rounded-lg border border-[#E0E0E6] divide-y divide-[#F0EFF6] text-xs">
-                {[
-                  ['Event', previewEvent.label],
-                  ['Reference', previewEvent.reference],
-                  ['Current Status', 'Unresolved — all reminders sent'],
-                  ['Pending Since', '08-Aug-2026'],
-                ].map(([k, v]) => (
-                  <div key={k} className="flex items-center justify-between gap-4 px-3 py-2">
-                    <span className="font-medium text-[#717182]">{k}</span>
-                    <span className="font-semibold text-[#030213] text-right">{v}</span>
-                  </div>
-                ))}
+              <div className="rounded-lg bg-[#F8F9FC] border border-[#F0EFF6] px-4 py-2.5 mb-3">
+                <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-0.5">Subject</p>
+                <p className="text-sm font-semibold text-[#030213]">{previewCat.email.subject}</p>
               </div>
-              <p className="text-[#5A5568]">Please review the issue and take the appropriate action.</p>
-              <span className="inline-flex items-center px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF]">
-                View Details
-              </span>
+              <div className="text-sm text-[#030213] leading-relaxed space-y-3">
+                <p>Hi {previewContact ? previewContact.name : <Placeholder text="{{Recipient Name}}" />},</p>
+                <p className="text-[#5A5568]">{previewCat.email.intro}</p>
+                <div className="rounded-lg border border-[#E0E0E6] divide-y divide-[#F0EFF6] text-xs">
+                  {previewCat.email.fields.map(([k, v]) => (
+                    <div key={k} className="flex items-center justify-between gap-4 px-3 py-2">
+                      <span className="font-medium text-[#717182]">{k}</span>
+                      <Placeholder text={v} />
+                    </div>
+                  ))}
+                </div>
+                {previewCat.email.lines.map(line =>
+                  line.startsWith('Escalated Because:') ? (
+                    <p key={line} className="text-[#5A5568]">
+                      <span className="font-semibold text-[#030213]">Escalated Because:</span>
+                      {line.slice('Escalated Because:'.length)}
+                    </p>
+                  ) : (
+                    <p key={line} className="text-[#5A5568]">{line}</p>
+                  )
+                )}
+                <span className="inline-flex items-center px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF]">
+                  {previewCat.email.cta}
+                </span>
+                {previewCat.email.closing && (
+                  <p className="text-[#5A5568]">
+                    {previewCat.email.closing.map(line => (
+                      <span key={line} className="block">{line}</span>
+                    ))}
+                  </p>
+                )}
+              </div>
             </div>
-            <p className="text-[11px] text-[#A0A0B0]">
-              The in-app notification reads: “An unresolved {previewEvent.label} has been escalated to you.
-              Please review and take the necessary action.”
-            </p>
+
+            {/* In-app */}
+            <div className="border-t border-[#F0EFF6] pt-3">
+              <p className="flex items-center gap-1.5 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-1.5">
+                <Bell className="w-3 h-3" /> In-App Notification
+              </p>
+              <div className="rounded-lg border border-[#E0E0E6] px-4 py-3 flex items-start gap-2.5">
+                <span className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: previewCat.iconBg }}>
+                  <previewCat.icon className="w-3.5 h-3.5" style={{ color: previewCat.iconColor }} />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs text-[#030213] leading-relaxed"><MergeInline text={previewCat.inApp.text} /></p>
+                  <p className="text-[11px] font-semibold text-[#4D8EF7] mt-1">Action: {previewCat.inApp.action}</p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </Modal>
