@@ -3,10 +3,11 @@ import {
   Sparkles, ArrowRight, FolderKanban, Plus, Wallet,
   CheckCircle2, FileText, PauseCircle,
   CalendarX2, XCircle, MessageSquare, TrendingUp, Info,
-  Reply, Check, Send, FilePen,
+  Reply, Check, Send, FilePen, AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import UrgentBadge from '../components/UrgentBadge';
 
 // ─── Clinic Portal — Overview ────────────────────────────────────────────────
 // A practice's home dashboard. Kept deliberately operational / at-a-glance:
@@ -35,9 +36,14 @@ const EXPOSURE_COUNT = FINANCE_BUCKETS.reduce((s, b) => s + b.count, 0);
 
 // Unread inbox preview — mirrors the conversations on the Messages page.
 type ConvType = 'Clinic' | 'Lab' | 'Supplier';
-interface Convo { name: string; type: ConvType; initials: string; unread: number; last: string; time: string }
+interface Convo {
+  name: string; type: ConvType; initials: string; unread: number; last: string; time: string;
+  // Conversation holds an unanswered urgent message — badged like the
+  // Messages inbox so it stands out before it's even opened.
+  urgent?: boolean;
+}
 const UNREAD: Convo[] = [
-  { name: 'Laburnum Dental',       type: 'Clinic',   initials: 'LD', unread: 14, last: 'Sent the updated impressions — can you confirm the shade?', time: '2m' },
+  { name: 'Laburnum Dental',       type: 'Clinic',   initials: 'LD', unread: 14, last: 'The crown for CASE-051 arrived damaged — we need a remake before Friday\'s fitting. Please confirm ASAP.', time: '2m', urgent: true },
   { name: 'S4S',                   type: 'Lab',      initials: 'S',  unread: 9,  last: 'Crown case #10234 is ready to ship today.',                  time: '1h' },
   { name: 'Patterson Dental',      type: 'Supplier', initials: 'PD', unread: 3,  last: 'Invoice INV-129 has been updated and re-sent.',              time: '3h' },
   { name: 'Northwood Dental Labs', type: 'Lab',      initials: 'ND', unread: 5,  last: 'The bridge case is back from QC — please review.',           time: '5h' },
@@ -288,8 +294,12 @@ export default function ClinicOverviewPage({ onOpenCases, onCreateCase, onOpenIn
                           <div className="flex items-center gap-1.5">
                             <p className="text-sm font-medium text-[#030213] truncate">{c.name}</p>
                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${typeChip(c.type)}`}>{c.type}</span>
+                            {c.urgent && <UrgentBadge className="flex-shrink-0" />}
                           </div>
-                          <p className="text-[11px] text-[#A0A0B0] truncate mt-0.5">{c.last}</p>
+                          <div className="flex items-center gap-1 mt-0.5 min-w-0">
+                            {c.urgent && <AlertTriangle className="w-3 h-3 text-[#DC2626] flex-shrink-0" />}
+                            <p className="text-[11px] text-[#A0A0B0] truncate">{c.last}</p>
+                          </div>
                         </div>
                       </button>
                       {/* Default: time + unread badge. On hover: quick actions. */}

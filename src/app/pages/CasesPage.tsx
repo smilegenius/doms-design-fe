@@ -763,6 +763,40 @@ function OverrideTag({ override }: { override: StatusOverride }) {
   );
 }
 
+// Checkbox with indeterminate support — used for bulk row selection. A parent
+// (case-level) checkbox shows the indeterminate dash when only some of its
+// sub-case services are selected.
+function TriCheckbox({ checked, indeterminate, onChange, disabled, title }: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: () => void;
+  disabled?: boolean;
+  title?: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = !checked && !!indeterminate;
+  }, [checked, indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      onChange={onChange}
+      title={title}
+      className="w-4 h-4 rounded border-[#E0E0E6] accent-[#4D8EF7] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+    />
+  );
+}
+
+// The selectable units of a case: its service items (sub-cases). Cases without
+// service items fall back to a single synthetic unit so they still select as a
+// whole case.
+function unitIdsOf(c: Case): string[] {
+  return c.serviceItems.length > 0 ? c.serviceItems.map(si => si.id) : ['__self__'];
+}
+
 // Modal for changing a case's status. If the case is still missing required
 // information, picking a new status reveals a mandatory override reason +
 // optional notes (the flow: warn → reason → notes → save → proceed).
@@ -863,6 +897,202 @@ function StatusChangeModal({ caseData, missing, onClose, onConfirm }: {
   );
 }
 
+// ─── Bulk status update ───────────────────────────────────────────────────────
+// One entry per selected case: which of its sub-case services are checked, and
+// whether the whole case is covered (full ⇒ the case-level status moves too).
+export interface BulkSelection {
+  c: Case;
+  subIds: Set<string>;
+  full: boolean;
+}
+
+// Modal for updating the status of every selected case — and, for multi-service
+// cases, each checked sub-case — in one action. Two steps: pick the target
+// status (plus a mandatory override reason when any selected case is still
+// missing required information), then an explicit confirmation summary. Nothing
+// is applied until the user confirms.
+function BulkStatusModal({ selections, missingByCase, onClose, onConfirm }: {
+  selections: BulkSelection[];
+  missingByCase: Map<string, string[]>;
+  onClose: () => void;
+  onConfirm: (toStatus: CaseStatus, reason?: string, notes?: string) => void;
+}) {
+  const [toStatus, setToStatus] = useState<CaseStatus | null>(null);
+  const [reason, setReason] = useState('');
+  const [notes, setNotes] = useState('');
+  const [confirming, setConfirming] = useState(false);
+
+  const caseCount = selections.length;
+  const unitCount = selections.reduce((n, s) => n + s.subIds.size, 0);
+  const partialCount = selections.filter(s => !s.full).length;
+  const fullCount = caseCount - partialCount;
+  const missingSelected = selections.filter(s => missingByCase.has(s.c.id));
+  const needsOverride = missingSelected.length > 0;
+  const canContinue = !!toStatus && (!needsOverride || !!reason);
+  // "current" tag only makes sense when every selected case shares one status.
+  const commonStatus = selections.every(s => s.c.status === selections[0].c.status) ? selections[0].c.status : null;
+  const pl = (n: number) => (n === 1 ? '' : 's');
+
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[#F0EFF6]">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-[#030213]">{confirming ? 'Confirm bulk update' : 'Bulk status update'}</h3>
+              <p className="text-[11px] text-[#717182] truncate">{caseCount} case{pl(caseCount)} · {unitCount} service{pl(unitCount)} selected</p>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors"><X className="w-4 h-4" /></button>
+          </div>
+
+          {!confirming ? (
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-2">New status for all selected</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {CHANGEABLE_STATUSES.map(st => {
+                    const sty = STATUS_STYLE[st];
+                    const Icon = sty.icon;
+                    const active = toStatus === st;
+                    return (
+                      <button
+                        key={st}
+                        onClick={() => setToStatus(st)}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${active ? 'border-[#4D8EF7] bg-[#EEF4FF] text-[#1565C0]' : 'border-[#E0E0E6] bg-white text-[#5A5568] hover:border-[#C8D8FC]'}`}
+                      >
+                        <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span className="truncate">{STATUS_LABEL[st]}</span>
+                        {st === commonStatus && <span className="ml-auto text-[9px] text-[#A0A0B0] flex-shrink-0">current</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-2">Applies to</label>
+                <div className="rounded-xl border border-[#F0EFF6] divide-y divide-[#F0EFF6] max-h-56 overflow-y-auto">
+                  {selections.map(({ c, subIds, full }) => {
+                    const multi = c.serviceItems.length > 1;
+                    return (
+                      <div key={c.id} className="px-3 py-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-xs font-semibold text-[#030213] flex-shrink-0">{c.id}</span>
+                          <span className="text-[11px] text-[#717182] truncate">{c.patientName}</span>
+                          <span className="ml-auto flex-shrink-0"><StatusBadge status={c.status} /></span>
+                        </div>
+                        {multi && (full ? (
+                          <p className="text-[10px] text-[#717182] mt-1">All {c.serviceItems.length} services will be updated</p>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                            {c.serviceItems.map((si, idx) => subIds.has(si.id) && (
+                              <span key={si.id} className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[#F5F8FF] border border-[#DBEAFE] text-[10px] font-medium text-[#1565C0]">
+                                {c.id}-{idx + 1} · {si.name}
+                              </span>
+                            ))}
+                            <span className="text-[10px] text-[#A0A0B0]">{subIds.size} of {c.serviceItems.length} services — case status stays “{STATUS_LABEL[c.status]}”</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {needsOverride && toStatus && (
+                <div className="rounded-xl border border-[#FDE68A] bg-[#FFF8E1] p-3 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-[#B45309] flex-shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-[#B45309]">{missingSelected.length} selected case{pl(missingSelected.length)} {missingSelected.length === 1 ? 'is' : 'are'} still missing required information</p>
+                      <p className="text-[11px] text-[#92610A] mt-0.5 leading-relaxed">
+                        {missingSelected.slice(0, 3).map(s => `${s.c.id}: ${(missingByCase.get(s.c.id) ?? []).join(', ')}`).join(' · ')}
+                        {missingSelected.length > 3 && ` · +${missingSelected.length - 3} more`}
+                        {' '}— moving {missingSelected.length === 1 ? 'it' : 'them'} to “{STATUS_LABEL[toStatus]}” without waiting for the dentist requires an override reason.
+                      </p>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#92610A] mb-1">Override reason <span className="text-[#B91C1C]">*</span></label>
+                    <select value={reason} onChange={(e) => setReason(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-[#E0C56B] bg-white text-sm text-[#030213] focus:border-[#B45309] focus:outline-none">
+                      <option value="">Select a reason…</option>
+                      {OVERRIDE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#92610A] mb-1">Additional notes <span className="font-normal text-[#A0895A]">(optional)</span></label>
+                    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Add context for the override…" className="w-full px-3 py-2 rounded-lg border border-[#E0C56B] bg-white text-sm text-[#030213] focus:border-[#B45309] focus:outline-none resize-none" />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="p-5 space-y-4">
+              <div className="rounded-xl border border-[#C8D8FC] bg-[#EEF4FF] px-4 py-5 text-center">
+                <span className="w-11 h-11 rounded-xl bg-white border border-[#DBEAFE] inline-flex items-center justify-center mb-2 shadow-sm">
+                  <RefreshCw className="w-5 h-5 text-[#4D8EF7]" />
+                </span>
+                <p className="text-sm font-semibold text-[#030213]">Update {caseCount} case{pl(caseCount)} ({unitCount} service{pl(unitCount)}) to</p>
+                <div className="mt-2 flex justify-center"><StatusBadge status={toStatus!} /></div>
+              </div>
+              <ul className="space-y-2 text-xs text-[#5A5568]">
+                <li className="flex items-start gap-2">
+                  <Check className="w-3.5 h-3.5 text-[#15803D] flex-shrink-0 mt-0.5" strokeWidth={3} />
+                  Every checked service (sub-case) moves to “{STATUS_LABEL[toStatus!]}”.
+                </li>
+                {fullCount > 0 && (
+                  <li className="flex items-start gap-2">
+                    <Check className="w-3.5 h-3.5 text-[#15803D] flex-shrink-0 mt-0.5" strokeWidth={3} />
+                    {fullCount} fully-selected case{pl(fullCount)} also update{fullCount === 1 ? 's' : ''} the case-level status.
+                  </li>
+                )}
+                {partialCount > 0 && (
+                  <li className="flex items-start gap-2">
+                    <AlertTriangle className="w-3.5 h-3.5 text-[#B45309] flex-shrink-0 mt-0.5" />
+                    {partialCount} partially-selected case{pl(partialCount)} keep{partialCount === 1 ? 's' : ''} the current case-level status — only the checked services change.
+                  </li>
+                )}
+                {needsOverride && (
+                  <li className="flex items-start gap-2">
+                    <AlertTriangle className="w-3.5 h-3.5 text-[#B45309] flex-shrink-0 mt-0.5" />
+                    Override reason “{reason}” will be recorded on {missingSelected.length} case{pl(missingSelected.length)} still missing required information.
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-[#F0EFF6] bg-[#FAFBFC]">
+            {!confirming ? (
+              <>
+                <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-[#5A5568] border border-[#E0E0E6] bg-white hover:bg-[#F3F3F5] transition-colors">Cancel</button>
+                <button
+                  onClick={() => canContinue && setConfirming(true)}
+                  disabled={!canContinue}
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-opacity ${canContinue ? 'bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90' : 'bg-[#C8C0F0] cursor-not-allowed opacity-60'}`}
+                >
+                  Review &amp; apply <ChevronRight className="w-4 h-4" />
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setConfirming(false)} className="px-4 py-2 rounded-lg text-sm font-medium text-[#5A5568] border border-[#E0E0E6] bg-white hover:bg-[#F3F3F5] transition-colors">Back</button>
+                <button
+                  onClick={() => onConfirm(toStatus!, needsOverride ? reason : undefined, needsOverride ? notes : undefined)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
+                >
+                  {needsOverride ? <><AlertTriangle className="w-4 h-4" /> Confirm with override</> : <><Check className="w-4 h-4" /> Confirm &amp; update</>}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
 // Plan-limit paywall — shown when a plan-limited portal (the lab) opens a case
 // beyond its quota. Asks the user to upgrade; "Back to cases" returns to the list.
 function UpgradeModal({ onUpgrade, onBack }: { onUpgrade: () => void; onBack: () => void }) {
@@ -901,7 +1131,7 @@ function UpgradeModal({ onUpgrade, onBack }: { onUpgrade: () => void; onBack: ()
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice }: {
+export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice, showConnectEmailNotice }: {
   initialCaseId?: string;
   onCreateCase?: () => void;
   // Called when the user clicks a draft case (status === 'draft'). The host
@@ -920,6 +1150,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // Non-participating) notice on the Case Details page. Lab + DSO portals
   // omit it, so the banner never shows there.
   showOfflineLabNotice?: boolean;
+  // Lab portal only — on scored cases with no business email connected, the
+  // Case Details page shows the "Connect Email" notice for the Automated Case
+  // Scoring Emails feature. Clinic/DSO portals omit it.
+  showConnectEmailNotice?: boolean;
 } = {}) {
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
@@ -1031,6 +1265,39 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     });
   }
 
+  // ── Bulk selection — granular to the service item (sub-case) so multi-service
+  // cases can be partially selected. Keyed caseId → Set of selected service ids.
+  // Checking a case checks all of its sub-cases; a partial set renders the
+  // parent checkbox indeterminate and leaves the case-level status untouched.
+  const [selectedSubs, setSelectedSubs] = useState<Map<string, Set<string>>>(new Map());
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  // Drafts (no lifecycle status yet) and the plan-limit teaser row can't be
+  // bulk-updated — same rule as the single-row "Change status" action.
+  const isSelectable = (c: Case) => c.status !== 'draft' && !c.forceUpgrade;
+
+  function setCaseSelected(c: Case, on: boolean) {
+    setSelectedSubs(prev => {
+      const next = new Map(prev);
+      if (on) next.set(c.id, new Set(unitIdsOf(c)));
+      else next.delete(c.id);
+      return next;
+    });
+  }
+
+  function toggleSubSelected(c: Case, siId: string) {
+    setSelectedSubs(prev => {
+      const next = new Map(prev);
+      const cur = new Set(next.get(c.id) ?? []);
+      if (cur.has(siId)) cur.delete(siId); else cur.add(siId);
+      if (cur.size === 0) next.delete(c.id); else next.set(c.id, cur);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedSubs(new Map());
+  }
+
   // Stats
   const stats = useMemo(() => ({
     total: cases.length,
@@ -1100,6 +1367,21 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / itemsPerPage));
   const paginated = sorted.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  // Header select-all is scoped to the current page (matching the Invoices
+  // pattern): checked when every eligible case on the page is fully selected,
+  // indeterminate when only some rows/services are.
+  const pageSelectable = paginated.filter(isSelectable);
+  const pageAllSelected = pageSelectable.length > 0 && pageSelectable.every(c => (selectedSubs.get(c.id)?.size ?? 0) >= unitIdsOf(c).length);
+  const pageSomeSelected = pageSelectable.some(c => (selectedSubs.get(c.id)?.size ?? 0) > 0);
+  function toggleSelectPage() {
+    setSelectedSubs(prev => {
+      const next = new Map(prev);
+      if (pageAllSelected) pageSelectable.forEach(c => next.delete(c.id));
+      else pageSelectable.forEach(c => next.set(c.id, new Set(unitIdsOf(c))));
+      return next;
+    });
+  }
 
   function handleColSort(col: SortColumn) {
     if (colSort === col) setColDir(d => (d === 'asc' ? 'desc' : 'asc'));
@@ -1211,6 +1493,62 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     return sc.applicable ? sc.services.filter(s => s.configured).flatMap(s => s.fields.filter(f => !f.filled).map(f => f.label)) : [];
   }, [statusModalCase, scoreCase]);
 
+  // The current bulk selection, resolved against the live case list. Selection
+  // survives paging/filtering — the bulk bar reflects everything checked so far.
+  const selectionSummary = useMemo(() => {
+    const entries: BulkSelection[] = [];
+    let unitCount = 0;
+    for (const c of cases) {
+      const sel = selectedSubs.get(c.id);
+      if (!sel || sel.size === 0) continue;
+      unitCount += sel.size;
+      entries.push({ c, subIds: sel, full: sel.size >= unitIdsOf(c).length });
+    }
+    return { entries, caseCount: entries.length, unitCount };
+  }, [cases, selectedSubs]);
+
+  // Missing requirements per selected case — any hit forces the override-reason
+  // step in the bulk modal (same gate as the single-case flow).
+  const bulkMissing = useMemo(() => {
+    const m = new Map<string, string[]>();
+    if (!bulkModalOpen) return m;
+    for (const { c } of selectionSummary.entries) {
+      const sc = scoreCase(c);
+      const miss = sc.applicable ? sc.services.filter(s => s.configured).flatMap(s => s.fields.filter(f => !f.filled).map(f => f.label)) : [];
+      if (miss.length > 0) m.set(c.id, miss);
+    }
+    return m;
+  }, [bulkModalOpen, selectionSummary, scoreCase]);
+
+  // Apply the confirmed bulk update: every checked service (sub-case) moves to
+  // the target status; fully-selected cases also move their case-level status,
+  // while partially-selected cases keep it. Cases missing required info get the
+  // override recorded, mirroring the single-case flow.
+  function applyBulkStatusChange(toStatus: CaseStatus, reason?: string, notes?: string) {
+    const { entries, caseCount, unitCount } = selectionSummary;
+    const byId = new Map(entries.map(e => [e.c.id, e]));
+    setCases(prev => prev.map(c => {
+      const e = byId.get(c.id);
+      if (!e) return c;
+      const missing = bulkMissing.get(c.id) ?? [];
+      const override: StatusOverride | undefined = reason && missing.length > 0
+        ? { reason, notes: notes?.trim() || undefined, by: CURRENT_USER, at: formatNow(), fromStatus: c.status, toStatus, missing }
+        : undefined;
+      return {
+        ...c,
+        serviceItems: c.serviceItems.map(si => e.subIds.has(si.id) ? { ...si, status: toStatus } : si),
+        status: e.full ? toStatus : c.status,
+        statusOverride: override ?? c.statusOverride,
+      };
+    }));
+    toast.success(
+      `${caseCount} case${caseCount === 1 ? '' : 's'} updated → ${STATUS_LABEL[toStatus]}` +
+      (unitCount > caseCount ? ` (${unitCount} services)` : '')
+    );
+    setBulkModalOpen(false);
+    clearSelection();
+  }
+
   if (selectedCase) {
     // Drafts route to the QuickCreate flow via onOpenDraft, so selectedCase
     // here is always a non-draft case opening the read-only detail. (The
@@ -1224,6 +1562,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           onRequestStatusChange={() => setStatusModalCase(selectedCase)}
           onSetStatus={(toStatus) => applyStatusChange(selectedCase, toStatus)}
           showOfflineLabNotice={showOfflineLabNotice}
+          showConnectEmailNotice={showConnectEmailNotice}
         />
         {statusModalCase && (
           <StatusChangeModal
@@ -1324,7 +1663,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           </button>
           {/* View Archived toggle — matches the Suppliers / Practices pattern */}
           <button
-            onClick={() => { setShowArchived(s => !s); setCurrentPage(1); }}
+            onClick={() => { setShowArchived(s => !s); setCurrentPage(1); clearSelection(); }}
             className={`inline-flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium border transition-colors flex-shrink-0 whitespace-nowrap ${
               showArchived
                 ? 'bg-[#F3F3F5] text-[#030213] border-[#BDBDBD]'
@@ -1356,6 +1695,34 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
         )}
       </div>
 
+      {/* Bulk action bar — appears when any case/service row is selected */}
+      {selectionSummary.caseCount > 0 && (
+        <div className="flex flex-wrap items-center gap-3 mb-4 px-4 py-3 bg-[#EEF4FF] border border-[#C8D8FC] rounded-xl">
+          <span className="text-sm font-semibold text-[#1565C0]">
+            {selectionSummary.caseCount} case{selectionSummary.caseCount === 1 ? '' : 's'} selected
+            {selectionSummary.unitCount > selectionSummary.caseCount && (
+              <span className="font-normal"> · {selectionSummary.unitCount} services</span>
+            )}
+          </span>
+          <button
+            onClick={clearSelection}
+            className="text-sm text-[#717182] hover:text-[#030213] underline underline-offset-2 transition-colors"
+          >
+            Clear selection
+          </button>
+          <div className="ml-auto">
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<RefreshCw className="w-4 h-4" />}
+              onClick={() => setBulkModalOpen(true)}
+            >
+              Update Status
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Empty state */}
       {sorted.length === 0 && (
         <div className="bg-white rounded-lg border border-[#E0E0E6] flex flex-col items-center justify-center py-20 text-center">
@@ -1370,9 +1737,19 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
       {sorted.length > 0 && viewMode === 'table' && (
         <div className="bg-[#F3F3F5] rounded-xl border border-[#E0E0E6] overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] border-separate border-spacing-y-1">
+            <table className="w-full min-w-[940px] border-separate border-spacing-y-1">
               <thead>
                 <tr className="bg-[#F3F3F5] [&>th]:border-b [&>th]:border-[#E0E0E6]">
+                  {/* Select-all — scoped to the current page */}
+                  <th className="w-8 pl-4 pr-1 py-3" onClick={(e) => e.stopPropagation()}>
+                    <TriCheckbox
+                      checked={pageAllSelected}
+                      indeterminate={!pageAllSelected && pageSomeSelected}
+                      onChange={toggleSelectPage}
+                      disabled={pageSelectable.length === 0}
+                      title="Select all on this page"
+                    />
+                  </th>
                   <th className="w-12 px-4 py-3"></th>
                   {visibleCols.status && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Status</th>
@@ -1475,6 +1852,24 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                     <React.Fragment key={c.id}>
                     {/* ── Parent row ── */}
                     <tr onClick={() => openCase(c)} className="bg-white hover:bg-[#F8F9FC] transition-colors cursor-pointer relative [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]">
+                      {/* Bulk-select checkbox — checking a multi-service case
+                          checks every sub-case; partial sub-case selection shows
+                          the indeterminate dash. Drafts/locked rows are exempt. */}
+                      <td className="pl-4 pr-1 py-3" onClick={(e) => e.stopPropagation()}>
+                        {isSelectable(c) && (() => {
+                          const sel = selectedSubs.get(c.id);
+                          const fullSel = !!sel && sel.size >= unitIdsOf(c).length;
+                          const partialSel = !!sel && sel.size > 0 && !fullSel;
+                          return (
+                            <TriCheckbox
+                              checked={fullSel}
+                              indeterminate={partialSel}
+                              onChange={() => setCaseSelected(c, !fullSel)}
+                              title={isMulti ? 'Select case (all services)' : 'Select case'}
+                            />
+                          );
+                        })()}
+                      </td>
                       <td className={`pl-3 pr-2 py-3 relative ${lockBlur}`}>
                         {(() => {
                           const hasScans = (c.serviceItems[0]?.scanFileCount ?? 0) > 0;
@@ -1624,6 +2019,16 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                         onClick={() => openCase(c)}
                         className="bg-[#F5F8FF] hover:bg-[#EEF4FF] transition-colors cursor-pointer [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]"
                       >
+                        {/* Sub-case checkbox — selects just this service */}
+                        <td className="pl-4 pr-1 py-2" onClick={(e) => e.stopPropagation()}>
+                          {isSelectable(c) && (
+                            <TriCheckbox
+                              checked={selectedSubs.get(c.id)?.has(si.id) ?? false}
+                              onChange={() => toggleSubSelected(c, si.id)}
+                              title={`Select ${c.id}-${idx + 1}`}
+                            />
+                          )}
+                        </td>
                         {/* Left indent — subtle blue left border */}
                         <td className="pl-3 pr-2 py-2">
                           <div className="w-0.5 h-5 bg-gradient-to-b from-[#4D8EF7] to-[#A59DFF] rounded-full mx-auto opacity-50" />
@@ -1708,9 +2113,29 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
 
                   {/* Header */}
                   <div className="flex items-start justify-between px-4 pt-4 pb-2">
-                    <span className="inline-flex flex-col items-start gap-1">
-                      <StatusBadge status={c.status} />
-                      {c.statusOverride && <OverrideTag override={c.statusOverride} />}
+                    <span className="inline-flex items-start gap-2.5">
+                      {/* Bulk-select — selecting a card selects the whole case
+                          (all services); partial table selections show as the
+                          indeterminate dash here too. */}
+                      {isSelectable(c) && (() => {
+                        const sel = selectedSubs.get(c.id);
+                        const fullSel = !!sel && sel.size >= unitIdsOf(c).length;
+                        const partialSel = !!sel && sel.size > 0 && !fullSel;
+                        return (
+                          <span className="pt-0.5" onClick={(e) => e.stopPropagation()}>
+                            <TriCheckbox
+                              checked={fullSel}
+                              indeterminate={partialSel}
+                              onChange={() => setCaseSelected(c, !fullSel)}
+                              title="Select case"
+                            />
+                          </span>
+                        );
+                      })()}
+                      <span className="inline-flex flex-col items-start gap-1">
+                        <StatusBadge status={c.status} />
+                        {c.statusOverride && <OverrideTag override={c.statusOverride} />}
+                      </span>
                     </span>
                     <div className="relative" onClick={(e) => e.stopPropagation()}>
                       <button
@@ -1874,6 +2299,17 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           missing={statusModalMissing}
           onClose={() => setStatusModalCase(null)}
           onConfirm={(toStatus, override) => { applyStatusChange(statusModalCase, toStatus, override); setStatusModalCase(null); }}
+        />
+      )}
+
+      {/* Bulk status update — opened from the bulk action bar. Picks a target
+          status, then asks for explicit confirmation before applying. */}
+      {bulkModalOpen && selectionSummary.caseCount > 0 && (
+        <BulkStatusModal
+          selections={selectionSummary.entries}
+          missingByCase={bulkMissing}
+          onClose={() => setBulkModalOpen(false)}
+          onConfirm={applyBulkStatusChange}
         />
       )}
     </div>

@@ -11,6 +11,8 @@ import ModalPortal from '../components/ModalPortal';
 import UrgentBadge from '../components/UrgentBadge';
 import UrgentConfirmModal from '../components/UrgentConfirmModal';
 import { OfflineLabNotice, offlineLabStatusFor } from '../components/OfflineLabNotice';
+import ConnectEmailNotice from '../components/ConnectEmailNotice';
+import { useCaseScoringEmails } from '../data/caseScoringEmails';
 import { ScoreBadge } from '../components/ScoreBadge';
 import { AiSparkle } from '../components/AiSparkle';
 import { useCaseScoring } from '../context/CaseScoringContext';
@@ -194,6 +196,10 @@ interface CaseDetailPageProps {
       Non-participating) notice when this case's lab isn't on Smile Genius.
       The lab and DSO portals never pass it, so they never see the banner. */
   showOfflineLabNotice?: boolean;
+  /** Lab portal only — when this case has been scored and the lab has NO
+      business email connected, show the "Connect Email" notice (automated
+      case scoring emails can't be sent until an account is connected). */
+  showConnectEmailNotice?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -2709,7 +2715,7 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
-export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus, showOfflineLabNotice }: CaseDetailPageProps) {
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus, showOfflineLabNotice, showConnectEmailNotice }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState(caseData.requestedDelivery ?? '');
@@ -2758,6 +2764,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
 
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
+  // Automated case scoring emails — the lab's business-email connection.
+  // Reactive: the banner below disappears the moment an account is connected.
+  const { connection: emailConnection } = useCaseScoringEmails();
 
   // Completeness score from the case's real data — identical to the cases list.
   // Drives the "what's missing" messaging and the missing-info email/reply loop.
@@ -2885,6 +2894,18 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
       {offlineLabStatus && caseData.lab && (
         <div className="mx-6 mt-1">
           <OfflineLabNotice labName={caseData.lab} status={offlineLabStatus} variant="detailed" />
+        </div>
+      )}
+
+      {/* ── Connect-email notice — automated case scoring emails. Shown on
+          every SCORED case while the lab has no business email connected:
+          without a connection the automated emails can't be sent. The
+          "Connect Email" action deep-links to Settings → Case Scoring
+          Emails; the banner keeps showing until an account is connected.
+          Lab portal only (the host passes showConnectEmailNotice). ── */}
+      {showConnectEmailNotice && baseScore.applicable && emailConnection.status !== 'connected' && (
+        <div className="mx-6 mt-1">
+          <ConnectEmailNotice />
         </div>
       )}
 

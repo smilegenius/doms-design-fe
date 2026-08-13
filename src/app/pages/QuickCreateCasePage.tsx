@@ -11,6 +11,8 @@ import { useCaseScoring } from '../context/CaseScoringContext';
 import { extractCaseEntities } from '../data/instructionExtraction';
 import ModalPortal from '../components/ModalPortal';
 import { OFFLINE_LABS, OfflineLabNotice } from '../components/OfflineLabNotice';
+import ConnectEmailNotice from '../components/ConnectEmailNotice';
+import { useCaseScoringEmails, categoryForTier, findTemplate, CATEGORY_META } from '../data/caseScoringEmails';
 import AddPracticeModal from '../components/AddPracticeModal';
 import AddStaffModal from '../components/AddStaffModal';
 import { mockSuppliers } from '../data/suppliersData';
@@ -1028,6 +1030,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   const cpNoun  = isLab ? 'clinic' : 'lab';   // lowercase for copy
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
+  // Automated case scoring emails (lab portal) — the business-email connection
+  // + per-outcome automation config. Drives the "Connect Email" notice on
+  // scored drafts and the auto-send simulation when the case is created.
+  const scoringEmails = useCaseScoringEmails();
   // Fields seeded from an email/document-sourced draft were extracted by AI, so
   // they're flagged with a sparkle for the user to review.
   const aiPrefilled = !!prefillDraft && prefillDraft.source === 'email';
@@ -1161,6 +1167,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   const [aiFields, setAiFields] = useState<Record<string, number>>({});
   const [aiFilledCount, setAiFilledCount] = useState(0);   // review strip; 0 = hidden
   const [readingInstructions, setReadingInstructions] = useState(false);
+  // Feature-intro note above the instructions box. Session-local on purpose:
+  // it reappears for every new case (per PM ask, "for a while") until the
+  // user dismisses it or runs an extraction on this case.
+  const [nlNoteDismissed, setNlNoteDismissed] = useState(false);
   const lastParsedRef = useRef('');          // blur only re-runs when text changed
   // Delivery + order type carry non-empty defaults, so "user touched it" must
   // be tracked separately from "has a value".
@@ -1481,6 +1491,21 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
     // the lab won't see it on the platform or move the status along.
     if (!isLab && selectedLab?.platformStatus) {
       toast.info(`${selectedLab.name} is an offline lab — send them the order form and update the case status from your side.`);
+    }
+    // ── Automated case scoring email — fires once scoring completes at
+    // creation. Complete → never sends. Needs Review / Incomplete → sends the
+    // category's selected template automatically, from the lab's CONNECTED
+    // business email account. No connection → nothing is sent and the
+    // "Connect Email" notice stays on the case instead.
+    if (isLab && liveScore.applicable) {
+      const category = categoryForTier(liveScore.tier);
+      if (category && scoringEmails.automation[category].enabled) {
+        if (scoringEmails.connection.status === 'connected') {
+          const tpl = findTemplate(category, scoringEmails.automation[category].templateId, scoringEmails.customTemplates);
+          const dentistName = dentists.find(d => d.id === dentistId)?.name ?? 'the dentist';
+          toast.info(`Case scored ${CATEGORY_META[category].label} — "${tpl.name}" sent automatically to ${dentistName} from ${scoringEmails.connection.email}.`);
+        }
+      }
     }
     onSubmitted();
   }
@@ -2019,6 +2044,18 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           </div>
         )}
 
+        {/* ── Connect-email notice — automated case scoring emails (lab).
+            Appears as soon as this draft HAS a score and the lab has no
+            business email connected: the automated Needs Review / Incomplete
+            emails can't be sent without one. "Connect Email" deep-links to
+            Settings → Case Scoring Emails; the notice keeps showing on scored
+            cases until an account is connected. ── */}
+        {isLab && liveScore.applicable && scoringEmails.connection.status !== 'connected' && (
+          <div className="max-w-6xl mx-auto mb-3">
+            <ConnectEmailNotice variant="compact" />
+          </div>
+        )}
+
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
           {/* ── LEFT COLUMN — main form. Uses flex+order so Patient+Lab
               renders first visually while Case Details stays second in
@@ -2502,28 +2539,29 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 <span className="text-[10px] text-[#A0A0B0] italic">— optional</span>
                 {aiPrefilled && caseInstructions.trim().length > 0 && <AiSparkle label title="Pulled from the prescription email by AI — please review" />}
               </div>
-              <div className="flex items-center gap-2">
-                {/* Explicit extraction trigger — blur also runs it, but only
-                    when the text changed since the last run. */}
-                <button
-                  type="button"
-                  onClick={() => runInstructionExtraction('button')}
-                  disabled={!caseInstructions.trim() || readingInstructions}
-                  title="Read the instructions and pre-fill the case fields — you review before creating"
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] hover:bg-[#FEE2E2] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {readingInstructions
-                    ? <><Loader2 className="w-3 h-3 animate-spin" /> Reading…</>
-                    : <><AiSparkle title="" /> Read instructions</>}
-                </button>
-                {(caseInstructions.trim().length > 0 || caseInstructionsFiles.length > 0) && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#16A34A] uppercase tracking-wider">
-                    <Check className="w-3 h-3" strokeWidth={3} />
-                    Added
-                  </span>
-                )}
-              </div>
+              {(caseInstructions.trim().length > 0 || caseInstructionsFiles.length > 0) && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#16A34A] uppercase tracking-wider">
+                  <Check className="w-3 h-3" strokeWidth={3} />
+                  Added
+                </span>
+              )}
             </div>
+            {/* Feature note — shown on every new case (session-local, so it
+                comes back next time) until dismissed or until the first
+                extraction runs, when the review strip takes its place. */}
+            {!nlNoteDismissed && aiFilledCount === 0 && (
+              <div className="mb-2 flex items-start gap-2 px-3 py-2 rounded-lg border border-[#FECACA] bg-[#FEF2F2]">
+                <AiSparkle label title="" className="mt-px" />
+                <p className="flex-1 text-[11px] text-[#5A5568] leading-snug">
+                  <span className="font-semibold text-[#030213]">Describe the case in plain language</span> — e.g.
+                  “Emax crown on 26, shade A2, patient Sarah Whitfield, deliver by 12 Aug” — and
+                  Smile Genius will pre-fill the form. You review every field before creating.
+                </p>
+                <button type="button" onClick={() => setNlNoteDismissed(true)} title="Dismiss" className="flex-shrink-0 mt-px">
+                  <X className="w-3 h-3 text-[#A0A0B0] hover:text-[#5A5568]" />
+                </button>
+              </div>
+            )}
             {/* Review strip — extraction never commits silently: it reports
                 what it filled and offers Undo. Field edits don't dismiss it
                 (the user is mid-review); Undo / × do. */}
@@ -2546,14 +2584,30 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </button>
               </div>
             )}
-            <textarea
-              value={caseInstructions}
-              onChange={(e) => setCaseInstructions(e.target.value)}
-              onBlur={() => runInstructionExtraction('blur')}
-              rows={2}
-              placeholder="Describe the case in plain language — e.g. “Emax crown on 26, shade A2, patient Sarah Whitfield, deliver by 12 Aug” — and we'll fill the form for review."
-              className="w-full px-3 py-2 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] resize-none mb-2"
-            />
+            {/* Composer — the "Read instructions" trigger lives INSIDE the
+                box (bottom-right), like a send action; blur also runs the
+                extraction when the text changed since the last run. */}
+            <div className="relative mb-2">
+              <textarea
+                value={caseInstructions}
+                onChange={(e) => setCaseInstructions(e.target.value)}
+                onBlur={() => runInstructionExtraction('blur')}
+                rows={3}
+                placeholder="Describe the case in plain language — e.g. “Emax crown on 26, shade A2, patient Sarah Whitfield, deliver by 12 Aug” — and we'll fill the form for review."
+                className="w-full px-3 pt-2 pb-9 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] resize-none"
+              />
+              <button
+                type="button"
+                onClick={() => runInstructionExtraction('button')}
+                disabled={!caseInstructions.trim() || readingInstructions}
+                title="Read the instructions and pre-fill the case fields — you review before creating"
+                className="absolute bottom-2.5 right-2 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] hover:bg-[#FEE2E2] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {readingInstructions
+                  ? <><Loader2 className="w-3 h-3 animate-spin" /> Reading…</>
+                  : <><AiSparkle title="" /> Read instructions</>}
+              </button>
+            </div>
             {/* Upload zone — clicking adds a fake attachment for the demo.
                 In production this would open the OS file picker. */}
             <button

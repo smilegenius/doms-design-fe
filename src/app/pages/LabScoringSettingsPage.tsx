@@ -3,11 +3,13 @@ import {
   Sliders, Gauge, FileText, RotateCcw, CheckCircle2, Info, Sparkles, Save,
   ChevronDown, AlertTriangle, Plus, X, FolderKanban, Mail, Copy, Check, Pencil,
 } from 'lucide-react';
-import ModalPortal from '../components/ModalPortal';
+import { useNavigate } from 'react-router-dom';
 import ServiceConfigDrawer from './ServiceConfigDrawer';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
-import { SCOREABLE_SERVICE_TYPES, SERVICE_GROUPS, TIER_BAND, ScoreBand, SCORE_FIELD_DEF_MAP, MISSING_INFO_EMAIL, MISSING_INFO_EMAIL_PLACEHOLDERS } from '../data/caseScoring';
+import { SCOREABLE_SERVICE_TYPES, SERVICE_GROUPS, TIER_BAND, ScoreBand, SCORE_FIELD_DEF_MAP } from '../data/caseScoring';
+import { useCaseScoringEmails, findTemplate, PROVIDER_META, CATEGORY_META } from '../data/caseScoringEmails';
+import type { ScoringEmailCategory } from '../data/caseScoringEmails';
 import type { PrescriptionField } from '../data/prescriptionBuilder';
 import { scoreableFieldsFor } from '../data/prescriptionBuilder';
 import { mockCases } from './CasesPage';
@@ -96,28 +98,12 @@ export default function LabScoringSettingsPage() {
   // The service whose "Configure" drawer is open (null = closed).
   const [configService, setConfigService] = useState<string | null>(null);
 
-  // ── Auto-email config (local — prototype) ──
-  const [emailEnabled, setEmailEnabled] = useState(true);
-  const [emailSubject, setEmailSubject] = useState(MISSING_INFO_EMAIL.subject);
-  const [emailBody, setEmailBody] = useState(MISSING_INFO_EMAIL.body);
-  const [emailTemplateOpen, setEmailTemplateOpen] = useState(false);
-  const [triggerIncomplete, setTriggerIncomplete] = useState(true);
-  const [triggerAttention, setTriggerAttention] = useState(true);
-  const [markSentForReview, setMarkSentForReview] = useState(true);
-  const emailIsDefault = emailSubject === MISSING_INFO_EMAIL.subject && emailBody === MISSING_INFO_EMAIL.body;
-  // Step 1 — the mailbox that sends the emails + receives replies. Connect any
-  // of 3 providers (mirrors the Invoices dispute module).
-  const [mailboxConnected, setMailboxConnected] = useState(false);
-  const [mailboxProvider, setMailboxProvider] = useState<'gmail' | 'outlook' | 'm365' | null>(null);
-  const [connectDrawerOpen, setConnectDrawerOpen] = useState(false);
-  const connectedEmail = 'lab.replies@smilegenius.co.uk';
-  const providerLabel = (p: typeof mailboxProvider) => p === 'gmail' ? 'Gmail' : p === 'outlook' ? 'Outlook' : p === 'm365' ? 'Microsoft 365' : '';
-  const connectMailbox = (p: 'gmail' | 'outlook' | 'm365') => {
-    setMailboxProvider(p);
-    setMailboxConnected(true);
-    setConnectDrawerOpen(false);
-    toast.success(`Connected to ${providerLabel(p)}`);
-  };
+  // ── Auto-email — configuration now lives in Settings → Case Scoring Emails
+  // (email connection, per-outcome automation, templates). This tab renders a
+  // live read-only summary of that shared store + a jump link, so there's a
+  // single source of truth.
+  const navigate = useNavigate();
+  const scoringEmails = useCaseScoringEmails();
 
   const anyStale = useMemo(() => SCOREABLE_SERVICE_TYPES.some(s => isServiceStale(s)), [isServiceStale]);
 
@@ -629,191 +615,92 @@ export default function LabScoringSettingsPage() {
 
               {scoringTab === 'email' && (
                 <>
-                  {/* Intro */}
+                  {/* Intro — the configuration itself moved to Settings so the
+                      email connection, automation toggles and templates have a
+                      single home. This tab stays as a live summary + shortcut. */}
                   <div className="bg-gradient-to-br from-[#EEF4FF] to-[#F5F3FF] border border-[#DBEAFE] rounded-xl p-4 flex items-start gap-3">
                     <span className="w-9 h-9 rounded-lg bg-white border border-[#DBEAFE] flex items-center justify-center flex-shrink-0">
                       <Mail className="w-4 h-4 text-[#4D8EF7]" />
                     </span>
                     <div className="text-xs text-[#3A4A63] leading-relaxed">
-                      <span className="font-semibold text-[#1565C0]">Auto-email the dentist.</span>{' '}
-                      When a case is missing required info, email the dentist the missing items automatically so they can update the case. Replies show up on the case.
+                      <span className="font-semibold text-[#1565C0]">Automated Case Scoring Emails.</span>{' '}
+                      When a case is scored <span className="font-semibold">Needs Review</span> or{' '}
+                      <span className="font-semibold">Incomplete</span>, the selected template is emailed to the dentist
+                      automatically from your own business email account. Connection, automation and templates are
+                      configured in <span className="font-semibold">Settings → Notifications → Case Scoring Emails</span>.
                     </div>
                   </div>
 
-                  {/* Step 1 — connect the mailbox that sends emails + receives replies */}
-                  <div className="bg-white border border-[#E0E0E6] rounded-xl p-4 flex items-center justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0">
-                      <span className="w-9 h-9 rounded-lg bg-[#EEF4FF] border border-[#C8D8FC] flex items-center justify-center flex-shrink-0">
-                        <Mail className="w-4 h-4 text-[#1565C0]" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">Step 1 · Mailbox</p>
-                        {mailboxConnected ? (
-                          <p className="text-sm font-medium text-[#030213] flex items-center gap-1.5 flex-wrap">
-                            <CheckCircle2 className="w-4 h-4 text-[#15803D]" /> Connected ·
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#F0FDF4] border border-[#BBF7D0] text-[10px] font-semibold text-[#2E7D32]"><span className="w-1.5 h-1.5 rounded-full bg-[#2E7D32]" />{providerLabel(mailboxProvider)}</span>
-                            <span className="font-mono text-[#1565C0]">{connectedEmail}</span>
-                          </p>
-                        ) : (
-                          <p className="text-sm font-medium text-[#030213]">Connect the inbox that receives dentist replies</p>
-                        )}
-                        <p className="text-[11px] text-[#717182] mt-0.5">Emails are sent from — and replies are read in — this mailbox.</p>
-                      </div>
-                    </div>
-                    {mailboxConnected ? (
-                      <button onClick={() => { setMailboxConnected(false); setMailboxProvider(null); toast.success('Mailbox disconnected'); }} className="text-[11px] font-semibold text-[#B91C1C] hover:underline flex-shrink-0">Disconnect</button>
-                    ) : (
-                      <button onClick={() => setConnectDrawerOpen(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity flex-shrink-0">
-                        <Mail className="w-4 h-4" /> Connect mailbox
-                      </button>
-                    )}
-                  </div>
-
-                  <div className={`bg-white border border-[#E0E0E6] rounded-xl p-5 space-y-4 ${!mailboxConnected ? 'opacity-60' : ''}`}>
-                    {/* Master toggle */}
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[#030213]">Send missing-info email</p>
-                        <p className="text-xs text-[#717182] mt-0.5 leading-relaxed">
-                          {!mailboxConnected ? 'Connect a mailbox above to enable auto-emails.' : emailEnabled ? 'Sent automatically to the dentist when an incoming case is missing required info.' : 'Paused — no automatic emails are sent.'}
-                        </p>
-                      </div>
-                      <Toggle on={emailEnabled && mailboxConnected} disabled={!mailboxConnected} onClick={() => { setEmailEnabled(!emailEnabled); toast.success(`Auto-email ${!emailEnabled ? 'enabled' : 'paused'}`); }} />
-                    </div>
-
-                    {mailboxConnected && emailEnabled && (
-                      <>
-                        {/* Trigger */}
-                        <div className="pt-4 border-t border-[#F0EFF6]">
-                          <p className="text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-2">Send when a case is</p>
-                          <div className="flex flex-wrap gap-2">
-                            {[
-                              { on: triggerIncomplete, set: setTriggerIncomplete, label: 'Incomplete', dot: '#EF4444' },
-                              { on: triggerAttention, set: setTriggerAttention, label: 'Need Attention', dot: '#F59E0B' },
-                            ].map((t) => (
-                              <button
-                                key={t.label}
-                                onClick={() => t.set(!t.on)}
-                                role="checkbox"
-                                aria-checked={t.on}
-                                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                                  t.on ? 'bg-[#EEF4FF] text-[#1565C0] border-[#C8D8FC]' : 'bg-white text-[#717182] border-[#E0E0E6] hover:border-[#4D8EF7]'
-                                }`}
-                              >
-                                <span className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                                  t.on ? 'bg-[#4D8EF7] border-[#4D8EF7]' : 'bg-white border-[#D4CEE1]'
-                                }`}>
-                                  {t.on && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
-                                </span>
-                                <span className="w-2 h-2 rounded-full" style={{ background: t.dot }} />
-                                {t.label}
-                              </button>
-                            ))}
-                          </div>
-                          <p className="text-[11px] text-[#A0A0B0] mt-1.5">Complete cases never trigger an email.</p>
-                        </div>
-
-                        {/* Template editor */}
-                        <div className="border border-[#E0E0E6] rounded-lg overflow-hidden">
-                          <button onClick={() => setEmailTemplateOpen(o => !o)} className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 bg-[#FAFBFC] hover:bg-[#F3F4F8] transition-colors">
-                            <span className="flex items-center gap-2 min-w-0">
-                              <Mail className="w-3.5 h-3.5 text-[#717182] flex-shrink-0" />
-                              <span className="text-sm font-medium text-[#030213]">Email template</span>
-                              {!emailIsDefault && <span className="inline-flex items-center px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#BFDBFE]">Customised</span>}
-                            </span>
-                            <span className="flex items-center gap-1 text-xs text-[#717182] flex-shrink-0">
-                              {emailTemplateOpen ? 'Hide' : 'Edit'}
-                              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${emailTemplateOpen ? 'rotate-180' : ''}`} />
-                            </span>
-                          </button>
-                          {emailTemplateOpen && (
-                            <div className="p-3.5 space-y-3 border-t border-[#F0EFF6]">
-                              <div>
-                                <label className="block text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-1">Subject</label>
-                                <input value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/15" />
-                              </div>
-                              <div>
-                                <label className="block text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-1">Body</label>
-                                <textarea value={emailBody} onChange={(e) => setEmailBody(e.target.value)} rows={11} className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/15 font-mono leading-relaxed resize-y" />
-                              </div>
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex flex-wrap gap-1">
-                                  {MISSING_INFO_EMAIL_PLACEHOLDERS.map((p) => (
-                                    <button key={p} onClick={() => { navigator.clipboard?.writeText(`{{${p}}}`); toast.success(`Copied {{${p}}}`); }} title="Click to copy" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white border border-[#BFDBFE] text-[10px] font-mono font-semibold text-[#1565C0] hover:bg-[#EEF4FF]">
-                                      {`{{${p}}}`}<Copy className="w-2.5 h-2.5" />
-                                    </button>
-                                  ))}
-                                </div>
-                                <button disabled={emailIsDefault} onClick={() => { setEmailSubject(MISSING_INFO_EMAIL.subject); setEmailBody(MISSING_INFO_EMAIL.body); toast.success('Template reset to default'); }} className="text-[11px] font-medium text-[#717182] hover:text-[#030213] disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap flex-shrink-0">Reset to default</button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Post-send action */}
-                        <div className="flex items-center justify-between gap-3">
+                  {/* Live summary of the shared Case Scoring Emails config — read-only
+                      here; the single editable home is Settings → Case Scoring Emails. */}
+                  <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
+                    <div className="divide-y divide-[#F0EFF6]">
+                      {/* Connection status */}
+                      <div className="flex items-center justify-between gap-3 px-4 py-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-8 h-8 rounded-lg bg-[#EEF4FF] border border-[#C8D8FC] flex items-center justify-center flex-shrink-0">
+                            <Mail className="w-4 h-4 text-[#1565C0]" />
+                          </span>
                           <div className="min-w-0">
-                            <p className="text-sm font-medium text-[#030213]">Set status to "Sent for Review"</p>
-                            <p className="text-xs text-[#717182] mt-0.5">After the email goes out, move the case to Sent for Review.</p>
-                          </div>
-                          <Toggle on={markSentForReview} onClick={() => setMarkSentForReview(!markSentForReview)} />
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Connect-mailbox drawer (Step 1) — same 3-provider flow as the Invoices dispute module.
-                      Rendered through ModalPortal (document root) so the backdrop covers the FULL
-                      viewport — the page's animated scroll container would otherwise clip a plain
-                      fixed child to itself. */}
-                  {connectDrawerOpen && (
-                    <ModalPortal>
-                    <div className="fixed inset-0 z-[120] flex">
-                      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setConnectDrawerOpen(false)} />
-                      <div className="relative md:ml-auto flex flex-col bg-white shadow-2xl w-full md:w-[55%] md:max-w-[680px] h-full animate-in slide-in-from-right duration-200">
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6] flex-shrink-0">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-9 h-9 rounded-full bg-[#EEF4FF] flex items-center justify-center flex-shrink-0"><Mail className="w-4 h-4 text-[#4D8EF7]" /></div>
-                            <div className="min-w-0">
-                              <h3 className="text-base font-semibold text-[#030213] truncate">Connect mailbox</h3>
-                              <p className="text-[11px] text-[#717182] truncate">Missing-info emails &amp; dentist replies</p>
-                            </div>
-                          </div>
-                          <button onClick={() => setConnectDrawerOpen(false)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors"><X className="w-4 h-4" /></button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto bg-[#FAFBFC]">
-                          <div className="flex flex-col items-center text-center px-8 py-12">
-                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] flex items-center justify-center mb-4"><Mail className="w-7 h-7 text-white" /></div>
-                            <h4 className="text-base font-semibold text-[#030213] mb-1">Connect your mailbox</h4>
-                            <p className="text-sm text-[#717182] max-w-md leading-relaxed mb-6">
-                              Missing-info emails are sent as real emails from your own address. Once connected, every dentist reply lands back on the case so you don't have to switch to your inbox.
-                            </p>
-                            <div className="grid grid-cols-3 gap-3 w-full max-w-md">
-                              {([
-                                { id: 'gmail',   label: 'Gmail',         color: 'text-[#EA4335]', sub: 'OAuth via Google' },
-                                { id: 'outlook', label: 'Outlook',       color: 'text-[#0078D4]', sub: 'OAuth via Microsoft' },
-                                { id: 'm365',    label: 'Microsoft 365', color: 'text-[#185ABD]', sub: 'OAuth via Microsoft' },
-                              ] as const).map(p => (
-                                <button
-                                  key={p.id}
-                                  onClick={() => connectMailbox(p.id)}
-                                  className="flex flex-col items-center gap-1.5 p-4 bg-white border border-[#E0E0E6] rounded-xl hover:border-[#4D8EF7] hover:shadow-sm transition-all"
-                                >
-                                  <Mail className={`w-5 h-5 ${p.color}`} />
-                                  <span className="text-xs font-semibold text-[#030213]">{p.label}</span>
-                                  <span className="text-[10px] text-[#A0A0B0]">{p.sub}</span>
-                                </button>
-                              ))}
-                            </div>
-                            <p className="text-[10px] text-[#A0A0B0] mt-6 max-w-md">
-                              We request read + send permission on the connected mailbox and only show messages associated with case threads. Demo only — no real account is connected.
-                            </p>
+                            <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">Email account</p>
+                            {scoringEmails.connection.status === 'connected' && scoringEmails.connection.provider ? (
+                              <p className="text-sm font-medium text-[#030213] flex items-center gap-1.5 flex-wrap">
+                                <CheckCircle2 className="w-4 h-4 text-[#15803D]" />
+                                <span className="font-mono text-[#1565C0]">{scoringEmails.connection.email}</span>
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#F0FDF4] border border-[#BBF7D0] text-[10px] font-semibold text-[#2E7D32]">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-[#2E7D32]" />
+                                  {PROVIDER_META[scoringEmails.connection.provider].label}
+                                </span>
+                              </p>
+                            ) : (
+                              <p className="text-sm font-medium text-[#B45309] flex items-center gap-1.5">
+                                <AlertTriangle className="w-4 h-4" />
+                                Not connected — automated emails can't be sent
+                              </p>
+                            )}
                           </div>
                         </div>
                       </div>
+                      {/* Per-outcome automation summary */}
+                      {(['needs-review', 'incomplete'] as ScoringEmailCategory[]).map(cat => {
+                        const conf = scoringEmails.automation[cat];
+                        const tpl = findTemplate(cat, conf.templateId, scoringEmails.customTemplates);
+                        return (
+                          <div key={cat} className="flex items-center justify-between gap-3 px-4 py-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: CATEGORY_META[cat].dot }} />
+                              <p className="text-sm font-medium text-[#030213]">{CATEGORY_META[cat].label}</p>
+                            </div>
+                            <p className="text-xs text-[#717182] truncate">
+                              {conf.enabled
+                                ? <><span className="font-semibold text-[#15803D]">Enabled</span> · sends "{tpl.name}"</>
+                                : <span className="font-semibold text-[#A0A0B0]">Disabled</span>}
+                            </p>
+                          </div>
+                        );
+                      })}
+                      {/* Complete — never sends, so nothing to configure */}
+                      <div className="flex items-center justify-between gap-3 px-4 py-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-2 h-2 rounded-full flex-shrink-0 bg-[#22C55E]" />
+                          <p className="text-sm font-medium text-[#5A5568]">Complete</p>
+                        </div>
+                        <p className="text-xs text-[#A0A0B0]">Never sends an email</p>
+                      </div>
                     </div>
-                    </ModalPortal>
-                  )}
+                    <div className="px-4 py-3 bg-[#F8F9FC] border-t border-[#F0EFF6] flex items-center justify-between gap-3">
+                      <p className="text-[11px] text-[#717182]">
+                        Connect or disconnect the account, switch templates and create custom ones in Settings.
+                      </p>
+                      <button
+                        onClick={() => navigate('/lab/settings?tab=notifications&sub=case-emails')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity flex-shrink-0"
+                      >
+                        <Mail className="w-3.5 h-3.5" />
+                        Open Email Settings
+                      </button>
+                    </div>
+                  </div>
                 </>
               )}
             </>

@@ -26,6 +26,7 @@ import InviteUsersModal, { InviteUserRow } from '../components/InviteUsersModal'
 import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
 import NotificationPreferences from './NotificationPreferencesPage';
 import EscalationMatrix from './EscalationMatrixPage';
+import CaseScoringEmailsSettings from './CaseScoringEmailsSettingsPage';
 import Toggle from '../components/Toggle';
 import { useCustomServices, removeCustomService } from '../data/customServices';
 import { useToast } from '../context/ToastContext';
@@ -114,12 +115,22 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
   //   /lab/settings?tab=notifications&sub=escalations
   // The portal shells parse only the pathname, so query params pass through.
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabParam = searchParams.get('tab') as TabId | null;
-  const activeTab: TabId = tabParam && TABS.some(t => t.id === tabParam) ? tabParam : 'personal';
-  // Notifications tab is split: the existing notification toggles on one
-  // sub-tab, the Escalation Matrix on the other.
-  const notifSubTab: 'preferences' | 'escalations' =
-    searchParams.get('sub') === 'escalations' ? 'escalations' : 'preferences';
+  const tabs = TABS;
+  const tabParam = searchParams.get('tab');
+  const activeTab: TabId =
+    // Legacy deep link from when Case Scoring Emails was its own tab.
+    tabParam === 'case-emails' ? 'notifications'
+    : tabParam && tabs.some(t => t.id === tabParam) ? (tabParam as TabId) : 'personal';
+  // Notifications tab is split into sub-tabs: the notification toggles, the
+  // Escalation Matrix, and (lab only) Case Scoring Emails — the automated
+  // dentist-email config the "Connect Email" banner deep-links to
+  // (?tab=notifications&sub=case-emails).
+  type NotifSubTab = 'preferences' | 'escalations' | 'case-emails';
+  const subParam = searchParams.get('sub');
+  const notifSubTab: NotifSubTab =
+    subParam === 'escalations' ? 'escalations'
+    : (subParam === 'case-emails' || tabParam === 'case-emails') && portal === 'lab' ? 'case-emails'
+    : 'preferences';
 
   const setActiveTab = (id: TabId) => {
     const next = new URLSearchParams(searchParams);
@@ -127,10 +138,10 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
     next.delete('sub');
     setSearchParams(next);
   };
-  const setNotifSubTab = (sub: 'preferences' | 'escalations') => {
+  const setNotifSubTab = (sub: NotifSubTab) => {
     const next = new URLSearchParams(searchParams);
     next.set('tab', 'notifications');
-    if (sub === 'escalations') next.set('sub', 'escalations'); else next.delete('sub');
+    if (sub === 'preferences') next.delete('sub'); else next.set('sub', sub);
     setSearchParams(next);
   };
 
@@ -270,7 +281,7 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
         {/* Vertical menu — matches Spend Settings */}
         <aside className="lg:w-64 flex-shrink-0">
           <nav className="bg-white border border-[#E0E0E6] rounded-xl p-2 lg:sticky lg:top-6">
-            {TABS.map(({ id, label, description, icon: Icon }) => {
+            {tabs.map(({ id, label, description, icon: Icon }) => {
               const active = activeTab === id;
               const done = CONFIGURED.has(id);
               return (
@@ -308,12 +319,12 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
             <div className="mt-2 pt-2 border-t border-[#F0EFF6]">
               <div className="px-3 py-1.5 flex items-center justify-between">
                 <span className="text-[10px] font-medium text-[#717182] uppercase tracking-wide">Setup progress</span>
-                <span className="text-[11px] font-semibold text-[#030213]">{CONFIGURED.size}/{TABS.length}</span>
+                <span className="text-[11px] font-semibold text-[#030213]">{CONFIGURED.size}/{tabs.length}</span>
               </div>
               <div className="mx-3 mb-1 h-1 rounded-full bg-[#F3F3F5] overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] transition-all"
-                  style={{ width: `${(CONFIGURED.size / TABS.length) * 100}%` }}
+                  style={{ width: `${(CONFIGURED.size / tabs.length) * 100}%` }}
                 />
               </div>
             </div>
@@ -800,9 +811,24 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
               <ShieldAlert className="w-3.5 h-3.5" />
               Escalation Matrix
             </button>
+            {portal === 'lab' && (
+              <button
+                onClick={() => setNotifSubTab('case-emails')}
+                className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  notifSubTab === 'case-emails' ? 'bg-white text-[#030213] shadow-sm' : 'text-[#717182] hover:text-[#030213]'
+                }`}
+              >
+                <Send className="w-3.5 h-3.5" />
+                Case Scoring Emails
+              </button>
+            )}
           </div>
 
           {notifSubTab === 'escalations' && <EscalationMatrix />}
+
+          {/* Case Scoring Emails (lab only) — Email Integration + automation
+              for the Automated Case Scoring Emails feature. */}
+          {notifSubTab === 'case-emails' && portal === 'lab' && <CaseScoringEmailsSettings />}
 
           {notifSubTab === 'preferences' && portal === 'lab' && (
             <NotificationPreferences />
@@ -864,7 +890,6 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
           )}
         </div>
       )}
-
 
         </section>
       </div>

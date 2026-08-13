@@ -136,6 +136,7 @@ export default function LabApp() {
           onConfigureScoring={() => setActivePage('configuration')}
           onOpenDraft={(c) => navigate(`/lab/cases/quick-new/${encodeURIComponent(c.id)}`)}
           caseViewLimit={2}
+          showConnectEmailNotice
         />
       )}
       {activePage === 'invoices' && (
