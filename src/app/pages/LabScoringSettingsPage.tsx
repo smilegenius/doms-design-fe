@@ -3,13 +3,11 @@ import {
   Sliders, Gauge, FileText, RotateCcw, CheckCircle2, Info, Sparkles, Save,
   ChevronDown, AlertTriangle, Plus, X, FolderKanban, Mail, Copy, Check, Pencil,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import ServiceConfigDrawer from './ServiceConfigDrawer';
+import CaseScoringEmailsSettings from './CaseScoringEmailsSettingsPage';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import { SCOREABLE_SERVICE_TYPES, SERVICE_GROUPS, TIER_BAND, ScoreBand, SCORE_FIELD_DEF_MAP } from '../data/caseScoring';
-import { useCaseScoringEmails, findTemplate, PROVIDER_META, CATEGORY_META } from '../data/caseScoringEmails';
-import type { ScoringEmailCategory } from '../data/caseScoringEmails';
 import type { PrescriptionField } from '../data/prescriptionBuilder';
 import { scoreableFieldsFor } from '../data/prescriptionBuilder';
 import { mockCases } from './CasesPage';
@@ -81,7 +79,18 @@ export function AddOption({ onAdd }: { onAdd: (v: string) => void }) {
   );
 }
 
-export default function LabScoringSettingsPage() {
+export default function LabScoringSettingsPage({ embedded = false, fixedSection, initialScoringTab }: {
+  /** Rendered inside a Settings tab (the live portal's home for this config):
+      skips the page padding since the settings shell provides it. */
+  embedded?: boolean;
+  /** Lock the page to ONE section — the live portal keeps Prescription
+      Builder and Case Scoring as SEPARATE Settings entries, so each tab
+      renders just its own section (no section switcher, no side menu). */
+  fixedSection?: Section;
+  /** Deep-link straight onto a Case Scoring inner tab (e.g. the "Connect
+      Email" banner opens 'email' — the Case Scoring Emails tab). */
+  initialScoringTab?: 'weights' | 'thresholds' | 'email';
+} = {}) {
   const { toast } = useToast();
   const {
     config, thresholds, prescription, serviceOffered,
@@ -92,18 +101,11 @@ export default function LabScoringSettingsPage() {
     setThresholdUpTo, toggleThreshold, setThresholdLabel,
   } = useCaseScoring();
 
-  const [section, setSection] = useState<Section>('prescription');
-  const [scoringTab, setScoringTab] = useState<'weights' | 'thresholds' | 'email'>('weights');
+  const [section, setSection] = useState<Section>(fixedSection ?? (initialScoringTab ? 'scoring' : 'prescription'));
+  const [scoringTab, setScoringTab] = useState<'weights' | 'thresholds' | 'email'>(initialScoringTab ?? 'weights');
   const [activeService, setActiveService] = useState<string>(SCOREABLE_SERVICE_TYPES[0]);
   // The service whose "Configure" drawer is open (null = closed).
   const [configService, setConfigService] = useState<string | null>(null);
-
-  // ── Auto-email — configuration now lives in Settings → Case Scoring Emails
-  // (email connection, per-outcome automation, templates). This tab renders a
-  // live read-only summary of that shared store + a jump link, so there's a
-  // single source of truth.
-  const navigate = useNavigate();
-  const scoringEmails = useCaseScoringEmails();
 
   const anyStale = useMemo(() => SCOREABLE_SERVICE_TYPES.some(s => isServiceStale(s)), [isServiceStale]);
 
@@ -195,13 +197,22 @@ export default function LabScoringSettingsPage() {
   });
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-5">
-      {/* Header */}
+    <div className={embedded ? 'space-y-5' : 'p-4 sm:p-6 lg:p-8 space-y-5'}>
+      {/* Header — title tracks the locked section when this page is embedded
+          as a single-purpose Settings tab. */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl sm:text-2xl font-semibold text-[#030213]">Configuration</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold text-[#030213]">
+            {fixedSection === 'prescription' ? 'Prescription Builder'
+              : fixedSection === 'scoring' ? 'Case Scoring'
+              : 'Configuration'}
+          </h1>
           <p className="text-sm text-[#717182] mt-0.5">
-            Build the prescription form and decide how cases are scored. Scoring is driven by the fields you enable here.
+            {fixedSection === 'prescription'
+              ? 'Build the prescription form shown in case creation — services, fields and dropdown values. Fields tagged Scored feed Case Scoring.'
+              : fixedSection === 'scoring'
+                ? 'Decide how cases are scored — field weights, score bands and automated case scoring emails.'
+                : 'Build the prescription form and decide how cases are scored. Scoring is driven by the fields you enable here.'}
           </p>
         </div>
         <button
@@ -214,7 +225,9 @@ export default function LabScoringSettingsPage() {
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6">
-        {/* Left menu — a single "Cases" section */}
+        {/* Left menu — a single "Cases" section. Hidden when the page is
+            locked to one section (the Settings nav already provides it). */}
+        {!fixedSection && (
         <aside className="lg:w-60 flex-shrink-0">
           <nav className="bg-white border border-[#E0E0E6] rounded-xl p-2 lg:sticky lg:top-6">
             <div className="w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left relative bg-gradient-to-r from-[#EEF4FF] to-[#F5F3FF]">
@@ -230,10 +243,14 @@ export default function LabScoringSettingsPage() {
             </div>
           </nav>
         </aside>
+        )}
 
         {/* Panel */}
         <section className="flex-1 min-w-0 space-y-4">
-          {/* Horizontal tabs — Prescription Builder · Case Scoring (matches invoice config) */}
+          {/* Horizontal tabs — Prescription Builder · Case Scoring. Hidden when
+              locked to one section: the live portal exposes each as its own
+              Settings entry, so the switcher would duplicate that nav. */}
+          {!fixedSection && (
           <div className="p-1 bg-[#F3F3F5] rounded-xl">
             <div className="flex gap-1">
               {([
@@ -254,6 +271,7 @@ export default function LabScoringSettingsPage() {
               ))}
             </div>
           </div>
+          )}
 
           {/* ── PRESCRIPTION BUILDER ── */}
           {section === 'prescription' && (
@@ -341,7 +359,7 @@ export default function LabScoringSettingsPage() {
             <>
               {/* Inner tabs: Weights | Bands | Auto-Email — full width */}
               <div className="flex items-center gap-1 p-1 bg-white border border-[#E0E0E6] rounded-lg">
-                {([['weights', 'Field Weights'], ['thresholds', 'Score Bands'], ['email', 'Auto-Email']] as const).map(([id, label]) => (
+                {([['weights', 'Field Weights'], ['thresholds', 'Score Bands'], ['email', 'Case Scoring Emails']] as const).map(([id, label]) => (
                   <button
                     key={id}
                     onClick={() => setScoringTab(id)}
@@ -613,96 +631,12 @@ export default function LabScoringSettingsPage() {
                 </>
               )}
 
-              {scoringTab === 'email' && (
-                <>
-                  {/* Intro — the configuration itself moved to Settings so the
-                      email connection, automation toggles and templates have a
-                      single home. This tab stays as a live summary + shortcut. */}
-                  <div className="bg-gradient-to-br from-[#EEF4FF] to-[#F5F3FF] border border-[#DBEAFE] rounded-xl p-4 flex items-start gap-3">
-                    <span className="w-9 h-9 rounded-lg bg-white border border-[#DBEAFE] flex items-center justify-center flex-shrink-0">
-                      <Mail className="w-4 h-4 text-[#4D8EF7]" />
-                    </span>
-                    <div className="text-xs text-[#3A4A63] leading-relaxed">
-                      <span className="font-semibold text-[#1565C0]">Automated Case Scoring Emails.</span>{' '}
-                      When a case is scored <span className="font-semibold">Needs Review</span> or{' '}
-                      <span className="font-semibold">Incomplete</span>, the selected template is emailed to the dentist
-                      automatically from your own business email account. Connection, automation and templates are
-                      configured in <span className="font-semibold">Settings → Notifications → Case Scoring Emails</span>.
-                    </div>
-                  </div>
 
-                  {/* Live summary of the shared Case Scoring Emails config — read-only
-                      here; the single editable home is Settings → Case Scoring Emails. */}
-                  <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
-                    <div className="divide-y divide-[#F0EFF6]">
-                      {/* Connection status */}
-                      <div className="flex items-center justify-between gap-3 px-4 py-3">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="w-8 h-8 rounded-lg bg-[#EEF4FF] border border-[#C8D8FC] flex items-center justify-center flex-shrink-0">
-                            <Mail className="w-4 h-4 text-[#1565C0]" />
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">Email account</p>
-                            {scoringEmails.connection.status === 'connected' && scoringEmails.connection.provider ? (
-                              <p className="text-sm font-medium text-[#030213] flex items-center gap-1.5 flex-wrap">
-                                <CheckCircle2 className="w-4 h-4 text-[#15803D]" />
-                                <span className="font-mono text-[#1565C0]">{scoringEmails.connection.email}</span>
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#F0FDF4] border border-[#BBF7D0] text-[10px] font-semibold text-[#2E7D32]">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-[#2E7D32]" />
-                                  {PROVIDER_META[scoringEmails.connection.provider].label}
-                                </span>
-                              </p>
-                            ) : (
-                              <p className="text-sm font-medium text-[#B45309] flex items-center gap-1.5">
-                                <AlertTriangle className="w-4 h-4" />
-                                Not connected — automated emails can't be sent
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      {/* Per-outcome automation summary */}
-                      {(['needs-review', 'incomplete'] as ScoringEmailCategory[]).map(cat => {
-                        const conf = scoringEmails.automation[cat];
-                        const tpl = findTemplate(cat, conf.templateId, scoringEmails.customTemplates);
-                        return (
-                          <div key={cat} className="flex items-center justify-between gap-3 px-4 py-3">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: CATEGORY_META[cat].dot }} />
-                              <p className="text-sm font-medium text-[#030213]">{CATEGORY_META[cat].label}</p>
-                            </div>
-                            <p className="text-xs text-[#717182] truncate">
-                              {conf.enabled
-                                ? <><span className="font-semibold text-[#15803D]">Enabled</span> · sends "{tpl.name}"</>
-                                : <span className="font-semibold text-[#A0A0B0]">Disabled</span>}
-                            </p>
-                          </div>
-                        );
-                      })}
-                      {/* Complete — never sends, so nothing to configure */}
-                      <div className="flex items-center justify-between gap-3 px-4 py-3">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="w-2 h-2 rounded-full flex-shrink-0 bg-[#22C55E]" />
-                          <p className="text-sm font-medium text-[#5A5568]">Complete</p>
-                        </div>
-                        <p className="text-xs text-[#A0A0B0]">Never sends an email</p>
-                      </div>
-                    </div>
-                    <div className="px-4 py-3 bg-[#F8F9FC] border-t border-[#F0EFF6] flex items-center justify-between gap-3">
-                      <p className="text-[11px] text-[#717182]">
-                        Connect or disconnect the account, switch templates and create custom ones in Settings.
-                      </p>
-                      <button
-                        onClick={() => navigate('/lab/settings?tab=notifications&sub=case-emails')}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity flex-shrink-0"
-                      >
-                        <Mail className="w-3.5 h-3.5" />
-                        Open Email Settings
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
+              {/* Case Scoring Emails — the full Automated Case Scoring Emails
+                  module (email integration, per-outcome automation, template
+                  selection + custom templates). Replaces the old Auto-Email
+                  prototype so this inner tab IS the feature's single home. */}
+              {scoringTab === 'email' && <CaseScoringEmailsSettings />}
             </>
           )}
 

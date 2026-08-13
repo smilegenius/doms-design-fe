@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from './context/ToastContext';
 import Layout from './components/Layout';
 import LabOverviewPage from './pages/LabOverviewPage';
 import LabAnalyticsPage from './pages/LabAnalyticsPage';
-import LabScoringSettingsPage from './pages/LabScoringSettingsPage';
 import CasesPage, { draftCases } from './pages/CasesPage';
 import QuickCreateCasePage from './pages/QuickCreateCasePage';
 import InvoicesPage from './pages/InvoicesPage';
@@ -101,6 +100,13 @@ export default function LabApp() {
     return <MessagesPage onClose={() => setActivePage('overview')} />;
   }
 
+  // Case Scoring configuration now lives inside Settings (matching the live
+  // lab portal). Old /lab/configuration links (overview, analytics, "score
+  // unavailable" pills…) land on the Settings tab instead.
+  if (activePage === 'configuration') {
+    return <Navigate to="/lab/settings?tab=case-scoring" replace />;
+  }
+
   // A clicked draft opens the QuickCreate screen full-screen (no sidebar/top
   // bar) pre-filled with the draft's data, so the lab can review/complete it.
   if (activePage === 'quick-create-case') {
@@ -152,7 +158,6 @@ export default function LabApp() {
           }}
         />
       )}
-      {activePage === 'configuration' && <LabScoringSettingsPage />}
       {activePage === 'settings' && <SettingsPage portal="lab" />}
       {activePage === 'notifications' && (
         <NotificationsPage onOpenSettings={() => navigate('/lab/settings?tab=notifications')} />

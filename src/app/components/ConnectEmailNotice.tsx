@@ -11,7 +11,8 @@ import { Mail, ArrowRight } from 'lucide-react';
 // Body copy is the product spec's, verbatim.
 export default function ConnectEmailNotice({ variant = 'detailed' }: { variant?: 'compact' | 'detailed' }) {
   const navigate = useNavigate();
-  const goToSettings = () => navigate('/lab/settings?tab=notifications&sub=case-emails');
+  // Settings → Case Scoring, opened straight onto the Case Scoring Emails tab.
+  const goToSettings = () => navigate('/lab/settings?tab=case-scoring&sub=case-emails');
 
   if (variant === 'compact') {
     return (

@@ -21,12 +21,14 @@ import {
   FlaskConical,
   Trash2,
   ShieldAlert,
+  Sliders,
+  FileText,
 } from 'lucide-react';
 import InviteUsersModal, { InviteUserRow } from '../components/InviteUsersModal';
 import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
 import NotificationPreferences from './NotificationPreferencesPage';
 import EscalationMatrix from './EscalationMatrixPage';
-import CaseScoringEmailsSettings from './CaseScoringEmailsSettingsPage';
+import LabScoringSettingsPage from './LabScoringSettingsPage';
 import Toggle from '../components/Toggle';
 import { useCustomServices, removeCustomService } from '../data/customServices';
 import { useToast } from '../context/ToastContext';
@@ -36,7 +38,7 @@ import FilterDrawer from '../components/FilterDrawer';
 import Pagination from '../components/Pagination';
 import Button from '../components/Button';
 
-type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications';
+type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring';
 
 const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'personal',      label: 'Personal Info',   description: 'Your account profile',    icon: User },
@@ -46,8 +48,18 @@ const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'notifications', label: 'Notifications',   description: 'Alerts & escalations',    icon: Bell },
 ];
 
-// Mock configured-tabs set — wire to real persistence later
-const CONFIGURED: Set<TabId> = new Set(['personal', 'dso']);
+// Lab-only Settings sections — mirrors the live lab portal, where the
+// Prescription Builder and Case Scoring (weights, bands and Case Scoring
+// Emails) are SEPARATE Settings entries rather than a standalone sidebar page.
+const LAB_TABS: { id: TabId; label: string; description: string; icon: any }[] = [
+  ...TABS,
+  { id: 'prescription-builder', label: 'Prescription Builder', description: 'Case form fields & services', icon: FileText },
+  { id: 'case-scoring',         label: 'Case Scoring',         description: 'Weights, bands & auto-emails', icon: Sliders },
+];
+
+// Mock configured-tabs set — wire to real persistence later. Case Scoring
+// ships with a seeded default config, so it reads as configured out of the box.
+const CONFIGURED: Set<TabId> = new Set(['personal', 'dso', 'prescription-builder', 'case-scoring']);
 
 interface Member {
   id: string;
@@ -115,22 +127,20 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
   //   /lab/settings?tab=notifications&sub=escalations
   // The portal shells parse only the pathname, so query params pass through.
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabs = TABS;
+  const tabs = portal === 'lab' ? LAB_TABS : TABS;
   const tabParam = searchParams.get('tab');
-  const activeTab: TabId =
-    // Legacy deep link from when Case Scoring Emails was its own tab.
-    tabParam === 'case-emails' ? 'notifications'
-    : tabParam && tabs.some(t => t.id === tabParam) ? (tabParam as TabId) : 'personal';
-  // Notifications tab is split into sub-tabs: the notification toggles, the
-  // Escalation Matrix, and (lab only) Case Scoring Emails — the automated
-  // dentist-email config the "Connect Email" banner deep-links to
-  // (?tab=notifications&sub=case-emails).
-  type NotifSubTab = 'preferences' | 'escalations' | 'case-emails';
   const subParam = searchParams.get('sub');
-  const notifSubTab: NotifSubTab =
-    subParam === 'escalations' ? 'escalations'
-    : (subParam === 'case-emails' || tabParam === 'case-emails') && portal === 'lab' ? 'case-emails'
-    : 'preferences';
+  // Legacy deep links from when Case Scoring Emails lived elsewhere — both now
+  // resolve to Case Scoring with the Case Scoring Emails inner tab open.
+  const caseEmailsDeepLink =
+    subParam === 'case-emails' || tabParam === 'case-emails';
+  const activeTab: TabId =
+    caseEmailsDeepLink && portal === 'lab' ? 'case-scoring'
+    : tabParam && tabs.some(t => t.id === tabParam) ? (tabParam as TabId) : 'personal';
+  // Notifications tab is split: the existing notification toggles on one
+  // sub-tab, the Escalation Matrix on the other.
+  const notifSubTab: 'preferences' | 'escalations' =
+    subParam === 'escalations' ? 'escalations' : 'preferences';
 
   const setActiveTab = (id: TabId) => {
     const next = new URLSearchParams(searchParams);
@@ -138,10 +148,10 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
     next.delete('sub');
     setSearchParams(next);
   };
-  const setNotifSubTab = (sub: NotifSubTab) => {
+  const setNotifSubTab = (sub: 'preferences' | 'escalations') => {
     const next = new URLSearchParams(searchParams);
     next.set('tab', 'notifications');
-    if (sub === 'preferences') next.delete('sub'); else next.set('sub', sub);
+    if (sub === 'escalations') next.set('sub', 'escalations'); else next.delete('sub');
     setSearchParams(next);
   };
 
@@ -811,24 +821,9 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
               <ShieldAlert className="w-3.5 h-3.5" />
               Escalation Matrix
             </button>
-            {portal === 'lab' && (
-              <button
-                onClick={() => setNotifSubTab('case-emails')}
-                className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  notifSubTab === 'case-emails' ? 'bg-white text-[#030213] shadow-sm' : 'text-[#717182] hover:text-[#030213]'
-                }`}
-              >
-                <Send className="w-3.5 h-3.5" />
-                Case Scoring Emails
-              </button>
-            )}
           </div>
 
           {notifSubTab === 'escalations' && <EscalationMatrix />}
-
-          {/* Case Scoring Emails (lab only) — Email Integration + automation
-              for the Automated Case Scoring Emails feature. */}
-          {notifSubTab === 'case-emails' && portal === 'lab' && <CaseScoringEmailsSettings />}
 
           {notifSubTab === 'preferences' && portal === 'lab' && (
             <NotificationPreferences />
@@ -889,6 +884,22 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
         </div>
           )}
         </div>
+      )}
+
+      {/* ─── Prescription Builder (lab only) ──────────────────────────────── */}
+      {/* Its own Settings entry, matching the live portal — separate from
+          Case Scoring. */}
+      {activeTab === 'prescription-builder' && portal === 'lab' && (
+        <LabScoringSettingsPage embedded fixedSection="prescription" />
+      )}
+
+      {/* ─── Case Scoring (lab only) ──────────────────────────────────────── */}
+      {/* Field Weights, Score Bands and Case Scoring Emails — embedded to
+          match the live lab portal, where it's a Settings section. The
+          "Connect Email" banner deep-links to ?tab=case-scoring&sub=case-emails,
+          which opens straight onto the Case Scoring Emails inner tab. */}
+      {activeTab === 'case-scoring' && portal === 'lab' && (
+        <LabScoringSettingsPage embedded fixedSection="scoring" initialScoringTab={caseEmailsDeepLink ? 'email' : undefined} />
       )}
 
         </section>

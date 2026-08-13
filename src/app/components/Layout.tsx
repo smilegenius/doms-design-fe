@@ -117,14 +117,13 @@ const clinicNavItems = [
 ];
 
 // Lab Portal — the manufacturing lab's view. Cases flow IN from its clients
-// (clinics + dental groups); Configuration is where the lab sets up case
-// scoring (weighted prescription fields per service type).
+// (clinics + dental groups). Case Scoring configuration (weighted prescription
+// fields per service type) lives inside Settings, matching the live portal.
 const labNavItems = [
   { id: 'overview',      label: 'Overview',      icon: OverviewIcon,    isCustom: true  },
   { id: 'cases',         label: 'Cases',         icon: CasesIcon,       isCustom: true  },
   { id: 'invoices',      label: 'Invoices',      icon: FilledFileText,  isCustom: false },
   { id: 'analytics',     label: 'Analytics',     icon: FilledBarChart,  isCustom: false },
-  { id: 'configuration', label: 'Configuration', icon: FilledSliders,   isCustom: false },
 ];
 
 export default function Layout({ children, activePage = 'overview', onNavigate, portal = 'supplier' }: LayoutProps) {

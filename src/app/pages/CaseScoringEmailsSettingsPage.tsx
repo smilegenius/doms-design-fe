@@ -187,6 +187,8 @@ export default function CaseScoringEmailsSettings() {
           <span className="font-semibold">Incomplete</span>, the selected email template is sent to the dentist
           automatically — from your own business email account, not from Smile Genius — so communication happens
           without manual follow-up. Cases scored <span className="font-semibold">Complete</span> never trigger an email.
+          Emails are sent only to dentists with an email address on file — cases whose dentist has no email are
+          skipped.
         </div>
       </div>
 
