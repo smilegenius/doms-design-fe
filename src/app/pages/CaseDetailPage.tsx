@@ -5,7 +5,7 @@ import {
   StickyNote, X, Bold, Italic, Underline, Strikethrough, Code as CodeIcon,
   Superscript, Subscript, Undo2, Redo2, Paperclip, Eye, Plus, Minus,
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
-  Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info,
+  Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
 import UrgentBadge from '../components/UrgentBadge';
@@ -1579,9 +1579,21 @@ type Channel = 'email' | 'whatsapp';
 interface ConvMsg {
   id: string; channel: Channel; dir: 'in' | 'out';
   name: string; initials: string; date: string; time: string; body: string;
+  /** Email messages only — shown as a subject line atop the bubble. */
+  subject?: string;
+  /** Email replies — which mail this answers (quoted under the subject). */
+  replyTo?: { name: string; date: string; time: string; snippet: string };
   // Flagged urgent by the sender — badged in the thread and (in the real app)
   // escalates reminder notifications until the recipient replies.
   urgent?: boolean;
+}
+
+// First meaningful line of an email body — the quoted preview in replies.
+// Skips a leading greeting ("Hello Dr …,") so the quote shows actual content.
+function bodySnippet(body: string): string {
+  const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
+  const first = lines.find(l => !/^(hi|hello|dear)\b/i.test(l)) ?? lines[0] ?? '';
+  return first.slice(0, 90);
 }
 
 // Small tooltip (copied from the overview pages — no shared component exists).
@@ -1633,6 +1645,23 @@ function ChannelBubble({ msg, showChannel }: { msg: ConvMsg; showChannel?: boole
           <span className="text-[10px] text-[#A0A0B0]">{msg.time}</span>
         </div>
         <div className={`rounded-xl border px-3 py-2.5 ${bubble}`}>
+          {/* Emails carry a subject line, set apart from the body like a mail client. */}
+          {!wa && msg.subject && (
+            <p className="flex items-baseline gap-1.5 pb-2 mb-2 border-b border-[#030213]/10">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-[#A0A0B0] flex-shrink-0">Subject</span>
+              <span className="text-xs font-semibold text-[#030213]">{msg.subject}</span>
+            </p>
+          )}
+          {/* Replies quote which mail they answer — sender, when, and a snippet. */}
+          {!wa && msg.replyTo && (
+            <div className="mb-2 pl-2.5 py-0.5 border-l-2 border-[#4D8EF7]/40">
+              <p className="flex items-center gap-1 text-[10px] font-semibold text-[#717182]">
+                <Reply className="w-3 h-3 flex-shrink-0" />
+                Replying to {msg.replyTo.name} · {msg.replyTo.date} {msg.replyTo.time}
+              </p>
+              <p className="text-[10px] text-[#A0A0B0] italic truncate">“{msg.replyTo.snippet}”</p>
+            </div>
+          )}
           <pre className="text-xs text-[#030213] whitespace-pre-wrap font-sans leading-relaxed">{msg.body}</pre>
         </div>
       </div>
@@ -1652,13 +1681,16 @@ function buildConversation(caseData: CaseForDetail, replied: boolean, missing: s
   const emailBody = missing.length
     ? fillTemplate(MISSING_INFO_EMAIL.body, vars)
     : `Hello ${dentist},\n\nThanks — we've received the prescription for case ${caseData.id} and everything looks complete. We're starting production now.\n\nSmile Genius Lab`;
+  const emailSubject = missing.length
+    ? fillTemplate(MISSING_INFO_EMAIL.subject, vars)
+    : `Prescription received for Case ${caseData.id}`;
   const msgs: ConvMsg[] = [
-    { id: 'em-1', channel: 'email', dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Yesterday', time: '09:12', body: emailBody },
+    { id: 'em-1', channel: 'email', dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Yesterday', time: '09:12', subject: emailSubject, body: emailBody },
     { id: 'wa-1', channel: 'whatsapp', dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Yesterday', time: '10:40', body: `Hi Dr ${last}, just emailed you about case ${caseData.id} — happy to take the files over WhatsApp if that's quicker 👍` },
     { id: 'wa-2', channel: 'whatsapp', dir: 'in', name: dentist, initials: dInit, date: 'Yesterday', time: '11:05', body: `Thanks! I'll get the outstanding bits over shortly.` },
   ];
   if (replied) {
-    msgs.push({ id: 'em-2', channel: 'email', dir: 'in', name: dentist, initials: dInit, date: 'Today', time: '08:30', body: `Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production.` });
+    msgs.push({ id: 'em-2', channel: 'email', dir: 'in', name: dentist, initials: dInit, date: 'Today', time: '08:30', subject: `Re: ${emailSubject}`, replyTo: { name: 'Smile Genius Lab', date: 'Yesterday', time: '09:12', snippet: bodySnippet(emailBody) }, body: `Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production.` });
   } else {
     msgs.push({ id: 'wa-3', channel: 'whatsapp', dir: 'in', name: dentist, initials: dInit, date: 'Today', time: '08:15', body: `Uploading now — should be done in 10 mins 🙌` });
   }
@@ -1715,8 +1747,21 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
   const shown = activeTab === 'email' ? emailMsgs : activeTab === 'whatsapp' ? waMsgs : msgs;
   const hasReply = msgs.some(m => m.channel === 'email' && m.dir === 'in');
 
+  // Follow-up emails thread under the original subject ("Re: …") and quote
+  // which mail they answer.
+  const threadSubject = (() => {
+    const s = msgs.find(m => m.channel === 'email' && m.subject)?.subject;
+    return s ? (s.startsWith('Re:') ? s : `Re: ${s}`) : undefined;
+  })();
+  const quoteOf = (m?: ConvMsg) =>
+    m ? { name: m.name, date: m.date, time: m.time, snippet: bodySnippet(m.body) } : undefined;
+  // A new outbound email replies to the latest email in the thread.
+  const lastEmail = [...msgs].reverse().find(m => m.channel === 'email');
+  // The dentist's reply answers the lab's latest outbound email.
+  const lastOutEmail = [...msgs].reverse().find(m => m.channel === 'email' && m.dir === 'out');
+
   const deliver = (t: string, isUrgent: boolean) => {
-    setMsgs(prev => [...prev, { id: `new-${++idRef.current}`, channel: composeChannel, dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now', body: t, urgent: isUrgent || undefined }]);
+    setMsgs(prev => [...prev, { id: `new-${++idRef.current}`, channel: composeChannel, dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now', subject: composeChannel === 'email' ? threadSubject : undefined, replyTo: composeChannel === 'email' ? quoteOf(lastEmail) : undefined, body: t, urgent: isUrgent || undefined }]);
     setDraft('');
     setUrgentArmed(false);
     toast.success(isUrgent
@@ -1730,7 +1775,7 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
     deliver(t, false);
   };
   const simulateReply = () => {
-    setMsgs(prev => [...prev, { id: `reply-${++idRef.current}`, channel: 'email', dir: 'in', name: caseData.dentist, initials: nameInitials(caseData.dentist), date: 'Today', time: 'now', body: `Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production.` }]);
+    setMsgs(prev => [...prev, { id: `reply-${++idRef.current}`, channel: 'email', dir: 'in', name: caseData.dentist, initials: nameInitials(caseData.dentist), date: 'Today', time: 'now', subject: threadSubject, replyTo: quoteOf(lastOutEmail), body: `Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production.` }]);
     onMarkReceived?.();
   };
 

@@ -414,7 +414,7 @@ type PreviewPaneTab = 'primary' | 'model';
 // PDF e-mail attachment — anything that landed outside the auto-fetch).
 // After "upload" (mocked — no real file picker in the prototype) the
 // pane surfaces a stylised Rx preview and an Apply-to-form CTA.
-function PrescriptionUploadPane({ onApply }: {
+function PrescriptionUploadPane({ onApply, aiDescribe }: {
   onApply: (prefill: {
     patientName: string;
     serviceName: string;
@@ -423,6 +423,16 @@ function PrescriptionUploadPane({ onApply }: {
     shade: string;
     instructions: string;
   }) => void;
+  /** "Describe the case in plain words" — the AI quick-fill, surfaced HERE
+      (above the upload card) so writing a sentence and uploading a
+      prescription read as two clear, equal ways to start. Bound to the same
+      Case Instructions field the form uses, so both stay in sync. */
+  aiDescribe?: {
+    value: string;
+    onChange: (v: string) => void;
+    onFill: () => void;
+    filling: boolean;
+  };
 }) {
   const [uploaded, setUploaded] = useState<{
     filename: string;
@@ -489,6 +499,45 @@ function PrescriptionUploadPane({ onApply }: {
 
         {!uploaded ? (
           <>
+            {/* Describe-in-plain-words — the AI quick fill, first so it reads
+                as the fastest way to start. */}
+            {aiDescribe && (
+              <>
+                <div className="bg-white border border-[#FECACA] rounded-xl p-3">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <AiSparkle label title="" />
+                    <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider">Describe the case</p>
+                  </div>
+                  <p className="text-[10px] text-[#5A5568] leading-snug mb-2">
+                    Write it in plain words — e.g. “Emax crown on 26, shade A2, patient Sarah Whitfield, deliver by
+                    12 Aug” — and Smile Genius pre-fills the form on the right. You review every field before creating.
+                  </p>
+                  <textarea
+                    value={aiDescribe.value}
+                    onChange={(e) => aiDescribe.onChange(e.target.value)}
+                    rows={3}
+                    placeholder="Describe the case in plain language…"
+                    className="w-full px-2.5 py-2 text-[11px] text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/15 resize-y leading-relaxed"
+                  />
+                  <button
+                    type="button"
+                    onClick={aiDescribe.onFill}
+                    disabled={!aiDescribe.value.trim() || aiDescribe.filling}
+                    className="mt-1.5 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {aiDescribe.filling
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading your description…</>
+                      : <><Zap className="w-3.5 h-3.5" /> Fill the form with AI</>}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 px-1">
+                  <span className="flex-1 h-px bg-[#E0E0E6]" />
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-[#A0A0B0]">or</span>
+                  <span className="flex-1 h-px bg-[#E0E0E6]" />
+                </div>
+              </>
+            )}
+
             {/* Empty-state upload card */}
             <button
               type="button"
@@ -1170,7 +1219,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // Feature-intro note above the instructions box. Session-local on purpose:
   // it reappears for every new case (per PM ask, "for a while") until the
   // user dismisses it or runs an extraction on this case.
-  const [nlNoteDismissed, setNlNoteDismissed] = useState(false);
   const lastParsedRef = useRef('');          // blur only re-runs when text changed
   // Delivery + order type carry non-empty defaults, so "user touched it" must
   // be tracked separately from "has a value".
@@ -1828,6 +1876,12 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           <EmailPreviewPane caseData={prefillDraft} />
         ) : (
           <PrescriptionUploadPane
+            aiDescribe={{
+              value: caseInstructions,
+              onChange: setCaseInstructions,
+              onFill: () => runInstructionExtraction('button'),
+              filling: readingInstructions,
+            }}
             onApply={(p) => {
               setPatientName(p.patientName);
               setCaseInstructions(p.instructions);
@@ -2546,22 +2600,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </span>
               )}
             </div>
-            {/* Feature note — shown on every new case (session-local, so it
-                comes back next time) until dismissed or until the first
-                extraction runs, when the review strip takes its place. */}
-            {!nlNoteDismissed && aiFilledCount === 0 && (
-              <div className="mb-2 flex items-start gap-2 px-3 py-2 rounded-lg border border-[#FECACA] bg-[#FEF2F2]">
-                <AiSparkle label title="" className="mt-px" />
-                <p className="flex-1 text-[11px] text-[#5A5568] leading-snug">
-                  <span className="font-semibold text-[#030213]">Describe the case in plain language</span> — e.g.
-                  “Emax crown on 26, shade A2, patient Sarah Whitfield, deliver by 12 Aug” — and
-                  Smile Genius will pre-fill the form. You review every field before creating.
-                </p>
-                <button type="button" onClick={() => setNlNoteDismissed(true)} title="Dismiss" className="flex-shrink-0 mt-px">
-                  <X className="w-3 h-3 text-[#A0A0B0] hover:text-[#5A5568]" />
-                </button>
-              </div>
-            )}
+            {/* The "describe in plain language" explainer moved to the LEFT
+                pane (above Upload prescription), where writing a sentence and
+                uploading read as two clear ways to start. This textarea keeps
+                the same extraction behaviour (blur / Read instructions). */}
             {/* Review strip — extraction never commits silently: it reports
                 what it filled and offers Undo. Field edits don't dismiss it
                 (the user is mid-review); Undo / × do. */}
