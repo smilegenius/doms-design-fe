@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Mail, CheckCircle2, Plus, X, Eye, Pencil, Trash2, Copy, RefreshCw,
-  AlertTriangle, Loader2, FileText, Sparkles, Ban, ChevronDown, Bell, ShieldAlert,
+  AlertTriangle, Loader2, FileText, Sparkles, ChevronDown, Bell, ShieldAlert,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
 import Toggle from '../components/Toggle';
@@ -47,7 +47,9 @@ const ESCALATION_IN_APP = 'Case {{Case ID}} has been escalated because no respon
 //   2. Email Automation — per scoring outcome (Needs Review / Incomplete),
 //      an on/off toggle + exactly one selected template. Complete has no
 //      configuration: it never sends an email.
-//   3. Custom Templates — the lab's own templates, usable in either category.
+//   3. Escalation — per outcome, escalate unresolved Case Scoring requests
+//      (no dentist response / no case updates) to a clinic contact.
+//   4. Custom Templates — the lab's own templates, usable in either category.
 // State lives in data/caseScoringEmails.ts (localStorage) so the case pages
 // and the create-case flow read the same connection + automation config.
 
@@ -216,67 +218,56 @@ export default function CaseScoringEmailsSettings() {
         </span>
         <div className="text-xs text-[#3A4A63] leading-relaxed">
           <span className="font-semibold text-[#1565C0]">Automated Case Scoring Emails.</span>{' '}
-          When case scoring classifies a case as <span className="font-semibold">Needs Review</span> or{' '}
-          <span className="font-semibold">Incomplete</span>, the selected email template is sent to the dentist
-          automatically — from your own business email account, not from Smile Genius — so communication happens
-          without manual follow-up. Cases scored <span className="font-semibold">Complete</span> never trigger an email.
-          Emails are sent only to dentists with an email address on file — cases whose dentist has no email are
-          skipped.
+          Cases scored <span className="font-semibold">Needs Review</span> or{' '}
+          <span className="font-semibold">Incomplete</span> automatically email the dentist from your own business
+          email account — <span className="font-semibold">Complete</span> never triggers an email, and dentists
+          without an email address on file are skipped.
         </div>
       </div>
 
-      {/* ── 1 · Email Integration — connection status is ALWAYS visible ── */}
+      {/* ── 1 · Email Integration — connection status is ALWAYS visible.
+          Connected: a slim strip so the automation config below is the focus.
+          Not connected: the full connect card, and NOTHING below renders —
+          connecting is the gating first step. ── */}
+      {connected && connection.provider ? (
+        <div className="bg-white rounded-xl border border-[#E0E0E6] px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
+            <span className="w-7 h-7 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0] flex items-center justify-center flex-shrink-0">
+              <CheckCircle2 className="w-4 h-4 text-[#15803D]" />
+            </span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0]">Email Integration</span>
+            <span className="font-mono text-xs font-medium text-[#1565C0] truncate">{connection.email}</span>
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#F0FDF4] border border-[#BBF7D0] text-[10px] font-semibold text-[#2E7D32]">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: PROVIDER_META[connection.provider].color }} />
+              {PROVIDER_META[connection.provider].label} · {PROVIDER_META[connection.provider].product}
+            </span>
+            <span className="text-[11px] text-[#A0A0B0]">Connected {fmtDate(connection.connectedAt)}</span>
+          </div>
+          <button
+            onClick={() => setDisconnectOpen(true)}
+            className="text-[11px] font-semibold text-[#B91C1C] hover:underline flex-shrink-0"
+            title="Disconnect this email account"
+          >
+            Disconnect
+          </button>
+        </div>
+      ) : (
       <Card
         title="Email Integration"
         actions={
-          connected ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border bg-[#F0FDF4] text-[#2E7D32] border-[#BBF7D0]">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Connected
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border bg-[#FFF8E1] text-[#B45309] border-[#FDE68A]">
-              <AlertTriangle className="w-3.5 h-3.5" /> Not Connected
-            </span>
-          )
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border bg-[#FFF8E1] text-[#B45309] border-[#FDE68A]">
+            <AlertTriangle className="w-3.5 h-3.5" /> Not Connected
+          </span>
         }
       >
-        {connected && connection.provider ? (
-          /* Connected — provider, address, since-when + Disconnect */
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-start gap-3 min-w-0">
-              <span className="w-10 h-10 rounded-lg bg-[#EEF4FF] border border-[#C8D8FC] flex items-center justify-center flex-shrink-0">
-                <Mail className="w-5 h-5 text-[#1565C0]" />
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-[#030213] flex items-center gap-2 flex-wrap">
-                  <span className="font-mono text-[#1565C0]">{connection.email}</span>
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#F0FDF4] border border-[#BBF7D0] text-[10px] font-semibold text-[#2E7D32]">
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: PROVIDER_META[connection.provider].color }} />
-                    {PROVIDER_META[connection.provider].label} · {PROVIDER_META[connection.provider].product}
-                  </span>
-                </p>
-                <p className="text-[11px] text-[#717182] mt-0.5">
-                  Connected {fmtDate(connection.connectedAt)} · All automated case scoring emails are sent from this
-                  account rather than from Smile Genius.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setDisconnectOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#B91C1C] border border-[#FECACA] bg-white hover:bg-[#FEF2F2] transition-colors flex-shrink-0"
-            >
-              <X className="w-3.5 h-3.5" />
-              Disconnect
-            </button>
-          </div>
-        ) : showProviderPicker ? (
+        {showProviderPicker ? (
           /* Never connected (or choosing a different account) — provider cards */
           <div>
             <p className="text-sm text-[#030213] font-medium mb-1">Connect your business email account</p>
             <p className="text-xs text-[#717182] leading-relaxed mb-4">
               Automated case scoring emails are sent from the account you connect here — dentists see your lab's
               address, and their replies land in your own inbox. Until an account is connected, no automated emails
-              can be sent.
+              can be sent; your automation, escalation and template settings appear once you connect.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
               {(Object.keys(PROVIDER_META) as EmailProvider[]).map(p => (
@@ -335,28 +326,20 @@ export default function CaseScoringEmailsSettings() {
           </div>
         )}
       </Card>
+      )}
+
+      {/* ── Everything below is gated on the connection: no account, nothing
+          to automate — the connect card above is the whole page until then. ── */}
+      {connected && (<>
 
       {/* ── 2 · Email Automation — one toggle + one template per outcome ── */}
       <Card title="Email Automation">
-        {!connected && (
-          <div className="mb-4 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3 flex items-start gap-2.5">
-            <span className="w-6 h-6 rounded-lg bg-[#FEF3C7] text-[#B45309] flex items-center justify-center flex-shrink-0 mt-0.5">
-              <AlertTriangle className="w-3.5 h-3.5" />
-            </span>
-            <p className="text-[11px] text-[#A16207] leading-relaxed">
-              <span className="font-bold text-[#92400E]">No email account connected.</span>{' '}
-              Automated case scoring emails cannot be sent. Your configuration below is saved and takes effect the
-              moment an account is connected above.
-            </p>
-          </div>
-        )}
-
         <p className="text-xs text-[#717182] leading-relaxed mb-4">
-          Choose which case scoring outcomes automatically trigger an email to the dentist, and which template each
-          outcome sends. Exactly one template can be selected per outcome.
+          Each outcome has its own on/off toggle and exactly one selected email template.
         </p>
 
-        <div className="space-y-4">
+        {/* Outcomes sit side by side on large screens to keep the page short. */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           {CATEGORIES.map(cat => {
             const meta = CATEGORY_META[cat];
             const conf = automation[cat];
@@ -500,22 +483,6 @@ export default function CaseScoringEmailsSettings() {
             );
           })}
 
-          {/* Complete — deliberately NOT configurable: it never sends an email */}
-          <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-dashed border-[#E0E0E6] bg-[#FAFBFC]">
-            <div className="flex items-start gap-2.5 min-w-0">
-              <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0 bg-[#22C55E]" />
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-[#5A5568]">Complete</p>
-                <p className="text-[11px] text-[#A0A0B0] leading-relaxed mt-0.5">
-                  No configuration — an email is never sent for cases scored Complete.
-                </p>
-              </div>
-            </div>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold text-[#A0A0B0] bg-white border border-[#E0E0E6] flex-shrink-0">
-              <Ban className="w-3 h-3" />
-              Never sends
-            </span>
-          </div>
         </div>
       </Card>
 
@@ -528,11 +495,11 @@ export default function CaseScoringEmailsSettings() {
           nothing to escalate. */}
       <Card title="Escalation">
         <p className="text-xs text-[#717182] leading-relaxed mb-4">
-          If the dentist does not respond to the Case Scoring email — and the case is not updated — the request is
-          escalated to a clinic contact so someone can intervene before the case due date and prevent delays in
-          production.
+          If the dentist doesn't respond to the Case Scoring email — and the case isn't updated — the request
+          escalates to a clinic contact before the case due date.
         </p>
-        <div className="space-y-4">
+        {/* Outcomes sit side by side on large screens to keep the page short. */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           {CATEGORIES.map(cat => {
             const meta = CATEGORY_META[cat];
             const esc = escalation[cat];
@@ -540,7 +507,6 @@ export default function CaseScoringEmailsSettings() {
             const prereqMissing = esc.enabled && (!connected || !automation[cat].enabled);
             return (
               <div key={cat} className="border border-[#E0E0E6] rounded-xl">
-                {/* Outcome header — status + Enable Escalation toggle */}
                 <div className="flex items-center justify-between gap-3 px-4 py-3 bg-[#FAFBFC] border-b border-[#F0EFF6] rounded-t-xl">
                   <div className="flex items-start gap-2.5 min-w-0">
                     <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: meta.dot }} />
@@ -557,13 +523,13 @@ export default function CaseScoringEmailsSettings() {
                         )}
                       </p>
                       <p className="text-[11px] text-[#717182] leading-relaxed mt-0.5">
-                        Escalates unresolved {meta.label} emails to a clinic contact.
+                        Unresolved {meta.label} emails.
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={`text-[11px] font-semibold ${esc.enabled ? 'text-[#15803D]' : 'text-[#A0A0B0]'}`}>
-                      {esc.enabled ? 'Escalation enabled' : 'Escalation disabled'}
+                    <span className={`hidden xl:inline text-[11px] font-semibold ${esc.enabled ? 'text-[#15803D]' : 'text-[#A0A0B0]'}`}>
+                      {esc.enabled ? 'Enabled' : 'Disabled'}
                     </span>
                     <Toggle
                       on={esc.enabled}
@@ -589,7 +555,7 @@ export default function CaseScoringEmailsSettings() {
                         </p>
                       </div>
                     )}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4">
+                    <div className="grid grid-cols-1 gap-y-4">
                       {/* Escalation Contact */}
                       <div>
                         <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0]">Escalation Contact</p>
@@ -722,6 +688,8 @@ export default function CaseScoringEmailsSettings() {
           </div>
         )}
       </Card>
+
+      </>)}
 
       {/* ── Mock OAuth consent + connecting state ── */}
       {consentProvider && (

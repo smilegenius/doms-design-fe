@@ -834,11 +834,25 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
 
       {/* ─── Case Scoring (lab only) ──────────────────────────────────────── */}
       {/* Field Weights, Score Bands and Case Scoring Emails — embedded to
-          match the live lab portal, where it's a Settings section. The
-          "Connect Email" banner deep-links to ?tab=case-scoring&sub=case-emails,
-          which opens straight onto the Case Scoring Emails inner tab. */}
+          match the live lab portal, where it's a Settings section. Every
+          inner tab is URL-driven so it's deep-linkable and survives refresh:
+            ?tab=case-scoring                  → Field Weights
+            ?tab=case-scoring&sub=bands        → Score Bands
+            ?tab=case-scoring&sub=case-emails  → Case Scoring Emails
+          (the "Connect Email" banner uses the last one). */}
       {activeTab === 'case-scoring' && portal === 'lab' && (
-        <LabScoringSettingsPage embedded fixedSection="scoring" initialScoringTab={caseEmailsDeepLink ? 'email' : undefined} />
+        <LabScoringSettingsPage
+          embedded
+          fixedSection="scoring"
+          activeScoringTab={caseEmailsDeepLink ? 'email' : subParam === 'bands' ? 'thresholds' : 'weights'}
+          onScoringTabChange={(t) => {
+            const next = new URLSearchParams(searchParams);
+            next.set('tab', 'case-scoring');
+            if (t === 'weights') next.delete('sub');
+            else next.set('sub', t === 'thresholds' ? 'bands' : 'case-emails');
+            setSearchParams(next);
+          }}
+        />
       )}
 
         </section>

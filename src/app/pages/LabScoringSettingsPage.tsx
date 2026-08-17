@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import ServiceConfigDrawer from './ServiceConfigDrawer';
 import CaseScoringEmailsSettings from './CaseScoringEmailsSettingsPage';
+import { useCaseScoringEmails } from '../data/caseScoringEmails';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import { SCOREABLE_SERVICE_TYPES, SERVICE_GROUPS, TIER_BAND, ScoreBand, SCORE_FIELD_DEF_MAP } from '../data/caseScoring';
@@ -79,7 +80,7 @@ export function AddOption({ onAdd }: { onAdd: (v: string) => void }) {
   );
 }
 
-export default function LabScoringSettingsPage({ embedded = false, fixedSection, initialScoringTab }: {
+export default function LabScoringSettingsPage({ embedded = false, fixedSection, initialScoringTab, activeScoringTab, onScoringTabChange }: {
   /** Rendered inside a Settings tab (the live portal's home for this config):
       skips the page padding since the settings shell provides it. */
   embedded?: boolean;
@@ -90,6 +91,10 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
   /** Deep-link straight onto a Case Scoring inner tab (e.g. the "Connect
       Email" banner opens 'email' — the Case Scoring Emails tab). */
   initialScoringTab?: 'weights' | 'thresholds' | 'email';
+  /** Controlled inner tab — the Settings host drives it from the URL
+      (?sub=weights|bands|case-emails) so every tab is deep-linkable. */
+  activeScoringTab?: 'weights' | 'thresholds' | 'email';
+  onScoringTabChange?: (tab: 'weights' | 'thresholds' | 'email') => void;
 } = {}) {
   const { toast } = useToast();
   const {
@@ -102,7 +107,14 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
   } = useCaseScoring();
 
   const [section, setSection] = useState<Section>(fixedSection ?? (initialScoringTab ? 'scoring' : 'prescription'));
-  const [scoringTab, setScoringTab] = useState<'weights' | 'thresholds' | 'email'>(initialScoringTab ?? 'weights');
+  // Inner Case Scoring tab — controlled by the host (URL-driven) when
+  // activeScoringTab is passed; falls back to local state otherwise.
+  const [localScoringTab, setLocalScoringTab] = useState<'weights' | 'thresholds' | 'email'>(initialScoringTab ?? 'weights');
+  const scoringTab = activeScoringTab ?? localScoringTab;
+  const setScoringTab = (t: 'weights' | 'thresholds' | 'email') => {
+    setLocalScoringTab(t);
+    onScoringTabChange?.(t);
+  };
   const [activeService, setActiveService] = useState<string>(SCOREABLE_SERVICE_TYPES[0]);
   // The service whose "Configure" drawer is open (null = closed).
   const [configService, setConfigService] = useState<string | null>(null);
@@ -199,38 +211,47 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
   // ── Dirty tracking for the save bar ──
   // Signature of everything this page edits; Save is inactive until it drifts
   // from the last-saved snapshot (taken at mount, refreshed on each save).
-  // Case Scoring Emails is excluded — that module persists live and hides the
-  // save bar entirely.
   const stateSignature = JSON.stringify({ config, thresholds, prescription, serviceOffered });
   const [savedSignature, setSavedSignature] = useState(stateSignature);
   const isDirty = stateSignature !== savedSignature;
 
+  // The Case Scoring Emails tab edits its own store (which also persists
+  // live); it gets the same Save bar with its own dirty tracking so the
+  // button behaves identically on every tab.
+  const emailSettings = useCaseScoringEmails();
+  const emailSignature = JSON.stringify(emailSettings);
+  const [savedEmailSignature, setSavedEmailSignature] = useState(emailSignature);
+  const onEmailTab = section === 'scoring' && scoringTab === 'email';
+  const emailDirty = emailSignature !== savedEmailSignature;
+  const barDirty = onEmailTab ? emailDirty : isDirty;
+
   return (
     <div className={embedded ? 'space-y-5' : 'p-4 sm:p-6 lg:p-8 space-y-5'}>
       {/* Header — title tracks the locked section when this page is embedded
-          as a single-purpose Settings tab. */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-semibold text-[#030213]">
+          as a single-purpose Settings tab. Reset sits ON the title row (it
+          never wraps below), with the description underneath. */}
+      <div>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-xl sm:text-2xl font-semibold text-[#030213] truncate">
             {fixedSection === 'prescription' ? 'Prescription Builder'
               : fixedSection === 'scoring' ? 'Case Scoring'
               : 'Configuration'}
           </h1>
-          <p className="text-sm text-[#717182] mt-0.5">
-            {fixedSection === 'prescription'
-              ? 'Build the prescription form shown in case creation — services, fields and dropdown values. Fields tagged Scored feed Case Scoring.'
-              : fixedSection === 'scoring'
-                ? 'Decide how cases are scored — field weights, score bands and automated case scoring emails.'
-                : 'Build the prescription form and decide how cases are scored. Scoring is driven by the fields you enable here.'}
-          </p>
+          <button
+            onClick={() => { resetDefaults(); toast.success('Configuration reset to defaults'); }}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] bg-white hover:border-[#4D8EF7] hover:text-[#1565C0] transition-colors flex-shrink-0"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            Reset to defaults
+          </button>
         </div>
-        <button
-          onClick={() => { resetDefaults(); toast.success('Configuration reset to defaults'); }}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] bg-white hover:border-[#4D8EF7] hover:text-[#1565C0] transition-colors"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          Reset to defaults
-        </button>
+        <p className="text-sm text-[#717182] mt-0.5">
+          {fixedSection === 'prescription'
+            ? 'Build the prescription form shown in case creation — services, fields and dropdown values. Fields tagged Scored feed Case Scoring.'
+            : fixedSection === 'scoring'
+              ? 'Decide how cases are scored — field weights, score bands and automated case scoring emails.'
+              : 'Build the prescription form and decide how cases are scored. Scoring is driven by the fields you enable here.'}
+        </p>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6">
@@ -650,12 +671,11 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
           )}
 
           {/* Save bar — sticks to the bottom of the viewport on long pages.
-              Inactive until something actually changed; hidden on the Case
-              Scoring Emails tab, which persists every change instantly. */}
-          {!(section === 'scoring' && scoringTab === 'email') && (
+              Present on EVERY tab; inactive until something actually changed.
+              (Changes already apply live everywhere — Save confirms them.) */}
           <div className="sticky bottom-0 z-20 flex items-center justify-between gap-3 bg-white border border-[#E0E0E6] rounded-xl px-5 py-3.5 shadow-[0_-4px_16px_-8px_rgba(0,0,0,0.15)]">
             <div className="flex items-center gap-2 text-xs text-[#717182]">
-              {isDirty ? (
+              {barDirty ? (
                 <>
                   <span className="w-2 h-2 rounded-full bg-[#F59E0B] animate-pulse flex-shrink-0" />
                   Unsaved changes — they already apply live across the lab and clinic; Save confirms them.
@@ -668,9 +688,14 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
               )}
             </div>
             <button
-              disabled={!isDirty}
-              title={isDirty ? undefined : 'No changes to save'}
+              disabled={!barDirty}
+              title={barDirty ? undefined : 'No changes to save'}
               onClick={() => {
+                if (onEmailTab) {
+                  setSavedEmailSignature(emailSignature);
+                  toast.success('Case scoring email settings saved');
+                  return;
+                }
                 if (invalidScoringServices.length > 0) {
                   toast.error(`Weights must total 100 before saving. Fix: ${invalidScoringServices.join(', ')}.`);
                   // Jump to the first offending service so the fix is one click away.
@@ -686,7 +711,6 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
               Save changes
             </button>
           </div>
-          )}
         </section>
       </div>
 

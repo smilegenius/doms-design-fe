@@ -32,12 +32,12 @@ export const CATEGORY_META: Record<ScoringEmailCategory, { label: string; dot: s
   'needs-review': {
     label: 'Needs Review',
     dot: '#F59E0B',
-    description: 'Sent when a case is scored in the amber band — items need the dentist’s attention before production can begin.',
+    description: 'Amber band — items need the dentist’s attention.',
   },
   incomplete: {
     label: 'Incomplete',
     dot: '#EF4444',
-    description: 'Sent when a case is scored in the red band — required information is missing and production cannot begin.',
+    description: 'Red band — required information is missing.',
   },
 };
 
