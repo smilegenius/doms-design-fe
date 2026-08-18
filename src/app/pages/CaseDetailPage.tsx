@@ -3114,38 +3114,42 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           Back to Cases
         </button>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Completeness score — the SAME badge the cases list shows (round %
-              + tier + what's missing). Rendered for every case. Compact keeps
-              the missing list on one line with a chevron for the rest. */}
-          <ScoreBadge score={caseScore} withDetails compact />
-          {/* Email-thread state when this case is in the missing-info loop. */}
-          {replyReceived ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0] text-[11px] font-medium text-[#15803D]">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              {caseData.dentist} replied · score updated {baseScore.percent}% → 100%
-            </span>
-          ) : emailSent ? (
-            <button
-              onClick={() => setThreadOpen(true)}
-              title="Open the conversation"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EEF2FF] border border-[#C7D2FE] text-[11px] font-medium text-[#4338CA] hover:bg-[#E0E7FF] transition-colors"
-            >
-              <MessageSquare className="w-3.5 h-3.5" />
-              Conversation hub · awaiting {caseData.dentist}
-            </button>
-          ) : null}
-          {isIncomplete && !emailSent && !replyReceived && (
-            <button
-              onClick={sendMissingInfoEmail}
-              title={emailSendMode === 'manual'
-                ? 'Open the conversation — manual sending is on, pick a template and send it yourself'
-                : 'Auto-email the dentist the list of missing items'}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
-            >
-              <Send className="w-3.5 h-3.5" />
-              Email dentist
-            </button>
-          )}
+          {/* Completeness score + its follow-up action in ONE card — the score
+              and "Email dentist" (or the thread state that replaces it) read
+              as a single unit: score on the left, what-to-do-about-it right. */}
+          <div className="flex items-center gap-2.5 pl-2.5 pr-1.5 py-1 rounded-xl border border-[#E0E0E6] bg-white">
+            <ScoreBadge score={caseScore} withDetails compact />
+            {(replyReceived || emailSent || isIncomplete) && (
+              <span className="w-px self-stretch my-1 bg-[#F0EFF6] flex-shrink-0" />
+            )}
+            {/* Email-thread state when this case is in the missing-info loop. */}
+            {replyReceived ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0] text-[11px] font-medium text-[#15803D]">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {caseData.dentist} replied · score updated {baseScore.percent}% → 100%
+              </span>
+            ) : emailSent ? (
+              <button
+                onClick={() => setThreadOpen(true)}
+                title="Open the conversation"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EEF2FF] border border-[#C7D2FE] text-[11px] font-medium text-[#4338CA] hover:bg-[#E0E7FF] transition-colors"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                Conversation hub · awaiting {caseData.dentist}
+              </button>
+            ) : isIncomplete ? (
+              <button
+                onClick={sendMissingInfoEmail}
+                title={emailSendMode === 'manual'
+                  ? 'Open the conversation — manual sending is on, pick a template and send it yourself'
+                  : 'Auto-email the dentist the list of missing items'}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity whitespace-nowrap"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Email dentist
+              </button>
+            ) : null}
+          </div>
           {missingDeliveryDate && (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FFEBEE] border border-[#FECDD3] text-[11px] font-medium text-[#BE123C]">
               <AlertTriangle className="w-3.5 h-3.5" />
