@@ -705,7 +705,7 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
                 setSavedSignature(stateSignature);
                 toast.success('Configuration saved');
               }}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:opacity-45"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:opacity-45 whitespace-nowrap flex-shrink-0"
             >
               <Save className="w-4 h-4" />
               Save changes

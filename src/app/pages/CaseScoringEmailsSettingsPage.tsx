@@ -122,6 +122,9 @@ export default function CaseScoringEmailsSettings() {
   // Case Scoring escalation preview modal (email + in-app), per outcome.
   const [escPreview, setEscPreview] = useState<ScoringEmailCategory | null>(null);
 
+  // Email Integration lives in a MODAL, opened from the status pill on the
+  // intro card — connect, reconnect and disconnect all happen there.
+  const [integrationOpen, setIntegrationOpen] = useState(false);
   // Connect flow: pick a provider → mock OAuth consent → connecting → done.
   const [consentProvider, setConsentProvider] = useState<EmailProvider | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -151,6 +154,7 @@ export default function CaseScoringEmailsSettings() {
       setConnecting(false);
       setConsentProvider(null);
       setPickerOverride(false);
+      setIntegrationOpen(false);
       toast.success(`${PROVIDER_META[consentProvider].label} connected — case scoring emails now send from ${MOCK_LAB_EMAIL}`);
     }, 900);
   };
@@ -161,6 +165,7 @@ export default function CaseScoringEmailsSettings() {
   };
   const handleReconnect = () => {
     reconnectEmail();
+    setIntegrationOpen(false);
     toast.success(`Reconnected to ${connection.lastEmail ?? MOCK_LAB_EMAIL} — automation resumed`);
   };
 
@@ -211,146 +216,51 @@ export default function CaseScoringEmailsSettings() {
   return (
     <div className="space-y-4">
 
-      {/* ── Intro — what this section automates ── */}
-      <div className="bg-gradient-to-br from-[#EEF4FF] to-[#F5F3FF] border border-[#DBEAFE] rounded-xl p-4 flex items-start gap-3">
+      {/* ── ONE header card: short intro + the connection STATUS pill.
+          Clicking the pill opens the Email Integration modal, where connect /
+          reconnect / disconnect live. ── */}
+      <div className="bg-gradient-to-br from-[#EEF4FF] to-[#F5F3FF] border border-[#DBEAFE] rounded-xl p-4 flex items-center gap-3 flex-wrap">
         <span className="w-9 h-9 rounded-lg bg-white border border-[#DBEAFE] flex items-center justify-center flex-shrink-0">
           <Sparkles className="w-4 h-4 text-[#4D8EF7]" />
         </span>
-        <div className="text-xs text-[#3A4A63] leading-relaxed">
+        <div className="flex-1 min-w-[220px] text-xs text-[#3A4A63] leading-relaxed">
           <span className="font-semibold text-[#1565C0]">Automated Case Scoring Emails.</span>{' '}
           Cases scored <span className="font-semibold">Needs Review</span> or{' '}
-          <span className="font-semibold">Incomplete</span> automatically email the dentist from your own business
-          email account — <span className="font-semibold">Complete</span> never triggers an email, and dentists
-          without an email address on file are skipped.
+          <span className="font-semibold">Incomplete</span> email the dentist automatically — from your own
+          business email account, not Smile Genius.
         </div>
+        <button
+          onClick={() => setIntegrationOpen(true)}
+          title={connected ? `Manage the email integration — sending as ${connection.email}` : 'Connect your business email account'}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors flex-shrink-0 ${
+            connected
+              ? 'bg-[#F0FDF4] text-[#2E7D32] border-[#BBF7D0] hover:bg-[#DCFCE7]'
+              : 'bg-[#FFF8E1] text-[#B45309] border-[#FDE68A] hover:bg-[#FEF3C7]'
+          }`}
+        >
+          {connected ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+          {connected ? 'Connected' : 'Not Connected'}
+          <ChevronDown className="w-3 h-3 -rotate-90" />
+        </button>
       </div>
-
-      {/* ── 1 · Email Integration — connection status is ALWAYS visible.
-          Connected: a slim strip so the automation config below is the focus.
-          Not connected: the full connect card, and NOTHING below renders —
-          connecting is the gating first step. ── */}
-      {connected && connection.provider ? (
-        <div className="bg-white rounded-xl border border-[#E0E0E6] px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
-            <span className="w-7 h-7 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0] flex items-center justify-center flex-shrink-0">
-              <CheckCircle2 className="w-4 h-4 text-[#15803D]" />
-            </span>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0]">Email Integration</span>
-            <span className="font-mono text-xs font-medium text-[#1565C0] truncate">{connection.email}</span>
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#F0FDF4] border border-[#BBF7D0] text-[10px] font-semibold text-[#2E7D32]">
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: PROVIDER_META[connection.provider].color }} />
-              {PROVIDER_META[connection.provider].label} · {PROVIDER_META[connection.provider].product}
-            </span>
-            <span className="text-[11px] text-[#A0A0B0]">Connected {fmtDate(connection.connectedAt)}</span>
-          </div>
-          <button
-            onClick={() => setDisconnectOpen(true)}
-            className="text-[11px] font-semibold text-[#B91C1C] hover:underline flex-shrink-0"
-            title="Disconnect this email account"
-          >
-            Disconnect
-          </button>
-        </div>
-      ) : (
-      <Card
-        title="Email Integration"
-        actions={
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border bg-[#FFF8E1] text-[#B45309] border-[#FDE68A]">
-            <AlertTriangle className="w-3.5 h-3.5" /> Not Connected
-          </span>
-        }
-      >
-        {showProviderPicker ? (
-          /* Never connected (or choosing a different account) — provider cards */
-          <div>
-            <p className="text-sm text-[#030213] font-medium mb-1">Connect your business email account</p>
-            <p className="text-xs text-[#717182] leading-relaxed mb-4">
-              Automated case scoring emails are sent from the account you connect here — dentists see your lab's
-              address, and their replies land in your own inbox. Until an account is connected, no automated emails
-              can be sent; your automation, escalation and template settings appear once you connect.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
-              {(Object.keys(PROVIDER_META) as EmailProvider[]).map(p => (
-                <button
-                  key={p}
-                  onClick={() => startOAuth(p)}
-                  className="flex items-center gap-3 p-4 bg-white border border-[#E0E0E6] rounded-xl hover:border-[#4D8EF7] hover:shadow-sm transition-all text-left"
-                >
-                  <Mail className="w-5 h-5 flex-shrink-0" style={{ color: PROVIDER_META[p].color }} />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-[#030213]">{PROVIDER_META[p].label}</span>
-                    <span className="block text-[11px] text-[#A0A0B0]">{PROVIDER_META[p].product} · {PROVIDER_META[p].oauth}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-            {connection.lastProvider && (
-              <button onClick={() => setPickerOverride(false)} className="mt-3 text-[11px] font-medium text-[#717182] hover:text-[#030213]">
-                ← Back
-              </button>
-            )}
-          </div>
-        ) : (
-          /* Previously connected → one-click Reconnect */
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-start gap-3 min-w-0">
-              <span className="w-10 h-10 rounded-lg bg-[#FFF8E1] border border-[#FDE68A] flex items-center justify-center flex-shrink-0">
-                <Mail className="w-5 h-5 text-[#B45309]" />
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-[#030213]">
-                  <span className="font-mono text-[#5A5568]">{connection.lastEmail}</span>{' '}
-                  <span className="text-[#B45309]">is disconnected</span>
-                </p>
-                <p className="text-[11px] text-[#717182] mt-0.5">
-                  Automated case scoring emails are paused. Reconnect to resume, or connect a different account —
-                  your automation settings and templates are kept either way.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button
-                onClick={() => setPickerOverride(true)}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] bg-white hover:bg-[#F8F9FC] transition-colors"
-              >
-                Connect a different account
-              </button>
-              <button
-                onClick={handleReconnect}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Reconnect
-              </button>
-            </div>
-          </div>
-        )}
-      </Card>
-      )}
 
       {/* ── Everything below is gated on the connection: no account, nothing
           to automate — the connect card above is the whole page until then. ── */}
       {connected && (<>
 
-      {/* ── 2 · Email Automation — one toggle + one template per outcome ── */}
-      <Card title="Email Automation">
-        {/* Sending mode — Automatic sends on scoring; Manual keeps everything
-            configured but leaves the send to the lab, from the case's
-            Conversation hub (where every template is one click away). */}
-        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap px-4 py-3 rounded-xl border border-[#E0E0E6] bg-[#FAFBFC]">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-[#030213]">Sending mode</p>
-            <p className="text-[11px] text-[#717182] leading-relaxed mt-0.5 max-w-md">
-              {sendMode === 'automatic'
-                ? 'Automatic — the selected template is emailed to the dentist the moment a case is scored Needs Review or Incomplete.'
-                : 'Manual — nothing sends by itself. You review each scored case and send the template yourself from its Conversation hub.'}
-            </p>
-          </div>
+      {/* ── 2 · Email Automation — one toggle + one template per outcome.
+          The Automatic/Manual sending mode lives ON the card header. ── */}
+      <Card
+        title="Email Automation"
+        actions={
           <div className="inline-flex p-0.5 bg-[#F3F3F5] rounded-lg flex-shrink-0">
             {(['automatic', 'manual'] as const).map(mode => (
               <button
                 key={mode}
                 aria-pressed={sendMode === mode}
+                title={mode === 'automatic'
+                  ? 'Send the selected template automatically the moment a case is scored'
+                  : 'Send nothing automatically — email from each case\'s Conversation hub'}
                 onClick={() => {
                   if (sendMode === mode) return;
                   setSendMode(mode);
@@ -367,12 +277,12 @@ export default function CaseScoringEmailsSettings() {
               </button>
             ))}
           </div>
-        </div>
-
+        }
+      >
         <p className="text-xs text-[#717182] leading-relaxed mb-4">
           {sendMode === 'manual'
-            ? 'Disabled while sending is manual — nothing sends automatically, and every template is offered when you email from a case\'s Conversation hub.'
-            : 'Each outcome has its own on/off toggle and exactly one selected email template.'}
+            ? 'Manual sending — nothing sends by itself, and every template is offered when you email from a case\'s Conversation hub, so the automation below is disabled.'
+            : 'Automatic sending — the selected template is emailed the moment a case is scored. Each outcome has its own on/off toggle and exactly one selected template.'}
         </p>
 
         {/* Outcomes sit side by side on large screens to keep the page short.
@@ -729,6 +639,140 @@ export default function CaseScoringEmailsSettings() {
       </Card>
 
       </>)}
+
+      {/* ── Email Integration modal — connect / reconnect / disconnect. The
+          OAuth consent and disconnect confirmation stack ABOVE it (z-120 vs
+          z-110). ── */}
+      {integrationOpen && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setIntegrationOpen(false)} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#F0EFF6]">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-8 h-8 rounded-lg bg-[#EEF4FF] flex items-center justify-center flex-shrink-0">
+                    <Mail className="w-4 h-4 text-[#4D8EF7]" />
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-[#030213]">Email Integration</h3>
+                    <p className="text-[11px] text-[#717182]">The account your case scoring emails send from</p>
+                  </div>
+                </div>
+                <button onClick={() => setIntegrationOpen(false)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors flex-shrink-0">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="px-5 py-4">
+                {connected && connection.provider ? (
+                  /* Connected — account details + disconnect */
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3 p-3 rounded-xl border border-[#BBF7D0] bg-[#F0FDF4]">
+                      <span className="w-9 h-9 rounded-lg bg-white border border-[#BBF7D0] flex items-center justify-center flex-shrink-0">
+                        <CheckCircle2 className="w-4 h-4 text-[#15803D]" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-mono text-sm font-medium text-[#030213] truncate">{connection.email}</p>
+                        <p className="flex items-center gap-1.5 text-[11px] text-[#2E7D32]">
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: PROVIDER_META[connection.provider].color }} />
+                          {PROVIDER_META[connection.provider].label} · {PROVIDER_META[connection.provider].product} · Connected {fmtDate(connection.connectedAt)}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-[#717182] leading-relaxed">
+                      All automated case scoring emails are sent from this account rather than from Smile Genius,
+                      and dentist replies land in its inbox.
+                    </p>
+                  </div>
+                ) : showProviderPicker ? (
+                  /* Never connected (or choosing a different account) */
+                  <div className="space-y-3">
+                    <p className="text-xs text-[#717182] leading-relaxed">
+                      Automated case scoring emails are sent from the account you connect — dentists see your lab's
+                      address, and their replies land in your own inbox. Nothing sends until an account is connected.
+                    </p>
+                    <div className="space-y-2">
+                      {(Object.keys(PROVIDER_META) as EmailProvider[]).map(p => (
+                        <button
+                          key={p}
+                          onClick={() => startOAuth(p)}
+                          className="w-full flex items-center gap-3 p-3 bg-white border border-[#E0E0E6] rounded-xl hover:border-[#4D8EF7] hover:shadow-sm transition-all text-left"
+                        >
+                          <Mail className="w-5 h-5 flex-shrink-0" style={{ color: PROVIDER_META[p].color }} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-semibold text-[#030213]">{PROVIDER_META[p].label}</span>
+                            <span className="block text-[11px] text-[#A0A0B0]">{PROVIDER_META[p].product} · {PROVIDER_META[p].oauth}</span>
+                          </span>
+                          <ChevronDown className="w-4 h-4 -rotate-90 text-[#A0A0B0]" />
+                        </button>
+                      ))}
+                    </div>
+                    {connection.lastProvider && (
+                      <button onClick={() => setPickerOverride(false)} className="text-[11px] font-medium text-[#717182] hover:text-[#030213]">
+                        ← Back
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  /* Previously connected → one-click Reconnect */
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3 p-3 rounded-xl border border-[#FDE68A] bg-[#FFF8E1]">
+                      <span className="w-9 h-9 rounded-lg bg-white border border-[#FDE68A] flex items-center justify-center flex-shrink-0">
+                        <Mail className="w-4 h-4 text-[#B45309]" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-mono text-sm font-medium text-[#030213] truncate">{connection.lastEmail}</p>
+                        <p className="text-[11px] text-[#B45309]">Disconnected — automated emails are paused</p>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-[#717182] leading-relaxed">
+                      Reconnect to resume, or connect a different account — your automation settings and templates
+                      are kept either way.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 px-5 py-4 bg-[#F8F9FC] border-t border-[#F0EFF6]">
+                {connected && connection.provider ? (
+                  <>
+                    <button onClick={() => setIntegrationOpen(false)} className="px-3 py-2 rounded-lg text-sm font-medium text-[#5A5568] hover:bg-[#F0EFF6] transition-colors">
+                      Close
+                    </button>
+                    <button
+                      onClick={() => setDisconnectOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-[#B91C1C] border border-[#FECACA] bg-white hover:bg-[#FEF2F2] transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Disconnect
+                    </button>
+                  </>
+                ) : showProviderPicker ? (
+                  <button onClick={() => setIntegrationOpen(false)} className="px-3 py-2 rounded-lg text-sm font-medium text-[#5A5568] hover:bg-[#F0EFF6] transition-colors">
+                    Close
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setPickerOverride(true)}
+                      className="px-3 py-2 rounded-lg text-sm font-medium text-[#5A5568] hover:bg-[#F0EFF6] transition-colors"
+                    >
+                      Connect a different account
+                    </button>
+                    <button
+                      onClick={handleReconnect}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Reconnect
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
 
       {/* ── Mock OAuth consent + connecting state ── */}
       {consentProvider && (

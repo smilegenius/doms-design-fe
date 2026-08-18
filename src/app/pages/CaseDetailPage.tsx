@@ -6,7 +6,7 @@ import {
   StickyNote, X, Bold, Italic, Underline, Strikethrough, Code as CodeIcon,
   Superscript, Subscript, Undo2, Redo2, Paperclip, Eye, Plus, Minus,
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
-  Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply,
+  Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply, Pencil,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
 import UrgentBadge from '../components/UrgentBadge';
@@ -1762,11 +1762,14 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
   // placeholders resolved from THIS case. The plain composer below stays the
   // non-template path — typed replies thread as "Re: …" like before.
   const { automation, customTemplates } = useCaseScoringEmails();
-  const [composeModal, setComposeModal] = useState<{ tplId: string; subject: string; body: string } | null>(null);
+  const [composeModal, setComposeModal] = useState<{ tplId: string; to: string; subject: string; body: string } | null>(null);
   const [composeTplMenuOpen, setComposeTplMenuOpen] = useState(false);
-  // The email composer's template dropdown (emails always start from a
-  // template — free-typing is a WhatsApp thing).
-  const [emailTplMenuOpen, setEmailTplMenuOpen] = useState(false);
+  // The dentist's email on file. Email-sourced cases carry it (they wrote
+  // in); otherwise it's unknown and the compose modal asks for it on the
+  // spot — no email, no send.
+  const dentistEmailOnFile = caseData.source === 'email'
+    ? `${(caseData.dentist.split(' ').filter(Boolean).slice(-1)[0] ?? 'dentist').toLowerCase()}@${String((caseData as any).practice ?? 'practice').toLowerCase().replace(/[^a-z0-9]+/g, '')}.co.uk`
+    : undefined;
   const templateGroups: { label: string; dot?: string; items: ScoringEmailTemplate[] }[] = [
     { label: CATEGORY_META['needs-review'].label, dot: CATEGORY_META['needs-review'].dot, items: DEFAULT_TEMPLATES['needs-review'] },
     { label: CATEGORY_META.incomplete.label, dot: CATEGORY_META.incomplete.dot, items: DEFAULT_TEMPLATES.incomplete },
@@ -1785,26 +1788,24 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
     };
     return text.replace(/\{\{([^}]+)\}\}/g, (_, k) => vars[String(k).trim()] ?? `{{${k}}}`);
   };
-  // The template configured for this case's scoring band — pre-highlighted in
-  // the composer dropdown so the right template is one click away.
-  const configuredTplId = (() => {
+  // Opens the email draft directly (no dropdown step), seeded with the
+  // template configured for this case's band — everything editable inside.
+  const openEmailDraft = () => {
     const cat = categoryForTier(score.tier) ?? 'needs-review';
-    return findTemplate(cat, automation[cat].templateId, customTemplates).id;
-  })();
-  // Picking a template (from the composer dropdown) opens the compose modal
-  // seeded with it — subject and body editable before sending.
-  const openTemplate = (tpl: ScoringEmailTemplate) => {
-    setComposeModal({ tplId: tpl.id, subject: fillScoringTemplate(tpl.subject), body: fillScoringTemplate(tpl.body) });
-    setEmailTplMenuOpen(false);
+    const tpl = findTemplate(cat, automation[cat].templateId, customTemplates);
+    setComposeModal({ tplId: tpl.id, to: dentistEmailOnFile ?? '', subject: fillScoringTemplate(tpl.subject), body: fillScoringTemplate(tpl.body) });
   };
   const switchComposeTemplate = (tpl: ScoringEmailTemplate) => {
-    setComposeModal({ tplId: tpl.id, subject: fillScoringTemplate(tpl.subject), body: fillScoringTemplate(tpl.body) });
+    setComposeModal(m => m && ({ ...m, tplId: tpl.id, subject: fillScoringTemplate(tpl.subject), body: fillScoringTemplate(tpl.body) }));
     setComposeTplMenuOpen(false);
   };
+  const composeToValid = !!composeModal && /\S+@\S+\.\S+/.test(composeModal.to.trim());
   const sendComposed = () => {
-    if (!composeModal || !composeModal.body.trim()) return;
+    if (!composeModal || !composeModal.body.trim() || !composeToValid) return;
     setMsgs(prev => [...prev, { id: `new-${++idRef.current}`, channel: 'email', dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now', subject: composeModal.subject.trim() || undefined, body: composeModal.body }]);
-    toast.success(`Email sent to ${caseData.dentist}`);
+    toast.success(dentistEmailOnFile
+      ? `Email sent to ${composeModal.to.trim()}`
+      : `Email sent to ${composeModal.to.trim()} — saved to ${caseData.dentist}'s contact details.`);
     setComposeModal(null);
     setComposeTplMenuOpen(false);
   };
@@ -2000,62 +2001,25 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
             )}
           </div>
           {composeChannel === 'email' ? (
-            /* Emails always start from a template — no free-typing needed.
-               The dropdown lists every template (defaults + custom, the
-               configured one for this case's band pre-highlighted); picking
-               one opens the compose modal for review + edits before sending. */
-            <div className="relative">
-              <button
-                onClick={() => setEmailTplMenuOpen(o => !o)}
-                aria-haspopup="listbox"
-                aria-expanded={emailTplMenuOpen}
-                className={`w-full flex items-center gap-2 border rounded-xl px-3 py-2.5 text-left transition-colors ${emailTplMenuOpen ? 'border-[#4D8EF7] ring-2 ring-[#4D8EF7]/15' : 'border-[#E0E0E6] hover:border-[#C8D8FC]'}`}
-              >
-                <FileText className="w-4 h-4 text-[#4D8EF7] flex-shrink-0" />
-                <span className="flex-1 text-sm text-[#717182] truncate">Choose a template to email {caseData.dentist}…</span>
-                <ChevronDown className={`w-4 h-4 text-[#717182] flex-shrink-0 transition-transform ${emailTplMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {emailTplMenuOpen && (
-                <>
-                  <span className="fixed inset-0 z-40" onClick={() => setEmailTplMenuOpen(false)} />
-                  <div className="absolute bottom-full left-0 right-0 mb-1 z-50 bg-white border border-[#E0E0E6] rounded-xl shadow-lg" role="listbox">
-                    <div className="max-h-64 overflow-y-auto p-1.5">
-                      {templateGroups.map(g => (
-                        <div key={g.label}>
-                          <p className="px-2 pt-1 pb-0.5 text-[9px] font-bold uppercase tracking-wider text-[#A0A0B0] flex items-center gap-1">
-                            {g.dot && <span className="w-1.5 h-1.5 rounded-full" style={{ background: g.dot }} />}
-                            {g.label}
-                          </p>
-                          {g.items.map(t => {
-                            const suggested = t.id === configuredTplId;
-                            return (
-                              <button
-                                key={t.id}
-                                role="option"
-                                onClick={() => openTemplate(t)}
-                                className={`w-full px-2 py-1.5 rounded-lg text-left transition-colors ${suggested ? 'bg-[#EEF4FF]' : 'hover:bg-[#F8F9FC]'}`}
-                                title={`Review and send "${t.name}"`}
-                              >
-                                <span className="flex items-center gap-1.5 text-xs font-semibold text-[#030213]">
-                                  {t.name} <span className="font-normal text-[#A0A0B0]">· {t.tone}</span>
-                                  {suggested && (
-                                    <span className="ml-auto px-1.5 py-px rounded-full bg-white border border-[#BFDBFE] text-[8px] font-bold uppercase tracking-wider text-[#1565C0]">Suggested</span>
-                                  )}
-                                </span>
-                                <span className="block text-[10px] text-[#A0A0B0] truncate">{t.subject}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ))}
-                    </div>
-                    <p className="px-3 py-2 border-t border-[#F0EFF6] text-[9px] text-[#A0A0B0]">
-                      You review and edit the email before it sends. Manage templates in Settings → Case Scoring.
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
+            /* Emails start from a draft, not free-typing: one click opens the
+               email draft modal seeded with this case's configured template —
+               switch template, edit everything, then send. */
+            <button
+              onClick={openEmailDraft}
+              className="w-full flex items-center gap-2.5 border border-[#E0E0E6] rounded-xl px-3 py-2.5 text-left hover:border-[#4D8EF7] hover:bg-[#F5F8FF] transition-colors group"
+              title={`Open an email draft to ${caseData.dentist}`}
+            >
+              <span className="w-7 h-7 rounded-lg bg-[#EEF4FF] flex items-center justify-center flex-shrink-0">
+                <Pencil className="w-3.5 h-3.5 text-[#4D8EF7]" />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm font-medium text-[#030213]">Write email to {caseData.dentist}</span>
+                <span className="block text-[10px] text-[#A0A0B0] truncate">
+                  Opens a draft from your case scoring template — review and edit before sending.
+                </span>
+              </span>
+              <Send className="w-4 h-4 text-[#4D8EF7] opacity-60 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+            </button>
           ) : (
             <>
               <div className={`flex items-center gap-2 border rounded-xl px-3 py-2 transition-colors ${urgentArmed ? 'border-[#FECACA] ring-1 ring-[#FECACA]/40' : 'border-[#E0E0E6]'}`}>
@@ -2162,6 +2126,28 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
                   </button>
                 </div>
                 <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3.5">
+                  {/* To — the dentist's email. When there's none on file, the
+                      draft asks for it on the spot: no address, no send. */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-1">To</label>
+                    <input
+                      type="email"
+                      value={composeModal.to}
+                      onChange={(e) => setComposeModal({ ...composeModal, to: e.target.value })}
+                      placeholder="dentist@practice.co.uk"
+                      className={`w-full px-3 py-2 text-sm font-mono border rounded-lg outline-none focus:ring-2 ${
+                        composeToValid || composeModal.to === ''
+                          ? 'border-[#E0E0E6] focus:border-[#4D8EF7] focus:ring-[#4D8EF7]/15'
+                          : 'border-[#FDE68A] focus:border-[#F59E0B] focus:ring-[#F59E0B]/15'
+                      }`}
+                    />
+                    {!dentistEmailOnFile && !composeToValid && (
+                      <p className="flex items-center gap-1 mt-1 text-[10px] text-[#B45309]">
+                        <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                        No email on file for {caseData.dentist} — enter it here to send. We'll save it to their contact details.
+                      </p>
+                    )}
+                  </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-1">Subject</label>
                     <input
@@ -2190,8 +2176,9 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
                   </button>
                   <button
                     onClick={sendComposed}
-                    disabled={!composeModal.body.trim()}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={!composeModal.body.trim() || !composeToValid}
+                    title={!composeToValid ? `Enter ${caseData.dentist}'s email address to send` : undefined}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                   >
                     <Send className="w-4 h-4" />
                     Send email
@@ -3055,9 +3042,10 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
 
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
-  // Automated case scoring emails — the lab's business-email connection.
-  // Reactive: the banner below disappears the moment an account is connected.
-  const { connection: emailConnection } = useCaseScoringEmails();
+  // Automated case scoring emails — the lab's business-email connection and
+  // sending mode. Reactive: the banner below disappears the moment an account
+  // is connected, and "Email dentist" honours Automatic vs Manual sending.
+  const { connection: emailConnection, sendMode: emailSendMode } = useCaseScoringEmails();
 
   // Completeness score from the case's real data — identical to the cases list.
   // Drives the "what's missing" messaging and the missing-info email/reply loop.
@@ -3078,6 +3066,13 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const caseScore = replyReceived ? scoreCase(fillMissingForScore(caseData) as any) : baseScore;
 
   function sendMissingInfoEmail() {
+    // Manual sending mode (Settings → Case Scoring → Case Scoring Emails):
+    // nothing sends automatically — just open the Conversation hub, where the
+    // user picks a template and sends it themselves.
+    if (emailSendMode === 'manual') {
+      setThreadOpen(true);
+      return;
+    }
     setEmailSent(true);
     onSetStatus?.('sent-for-review');
     setThreadOpen(true);
@@ -3142,7 +3137,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           {isIncomplete && !emailSent && !replyReceived && (
             <button
               onClick={sendMissingInfoEmail}
-              title="Auto-email the dentist the list of missing items"
+              title={emailSendMode === 'manual'
+                ? 'Open the conversation — manual sending is on, pick a template and send it yourself'
+                : 'Auto-email the dentist the list of missing items'}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
             >
               <Send className="w-3.5 h-3.5" />
