@@ -52,9 +52,11 @@ const UNREAD: Convo[] = [
   { name: 'Medit Ireland',         type: 'Supplier', initials: 'MI', unread: 1,  last: 'Scanner firmware update is now available.',                  time: '2d' },
 ];
 
+// Counterparty-type tints. Clinic is VIOLET deliberately — red/rose is
+// reserved for urgency, so the type chip never reads as an alert.
 function typeChip(type: ConvType) {
   switch (type) {
-    case 'Clinic':   return 'bg-[#FFE4E6] text-[#BE123C]';
+    case 'Clinic':   return 'bg-[#F3EEFF] text-[#5B21B6]';
     case 'Lab':      return 'bg-[#EEF4FF] text-[#1565C0]';
     case 'Supplier': return 'bg-[#F0FDF4] text-[#2E7D32]';
   }
@@ -284,7 +286,16 @@ export default function ClinicOverviewPage({ onOpenCases, onCreateCase, onOpenIn
                     <p className="text-[11px] text-[#A0A0B0] mt-0.5">No unread messages right now.</p>
                   </div>
                 ) : convos.map((c) => (
-                  <div key={c.name} className="rounded-lg hover:bg-[#FAFBFD] transition-colors group">
+                  // An unanswered urgent message tints the WHOLE row light red
+                  // so it reads as an alert before the badge is even seen.
+                  <div
+                    key={c.name}
+                    className={`rounded-lg transition-colors group ${
+                      c.urgent
+                        ? 'bg-[#FEF2F2] border border-[#FECACA] hover:bg-[#FEE2E2] mb-1'
+                        : 'hover:bg-[#FAFBFD]'
+                    }`}
+                  >
                     <div className="flex items-start gap-3 px-3 py-2.5">
                       <button onClick={onOpenMessages} className="flex items-start gap-3 flex-1 min-w-0 text-left">
                         <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-[11px] font-bold ${typeChip(c.type)}`}>
@@ -298,7 +309,7 @@ export default function ClinicOverviewPage({ onOpenCases, onCreateCase, onOpenIn
                           </div>
                           <div className="flex items-center gap-1 mt-0.5 min-w-0">
                             {c.urgent && <AlertTriangle className="w-3 h-3 text-[#DC2626] flex-shrink-0" />}
-                            <p className="text-[11px] text-[#A0A0B0] truncate">{c.last}</p>
+                            <p className={`text-[11px] truncate ${c.urgent ? 'text-[#991B1B]' : 'text-[#A0A0B0]'}`}>{c.last}</p>
                           </div>
                         </div>
                       </button>

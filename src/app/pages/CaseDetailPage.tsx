@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, Fragment } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, AlertTriangle, MessageSquare, MessageCircle, ChevronDown, ChevronUp,
   FileText, MapPin, Download, Calendar, Lightbulb, Maximize2, Minimize2,
@@ -12,7 +13,8 @@ import UrgentBadge from '../components/UrgentBadge';
 import UrgentConfirmModal from '../components/UrgentConfirmModal';
 import { OfflineLabNotice, offlineLabStatusFor } from '../components/OfflineLabNotice';
 import ConnectEmailNotice from '../components/ConnectEmailNotice';
-import { useCaseScoringEmails } from '../data/caseScoringEmails';
+import { useCaseScoringEmails, DEFAULT_TEMPLATES, CATEGORY_META, findTemplate, categoryForTier } from '../data/caseScoringEmails';
+import type { ScoringEmailCategory, ScoringEmailTemplate } from '../data/caseScoringEmails';
 import { ScoreBadge } from '../components/ScoreBadge';
 import { AiSparkle } from '../components/AiSparkle';
 import { useCaseScoring } from '../context/CaseScoringContext';
@@ -1753,6 +1755,59 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
     const s = msgs.find(m => m.channel === 'email' && m.subject)?.subject;
     return s ? (s.startsWith('Re:') ? s : `Re: ${s}`) : undefined;
   })();
+
+  // ── Compose from a case scoring template ────────────────────────────────────
+  // "Use template" opens a compose MODAL (same model as the Settings preview):
+  // a template switcher, an editable subject and an editable body, with the
+  // placeholders resolved from THIS case. The plain composer below stays the
+  // non-template path — typed replies thread as "Re: …" like before.
+  const { automation, customTemplates } = useCaseScoringEmails();
+  const [composeModal, setComposeModal] = useState<{ tplId: string; subject: string; body: string } | null>(null);
+  const [composeTplMenuOpen, setComposeTplMenuOpen] = useState(false);
+  // The email composer's template dropdown (emails always start from a
+  // template — free-typing is a WhatsApp thing).
+  const [emailTplMenuOpen, setEmailTplMenuOpen] = useState(false);
+  const templateGroups: { label: string; dot?: string; items: ScoringEmailTemplate[] }[] = [
+    { label: CATEGORY_META['needs-review'].label, dot: CATEGORY_META['needs-review'].dot, items: DEFAULT_TEMPLATES['needs-review'] },
+    { label: CATEGORY_META.incomplete.label, dot: CATEGORY_META.incomplete.dot, items: DEFAULT_TEMPLATES.incomplete },
+    ...(customTemplates.length ? [{ label: 'Custom templates', items: customTemplates }] : []),
+  ];
+  const allTemplates = templateGroups.flatMap(g => g.items);
+  const fillScoringTemplate = (text: string) => {
+    const vars: Record<string, string> = {
+      'Dentist Name': caseData.dentist,
+      'Patient Name': caseData.patientName ?? 'the patient',
+      'Case ID': caseData.id,
+      'Service Name': items[0]?.name ?? 'the service',
+      'Missing Items Summary': missing.length ? missing.map(m => `• ${m}`).join('\n') : '• (nothing outstanding)',
+      'Case Link': `https://app.smilegenius.co.uk/cases/${caseData.id}`,
+      'Lab Name': 'Smile Genius Lab',
+    };
+    return text.replace(/\{\{([^}]+)\}\}/g, (_, k) => vars[String(k).trim()] ?? `{{${k}}}`);
+  };
+  // The template configured for this case's scoring band — pre-highlighted in
+  // the composer dropdown so the right template is one click away.
+  const configuredTplId = (() => {
+    const cat = categoryForTier(score.tier) ?? 'needs-review';
+    return findTemplate(cat, automation[cat].templateId, customTemplates).id;
+  })();
+  // Picking a template (from the composer dropdown) opens the compose modal
+  // seeded with it — subject and body editable before sending.
+  const openTemplate = (tpl: ScoringEmailTemplate) => {
+    setComposeModal({ tplId: tpl.id, subject: fillScoringTemplate(tpl.subject), body: fillScoringTemplate(tpl.body) });
+    setEmailTplMenuOpen(false);
+  };
+  const switchComposeTemplate = (tpl: ScoringEmailTemplate) => {
+    setComposeModal({ tplId: tpl.id, subject: fillScoringTemplate(tpl.subject), body: fillScoringTemplate(tpl.body) });
+    setComposeTplMenuOpen(false);
+  };
+  const sendComposed = () => {
+    if (!composeModal || !composeModal.body.trim()) return;
+    setMsgs(prev => [...prev, { id: `new-${++idRef.current}`, channel: 'email', dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now', subject: composeModal.subject.trim() || undefined, body: composeModal.body }]);
+    toast.success(`Email sent to ${caseData.dentist}`);
+    setComposeModal(null);
+    setComposeTplMenuOpen(false);
+  };
   const quoteOf = (m?: ConvMsg) =>
     m ? { name: m.name, date: m.date, time: m.time, snippet: bodySnippet(m.body) } : undefined;
   // A new outbound email replies to the latest email in the thread.
@@ -1924,37 +1979,102 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
                   </button>
                 );
               })}
-              <button
-                onClick={() => setUrgentArmed(u => !u)}
-                title={urgentArmed ? 'This message will be sent as urgent' : 'Mark as Urgent — the recipient is reminded until they reply'}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border transition-colors ${urgentArmed ? 'bg-[#FEF2F2] border-[#FECACA] text-[#DC2626]' : 'bg-white border-[#E0E0E6] text-[#717182] hover:text-[#DC2626] hover:border-[#FECACA]'}`}
-              >
-                <AlertTriangle className="w-3 h-3" /> Urgent
-              </button>
+              {composeChannel === 'whatsapp' && (
+                <button
+                  onClick={() => setUrgentArmed(u => !u)}
+                  title={urgentArmed ? 'This message will be sent as urgent' : 'Mark as Urgent — the recipient is reminded until they reply'}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border transition-colors ${urgentArmed ? 'bg-[#FEF2F2] border-[#FECACA] text-[#DC2626]' : 'bg-white border-[#E0E0E6] text-[#717182] hover:text-[#DC2626] hover:border-[#FECACA]'}`}
+                >
+                  <AlertTriangle className="w-3 h-3" /> Urgent
+                </button>
+              )}
             </div>
-            <button
-              onClick={() => setDraft(draftReply)}
-              title="Fill the composer with the AI-suggested reply"
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] hover:bg-[#FEE2E2] transition-colors"
-            >
-              <AiSparkle /> Fill with AI
-            </button>
+            {composeChannel === 'whatsapp' && (
+              <button
+                onClick={() => setDraft(draftReply)}
+                title="Fill the composer with the AI-suggested reply"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] hover:bg-[#FEE2E2] transition-colors"
+              >
+                <AiSparkle /> Fill with AI
+              </button>
+            )}
           </div>
-          <div className={`flex items-center gap-2 border rounded-xl px-3 py-2 transition-colors ${urgentArmed ? 'border-[#FECACA] ring-1 ring-[#FECACA]/40' : 'border-[#E0E0E6]'}`}>
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
-              placeholder={`Message ${caseData.dentist} via ${composeChannel === 'email' ? 'email' : 'WhatsApp'}…`}
-              className="flex-1 text-sm text-[#030213] bg-transparent outline-none placeholder-[#A0A0B0]"
-            />
-            <button onClick={send} disabled={!draft.trim()} className={`p-1.5 rounded transition-colors disabled:opacity-40 ${urgentArmed ? 'text-[#DC2626] hover:text-[#B91C1C]' : 'text-[#4D8EF7] hover:text-[#3578E5]'}`}><Send className="w-4 h-4" /></button>
-          </div>
-          {urgentArmed && (
-            <p className="flex items-center gap-1 mt-1.5 px-1 text-[10px] text-[#B91C1C]">
-              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-              Will be sent as urgent — the recipient gets reminders at 2, 4, 6 and 8 hours until they reply.
-            </p>
+          {composeChannel === 'email' ? (
+            /* Emails always start from a template — no free-typing needed.
+               The dropdown lists every template (defaults + custom, the
+               configured one for this case's band pre-highlighted); picking
+               one opens the compose modal for review + edits before sending. */
+            <div className="relative">
+              <button
+                onClick={() => setEmailTplMenuOpen(o => !o)}
+                aria-haspopup="listbox"
+                aria-expanded={emailTplMenuOpen}
+                className={`w-full flex items-center gap-2 border rounded-xl px-3 py-2.5 text-left transition-colors ${emailTplMenuOpen ? 'border-[#4D8EF7] ring-2 ring-[#4D8EF7]/15' : 'border-[#E0E0E6] hover:border-[#C8D8FC]'}`}
+              >
+                <FileText className="w-4 h-4 text-[#4D8EF7] flex-shrink-0" />
+                <span className="flex-1 text-sm text-[#717182] truncate">Choose a template to email {caseData.dentist}…</span>
+                <ChevronDown className={`w-4 h-4 text-[#717182] flex-shrink-0 transition-transform ${emailTplMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {emailTplMenuOpen && (
+                <>
+                  <span className="fixed inset-0 z-40" onClick={() => setEmailTplMenuOpen(false)} />
+                  <div className="absolute bottom-full left-0 right-0 mb-1 z-50 bg-white border border-[#E0E0E6] rounded-xl shadow-lg" role="listbox">
+                    <div className="max-h-64 overflow-y-auto p-1.5">
+                      {templateGroups.map(g => (
+                        <div key={g.label}>
+                          <p className="px-2 pt-1 pb-0.5 text-[9px] font-bold uppercase tracking-wider text-[#A0A0B0] flex items-center gap-1">
+                            {g.dot && <span className="w-1.5 h-1.5 rounded-full" style={{ background: g.dot }} />}
+                            {g.label}
+                          </p>
+                          {g.items.map(t => {
+                            const suggested = t.id === configuredTplId;
+                            return (
+                              <button
+                                key={t.id}
+                                role="option"
+                                onClick={() => openTemplate(t)}
+                                className={`w-full px-2 py-1.5 rounded-lg text-left transition-colors ${suggested ? 'bg-[#EEF4FF]' : 'hover:bg-[#F8F9FC]'}`}
+                                title={`Review and send "${t.name}"`}
+                              >
+                                <span className="flex items-center gap-1.5 text-xs font-semibold text-[#030213]">
+                                  {t.name} <span className="font-normal text-[#A0A0B0]">· {t.tone}</span>
+                                  {suggested && (
+                                    <span className="ml-auto px-1.5 py-px rounded-full bg-white border border-[#BFDBFE] text-[8px] font-bold uppercase tracking-wider text-[#1565C0]">Suggested</span>
+                                  )}
+                                </span>
+                                <span className="block text-[10px] text-[#A0A0B0] truncate">{t.subject}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="px-3 py-2 border-t border-[#F0EFF6] text-[9px] text-[#A0A0B0]">
+                      You review and edit the email before it sends. Manage templates in Settings → Case Scoring.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className={`flex items-center gap-2 border rounded-xl px-3 py-2 transition-colors ${urgentArmed ? 'border-[#FECACA] ring-1 ring-[#FECACA]/40' : 'border-[#E0E0E6]'}`}>
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+                  placeholder={`Message ${caseData.dentist} via WhatsApp…`}
+                  className="flex-1 text-sm text-[#030213] bg-transparent outline-none placeholder-[#A0A0B0]"
+                />
+                <button onClick={send} disabled={!draft.trim()} className={`p-1.5 rounded transition-colors disabled:opacity-40 ${urgentArmed ? 'text-[#DC2626] hover:text-[#B91C1C]' : 'text-[#4D8EF7] hover:text-[#3578E5]'}`}><Send className="w-4 h-4" /></button>
+              </div>
+              {urgentArmed && (
+                <p className="flex items-center gap-1 mt-1.5 px-1 text-[10px] text-[#B91C1C]">
+                  <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                  Will be sent as urgent — the recipient gets reminders at 2, 4, 6 and 8 hours until they reply.
+                </p>
+              )}
+            </>
           )}
         </div>
       )}
@@ -1964,6 +2084,124 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
         onCancel={() => setConfirmUrgentOpen(false)}
         onConfirm={() => { setConfirmUrgentOpen(false); deliver(draft.trim(), true); }}
       />
+
+      {/* ── Compose from template — same model as the Settings preview:
+          template switcher up top, then a fully editable subject + body
+          (placeholders already resolved from this case). ── */}
+      {composeModal && (() => {
+        const currentTpl = allTemplates.find(t => t.id === composeModal.tplId);
+        return (
+          <ModalPortal>
+            <div className="fixed inset-0 z-[140] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setComposeModal(null)} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#F0EFF6] flex-shrink-0">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="w-8 h-8 rounded-lg bg-[#EEF4FF] flex items-center justify-center flex-shrink-0">
+                      <Mail className="w-4 h-4 text-[#4D8EF7]" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {/* Template switcher — identical pattern to Settings */}
+                      <div className="relative min-w-0">
+                        <button
+                          onClick={() => setComposeTplMenuOpen(o => !o)}
+                          aria-haspopup="listbox"
+                          aria-expanded={composeTplMenuOpen}
+                          title="Switch template"
+                          className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-white transition-colors text-left ${
+                            composeTplMenuOpen ? 'border-[#4D8EF7] ring-2 ring-[#4D8EF7]/15' : 'border-[#E0E0E6] hover:border-[#C8D8FC]'
+                          }`}
+                        >
+                          <span className="text-sm font-semibold text-[#030213] truncate">{currentTpl?.name ?? 'Template'}</span>
+                          <span className="text-[10px] text-[#A0A0B0] flex-shrink-0">{currentTpl?.tone}</span>
+                          <ChevronDown className={`w-3.5 h-3.5 text-[#717182] ml-auto flex-shrink-0 transition-transform ${composeTplMenuOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {composeTplMenuOpen && (
+                          <>
+                            <span className="fixed inset-0 z-20" onClick={() => setComposeTplMenuOpen(false)} />
+                            <div className="absolute top-full left-0 right-0 mt-1 z-30 rounded-xl border border-[#E0E0E6] bg-white shadow-lg" role="listbox">
+                              <div className="max-h-60 overflow-y-auto p-1.5">
+                                {templateGroups.map(g => (
+                                  <div key={g.label}>
+                                    <p className="px-2 pt-1 pb-0.5 text-[9px] font-bold uppercase tracking-wider text-[#A0A0B0] flex items-center gap-1">
+                                      {g.dot && <span className="w-1.5 h-1.5 rounded-full" style={{ background: g.dot }} />}
+                                      {g.label}
+                                    </p>
+                                    {g.items.map(t => {
+                                      const active = t.id === composeModal.tplId;
+                                      return (
+                                        <button
+                                          key={t.id}
+                                          role="option"
+                                          aria-selected={active}
+                                          onClick={() => switchComposeTemplate(t)}
+                                          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors ${active ? 'bg-[#EEF4FF]' : 'hover:bg-[#F8F9FC]'}`}
+                                        >
+                                          <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${active ? 'border-[#4D8EF7]' : 'border-[#D4CEE1]'}`}>
+                                            {active && <span className="w-1.5 h-1.5 rounded-full bg-[#4D8EF7]" />}
+                                          </span>
+                                          <span className="min-w-0">
+                                            <span className={`block text-xs font-semibold ${active ? 'text-[#1565C0]' : 'text-[#030213]'}`}>{t.name} <span className="font-normal text-[#A0A0B0]">· {t.tone}</span></span>
+                                            <span className="block text-[10px] text-[#A0A0B0] truncate">{t.subject}</span>
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-[#717182] mt-0.5">Email {caseData.dentist} · {caseData.id}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setComposeModal(null)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors flex-shrink-0">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-1">Subject</label>
+                    <input
+                      value={composeModal.subject}
+                      onChange={(e) => setComposeModal({ ...composeModal, subject: e.target.value })}
+                      className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/15"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-1">Body</label>
+                    <textarea
+                      value={composeModal.body}
+                      onChange={(e) => setComposeModal({ ...composeModal, body: e.target.value })}
+                      rows={12}
+                      className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/15 leading-relaxed resize-y"
+                    />
+                  </div>
+                  <p className="text-[10px] text-[#A0A0B0]">
+                    Placeholders were filled from this case — edit anything before sending. Switching template resets
+                    the subject and body.
+                  </p>
+                </div>
+                <div className="flex items-center justify-end gap-2 px-5 py-4 bg-[#F8F9FC] border-t border-[#F0EFF6] flex-shrink-0">
+                  <button onClick={() => setComposeModal(null)} className="px-3 py-2 rounded-lg text-sm font-medium text-[#5A5568] hover:bg-[#F0EFF6] transition-colors">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={sendComposed}
+                    disabled={!composeModal.body.trim()}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Send className="w-4 h-4" />
+                    Send email
+                  </button>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
+        );
+      })()}
     </div>
   );
 }
@@ -2805,7 +3043,15 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // Details card collapses by default to reclaim vertical space.
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Email thread lives in a case-level side drawer, opened from the header.
-  const [threadOpen, setThreadOpen] = useState(false);
+  // URL-addressable (?conversation=1) so the Conversation hub is deep-linkable
+  // and survives refresh / back-forward — e.g. /lab/cases/CASE-054?conversation=1.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const threadOpen = searchParams.get('conversation') === '1';
+  const setThreadOpen = (open: boolean) => {
+    const next = new URLSearchParams(searchParams);
+    if (open) next.set('conversation', '1'); else next.delete('conversation');
+    setSearchParams(next);
+  };
 
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();

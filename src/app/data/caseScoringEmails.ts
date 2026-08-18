@@ -270,8 +270,15 @@ export interface CategoryEscalation {
   timeframe: EscalationTimeframe;
 }
 
+// How case scoring emails go out: 'automatic' sends the selected template the
+// moment a case is scored Needs Review / Incomplete; 'manual' sends nothing by
+// itself — the lab reviews and sends the template from the case's
+// Conversation hub instead.
+export type SendMode = 'automatic' | 'manual';
+
 export interface CaseScoringEmailSettings {
   connection: EmailConnection;
+  sendMode: SendMode;
   automation: Record<ScoringEmailCategory, CategoryAutomation>;
   escalation: Record<ScoringEmailCategory, CategoryEscalation>;
   customTemplates: ScoringEmailTemplate[];
@@ -279,6 +286,7 @@ export interface CaseScoringEmailSettings {
 
 const DEFAULT_SETTINGS: CaseScoringEmailSettings = {
   connection: { status: 'disconnected' },
+  sendMode: 'automatic',
   automation: {
     'needs-review': { enabled: true, templateId: 'nr-default-1' },
     incomplete:     { enabled: true, templateId: 'inc-default-1' },
@@ -300,6 +308,7 @@ function load(): CaseScoringEmailSettings {
     // Merge over defaults so newly-added keys survive older saved payloads.
     return {
       connection: { ...DEFAULT_SETTINGS.connection, ...(parsed.connection ?? {}) },
+      sendMode: parsed.sendMode === 'manual' ? 'manual' : 'automatic',
       automation: {
         'needs-review': { ...DEFAULT_SETTINGS.automation['needs-review'], ...(parsed.automation?.['needs-review'] ?? {}) },
         incomplete:     { ...DEFAULT_SETTINGS.automation.incomplete,      ...(parsed.automation?.incomplete ?? {}) },
@@ -367,6 +376,10 @@ export function reconnectEmail() {
 }
 
 // ── Automation config ─────────────────────────────────────────────────────────
+export function setSendMode(mode: SendMode) {
+  commit({ ...settings, sendMode: mode });
+}
+
 export function setAutomationEnabled(category: ScoringEmailCategory, enabled: boolean) {
   commit({
     ...settings,

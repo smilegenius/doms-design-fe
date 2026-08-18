@@ -1131,7 +1131,7 @@ function UpgradeModal({ onUpgrade, onBack }: { onUpgrade: () => void; onBack: ()
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice, showConnectEmailNotice }: {
+export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice, showConnectEmailNotice, onCaseSelected }: {
   initialCaseId?: string;
   onCreateCase?: () => void;
   // Called when the user clicks a draft case (status === 'draft'). The host
@@ -1154,6 +1154,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // Case Details page shows the "Connect Email" notice for the Automated Case
   // Scoring Emails feature. Clinic/DSO portals omit it.
   showConnectEmailNotice?: boolean;
+  // Fired when the open case changes (id, or null on back-to-list) so the
+  // host shell can keep the URL in sync — /…/cases/<id> is deep-linkable.
+  onCaseSelected?: (caseId: string | null) => void;
 } = {}) {
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
@@ -1170,9 +1173,11 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     }
     return null;
   });
-  // Open the requested case when the prop changes after mount
+  // Open the requested case when the prop changes after mount. A cleared id
+  // (browser back to the list URL) closes the open detail, so back/forward
+  // navigate the case detail like real pages.
   React.useEffect(() => {
-    if (!initialCaseId) return;
+    if (!initialCaseId) { setSelectedCase(null); return; }
     const c = mockCases.find(c => c.id === initialCaseId);
     if (!c) return;
     // A deep-linked draft opens the prefilled creation flow, matching a click.
@@ -1451,6 +1456,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     // standalone showcase even before the view quota is reached.
     if (c.forceUpgrade) {
       setSelectedCase(c);
+      onCaseSelected?.(c.id);
       setUpgradeOpen(true);
       return;
     }
@@ -1458,11 +1464,13 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     // opening a further one surfaces the upgrade popup over the case.
     if (caseViewLimit != null && !viewedCaseIds.has(c.id) && viewedCaseIds.size >= caseViewLimit) {
       setSelectedCase(c);
+      onCaseSelected?.(c.id);
       setUpgradeOpen(true);
       return;
     }
     if (caseViewLimit != null) setViewedCaseIds(prev => new Set(prev).add(c.id));
     setSelectedCase(c);
+    onCaseSelected?.(c.id);
   }
 
   // Archive / unarchive a case. Updates the list AND the open detail snapshot
@@ -1557,7 +1565,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
       <>
         <CaseDetailPage
           caseData={selectedCase as any}
-          onBack={() => setSelectedCase(null)}
+          onBack={() => { setSelectedCase(null); onCaseSelected?.(null); }}
           onArchiveToggle={() => toggleArchive(selectedCase)}
           onRequestStatusChange={() => setStatusModalCase(selectedCase)}
           onSetStatus={(toStatus) => applyStatusChange(selectedCase, toStatus)}
@@ -1575,7 +1583,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
         {upgradeOpen && (
           <UpgradeModal
             onUpgrade={() => { setUpgradeOpen(false); toast.success('Redirecting to billing — upgrade flow (demo)'); }}
-            onBack={() => { setUpgradeOpen(false); setSelectedCase(null); }}
+            onBack={() => { setUpgradeOpen(false); setSelectedCase(null); onCaseSelected?.(null); }}
           />
         )}
       </>
@@ -1791,8 +1799,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                   {visibleCols.lab && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Lab</th>
                   )}
-                  {/* Settings / column picker — last column */}
-                  <th className="text-right px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  {/* Settings / column picker — last column. Sticky so the
+                      actions column never scrolls out of reach when many
+                      columns overflow horizontally. */}
+                  <th className="text-right px-4 py-3 sticky right-0 z-20 bg-[#F3F3F5] shadow-[-8px_0_12px_-10px_rgba(3,2,19,0.25)]" onClick={(e) => e.stopPropagation()}>
                     <div className="relative inline-block" ref={colMenuRef}>
                       <button
                         onClick={() => setColMenuOpen((v) => !v)}
@@ -1851,7 +1861,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                   return (
                     <React.Fragment key={c.id}>
                     {/* ── Parent row ── */}
-                    <tr onClick={() => openCase(c)} className="bg-white hover:bg-[#F8F9FC] transition-colors cursor-pointer relative [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]">
+                    <tr onClick={() => openCase(c)} className="group bg-white hover:bg-[#F8F9FC] transition-colors cursor-pointer relative [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]">
                       {/* Bulk-select checkbox — checking a multi-service case
                           checks every sub-case; partial sub-case selection shows
                           the indeterminate dash. Drafts/locked rows are exempt. */}
@@ -1962,7 +1972,15 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                           <span title={c.lab} className="block text-xs text-[#030213] truncate max-w-[140px]">{c.lab}</span>
                         </td>
                       )}
-                      <td className={`px-4 py-3 ${lockBlur}`} onClick={(e) => e.stopPropagation()}>
+                      {/* Row actions — sticky to the right edge, so they stay
+                          reachable (and hoverable) without horizontal scroll
+                          even when many columns are visible. The cell carries
+                          its own bg (matching row hover) so scrolled columns
+                          slide underneath. */}
+                      <td
+                        className={`px-4 py-3 sticky right-0 z-10 bg-white group-hover:bg-[#F8F9FC] transition-colors shadow-[-8px_0_12px_-10px_rgba(3,2,19,0.25)] ${lockBlur}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <div className="flex items-center justify-end gap-1">
                           {/* Email-thread indicator — email/iTero cases carry a reply
                               from the dentist; a red dot flags the unread thread. */}

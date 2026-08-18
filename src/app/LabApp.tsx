@@ -143,6 +143,9 @@ export default function LabApp() {
           onOpenDraft={(c) => navigate(`/lab/cases/quick-new/${encodeURIComponent(c.id)}`)}
           caseViewLimit={2}
           showConnectEmailNotice
+          onCaseSelected={(caseId) =>
+            navigate(caseId ? `/lab/cases/${encodeURIComponent(caseId)}` : '/lab/cases')
+          }
         />
       )}
       {activePage === 'invoices' && (

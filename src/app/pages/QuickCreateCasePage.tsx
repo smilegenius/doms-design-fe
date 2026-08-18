@@ -503,33 +503,7 @@ function PrescriptionUploadPane({ onApply, aiDescribe }: {
                 as the fastest way to start. */}
             {aiDescribe && (
               <>
-                <div className="bg-white border border-[#FECACA] rounded-xl p-3">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <AiSparkle label title="" />
-                    <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider">Describe the case</p>
-                  </div>
-                  <p className="text-[10px] text-[#5A5568] leading-snug mb-2">
-                    Write it in plain words — e.g. “Emax crown on 26, shade A2, patient Sarah Whitfield, deliver by
-                    12 Aug” — and Smile Genius pre-fills the form on the right. You review every field before creating.
-                  </p>
-                  <textarea
-                    value={aiDescribe.value}
-                    onChange={(e) => aiDescribe.onChange(e.target.value)}
-                    rows={3}
-                    placeholder="Describe the case in plain language…"
-                    className="w-full px-2.5 py-2 text-[11px] text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/15 resize-y leading-relaxed"
-                  />
-                  <button
-                    type="button"
-                    onClick={aiDescribe.onFill}
-                    disabled={!aiDescribe.value.trim() || aiDescribe.filling}
-                    className="mt-1.5 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {aiDescribe.filling
-                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading your description…</>
-                      : <><Zap className="w-3.5 h-3.5" /> Fill the form with AI</>}
-                  </button>
-                </div>
+                <AiDescribeCard {...aiDescribe} />
                 <div className="flex items-center gap-2 px-1">
                   <span className="flex-1 h-px bg-[#E0E0E6]" />
                   <span className="text-[9px] font-bold uppercase tracking-wider text-[#A0A0B0]">or</span>
@@ -920,7 +894,49 @@ function IteroLogo({ className = '' }: { className?: string }) {
 // zip" helper, and the Upload Zip File action. Once the zip is "uploaded"
 // (mocked — fills the scan slots) it flips to a success state with a jump to
 // the 3D Model tab.
-function IteroUploadPane({ uploadedCount, onUploadZip, onView3D, orderNumber = 'Order210398' }: {
+// "Describe the case" AI quick-fill — one card shared by every left-pane
+// variant (Add Prescription, iTero) so the plain-language fill is always a
+// visible way to start, whatever the case source.
+export interface AiDescribeProps {
+  value: string;
+  onChange: (v: string) => void;
+  onFill: () => void;
+  filling: boolean;
+}
+
+function AiDescribeCard({ value, onChange, onFill, filling }: AiDescribeProps) {
+  return (
+    <div className="bg-white border border-[#FECACA] rounded-xl p-3">
+      <div className="flex items-center gap-1.5 mb-1">
+        <AiSparkle label title="" />
+        <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider">Describe the case</p>
+      </div>
+      <p className="text-[10px] text-[#5A5568] leading-snug mb-2">
+        Write it in plain words — e.g. “Emax crown on 26, shade A2, patient Sarah Whitfield, deliver by
+        12 Aug” — and Smile Genius pre-fills the form on the right. You review every field before creating.
+      </p>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={3}
+        placeholder="Describe the case in plain language…"
+        className="w-full px-2.5 py-2 text-[11px] text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/15 resize-y leading-relaxed"
+      />
+      <button
+        type="button"
+        onClick={onFill}
+        disabled={!value.trim() || filling}
+        className="mt-1.5 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {filling
+          ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading your description…</>
+          : <><Zap className="w-3.5 h-3.5" /> Fill the form with AI</>}
+      </button>
+    </div>
+  );
+}
+
+function IteroUploadPane({ uploadedCount, onUploadZip, onView3D, orderNumber = 'Order210398', aiDescribe }: {
   /** Kept for callers but no longer surfaced — we don't show the zip filename. */
   attachmentName?: string;
   uploadedCount: number;
@@ -928,6 +944,8 @@ function IteroUploadPane({ uploadedCount, onUploadZip, onView3D, orderNumber = '
   onView3D: () => void;
   /** iTero order reference — the user searches for this when they open iTero. */
   orderNumber?: string;
+  /** The plain-language AI quick-fill, available here too. */
+  aiDescribe?: AiDescribeProps;
 }) {
   const { toast } = useToast();
   const uploaded = uploadedCount > 0;
@@ -1050,6 +1068,18 @@ function IteroUploadPane({ uploadedCount, onUploadZip, onView3D, orderNumber = '
             <div className="text-[10px] text-[#717182] text-center leading-relaxed px-2">
               Not sure how? Follow the <span className="font-semibold text-[#1565C0]">steps above</span> to download your scan from iTero.
             </div>
+          </>
+        )}
+
+        {/* Plain-language AI quick-fill — available for iTero cases too. */}
+        {aiDescribe && (
+          <>
+            <div className="flex items-center gap-2 px-1">
+              <span className="flex-1 h-px bg-[#E0E0E6]" />
+              <span className="text-[9px] font-bold uppercase tracking-wider text-[#A0A0B0]">or</span>
+              <span className="flex-1 h-px bg-[#E0E0E6]" />
+            </div>
+            <AiDescribeCard {...aiDescribe} />
           </>
         )}
       </div>
@@ -1549,9 +1579,14 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       const category = categoryForTier(liveScore.tier);
       if (category && scoringEmails.automation[category].enabled) {
         if (scoringEmails.connection.status === 'connected') {
-          const tpl = findTemplate(category, scoringEmails.automation[category].templateId, scoringEmails.customTemplates);
-          const dentistName = dentists.find(d => d.id === dentistId)?.name ?? 'the dentist';
-          toast.info(`Case scored ${CATEGORY_META[category].label} — "${tpl.name}" sent automatically to ${dentistName} from ${scoringEmails.connection.email}.`);
+          if (scoringEmails.sendMode === 'automatic') {
+            const tpl = findTemplate(category, scoringEmails.automation[category].templateId, scoringEmails.customTemplates);
+            const dentistName = dentists.find(d => d.id === dentistId)?.name ?? 'the dentist';
+            toast.info(`Case scored ${CATEGORY_META[category].label} — "${tpl.name}" sent automatically to ${dentistName} from ${scoringEmails.connection.email}.`);
+          } else {
+            // Manual mode — nothing sends by itself; nudge toward the case.
+            toast.info(`Case scored ${CATEGORY_META[category].label} — manual sending is on, so email the dentist from the case's Conversation hub.`);
+          }
         }
       }
     }
@@ -1860,6 +1895,12 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           <IteroUploadPane
             attachmentName={prefillDraft?.emailPrescription?.attachmentName}
             uploadedCount={scanFileCount}
+            aiDescribe={{
+              value: caseInstructions,
+              onChange: setCaseInstructions,
+              onFill: () => runInstructionExtraction('button'),
+              filling: readingInstructions,
+            }}
             onView3D={() => setPreviewTab('model')}
             onUploadZip={() => {
               // Mock the zip extraction — fill the scan slots so the 3D Model
@@ -2626,29 +2667,18 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </button>
               </div>
             )}
-            {/* Composer — the "Read instructions" trigger lives INSIDE the
-                box (bottom-right), like a send action; blur also runs the
-                extraction when the text changed since the last run. */}
+            {/* Plain instructions field — the AI plain-language fill lives in
+                the LEFT pane ("Describe the case"); this box is simply the
+                written instructions that go to the lab. Both stay in sync
+                (same field), so text typed in either shows in both. */}
             <div className="relative mb-2">
               <textarea
                 value={caseInstructions}
                 onChange={(e) => setCaseInstructions(e.target.value)}
-                onBlur={() => runInstructionExtraction('blur')}
                 rows={3}
-                placeholder="Describe the case in plain language — e.g. “Emax crown on 26, shade A2, patient Sarah Whitfield, deliver by 12 Aug” — and we'll fill the form for review."
-                className="w-full px-3 pt-2 pb-9 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] resize-none"
+                placeholder="Any specific instructions for the lab… (optional)"
+                className="w-full px-3 py-2 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] resize-none"
               />
-              <button
-                type="button"
-                onClick={() => runInstructionExtraction('button')}
-                disabled={!caseInstructions.trim() || readingInstructions}
-                title="Read the instructions and pre-fill the case fields — you review before creating"
-                className="absolute bottom-2.5 right-2 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] hover:bg-[#FEE2E2] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {readingInstructions
-                  ? <><Loader2 className="w-3 h-3 animate-spin" /> Reading…</>
-                  : <><AiSparkle title="" /> Read instructions</>}
-              </button>
             </div>
             {/* Upload zone — clicking adds a fake attachment for the demo.
                 In production this would open the OS file picker. */}
@@ -2684,7 +2714,12 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           </div>
           {/* ── RIGHT COLUMN — aggregated teeth map across all services ── */}
           <aside className="lg:order-2 lg:sticky lg:top-4 lg:self-start">
-            <AggregatedTeethChart selections={selections} pendingTeeth={pendingTeeth} onToggleTooth={toggleChartTooth} />
+            <AggregatedTeethChart
+              selections={selections}
+              pendingTeeth={pendingTeeth}
+              onToggleTooth={toggleChartTooth}
+              onAddService={() => setPickerOpen(true)}
+            />
           </aside>
         </div>
       </div>
@@ -4940,12 +4975,16 @@ const FDI_TEETH: Record<string, { cx: number; cy: number; rx: number; ry: number
   '38': { cx: 277, cy: 333, rx: 21, ry: 18 },
 };
 
-function AggregatedTeethChart({ selections, pendingTeeth = [], onToggleTooth }: {
+function AggregatedTeethChart({ selections, pendingTeeth = [], onToggleTooth, onAddService }: {
   selections: ServiceSelection[];
   // Teeth tapped before any service exists — rendered dashed-blue, applied to
   // the first added service by the parent.
   pendingTeeth?: string[];
   onToggleTooth?: (code: string) => void;
+  /** Opens the service picker straight from the chart — shown as a centred
+      button once teeth are selected (and on hover otherwise), so the
+      teeth-first flow finishes without leaving the chart. */
+  onAddService?: () => void;
 }) {
   // Map FDI code → list of {service color + label} entries that include it.
   const teethMap = useMemo(() => {
@@ -5081,6 +5120,21 @@ function AggregatedTeethChart({ selections, pendingTeeth = [], onToggleTooth }: 
               );
             })}
           </svg>
+
+          {/* Centred "Add service" — appears only once the clinician has
+              clicked teeth on the chart, as the flow's next step. System
+              primary button style; sits in the gap between the arches. */}
+          {onAddService && pendingTeeth.length > 0 && (
+            <button
+              type="button"
+              onClick={onAddService}
+              title={`Add a service for the ${pendingTeeth.length} selected ${pendingTeeth.length === 1 ? 'tooth' : 'teeth'}`}
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity shadow-sm"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add service
+            </button>
+          )}
         </div>
       </div>
 

@@ -9,7 +9,7 @@ import { useToast } from '../context/ToastContext';
 import { RecipientSearchSelect, CLINIC_MEMBERS } from './EscalationMatrixPage';
 import {
   useCaseScoringEmails, connectEmail, disconnectEmail, reconnectEmail,
-  setAutomationEnabled, selectTemplate, addCustomTemplate, updateCustomTemplate, removeCustomTemplate,
+  setSendMode, setAutomationEnabled, selectTemplate, addCustomTemplate, updateCustomTemplate, removeCustomTemplate,
   setEscalation, ESCALATION_TIMEFRAMES,
   DEFAULT_TEMPLATES, PROVIDER_META, CATEGORY_META, SCORING_EMAIL_PLACEHOLDERS, MOCK_LAB_EMAIL,
 } from '../data/caseScoringEmails';
@@ -117,7 +117,7 @@ type EditorState = {
 
 export default function CaseScoringEmailsSettings() {
   const { toast } = useToast();
-  const { connection, automation, escalation, customTemplates } = useCaseScoringEmails();
+  const { connection, sendMode, automation, escalation, customTemplates } = useCaseScoringEmails();
   const connected = connection.status === 'connected';
   // Case Scoring escalation preview modal (email + in-app), per outcome.
   const [escPreview, setEscPreview] = useState<ScoringEmailCategory | null>(null);
@@ -334,12 +334,51 @@ export default function CaseScoringEmailsSettings() {
 
       {/* ── 2 · Email Automation — one toggle + one template per outcome ── */}
       <Card title="Email Automation">
+        {/* Sending mode — Automatic sends on scoring; Manual keeps everything
+            configured but leaves the send to the lab, from the case's
+            Conversation hub (where every template is one click away). */}
+        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap px-4 py-3 rounded-xl border border-[#E0E0E6] bg-[#FAFBFC]">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-[#030213]">Sending mode</p>
+            <p className="text-[11px] text-[#717182] leading-relaxed mt-0.5 max-w-md">
+              {sendMode === 'automatic'
+                ? 'Automatic — the selected template is emailed to the dentist the moment a case is scored Needs Review or Incomplete.'
+                : 'Manual — nothing sends by itself. You review each scored case and send the template yourself from its Conversation hub.'}
+            </p>
+          </div>
+          <div className="inline-flex p-0.5 bg-[#F3F3F5] rounded-lg flex-shrink-0">
+            {(['automatic', 'manual'] as const).map(mode => (
+              <button
+                key={mode}
+                aria-pressed={sendMode === mode}
+                onClick={() => {
+                  if (sendMode === mode) return;
+                  setSendMode(mode);
+                  setTemplateMenuFor(null);
+                  toast.success(mode === 'automatic'
+                    ? 'Automatic sending on — scored cases email the dentist immediately'
+                    : 'Manual sending on — send case scoring emails from each case\'s Conversation hub');
+                }}
+                className={`px-3 py-1.5 rounded-md text-xs transition-colors ${
+                  sendMode === mode ? 'bg-white text-[#1565C0] font-semibold shadow-sm' : 'text-[#717182] font-medium hover:text-[#030213]'
+                }`}
+              >
+                {mode === 'automatic' ? 'Automatic' : 'Manual'}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <p className="text-xs text-[#717182] leading-relaxed mb-4">
-          Each outcome has its own on/off toggle and exactly one selected email template.
+          {sendMode === 'manual'
+            ? 'Disabled while sending is manual — nothing sends automatically, and every template is offered when you email from a case\'s Conversation hub.'
+            : 'Each outcome has its own on/off toggle and exactly one selected email template.'}
         </p>
 
-        {/* Outcomes sit side by side on large screens to keep the page short. */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        {/* Outcomes sit side by side on large screens to keep the page short.
+            In MANUAL mode the whole block is disabled — the automation config
+            only applies when sending is automatic. */}
+        <div className={`grid grid-cols-1 lg:grid-cols-2 gap-4 items-start ${sendMode === 'manual' ? 'opacity-50 pointer-events-none select-none' : ''}`} aria-disabled={sendMode === 'manual'}>
           {CATEGORIES.map(cat => {
             const meta = CATEGORY_META[cat];
             const conf = automation[cat];
