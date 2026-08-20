@@ -1,5 +1,14 @@
-import { useState } from 'react';
-import { Search, Settings as SettingsIcon, Clock, Bell, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Search, Settings as SettingsIcon, Clock, Bell, AlertTriangle, ShieldAlert, Plug, PlayCircle, RefreshCw } from 'lucide-react';
+import { ScannerReconnectFlow, useScannerReconnectFlow } from '../components/ScannerReconnect';
+import {
+  HELP_VIDEO_LABEL,
+  RECONNECT_LABEL,
+  allReminders,
+  formatTimestamp,
+  resolvePlaceholders,
+  useScannerConnections,
+} from '../data/scannerConnections';
 
 export interface NotificationItem {
   id: string;
@@ -9,9 +18,14 @@ export interface NotificationItem {
   read: boolean;
   // Urgent chat notifications (immediate + 2/4/6/8h reminders) render with a
   // red alert chip; escalations (reminders exhausted, routed to the contact
-  // from the Escalation Matrix) get an orange shield; everything else keeps
-  // the neutral bell.
-  type?: 'urgent-message' | 'urgent-reminder' | 'escalation';
+  // from the Escalation Matrix) get an orange shield; scanner token-expiry
+  // reminders get the teal plug (red once the token has actually lapsed);
+  // everything else keeps the neutral bell.
+  type?: 'urgent-message' | 'urgent-reminder' | 'escalation' | 'scanner-expiry' | 'scanner-expired';
+  /** Scanner this notification is about — drives its Reconnect Scanner action. */
+  scannerId?: string;
+  /** Action buttons rendered under the body. Scanner reminders carry both. */
+  actions?: ('reconnect' | 'video')[];
 }
 
 // Icon chip per notification type — shared by this page and the bell popover.
@@ -22,7 +36,67 @@ export function notificationIcon(type?: NotificationItem['type']) {
   if (type === 'escalation') {
     return { Icon: ShieldAlert, bg: '#FFF7ED', color: '#E65100' };
   }
+  if (type === 'scanner-expired') {
+    return { Icon: AlertTriangle, bg: '#FEF2F2', color: '#B91C1C' };
+  }
+  if (type === 'scanner-expiry') {
+    return { Icon: Plug, bg: '#ECFEFF', color: '#0F766E' };
+  }
   return { Icon: Bell, bg: '#F3F3F5', color: '#717182' };
+}
+
+// ─── Scanner token-expiry reminders ───────────────────────────────────────────
+// Derived live from the lab's scanner connections rather than stored, so the
+// feed reflects exactly what the reminder workflow has sent for the CURRENT
+// token cycle — and empties the instant a scanner is reconnected (AC4).
+// Lab portal only; the other portals pass enabled = false.
+export function useScannerNotificationItems(enabled: boolean): NotificationItem[] {
+  const connections = useScannerConnections();
+  return useMemo(() => {
+    if (!enabled) return [];
+    return allReminders(connections).map(r => ({
+      id: r.id,
+      title: resolvePlaceholders(r.copy.emailSubject, { scannerName: r.scannerName, userName: '' }),
+      body: resolvePlaceholders(r.copy.inApp, { scannerName: r.scannerName, userName: '' }),
+      timestamp: formatTimestamp(r.firedAt),
+      read: false,
+      type: r.stage === 'expired' ? ('scanner-expired' as const) : ('scanner-expiry' as const),
+      scannerId: r.scannerId,
+      actions: ['reconnect', 'video'] as ('reconnect' | 'video')[],
+    }));
+  }, [connections, enabled]);
+}
+
+/** The Reconnect Scanner / Watch Video CTAs every expiry notification carries. */
+export function NotificationActions({ item, flow, size = 'md' }: {
+  item: NotificationItem;
+  flow: ScannerReconnectFlow;
+  size?: 'sm' | 'md';
+}) {
+  const connections = useScannerConnections();
+  if (!item.actions?.length) return null;
+  const connection = connections.find(c => c.id === item.scannerId);
+  const pad = size === 'sm' ? 'px-2 py-1 text-[10px]' : 'px-3 py-1.5 text-[11px]';
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      {item.actions.includes('reconnect') && connection && (
+        <button
+          onClick={() => flow.openReconnect(connection)}
+          className={`inline-flex items-center gap-1.5 rounded-lg font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity ${pad}`}
+        >
+          <RefreshCw className="w-3 h-3" /> {RECONNECT_LABEL}
+        </button>
+      )}
+      {item.actions.includes('video') && (
+        <button
+          onClick={flow.openVideo}
+          className={`inline-flex items-center gap-1.5 rounded-lg font-semibold text-[#030213] bg-white border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors ${pad}`}
+        >
+          <PlayCircle className="w-3 h-3" /> {HELP_VIDEO_LABEL}
+        </button>
+      )}
+    </div>
+  );
 }
 
 export const MOCK_NOTIFICATIONS: NotificationItem[] = [
@@ -89,13 +163,21 @@ export const MOCK_NOTIFICATIONS: NotificationItem[] = [
 
 interface NotificationsPageProps {
   onOpenSettings: () => void;
+  /** Lab portal also receives the scanner token-expiry reminders. */
+  portal?: 'supplier' | 'clinic' | 'lab';
 }
 
-export default function NotificationsPage({ onOpenSettings }: NotificationsPageProps) {
+export default function NotificationsPage({ onOpenSettings, portal = 'supplier' }: NotificationsPageProps) {
   const [tab, setTab] = useState<'all' | 'unread' | 'read'>('all');
   const [search, setSearch] = useState('');
+  const flow = useScannerReconnectFlow();
+  const scannerItems = useScannerNotificationItems(portal === 'lab');
 
-  const filtered = MOCK_NOTIFICATIONS.filter(n => {
+  // Scanner reminders are the newest thing in the feed while a token is
+  // lapsing, so they sit on top of the seeded mock notifications.
+  const allItems = useMemo(() => [...scannerItems, ...MOCK_NOTIFICATIONS], [scannerItems]);
+
+  const filtered = allItems.filter(n => {
     if (tab === 'unread' && n.read) return false;
     if (tab === 'read' && !n.read) return false;
     if (search.trim()) {
@@ -105,9 +187,9 @@ export default function NotificationsPage({ onOpenSettings }: NotificationsPageP
     return true;
   });
 
-  const allCount = MOCK_NOTIFICATIONS.length;
-  const unreadCount = MOCK_NOTIFICATIONS.filter(n => !n.read).length;
-  const readCount = MOCK_NOTIFICATIONS.filter(n => n.read).length;
+  const allCount = allItems.length;
+  const unreadCount = allItems.filter(n => !n.read).length;
+  const readCount = allItems.filter(n => n.read).length;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -193,6 +275,7 @@ export default function NotificationsPage({ onOpenSettings }: NotificationsPageP
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-[#030213] mb-1">{n.title}</p>
                   <p className="text-xs text-[#717182] leading-relaxed">{n.body}</p>
+                  <NotificationActions item={n} flow={flow} />
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-[#A0A0B0] flex-shrink-0 whitespace-nowrap">
                   <Clock className="w-3.5 h-3.5" />
@@ -203,6 +286,8 @@ export default function NotificationsPage({ onOpenSettings }: NotificationsPageP
           })
         )}
       </div>
+
+      {flow.modals}
     </div>
   );
 }

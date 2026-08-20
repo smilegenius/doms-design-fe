@@ -6,6 +6,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import { mockCases } from './CasesPage';
+import ScannerExpiryNotice from '../components/ScannerExpiryNotice';
 
 // ─── Lab Portal — Overview ───────────────────────────────────────────────────
 // The manufacturing lab's home. Cases flow IN from the lab's clients — both
@@ -87,6 +88,10 @@ export default function LabOverviewPage({ onOpenCases, onOpenConfiguration, onOp
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-5">
+      {/* Scanner token expiry — leads the lab's home while a token is lapsing,
+          since an expired token silently stops incoming scanner cases. */}
+      <ScannerExpiryNotice />
+
       {/* Hero */}
       <div className="relative overflow-hidden rounded-2xl bg-white border border-[#E0E0E6] p-6 sm:p-7">
         <div

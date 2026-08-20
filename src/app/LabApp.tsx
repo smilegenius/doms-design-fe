@@ -143,6 +143,7 @@ export default function LabApp() {
           onOpenDraft={(c) => navigate(`/lab/cases/quick-new/${encodeURIComponent(c.id)}`)}
           caseViewLimit={2}
           showConnectEmailNotice
+          showScannerExpiryNotice
           onCaseSelected={(caseId) =>
             navigate(caseId ? `/lab/cases/${encodeURIComponent(caseId)}` : '/lab/cases')
           }
@@ -163,7 +164,7 @@ export default function LabApp() {
       )}
       {activePage === 'settings' && <SettingsPage portal="lab" />}
       {activePage === 'notifications' && (
-        <NotificationsPage onOpenSettings={() => navigate('/lab/settings?tab=notifications')} />
+        <NotificationsPage portal="lab" onOpenSettings={() => navigate('/lab/settings?tab=notifications')} />
       )}
     </Layout>
   );

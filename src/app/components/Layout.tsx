@@ -3,11 +3,22 @@ import { ChevronRight, ChevronLeft as ChevronLeftIcon, PanelLeftClose, PanelLeft
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import PageLoader from './PageLoader';
-import { MOCK_NOTIFICATIONS, notificationIcon } from '../pages/NotificationsPage';
+import {
+  MOCK_NOTIFICATIONS, NotificationActions, notificationIcon, useScannerNotificationItems,
+} from '../pages/NotificationsPage';
+import { useScannerReconnectFlow } from './ScannerReconnect';
 
-function NotificationsPopover({ onClose: _onClose, onViewAll }: { onClose: () => void; onViewAll: () => void }) {
+function NotificationsPopover({ onClose: _onClose, onViewAll, portal }: {
+  onClose: () => void;
+  onViewAll: () => void;
+  portal: 'supplier' | 'clinic' | 'lab';
+}) {
   const [tab, setTab] = useState<'all' | 'unread'>('all');
-  const items = MOCK_NOTIFICATIONS.filter(n => tab === 'all' || !n.read).slice(0, 4);
+  const flow = useScannerReconnectFlow();
+  // Lab only: scanner token-expiry reminders lead the popover while a token
+  // is lapsing, each with its Reconnect Scanner / Watch Video actions.
+  const scannerItems = useScannerNotificationItems(portal === 'lab');
+  const items = [...scannerItems, ...MOCK_NOTIFICATIONS].filter(n => tab === 'all' || !n.read).slice(0, 4);
   return (
     <div className="absolute right-0 top-full mt-2 w-[380px] bg-white border border-[#E0E0E6] rounded-xl shadow-lg overflow-hidden z-50">
       <div className="flex items-center justify-between px-5 py-4 border-b border-[#F0EFF6]">
@@ -49,6 +60,7 @@ function NotificationsPopover({ onClose: _onClose, onViewAll }: { onClose: () =>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-[#030213] mb-0.5">{n.title}</p>
                 <p className="text-xs text-[#717182] leading-relaxed line-clamp-3">{n.body}</p>
+                <NotificationActions item={n} flow={flow} size="sm" />
                 <p className="text-[10px] text-[#A0A0B0] mt-1.5">{n.timestamp}</p>
               </div>
             </div>
@@ -62,6 +74,7 @@ function NotificationsPopover({ onClose: _onClose, onViewAll }: { onClose: () =>
       >
         View all notification
       </button>
+      {flow.modals}
     </div>
   );
 }
@@ -341,6 +354,7 @@ export default function Layout({ children, activePage = 'overview', onNavigate, 
             </button>
             {notifOpen && (
               <NotificationsPopover
+                portal={portal}
                 onClose={() => setNotifOpen(false)}
                 onViewAll={() => { setNotifOpen(false); onNavigate?.('notifications'); }}
               />

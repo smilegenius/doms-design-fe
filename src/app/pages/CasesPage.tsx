@@ -35,6 +35,7 @@ import SearchInput from '../components/SearchInput';
 import SortDropdown from '../components/SortDropdown';
 import Pagination from '../components/Pagination';
 import FilterDrawer from '../components/FilterDrawer';
+import ScannerExpiryNotice from '../components/ScannerExpiryNotice';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 
@@ -1131,7 +1132,7 @@ function UpgradeModal({ onUpgrade, onBack }: { onUpgrade: () => void; onBack: ()
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice, showConnectEmailNotice, onCaseSelected }: {
+export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice, showConnectEmailNotice, showScannerExpiryNotice, onCaseSelected }: {
   initialCaseId?: string;
   onCreateCase?: () => void;
   // Called when the user clicks a draft case (status === 'draft'). The host
@@ -1154,6 +1155,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // Case Details page shows the "Connect Email" notice for the Automated Case
   // Scoring Emails feature. Clinic/DSO portals omit it.
   showConnectEmailNotice?: boolean;
+  // Lab portal only — show the scanner token-expiry reminder above the case
+  // list while a scanner token is expiring or has lapsed.
+  showScannerExpiryNotice?: boolean;
   // Fired when the open case changes (id, or null on back-to-list) so the
   // host shell can keep the URL in sync — /…/cases/<id> is deep-linkable.
   onCaseSelected?: (caseId: string | null) => void;
@@ -1599,6 +1603,11 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
+
+      {/* Scanner token expiry (lab only) — a lapsed token silently stops case
+          imports, so the reminder rides above the case list until the lab
+          reconnects. Informational; it never blocks the list. */}
+      {showScannerExpiryNotice && <ScannerExpiryNotice className="mb-5" />}
 
       {/* Header — count badge inline with title, no separate card */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">

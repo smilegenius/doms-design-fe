@@ -23,12 +23,14 @@ import {
   ShieldAlert,
   Sliders,
   FileText,
+  Plug,
 } from 'lucide-react';
 import InviteUsersModal, { InviteUserRow } from '../components/InviteUsersModal';
 import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
 import NotificationPreferences from './NotificationPreferencesPage';
 import EscalationMatrix from './EscalationMatrixPage';
 import LabScoringSettingsPage from './LabScoringSettingsPage';
+import ScannerSettingsPage from './ScannerSettingsPage';
 import Toggle from '../components/Toggle';
 import { useCustomServices, removeCustomService } from '../data/customServices';
 import { useToast } from '../context/ToastContext';
@@ -38,7 +40,7 @@ import FilterDrawer from '../components/FilterDrawer';
 import Pagination from '../components/Pagination';
 import Button from '../components/Button';
 
-type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring';
+type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners';
 
 const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'personal',      label: 'Personal Info',   description: 'Your account profile',    icon: User },
@@ -55,6 +57,7 @@ const LAB_TABS: { id: TabId; label: string; description: string; icon: any }[] =
   ...TABS,
   { id: 'prescription-builder', label: 'Prescription Builder', description: 'Case form fields & services', icon: FileText },
   { id: 'case-scoring',         label: 'Case Scoring',         description: 'Weights, bands & auto-emails', icon: Sliders },
+  { id: 'scanners',             label: 'Scanner Connections',  description: 'Tokens & expiry reminders',    icon: Plug },
 ];
 
 // Mock configured-tabs set — wire to real persistence later. Case Scoring
@@ -854,6 +857,12 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
           }}
         />
       )}
+
+      {/* ─── Scanner Connections (lab only) ───────────────────────────────── */}
+      {/* Scanner tokens + the always-on expiry reminder workflow. Deep-linked
+          from every expiry notification and from the lab-wide banner:
+            ?tab=scanners */}
+      {activeTab === 'scanners' && portal === 'lab' && <ScannerSettingsPage />}
 
         </section>
       </div>
