@@ -3603,6 +3603,42 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         </div>
       </div>
 
+      {/* ── Potential rescan — the same recommendation the creation flow shows,
+          for a case that reached the list without anyone deciding. Nothing is
+          classified automatically: the user picks. It leads the notices because
+          it is the only one asking for a DECISION — the others are
+          informational — and that decision shapes how the case is read. ── */}
+      {rescanMatches.length > 0 && !rescanDismissed && (
+        <div className="mx-6 mt-1 rounded-xl border border-[#DDD6FE] bg-[#F7F4FF] px-4 py-3 flex items-start gap-2.5">
+          <span className="w-6 h-6 rounded-lg bg-white border border-[#DDD6FE] text-[#7C3AED] flex items-center justify-center flex-shrink-0 mt-0.5">
+            <Copy className="w-3.5 h-3.5" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-[#7C3AED]">Potential Related Case Found</p>
+            <p className="text-[11px] text-[#6D5BA6] leading-relaxed mt-0.5">
+              We found {rescanMatches.length === 1 ? 'an existing case' : `${rescanMatches.length} existing cases`} that
+              closely {rescanMatches.length === 1 ? 'matches' : 'match'} this submission — best match{' '}
+              <span className="font-semibold">{rescanMatches[0].case.id}</span> at {rescanMatches[0].score}%. Please
+              review the suggested case.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
+            <button
+              onClick={() => setRescanDismissed(true)}
+              className="px-3 py-1.5 rounded-lg text-[11px] font-semibold text-[#030213] bg-white border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors"
+            >
+              Continue as New Case
+            </button>
+            <button
+              onClick={() => setRescanDecisionOpen(true)}
+              className="px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
+            >
+              Review match
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Offline-lab notice — sits ABOVE the scroll area (like the back nav
           and identity card), so it stays pinned while the case content
           scrolls underneath. ── */}
@@ -3770,40 +3806,6 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           </div>
         )}
       </div>
-
-      {/* ── Potential rescan — the same recommendation the creation flow shows,
-            for a case that reached the list without anyone deciding. Nothing
-            is classified automatically: the user picks. ── */}
-      {rescanMatches.length > 0 && !rescanDismissed && (
-        <div className="mx-6 mt-3 rounded-xl border border-[#DDD6FE] bg-[#F7F4FF] px-4 py-3 flex items-start gap-2.5">
-          <span className="w-6 h-6 rounded-lg bg-white border border-[#DDD6FE] text-[#7C3AED] flex items-center justify-center flex-shrink-0 mt-0.5">
-            <Copy className="w-3.5 h-3.5" />
-          </span>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-[#7C3AED]">Potential Related Case Found</p>
-            <p className="text-[11px] text-[#6D5BA6] leading-relaxed mt-0.5">
-              We found {rescanMatches.length === 1 ? 'an existing case' : `${rescanMatches.length} existing cases`} that
-              closely {rescanMatches.length === 1 ? 'matches' : 'match'} this submission — best match{' '}
-              <span className="font-semibold">{rescanMatches[0].case.id}</span> at {rescanMatches[0].score}%. Please
-              review the suggested case.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
-            <button
-              onClick={() => setRescanDismissed(true)}
-              className="px-3 py-1.5 rounded-lg text-[11px] font-semibold text-[#030213] bg-white border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors"
-            >
-              Continue as New Case
-            </button>
-            <button
-              onClick={() => setRescanDecisionOpen(true)}
-              className="px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
-            >
-              Review match
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ── Related Cases — the relationship both sides of a rescan pair show. ── */}
       {relationship !== 'none' && (
