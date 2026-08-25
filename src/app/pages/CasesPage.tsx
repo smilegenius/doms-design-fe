@@ -27,6 +27,8 @@ import {
   ArchiveRestore,
   Lock,
   Sparkles,
+  Copy,
+  GitBranch,
 } from 'lucide-react';
 import Button from '../components/Button';
 import ModalPortal from '../components/ModalPortal';
@@ -36,6 +38,10 @@ import SortDropdown from '../components/SortDropdown';
 import Pagination from '../components/Pagination';
 import FilterDrawer from '../components/FilterDrawer';
 import ScannerExpiryNotice from '../components/ScannerExpiryNotice';
+import { getCreatedCases, useCreatedCases } from '../data/createdCases';
+import {
+  RescanLink, originalIdOf, relatedIdsOf, relationshipOf, rescanIdsOf, useRescanLinks,
+} from '../data/rescanDetection';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 
@@ -108,6 +114,11 @@ export interface Case {
   // upgrade paywall, regardless of how many cases have been viewed. Used to
   // showcase the upgrade popup as the first received case in the lab portal.
   forceUpgrade?: boolean;
+  // Scanner-supplied identifiers, when the integration provides them. Used as
+  // SUPPORTING signals by rescan detection (data/rescanDetection.ts) — most
+  // cases have neither, which is why they never affect the confidence score.
+  scannerPatientId?: string;
+  scannerCaseRef?: string;
 }
 
 type ViewMode = 'table' | 'grid';
@@ -204,7 +215,9 @@ export function sourceLabel(source: CaseSource, scanner: Scanner, hasScanFiles =
 
 function pick<T>(arr: T[], i: number): T { return arr[i % arr.length]; }
 
-export const mockCases: Case[] = Array.from({ length: 50 }, (_, i) => {
+// Randomised bulk of the demo list. `mockCases` below prepends the
+// purpose-built rescan pairs to these.
+const generatedCases: Case[] = Array.from({ length: 50 }, (_, i) => {
   const firstName   = pick(PATIENT_FIRST, i * 3 + 1);
   const lastName    = pick(PATIENT_LAST,  i * 7 + 2);
   const statusIndex = (i * 11 + 3) % STATUSES.length;
@@ -318,6 +331,119 @@ export const mockCases: Case[] = Array.from({ length: 50 }, (_, i) => {
     source: 'scanner',
   };
 });
+
+// ── Rescan demo cases ───────────────────────────────────────────────────────
+// The randomised mock cases above never coincidentally share a patient,
+// clinic, dentist, lab AND service, so rescan detection would have nothing to
+// find. These four are purpose-built pairs, dated around the list's demo
+// "today" (19-May-2026) and inside the 14-day lookback:
+//   • RS-2001 / RS-2002 — already linked, so Related Cases, the relationship
+//     pills, the timeline entries and the Rescan filter all have data.
+//   • RS-2003 / RS-2004 — an unlinked 100% match, so Case Details shows the
+//     live recommendation and the user can make the decision themselves.
+// Both rescans carry more scan files than their original ("Scan file changed").
+// Clinic, dentist and lab are deliberately drawn from the values the CREATION
+// form's pickers offer (Smile Genius Manchester / Dr. Webb, and a supplier the
+// clinic portal can pick), so a case built in Quick Create can actually reach
+// the matching gate — one pair per portal:
+//   • RS-2001/2002 → lab "Smile Genius Lab", matched by LAB-portal creations
+//   • RS-2003/2004 → lab "Henry Schein", matched by CLINIC-portal creations
+export const rescanDemoCases: Case[] = [
+  {
+    id: 'CASE-RS-2001',
+    patientName: 'Isabella Hughes',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Crown'],
+    serviceItems: [{
+      id: 'rs2001-s1', name: 'Crown', status: 'refinement', deliveryDate: '22-May-2026',
+      fdi: [16], material: 'Zirconia', shade: 'A2', orderType: 'Private',
+      instructions: 'Full contour crown UR6. Check occlusal clearance.',
+      scanFileCount: 4, attachmentCount: 1,
+    }],
+    status: 'refinement',
+    createdAt: '06-May-2026',
+    updatedAt: '14-May-2026',
+    requestedDelivery: '22-May-2026',
+    hasAlert: false,
+    scanner: 'iTero',
+    source: 'scanner',
+    scannerPatientId: 'ITR-88213',
+    scannerCaseRef: 'ITR-CASE-55120',
+  },
+  {
+    id: 'CASE-RS-2002',
+    patientName: 'Isabella Hughes',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Crown'],
+    serviceItems: [{
+      id: 'rs2002-s1', name: 'Crown', status: 'in-production', deliveryDate: '28-May-2026',
+      fdi: [16], material: 'Zirconia', shade: 'A2', orderType: 'Private',
+      instructions: 'Re-scan after margin correction. Same shade as original order.',
+      scanFileCount: 6, attachmentCount: 1,
+    }],
+    status: 'in-production',
+    createdAt: '14-May-2026',
+    updatedAt: '18-May-2026',
+    requestedDelivery: '28-May-2026',
+    hasAlert: false,
+    scanner: 'iTero',
+    source: 'scanner',
+    scannerPatientId: 'ITR-88213',
+    scannerCaseRef: 'ITR-CASE-55984',
+  },
+  {
+    id: 'CASE-RS-2003',
+    patientName: 'Marcus Reed',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Henry Schein',
+    services: ['Night Guard'],
+    serviceItems: [{
+      id: 'rs2003-s1', name: 'Night Guard', status: 'quality-check', deliveryDate: '26-May-2026',
+      fdi: [36, 37], material: 'Acrylic', shade: 'Clear', orderType: 'Private',
+      instructions: 'Hard/soft night guard, lower left quadrant.',
+      scanFileCount: 3, attachmentCount: 1,
+    }],
+    status: 'quality-check',
+    createdAt: '11-May-2026',
+    updatedAt: '16-May-2026',
+    requestedDelivery: '26-May-2026',
+    hasAlert: false,
+    scanner: '3Shape',
+    source: 'scanner',
+    scannerPatientId: '3SH-40551',
+    scannerCaseRef: '3SH-REF-77310',
+  },
+  {
+    id: 'CASE-RS-2004',
+    patientName: 'Marcus Reed',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Henry Schein',
+    services: ['Night Guard'],
+    serviceItems: [{
+      id: 'rs2004-s1', name: 'Night Guard', status: 'new', deliveryDate: '30-May-2026',
+      fdi: [36, 37], material: 'Acrylic', shade: 'Clear', orderType: 'Private',
+      instructions: 'Patient returned — impression distorted, new scan taken.',
+      scanFileCount: 5, attachmentCount: 0,
+    }],
+    status: 'new',
+    createdAt: '18-May-2026',
+    updatedAt: '18-May-2026',
+    requestedDelivery: '30-May-2026',
+    hasAlert: false,
+    scanner: '3Shape',
+    source: 'scanner',
+    scannerPatientId: '3SH-40551',
+    scannerCaseRef: '3SH-REF-78002',
+  },
+];
+
+export const mockCases: Case[] = [...rescanDemoCases, ...generatedCases];
 
 // ── Upgrade-paywall demo case (lab only) ────────────────────────────────────
 // A freshly received case that always triggers the plan-limit upgrade popup
@@ -656,6 +782,41 @@ export const postReceivedCase: Case = {
 };
 mockCases.unshift(postReceivedCase);
 
+// ── Automated WhatsApp demo case ─────────────────────────────────────────────
+// Purpose-built to show the WhatsApp automation from scratch: a freshly
+// received case with NO scans attached, so it scores Needs Review and the
+// automation has something real to chase. Its Conversation hub carries the
+// step-by-step simulation (components/WhatsAppAutomationSimulator.tsx) — the
+// live automation fires once, silently, at scoring time, so a seeded case with
+// a replay is the only way to watch the whole sequence.
+export const WHATSAPP_DEMO_CASE_ID = 'CASE-WA-3001';
+export const whatsappDemoCase: Case = {
+  id: WHATSAPP_DEMO_CASE_ID,
+  patientName: 'Nadia Farrell',
+  practice: 'Smile Genius Manchester',
+  dentist: 'Dr. Amelia Hart',
+  lab: 'Smile Genius Lab',
+  services: ['Crown'],
+  serviceItems: [{
+    id: 'wa3001-s1', name: 'Crown', status: 'new', deliveryDate: '12-Jul-2026',
+    fdi: [26], material: 'E.max', shade: 'A2', orderType: 'Private',
+    instructions: 'Emax crown UL6. Scans to follow — dentist ran out of time at the appointment.',
+    scanFileCount: 0,
+    attachmentCount: 0,
+  }],
+  status: 'new',
+  // Dated just under the upgrade-paywall demo so it sits near the top of the
+  // lab list under the default "created-newest" sort — a demo case nobody can
+  // find is no demo at all.
+  createdAt: '28-Jun-2026',
+  updatedAt: '28-Jun-2026',
+  requestedDelivery: '12-Jul-2026',
+  hasAlert: false,
+  scanner: 'iTero',
+  source: 'scanner',
+};
+mockCases.unshift(whatsappDemoCase);
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<CaseStatus, string> = {
@@ -690,6 +851,32 @@ function parseDate(d: string): Date {
   const months: Record<string, number> = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
   const [day, mon, year] = d.split('-');
   return new Date(Number(year), months[mon], Number(day));
+}
+
+// ─── Rescan relationship pill (case rows) ─────────────────────────────────────
+// Lets a user tell an original from a rescan straight off the list (AC7).
+// Cases with no relationship render nothing.
+function RescanRowPill({ caseId, links }: { caseId: string; links: RescanLink[] }) {
+  const rel = relationshipOf(caseId, links);
+  if (rel === 'none') return null;
+  const rescanCount = rescanIdsOf(caseId, links).length;
+  return rel === 'rescan' ? (
+    <span
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-[#F3EEFF] text-[#7C3AED] border border-[#DDD6FE]"
+      title={`Rescan of ${originalIdOf(caseId, links)}`}
+    >
+      <Copy className="w-2.5 h-2.5" />
+      Rescan
+    </span>
+  ) : (
+    <span
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-[#EEF4FF] text-[#1565C0] border border-[#BFDBFE]"
+      title={`${rescanCount} rescan${rescanCount === 1 ? '' : 's'} linked to this case`}
+    >
+      <GitBranch className="w-2.5 h-2.5" />
+      Original · {rescanCount}
+    </span>
+  );
 }
 
 function isOverdue(dateStr: string | null): boolean {
@@ -1166,7 +1353,23 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   const { scoreCase } = useCaseScoring();
   // Plan-limited portals (the lab) lead with the upgrade-paywall demo case so
   // the very first case opened showcases the upgrade popup.
-  const [cases, setCases] = useState<Case[]>(() => caseViewLimit != null ? [upgradeDemoCase, ...mockCases] : mockCases);
+  // Cases created through Quick Create join the list alongside the mock data,
+  // so a case marked as a rescan at creation is a real record its original can
+  // link to and open.
+  const createdCases = useCreatedCases();
+  const rescanLinks = useRescanLinks();
+  const [cases, setCases] = useState<Case[]>(() => {
+    const base = caseViewLimit != null ? [upgradeDemoCase, ...mockCases] : mockCases;
+    return [...getCreatedCases(), ...base];
+  });
+  // Merge in anything created after mount (the user submitting the creation
+  // form) without disturbing edits already made to the cases in state.
+  React.useEffect(() => {
+    setCases(prev => {
+      const fresh = createdCases.filter(c => !prev.some(p => p.id === c.id));
+      return fresh.length ? [...fresh, ...prev] : prev;
+    });
+  }, [createdCases]);
   const [showArchived, setShowArchived] = useState(false);
   const [selectedCase, setSelectedCase] = useState<Case | null>(() => {
     if (initialCaseId) {
@@ -1195,6 +1398,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   const [dentistFilter, setDentistFilter] = useState<string>('all');
   const [scannerFilter, setScannerFilter] = useState<string>('all');
   const [alertFilter, setAlertFilter] = useState<'all' | 'alerts'>('all');
+  // Rescan relationship filter (AC7) — isolate rescans or the originals they
+  // were submitted against.
+  const [rescanFilter, setRescanFilter] = useState<'all' | 'rescan' | 'original'>('all');
   const [deliveryFilter, setDeliveryFilter] = useState<'all' | 'overdue' | 'upcoming' | 'no-date'>('all');
   // Quick time-window chip — operates on the case's last updated timestamp.
   const [timeFilter, setTimeFilter] = useState<'all' | '1h' | '1d' | '7d'>('all');
@@ -1333,7 +1539,13 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
       if (showArchived) { if (!c.archived) return false; }
       else if (c.archived) return false;
       const q = searchQuery.toLowerCase();
-      const matchSearch = !q || c.patientName.toLowerCase().includes(q) || c.practice.toLowerCase().includes(q) || c.dentist.toLowerCase().includes(q) || c.id.toLowerCase().includes(q);
+      // Searching either side of a rescan pair returns both cases, so an
+      // original case ID finds its rescans and vice versa (AC7).
+      const linkedIds = relatedIdsOf(c.id, rescanLinks);
+      const matchSearch = !q || c.patientName.toLowerCase().includes(q) || c.practice.toLowerCase().includes(q) || c.dentist.toLowerCase().includes(q) || c.id.toLowerCase().includes(q)
+        || linkedIds.some(id => id.toLowerCase().includes(q));
+      const rel = relationshipOf(c.id, rescanLinks);
+      const matchRescan = rescanFilter === 'all' || rel === rescanFilter;
       const matchStatus  = statusFilter   === 'all' || c.status === statusFilter;
       const matchService = serviceFilter  === 'all' || c.services.includes(serviceFilter);
       const matchPractice = practiceFilter === 'all' || c.practice === practiceFilter;
@@ -1346,9 +1558,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
       if (deliveryFilter === 'no-date')   matchDelivery = !c.requestedDelivery;
       // Time window — uses last-updated timestamp ("recent activity").
       const matchTime = !cutoff || parseDate(c.updatedAt) >= cutoff;
-      return matchSearch && matchStatus && matchService && matchPractice && matchDentist && matchScanner && matchAlert && matchDelivery && matchTime;
+      return matchSearch && matchStatus && matchService && matchPractice && matchDentist && matchScanner && matchAlert && matchDelivery && matchTime && matchRescan;
     });
-  }, [cases, showArchived, searchQuery, statusFilter, serviceFilter, practiceFilter, dentistFilter, scannerFilter, alertFilter, deliveryFilter, timeFilter]);
+  }, [cases, showArchived, searchQuery, statusFilter, serviceFilter, practiceFilter, dentistFilter, scannerFilter, alertFilter, deliveryFilter, timeFilter, rescanFilter, rescanLinks]);
 
   // Archived count for the toggle label.
   const archivedCount = useMemo(() => cases.filter(c => c.archived).length, [cases]);
@@ -1408,6 +1620,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     setAlertFilter('all');
     setDeliveryFilter('all');
     setTimeFilter('all');
+    setRescanFilter('all');
     setCurrentPage(1);
   }
 
@@ -1421,6 +1634,11 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   const alertOptions    = [
     { value: 'all',    label: 'All cases (with or without alert)' },
     { value: 'alerts', label: 'Cases with active alerts' },
+  ];
+  const rescanOptions = [
+    { value: 'all',      label: 'All cases' },
+    { value: 'rescan',   label: 'Rescan cases only' },
+    { value: 'original', label: 'Originals with rescans' },
   ];
   const deliveryOptions = [
     { value: 'all',      label: 'All delivery dates' },
@@ -1438,6 +1656,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   if (scannerFilter  !== 'all') activeFilters.push({ label: 'Scanner',   value: scannerFilter,                            onClear: () => setScannerFilter('all') });
   if (alertFilter    !== 'all') activeFilters.push({ label: 'Alerts',    value: 'With alerts',                            onClear: () => setAlertFilter('all') });
   if (deliveryFilter !== 'all') activeFilters.push({ label: 'Delivery',  value: deliveryOptions.find(o => o.value === deliveryFilter)?.label ?? deliveryFilter, onClear: () => setDeliveryFilter('all') });
+  if (rescanFilter   !== 'all') activeFilters.push({ label: 'Rescan',    value: rescanOptions.find(o => o.value === rescanFilter)?.label ?? rescanFilter,       onClear: () => setRescanFilter('all') });
 
   const sortOptions = [
     { value: 'created-newest', label: 'Created (Newest)' },
@@ -1575,6 +1794,13 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           onSetStatus={(toStatus) => applyStatusChange(selectedCase, toStatus)}
           showOfflineLabNotice={showOfflineLabNotice}
           showConnectEmailNotice={showConnectEmailNotice}
+          allCases={cases}
+          onOpenRelatedCase={(id) => {
+            const target = cases.find(c => c.id === id);
+            if (!target) return;
+            setSelectedCase(target);
+            onCaseSelected?.(target.id);
+          }}
         />
         {statusModalCase && (
           <StatusChangeModal
@@ -1938,7 +2164,12 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                         </td>
                       )}
                       {visibleCols.caseId && (
-                        <td className={`px-4 py-3 text-xs font-semibold text-[#030213] whitespace-nowrap ${lockBlur}`}>{c.id}</td>
+                        <td className={`px-4 py-3 text-xs font-semibold text-[#030213] whitespace-nowrap ${lockBlur}`}>
+                          <span className="inline-flex items-center gap-1.5">
+                            {c.id}
+                            <RescanRowPill caseId={c.id} links={rescanLinks} />
+                          </span>
+                        </td>
                       )}
                       {visibleCols.createdAt && (
                         <td className={`px-4 py-3 text-xs text-[#030213] whitespace-nowrap ${lockBlur}`}>{c.createdAt}</td>
@@ -2293,6 +2524,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           { label: 'Scanner',       value: scannerFilter,  options: scannerOptions,  onChange: (v) => { setScannerFilter(v);  setCurrentPage(1); } },
           { label: 'Delivery Date', value: deliveryFilter, options: deliveryOptions, onChange: (v) => { setDeliveryFilter(v as typeof deliveryFilter); setCurrentPage(1); } },
           { label: 'Alerts',        value: alertFilter,    options: alertOptions,    onChange: (v) => { setAlertFilter(v as typeof alertFilter); setCurrentPage(1); } },
+          { label: 'Rescan',        value: rescanFilter,   options: rescanOptions,   onChange: (v) => { setRescanFilter(v as typeof rescanFilter); setCurrentPage(1); } },
         ]}
         onApply={() => setFilterDrawerOpen(false)}
         onReset={() => { clearFilters(); setFilterDrawerOpen(false); }}

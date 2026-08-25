@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import {
   Sliders, Gauge, FileText, RotateCcw, CheckCircle2, Info, Sparkles, Save,
-  ChevronDown, AlertTriangle, Plus, X, FolderKanban, Mail, Copy, Check, Pencil,
+  ChevronDown, AlertTriangle, Plus, X, FolderKanban, Mail, MessageCircle, Copy, Check, Pencil,
 } from 'lucide-react';
 import ServiceConfigDrawer from './ServiceConfigDrawer';
 import CaseScoringEmailsSettings from './CaseScoringEmailsSettingsPage';
+import WhatsAppCommunicationSettings from './WhatsAppCommunicationSettings';
 import { useCaseScoringEmails } from '../data/caseScoringEmails';
+import { useWhatsAppComms } from '../data/whatsappComms';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import { SCOREABLE_SERVICE_TYPES, SERVICE_GROUPS, TIER_BAND, ScoreBand, SCORE_FIELD_DEF_MAP } from '../data/caseScoring';
@@ -115,6 +117,10 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
     setLocalScoringTab(t);
     onScoringTabChange?.(t);
   };
+  // Which channel's automated-communication config is on screen. The trigger
+  // events are shared; only the account, the toggles and the message content
+  // are per-channel.
+  const [commChannel, setCommChannel] = useState<'email' | 'whatsapp'>('email');
   const [activeService, setActiveService] = useState<string>(SCOREABLE_SERVICE_TYPES[0]);
   // The service whose "Configure" drawer is open (null = closed).
   const [configService, setConfigService] = useState<string | null>(null);
@@ -215,11 +221,13 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
   const [savedSignature, setSavedSignature] = useState(stateSignature);
   const isDirty = stateSignature !== savedSignature;
 
-  // The Case Scoring Emails tab edits its own store (which also persists
+  // The Automated Communication tab edits its own stores (which also persist
   // live); it gets the same Save bar with its own dirty tracking so the
-  // button behaves identically on every tab.
+  // button behaves identically on every tab. Both channels feed one signature
+  // — switching channel doesn't strand unsaved changes on the other.
   const emailSettings = useCaseScoringEmails();
-  const emailSignature = JSON.stringify(emailSettings);
+  const whatsappSettings = useWhatsAppComms();
+  const emailSignature = JSON.stringify({ email: emailSettings, whatsapp: whatsappSettings });
   const [savedEmailSignature, setSavedEmailSignature] = useState(emailSignature);
   const onEmailTab = section === 'scoring' && scoringTab === 'email';
   const emailDirty = emailSignature !== savedEmailSignature;
@@ -389,11 +397,11 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
             <>
               {/* Inner tabs: Weights | Bands | Auto-Email — full width */}
               <div className="flex items-center gap-1 p-1 bg-white border border-[#E0E0E6] rounded-lg">
-                {([['weights', 'Field Weights'], ['thresholds', 'Score Bands'], ['email', 'Case Scoring Emails']] as const).map(([id, label]) => (
+                {([['weights', 'Field Weights'], ['thresholds', 'Score Bands'], ['email', 'Communication']] as const).map(([id, label]) => (
                   <button
                     key={id}
                     onClick={() => setScoringTab(id)}
-                    className={`flex-1 text-center px-3 py-2 rounded-md text-sm font-semibold transition-colors ${
+                    className={`flex-1 text-center px-3 py-2 rounded-md text-xs font-semibold transition-colors ${
                       scoringTab === id ? 'bg-[#EEF4FF] text-[#1565C0]' : 'text-[#717182] hover:text-[#030213] hover:bg-[#F8F9FC]'
                     }`}
                   >
@@ -662,11 +670,32 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
               )}
 
 
-              {/* Case Scoring Emails — the full Automated Case Scoring Emails
-                  module (email integration, per-outcome automation, template
-                  selection + custom templates). Replaces the old Auto-Email
-                  prototype so this inner tab IS the feature's single home. */}
-              {scoringTab === 'email' && <CaseScoringEmailsSettings />}
+              {/* Automated Communication — the scoring outcomes decide WHEN a
+                  case update goes out; the channel picker below decides HOW.
+                  Email and WhatsApp are configured independently (each has its
+                  own account connection, per-outcome toggles and message
+                  content) but share the same trigger events and recipient. */}
+              {scoringTab === 'email' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-1 p-1 bg-white border border-[#E0E0E6] rounded-lg">
+                    {([['email', 'Email', Mail], ['whatsapp', 'WhatsApp', MessageCircle]] as const).map(([id, label, Icon]) => (
+                      <button
+                        key={id}
+                        onClick={() => setCommChannel(id)}
+                        className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold transition-colors ${
+                          commChannel === id
+                            ? (id === 'whatsapp' ? 'bg-[#F0FDF4] text-[#15803D]' : 'bg-[#EEF4FF] text-[#1565C0]')
+                            : 'text-[#717182] hover:text-[#030213] hover:bg-[#F8F9FC]'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {commChannel === 'email' ? <CaseScoringEmailsSettings /> : <WhatsAppCommunicationSettings />}
+                </div>
+              )}
             </>
           )}
 
@@ -693,7 +722,7 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
               onClick={() => {
                 if (onEmailTab) {
                   setSavedEmailSignature(emailSignature);
-                  toast.success('Case scoring email settings saved');
+                  toast.success('Automated communication settings saved');
                   return;
                 }
                 if (invalidScoringServices.length > 0) {

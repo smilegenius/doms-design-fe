@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, Fragment } from 'react';
+import { useState, useRef, useEffect, useMemo, Fragment } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, AlertTriangle, MessageSquare, MessageCircle, ChevronDown, ChevronUp,
@@ -7,19 +7,46 @@ import {
   Superscript, Subscript, Undo2, Redo2, Paperclip, Eye, Plus, Minus,
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply, Pencil,
+  Copy,
 } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
 import UrgentBadge from '../components/UrgentBadge';
 import UrgentConfirmModal from '../components/UrgentConfirmModal';
 import { OfflineLabNotice, offlineLabStatusFor } from '../components/OfflineLabNotice';
 import ConnectEmailNotice from '../components/ConnectEmailNotice';
-import { useCaseScoringEmails, DEFAULT_TEMPLATES, CATEGORY_META, findTemplate, categoryForTier } from '../data/caseScoringEmails';
+import { useCaseScoringEmails, DEFAULT_TEMPLATES, CATEGORY_META, MOCK_LAB_EMAIL, findTemplate, categoryForTier } from '../data/caseScoringEmails';
 import type { ScoringEmailCategory, ScoringEmailTemplate } from '../data/caseScoringEmails';
 import { ScoreBadge } from '../components/ScoreBadge';
 import { AiSparkle } from '../components/AiSparkle';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import { useToast } from '../context/ToastContext';
 import { MISSING_INFO_EMAIL } from '../data/caseScoring';
+import {
+  BLOCK_REASON_TEXT,
+  DEFAULT_WHATSAPP_TEMPLATES,
+  WhatsAppTemplate,
+  findWhatsAppTemplate,
+  isValidWhatsAppNumber,
+  useWhatsAppComms,
+  whatsappBlockReason,
+  whatsappNumberFor,
+} from '../data/whatsappComms';
+import { recordEmail, sendWhatsAppMessage, useCaseCommunications } from '../data/caseCommunications';
+import WhatsAppAutomationSimulator from '../components/WhatsAppAutomationSimulator';
+import { WHATSAPP_DEMO_CASE_ID } from './CasesPage';
+import RelatedCasesCard, { RelationshipPill } from '../components/RelatedCasesCard';
+import RescanDecisionModal from '../components/RescanDecisionModal';
+import type { Case as RescanCase } from './CasesPage';
+import {
+  detectRescanMatches,
+  linkFor,
+  markAsRescan,
+  originalIdOf,
+  relationshipOf,
+  rescanIdsOf,
+  subjectFromCase,
+  useRescanLinks,
+} from '../data/rescanDetection';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -198,6 +225,12 @@ interface CaseDetailPageProps {
       Non-participating) notice when this case's lab isn't on Smile Genius.
       The lab and DSO portals never pass it, so they never see the banner. */
   showOfflineLabNotice?: boolean;
+  /** Every case the host list knows about — the pool rescan detection searches
+      and the Related Cases section resolves linked IDs against. */
+  allCases?: RescanCase[];
+  /** Open another case in place — used by the Related Cases section to move
+      between an original and its rescans. */
+  onOpenRelatedCase?: (caseId: string) => void;
   /** Lab portal only — when this case has been scored and the lab has NO
       business email connected, show the "Connect Email" notice (automated
       case scoring emails can't be sent until an account is connected). */
@@ -369,6 +402,106 @@ function CaseTimelineModal({ caseData, onClose }: { caseData: CaseForDetail; onC
   );
 }
 
+// Rescan relationship entries (AC5). Creating a link writes to BOTH
+// timelines — the original records the rescan that was created against it, the
+// rescan records the case it came from — so either side tells the full story.
+function RescanTimelineEntries({ caseId }: { caseId: string }) {
+  const links = useRescanLinks();
+  const originalId = originalIdOf(caseId, links);
+  const rescanIds = rescanIdsOf(caseId, links);
+  if (!originalId && rescanIds.length === 0) return null;
+
+  // Both directions — a rescan that was itself re-scanned records the link it
+  // came from AND every link made against it.
+  const own = linkFor(caseId, links);
+  const entries = [
+    ...(originalId ? [{
+      id: `from-${originalId}`,
+      at: own?.linkedAt ?? '—',
+      by: own?.linkedBy ?? '—',
+      text: `This case was created as a Rescan of ${originalId}.`,
+    }] : []),
+    ...rescanIds.map(id => {
+      const l = linkFor(id, links);
+      return {
+        id: `to-${id}`,
+        at: l?.linkedAt ?? '—',
+        by: l?.linkedBy ?? '—',
+        text: `Rescan Case ${id} was created and linked to this case.`,
+      };
+    }),
+  ];
+
+  return (
+    <div className="border-t border-[#F0EFF6] px-5 py-4 bg-white">
+      <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-2.5">Case relationships</p>
+      <div className="space-y-2.5">
+        {entries.map(e => (
+          <div key={e.id} className="flex items-start gap-2.5">
+            <span className="w-6 h-6 rounded-lg bg-[#F3EEFF] flex items-center justify-center flex-shrink-0">
+              <Copy className="w-3 h-3 text-[#7C3AED]" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-[#030213] leading-relaxed">{e.text}</p>
+              <p className="text-[10px] text-[#A0A0B0] mt-0.5">{e.at} · {e.by}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Communications recorded against the case — automated and manual, email and
+// WhatsApp. Failed sends are recorded too (a WhatsApp message attempted while
+// the lab's account is disconnected never reaches a chat thread, so the
+// timeline is the only place it can surface).
+function CommunicationTimelineEntries({ caseId }: { caseId: string }) {
+  const comms = useCaseCommunications(caseId);
+  if (comms.length === 0) return null;
+
+  return (
+    <div className="border-t border-[#F0EFF6] px-5 py-4 bg-white">
+      <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-2.5">Communications</p>
+      <div className="space-y-2.5">
+        {[...comms].reverse().map(c => {
+          const wa = c.channel === 'whatsapp';
+          const failed = c.status === 'failed';
+          const Icon = wa ? MessageCircle : Mail;
+          const when = new Date(c.at);
+          const stamp = Number.isNaN(when.getTime())
+            ? c.at
+            : `${when.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} · ${when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+          return (
+            <div key={c.id} className="flex items-start gap-2.5">
+              <span
+                className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                  failed ? 'bg-[#FEF2F2]' : wa ? 'bg-[#F0FDF4]' : 'bg-[#EEF4FF]'
+                }`}
+              >
+                <Icon className={`w-3 h-3 ${failed ? 'text-[#DC2626]' : wa ? 'text-[#15803D]' : 'text-[#4D8EF7]'}`} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-[#030213] leading-relaxed">
+                  {failed ? 'Failed to send' : 'Sent'} {wa ? 'WhatsApp message' : 'email'} to {c.recipientName}
+                  <span className="font-normal text-[#717182]"> · {c.trigger === 'automated' ? 'Automated' : 'Manual'}</span>
+                </p>
+                <p className="text-[10px] text-[#A0A0B0] mt-0.5">
+                  {stamp} · {c.recipientAddress}
+                  {c.sender ? ` · from ${c.sender}` : ''}
+                </p>
+                {failed && c.failureReason && (
+                  <p className="text-[10px] text-[#B91C1C] mt-0.5">{c.failureReason}</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Inline case-pipeline timeline — same visual language as the invoice timeline modal.
 // Renders ONLY the steps that have actually happened (done + current/blocked).
 // Upcoming steps are not predicted — cases can move forward and backward.
@@ -516,6 +649,12 @@ function CaseTimeline({ caseData }: { caseData: CaseForDetail }) {
           </div>
         </div>
       </div>
+
+      {/* Relationship events — a rescan link is recorded on BOTH timelines. */}
+      <RescanTimelineEntries caseId={caseData.id} />
+
+      {/* Every message sent on this case, and every send that failed. */}
+      <CommunicationTimelineEntries caseId={caseData.id} />
     </div>
   );
 }
@@ -1711,6 +1850,25 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
   const [msgs, setMsgs] = useState<ConvMsg[]>(() => buildConversation(caseData, replied, missing));
   const [draft, setDraft] = useState('');
   const [composeChannel, setComposeChannel] = useState<Channel>('email');
+
+  // ── WhatsApp channel state ─────────────────────────────────────────────────
+  // Manual WhatsApp obeys the lab's WhatsApp communication setting: off, or no
+  // connected account, and the channel simply isn't offered here.
+  const whatsapp = useWhatsAppComms();
+  const waBlocked = whatsappBlockReason(whatsapp);
+  const waAvailable = waBlocked === null;
+  // Recipient — the same one manual email uses: the case's dentist. The number
+  // on file is editable in the composer before sending, exactly as the email
+  // draft's "To" is.
+  const [waNumber, setWaNumber] = useState(() => whatsappNumberFor(caseData.dentist));
+  // The WhatsApp draft modal — the template-led path, mirroring the email draft.
+  const [waDraft, setWaDraft] = useState<{ tplId: string; to: string; body: string } | null>(null);
+  const [waTplMenuOpen, setWaTplMenuOpen] = useState(false);
+  // The channel can be switched off (or the account disconnected) while the
+  // drawer is open — fall back to email rather than leaving a dead composer.
+  useEffect(() => {
+    if (!waAvailable && composeChannel === 'whatsapp') setComposeChannel('email');
+  }, [waAvailable, composeChannel]);
   // "Mark as Urgent" arms the next send; confirmed via the reminder-schedule
   // dialog before the message goes out.
   const [urgentArmed, setUrgentArmed] = useState(false);
@@ -1799,10 +1957,36 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
     setComposeModal(m => m && ({ ...m, tplId: tpl.id, subject: fillScoringTemplate(tpl.subject), body: fillScoringTemplate(tpl.body) }));
     setComposeTplMenuOpen(false);
   };
+
+  // ── WhatsApp draft ─────────────────────────────────────────────────────────
+  // Same shape as the email draft: opens seeded with the message configured for
+  // this case's band, with the recipient and the wording both editable before
+  // it goes out. The message list is the lab's own WhatsApp content, never the
+  // email templates — WhatsApp has no subject and reads on a phone.
+  const waCategory: ScoringEmailCategory = categoryForTier(score.tier) ?? 'needs-review';
+  const waTemplates: WhatsAppTemplate[] = [...DEFAULT_WHATSAPP_TEMPLATES[waCategory], ...whatsapp.customTemplates];
+  const openWhatsAppDraft = () => {
+    const tpl = findWhatsAppTemplate(waCategory, whatsapp.automation[waCategory].templateId, whatsapp.customTemplates);
+    setWaDraft({ tplId: tpl.id, to: waNumber, body: fillScoringTemplate(tpl.body) });
+  };
+  const switchWhatsAppTemplate = (tpl: WhatsAppTemplate) => {
+    setWaDraft(d => d && ({ ...d, tplId: tpl.id, body: fillScoringTemplate(tpl.body) }));
+    setWaTplMenuOpen(false);
+  };
+  const waToValid = !!waDraft && isValidWhatsAppNumber(waDraft.to);
   const composeToValid = !!composeModal && /\S+@\S+\.\S+/.test(composeModal.to.trim());
   const sendComposed = () => {
     if (!composeModal || !composeModal.body.trim() || !composeToValid) return;
     setMsgs(prev => [...prev, { id: `new-${++idRef.current}`, channel: 'email', dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now', subject: composeModal.subject.trim() || undefined, body: composeModal.body }]);
+    recordEmail({
+      caseId: caseData.id,
+      trigger: 'manual',
+      recipientName: caseData.dentist,
+      recipientAddress: composeModal.to.trim(),
+      sender: MOCK_LAB_EMAIL,
+      subject: composeModal.subject.trim() || undefined,
+      body: composeModal.body,
+    });
     toast.success(dentistEmailOnFile
       ? `Email sent to ${composeModal.to.trim()}`
       : `Email sent to ${composeModal.to.trim()} — saved to ${caseData.dentist}'s contact details.`);
@@ -1816,13 +2000,74 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
   // The dentist's reply answers the lab's latest outbound email.
   const lastOutEmail = [...msgs].reverse().find(m => m.channel === 'email' && m.dir === 'out');
 
+  // Append an outbound message to the thread. Shared by both channels — the
+  // send/record decision happens before this is called.
+  const appendOutbound = (channel: Channel, body: string, isUrgent = false) => {
+    setMsgs(prev => [...prev, {
+      id: `new-${++idRef.current}`, channel, dir: 'out',
+      name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now',
+      subject: channel === 'email' ? threadSubject : undefined,
+      replyTo: channel === 'email' ? quoteOf(lastEmail) : undefined,
+      body, urgent: isUrgent || undefined,
+    }]);
+  };
+
+  /**
+   * Manual WhatsApp send. Goes through the shared send path so the lab's
+   * WhatsApp setting and account state are applied exactly as they are for an
+   * automated message — and so the communication (or the failure) is recorded
+   * against the case either way.
+   */
+  const sendWhatsApp = (body: string, isUrgent = false, to: string = waNumber): boolean => {
+    const result = sendWhatsAppMessage({
+      caseId: caseData.id,
+      trigger: 'manual',
+      recipientName: caseData.dentist,
+      recipientAddress: to.trim(),
+      body,
+    });
+    if (result.status !== 'sent') {
+      toast.error(result.message);
+      return false;
+    }
+    appendOutbound('whatsapp', body, isUrgent);
+    toast.success(isUrgent
+      ? `Urgent WhatsApp message sent to ${caseData.dentist} — reminders are scheduled until they reply.`
+      : result.message);
+    return true;
+  };
+
+  // Send the drafted (template-led) WhatsApp message. A number edited in the
+  // draft becomes the case's recipient for later quick messages too, the same
+  // way the email draft saves an address that wasn't on file.
+  const sendWhatsAppDraft = () => {
+    if (!waDraft || !waDraft.body.trim() || !waToValid) return;
+    if (!sendWhatsApp(waDraft.body, false, waDraft.to)) return;
+    setWaNumber(waDraft.to.trim());
+    setWaDraft(null);
+    setWaTplMenuOpen(false);
+  };
+
   const deliver = (t: string, isUrgent: boolean) => {
-    setMsgs(prev => [...prev, { id: `new-${++idRef.current}`, channel: composeChannel, dir: 'out', name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now', subject: composeChannel === 'email' ? threadSubject : undefined, replyTo: composeChannel === 'email' ? quoteOf(lastEmail) : undefined, body: t, urgent: isUrgent || undefined }]);
+    if (composeChannel === 'whatsapp') {
+      if (!sendWhatsApp(t, isUrgent)) return;
+    } else {
+      appendOutbound('email', t, isUrgent);
+      recordEmail({
+        caseId: caseData.id,
+        trigger: 'manual',
+        recipientName: caseData.dentist,
+        recipientAddress: dentistEmailOnFile ?? `${caseData.dentist} (on file)`,
+        sender: MOCK_LAB_EMAIL,
+        subject: threadSubject,
+        body: t,
+      });
+      toast.success(isUrgent
+        ? 'Urgent message sent — the recipient has been notified.'
+        : 'Sent via Email');
+    }
     setDraft('');
     setUrgentArmed(false);
-    toast.success(isUrgent
-      ? 'Urgent message sent — the recipient has been notified.'
-      : `Sent via ${composeChannel === 'email' ? 'Email' : 'WhatsApp'}`);
   };
   const send = () => {
     const t = draft.trim();
@@ -1931,6 +2176,26 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
           </div>
         ) : (
           <div className="space-y-4">
+            {/* The seeded WhatsApp demo case carries the end-to-end automation
+                replay — the live automation fires once at scoring time, so this
+                is the only way to watch the whole sequence happen. */}
+            {activeTab === 'whatsapp' && caseData.id === WHATSAPP_DEMO_CASE_ID && (
+              <WhatsAppAutomationSimulator
+                caseId={caseData.id}
+                patientName={caseData.patientName ?? 'the patient'}
+                dentist={caseData.dentist}
+                serviceName={items[0]?.name ?? 'the service'}
+                missing={missing}
+                category={waCategory}
+                onReset={() => setMsgs(prev => prev.filter(m => m.channel !== 'whatsapp'))}
+                onOutbound={(body) => appendOutbound('whatsapp', body)}
+                onInbound={(body) => setMsgs(prev => [...prev, {
+                  id: `sim-in-${++idRef.current}`, channel: 'whatsapp', dir: 'in',
+                  name: caseData.dentist, initials: nameInitials(caseData.dentist),
+                  date: 'Today', time: 'now', body,
+                }])}
+              />
+            )}
             {shown.length === 0 ? (
               <p className="text-xs text-[#A0A0B0] italic text-center py-8">No {activeTab === 'email' ? 'emails' : activeTab === 'whatsapp' ? 'WhatsApp messages' : 'messages'} yet.</p>
             ) : shown.map(m => {
@@ -1970,11 +2235,22 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
                 const on = composeChannel === ch;
                 const wa = ch === 'whatsapp';
                 const Icon = wa ? MessageCircle : Mail;
+                // WhatsApp is only offered when the lab's WhatsApp
+                // communication setting is on AND an account is connected.
+                const off = wa && !waAvailable;
                 return (
                   <button
                     key={ch}
-                    onClick={() => setComposeChannel(ch)}
-                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border transition-colors ${on ? (wa ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]' : 'bg-[#EEF4FF] border-[#C8D8FC] text-[#1565C0]') : 'bg-white border-[#E0E0E6] text-[#717182] hover:border-[#BFDBFE]'}`}
+                    onClick={() => { if (!off) setComposeChannel(ch); }}
+                    disabled={off}
+                    title={off ? `${BLOCK_REASON_TEXT[waBlocked!]} Lab users can't send a WhatsApp message from this case.` : undefined}
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border transition-colors ${
+                      off
+                        ? 'bg-[#F8F8FA] border-[#EDEBF2] text-[#C0BFCC] cursor-not-allowed'
+                        : on
+                          ? (wa ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]' : 'bg-[#EEF4FF] border-[#C8D8FC] text-[#1565C0]')
+                          : 'bg-white border-[#E0E0E6] text-[#717182] hover:border-[#BFDBFE]'
+                    }`}
                   >
                     <Icon className="w-3 h-3" />{wa ? 'WhatsApp' : 'Email'}
                   </button>
@@ -2000,6 +2276,13 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
               </button>
             )}
           </div>
+          {/* Why the WhatsApp channel is greyed out — the lab's setting, not a bug. */}
+          {!waAvailable && (
+            <p className="flex items-center gap-1 mb-2 px-0.5 text-[10px] text-[#A0A0B0]">
+              <Info className="w-3 h-3 flex-shrink-0" />
+              {BLOCK_REASON_TEXT[waBlocked!]} WhatsApp messages can&apos;t be sent from this case.
+            </p>
+          )}
           {composeChannel === 'email' ? (
             /* Emails start from a draft, not free-typing: one click opens the
                email draft modal seeded with this case's configured template —
@@ -2022,6 +2305,23 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
             </button>
           ) : (
             <>
+              {/* Recipient — the case's dentist, the same recipient the manual
+                  email uses. The number is editable inside the draft. */}
+              <div className="flex items-center gap-1.5 mb-1.5 px-0.5 flex-wrap">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0]">To</span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#F0FDF4] border border-[#BBF7D0] text-[10px] font-semibold text-[#15803D]">
+                  <MessageCircle className="w-2.5 h-2.5" />
+                  {caseData.dentist}
+                  <span className="font-normal text-[#2F4F3A] tabular-nums">· {waNumber}</span>
+                </span>
+                <button
+                  onClick={openWhatsAppDraft}
+                  title="Open a WhatsApp draft from your configured message — edit the recipient and wording before sending"
+                  className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold text-[#15803D] bg-white border border-[#BBF7D0] hover:bg-[#F0FDF4] transition-colors"
+                >
+                  <Pencil className="w-3 h-3" /> Use template
+                </button>
+              </div>
               <div className={`flex items-center gap-2 border rounded-xl px-3 py-2 transition-colors ${urgentArmed ? 'border-[#FECACA] ring-1 ring-[#FECACA]/40' : 'border-[#E0E0E6]'}`}>
                 <input
                   value={draft}
@@ -2048,6 +2348,114 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
         onCancel={() => setConfirmUrgentOpen(false)}
         onConfirm={() => { setConfirmUrgentOpen(false); deliver(draft.trim(), true); }}
       />
+
+      {/* ── WhatsApp draft — the template-led manual send. Same model as the
+          email draft: pick the message, edit the recipient and the wording,
+          then send from the lab's connected WhatsApp Business number. ── */}
+      {waDraft && (() => {
+        const currentTpl = waTemplates.find(t => t.id === waDraft.tplId);
+        return (
+          <ModalPortal>
+            <div className="fixed inset-0 z-[140] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => { setWaDraft(null); setWaTplMenuOpen(false); }} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#F0EFF6] flex-shrink-0">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="w-8 h-8 rounded-lg bg-[#F0FDF4] flex items-center justify-center flex-shrink-0">
+                      <MessageCircle className="w-4 h-4 text-[#15803D]" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {/* The title is the message switcher — same interaction as
+                          the email draft's template dropdown. */}
+                      <div className="relative">
+                        <button
+                          onClick={() => setWaTplMenuOpen(o => !o)}
+                          className="flex items-center gap-1.5 text-sm font-semibold text-[#030213] hover:text-[#15803D] transition-colors max-w-full"
+                          title="Switch message"
+                        >
+                          <span className="truncate">{currentTpl?.name ?? 'WhatsApp message'}</span>
+                          <ChevronDown className={`w-3.5 h-3.5 text-[#717182] flex-shrink-0 transition-transform ${waTplMenuOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {waTplMenuOpen && (
+                          <>
+                            <span className="fixed inset-0 z-10" onClick={() => setWaTplMenuOpen(false)} />
+                            <div className="absolute top-full left-0 mt-1 z-20 w-72 max-h-64 overflow-y-auto rounded-xl border border-[#E0E0E6] bg-white shadow-lg p-1.5">
+                              {waTemplates.map(t => {
+                                const selected = t.id === waDraft.tplId;
+                                return (
+                                  <button
+                                    key={t.id}
+                                    onClick={() => switchWhatsAppTemplate(t)}
+                                    className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg text-left transition-colors ${selected ? 'bg-[#F0FDF4]' : 'hover:bg-[#F8F9FC]'}`}
+                                  >
+                                    <span className={`w-3.5 h-3.5 mt-0.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${selected ? 'border-[#15803D]' : 'border-[#D4CEE1]'}`}>
+                                      {selected && <span className="w-1.5 h-1.5 rounded-full bg-[#15803D]" />}
+                                    </span>
+                                    <span className="min-w-0">
+                                      <span className={`block text-xs font-semibold ${selected ? 'text-[#15803D]' : 'text-[#030213]'}`}>{t.name}</span>
+                                      <span className="block text-[10px] text-[#A0A0B0] truncate">{t.tone} · {t.body.split('\n')[0]}</span>
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-[#A0A0B0] truncate">
+                        Sending from {whatsapp.connection.number}
+                      </p>
+                    </div>
+                  </div>
+                  <button onClick={() => { setWaDraft(null); setWaTplMenuOpen(false); }} className="p-1.5 rounded-lg text-[#717182] hover:bg-[#F3F3F5] transition-colors flex-shrink-0"><X className="w-4 h-4" /></button>
+                </div>
+
+                <div className="p-5 space-y-3 overflow-y-auto">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0] mb-1">
+                      To — {caseData.dentist}
+                    </p>
+                    <input
+                      value={waDraft.to}
+                      onChange={(e) => setWaDraft(d => d && ({ ...d, to: e.target.value }))}
+                      placeholder="+44 7700 900000"
+                      className={`w-full px-3 py-2 rounded-lg border text-sm text-[#030213] tabular-nums focus:outline-none transition-colors ${
+                        waDraft.to.trim() && !waToValid ? 'border-[#FECACA] focus:border-[#DC2626]' : 'border-[#E0E0E6] focus:border-[#15803D]'
+                      }`}
+                    />
+                    {waDraft.to.trim() && !waToValid && (
+                      <p className="text-[10px] text-[#B91C1C] mt-1">Enter a valid WhatsApp number, including the country code.</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0] mb-1">Message</p>
+                    <textarea
+                      value={waDraft.body}
+                      onChange={(e) => setWaDraft(d => d && ({ ...d, body: e.target.value }))}
+                      rows={10}
+                      className="w-full px-3 py-2 rounded-lg border border-[#E0E0E6] text-sm text-[#030213] leading-relaxed focus:border-[#15803D] focus:outline-none resize-y"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-[#F0EFF6] flex-shrink-0">
+                  <p className="text-[10px] text-[#A0A0B0]">Recorded against case {caseData.id} once sent.</p>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => { setWaDraft(null); setWaTplMenuOpen(false); }} className="px-3.5 py-2 rounded-lg text-xs font-semibold text-[#030213] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">Cancel</button>
+                    <button
+                      onClick={sendWhatsAppDraft}
+                      disabled={!waDraft.body.trim() || !waToValid}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-white bg-[#15803D] hover:bg-[#166534] transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
+                    >
+                      <Send className="w-3.5 h-3.5" /> Send WhatsApp
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
+        );
+      })()}
 
       {/* ── Compose from template — same model as the Settings preview:
           template switcher up top, then a fully editable subject + body
@@ -2985,7 +3393,7 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
-export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus, showOfflineLabNotice, showConnectEmailNotice }: CaseDetailPageProps) {
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState(caseData.requestedDelivery ?? '');
@@ -3021,6 +3429,21 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
     ] : undefined,
   }));
   const isMultiService = serviceItems.length > 1;
+
+  // ── Rescan relationship ────────────────────────────────────────────────────
+  // Where this case sits in the rescan graph, plus — for a case that has never
+  // been resolved either way — the live recommendation. Detection runs against
+  // the host list's cases; without that pool there is nothing to match on.
+  const rescanLinks = useRescanLinks();
+  const relationship = relationshipOf(caseData.id, rescanLinks);
+  const [rescanDecisionOpen, setRescanDecisionOpen] = useState(false);
+  const [rescanDismissed, setRescanDismissed] = useState(false);
+  const rescanMatches = useMemo(() => {
+    if (relationship !== 'none' || !allCases?.length) return [];
+    const self = allCases.find(c => c.id === caseData.id);
+    if (!self) return [];
+    return detectRescanMatches(subjectFromCase(self), allCases);
+  }, [allCases, caseData.id, relationship]);
 
   // Single-service cases skip the "Case Summary" tab entirely — topTab defaults
   // straight to the one service's ID so no redundant navigation layer exists.
@@ -3228,6 +3651,16 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             </span>
           )}
 
+          {/* Compact timeline pill — the identity card is where this was always
+              meant to sit. Previously only multi-service cases could reach the
+              timeline (via the Case Summary strip), so single-service cases had
+              no route to it at all — including their rescan relationship
+              entries. */}
+          <CaseTimelinePill caseData={caseData} onClick={() => setTimelineOpen(true)} />
+
+          {/* Original / Rescan identity — only on cases in a relationship. */}
+          <RelationshipPill caseId={caseData.id} />
+
           {/* AI suggestion chip */}
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-[#FFF7ED] text-[#B45309] border border-[#FED7AA]">
             <Lightbulb className="w-3 h-3" />
@@ -3337,6 +3770,47 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           </div>
         )}
       </div>
+
+      {/* ── Potential rescan — the same recommendation the creation flow shows,
+            for a case that reached the list without anyone deciding. Nothing
+            is classified automatically: the user picks. ── */}
+      {rescanMatches.length > 0 && !rescanDismissed && (
+        <div className="mx-6 mt-3 rounded-xl border border-[#DDD6FE] bg-[#F7F4FF] px-4 py-3 flex items-start gap-2.5">
+          <span className="w-6 h-6 rounded-lg bg-white border border-[#DDD6FE] text-[#7C3AED] flex items-center justify-center flex-shrink-0 mt-0.5">
+            <Copy className="w-3.5 h-3.5" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-[#7C3AED]">Potential Related Case Found</p>
+            <p className="text-[11px] text-[#6D5BA6] leading-relaxed mt-0.5">
+              We found {rescanMatches.length === 1 ? 'an existing case' : `${rescanMatches.length} existing cases`} that
+              closely {rescanMatches.length === 1 ? 'matches' : 'match'} this submission — best match{' '}
+              <span className="font-semibold">{rescanMatches[0].case.id}</span> at {rescanMatches[0].score}%. Please
+              review the suggested case.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
+            <button
+              onClick={() => setRescanDismissed(true)}
+              className="px-3 py-1.5 rounded-lg text-[11px] font-semibold text-[#030213] bg-white border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors"
+            >
+              Continue as New Case
+            </button>
+            <button
+              onClick={() => setRescanDecisionOpen(true)}
+              className="px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
+            >
+              Review match
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Related Cases — the relationship both sides of a rescan pair show. ── */}
+      {relationship !== 'none' && (
+        <div className="mx-6 mt-3">
+          <RelatedCasesCard caseId={caseData.id} onOpenCase={onOpenRelatedCase} />
+        </div>
+      )}
 
       {/* ── Status-override banner — shown when a user advanced this case while
             requirements were still missing (reason + who/when). ── */}
@@ -3475,6 +3949,25 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
       {/* Case Timeline modal — opens from the compact pill in the identity card */}
       {timelineOpen && (
         <CaseTimelineModal caseData={caseData} onClose={() => setTimelineOpen(false)} />
+      )}
+
+      {/* Rescan decision — the user's call, never the system's. */}
+      {rescanDecisionOpen && rescanMatches.length > 0 && (
+        <RescanDecisionModal
+          matches={rescanMatches}
+          onClose={() => setRescanDecisionOpen(false)}
+          onContinueAsNew={() => { setRescanDecisionOpen(false); setRescanDismissed(true); toast.info(`${caseData.id} kept as a new case`); }}
+          onMarkAsRescan={(match) => {
+            markAsRescan({
+              rescanId: caseData.id,
+              originalId: match.case.id,
+              score: match.score,
+              by: caseData.dentist,
+            });
+            setRescanDecisionOpen(false);
+            toast.success(`${caseData.id} linked as a rescan of ${match.case.id}`);
+          }}
+        />
       )}
     </div>
   );

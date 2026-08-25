@@ -12,11 +12,20 @@ import { extractCaseEntities } from '../data/instructionExtraction';
 import ModalPortal from '../components/ModalPortal';
 import { OFFLINE_LABS, OfflineLabNotice } from '../components/OfflineLabNotice';
 import ConnectEmailNotice from '../components/ConnectEmailNotice';
-import { useCaseScoringEmails, categoryForTier, findTemplate, CATEGORY_META } from '../data/caseScoringEmails';
+import { useCaseScoringEmails, categoryForTier, findTemplate, CATEGORY_META, MOCK_LAB_EMAIL } from '../data/caseScoringEmails';
+import {
+  fillTemplateVars, findWhatsAppTemplate, useWhatsAppComms, whatsappBlockReason, whatsappNumberFor,
+} from '../data/whatsappComms';
+import { recordEmail, sendWhatsAppMessage } from '../data/caseCommunications';
 import AddPracticeModal from '../components/AddPracticeModal';
 import AddStaffModal from '../components/AddStaffModal';
 import { mockSuppliers } from '../data/suppliersData';
 import { mockStaffMembers, mockClinics } from '../data/clinicsData';
+import RescanDecisionModal from '../components/RescanDecisionModal';
+import { addCreatedCase, getCreatedCases, nextCaseId } from '../data/createdCases';
+import {
+  DEMO_TODAY, RescanMatch, RescanSubject, detectRescanMatches, formatCaseDate, markAsRescan,
+} from '../data/rescanDetection';
 
 // ─── Counterparty (Lab ↔ Clinic) ─────────────────────────────────────────────
 // The Quick Create flow is shared by both portals. In the CLINIC portal the
@@ -53,6 +62,7 @@ function initialsFor(name: string): string {
   const letters = name.replace(/[^A-Za-z ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0] ?? '').join('');
   return (letters || name.slice(0, 2)).toUpperCase();
 }
+import { mockCases } from './CasesPage';
 import type { Case, EmailPrescription } from './CasesPage';
 import { LAB_POSTAL_ADDRESSES } from './CaseDetailPage';
 import { ScoreBadge } from '../components/ScoreBadge';
@@ -388,6 +398,34 @@ const CASE_LEVEL_SCORE_FIELDS = new Set([
   'scans', 'scan_upper', 'scan_lower', 'scan_bite', 'scan_bite2',
   'instructions', 'attachments', 'delivery', 'orderType',
 ]);
+
+// The practice a clinic-portal user is creating from. The clinic form has no
+// practice picker (the user IS the practice), so the created case records this
+// stand-in — the same practice the mock prescription extraction uses.
+const CLINIC_PORTAL_PRACTICE = 'Smile Genius Manchester';
+// The lab a lab-portal user is entering cases for, mirrored from the lab
+// portal's own identity elsewhere in the app.
+const LAB_PORTAL_LAB = 'Smile Genius Lab';
+
+// ISO date from the form's date input → the "DD-MMM-YYYY" case records use.
+function isoToCaseDate(iso: string): string {
+  const [year, mon, day] = iso.split('-');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const m = Number(mon) - 1;
+  if (!year || !day || m < 0 || m > 11) return iso;
+  return `${day.padStart(2, '0')}-${months[m]}-${year}`;
+}
+
+// In-app tooth code (UR6) → FDI numeric (16). Inverse of fdiNumberToCode —
+// case records store FDI numbers, the form works in codes.
+function codeToFdiNumber(code: string): number | null {
+  const m = /^(UR|UL|LL|LR)(\d)$/.exec(code.trim().toUpperCase());
+  if (!m) return null;
+  const quadrant = { UR: 1, UL: 2, LL: 3, LR: 4 }[m[1] as 'UR' | 'UL' | 'LL' | 'LR'];
+  const position = Number(m[2]);
+  if (position < 1 || position > 8) return null;
+  return quadrant * 10 + position;
+}
 
 // FDI numeric (16, 26, etc.) → in-app tooth code (UR6, UL6) used by the
 // teeth chart + per-tooth field grids. First digit is the quadrant; second
@@ -1113,6 +1151,9 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // + per-outcome automation config. Drives the "Connect Email" notice on
   // scored drafts and the auto-send simulation when the case is created.
   const scoringEmails = useCaseScoringEmails();
+  // The WhatsApp half of the same automated communication workflow — same
+  // trigger events, same recipient, its own channel setting and message content.
+  const whatsappComms = useWhatsAppComms();
   // Fields seeded from an email/document-sourced draft were extracted by AI, so
   // they're flagged with a sparkle for the user to review.
   const aiPrefilled = !!prefillDraft && prefillDraft.source === 'email';
@@ -1557,14 +1598,102 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
     toast.info('Extraction undone — the form is back to how it was.');
   }
 
+  // ── Rescan detection ───────────────────────────────────────────────────────
+  // The case this form would produce, reduced to the attributes the matching
+  // engine compares. Dates use the demo clock the Cases list runs on, so a
+  // freshly created case sits inside the lookback window with the mock data.
+  function buildCaseRecord(id: string): Case {
+    const created = formatCaseDate(DEMO_TODAY);
+    const serviceItems = selections.map((sel, i) => ({
+      id: `${id}-s${i + 1}`,
+      name: CATALOG_ID_TO_SERVICE_NAME[sel.itemId] ?? getServiceDisplayName(sel),
+      status: 'new' as const,
+      deliveryDate: deliveryDate ? isoToCaseDate(deliveryDate) : null,
+      fdi: (sel.teeth ?? []).map(codeToFdiNumber).filter((n): n is number => n !== null),
+      material: sel.material,
+      shade: sel.shade,
+      orderType,
+      instructions: caseInstructions,
+      scanFileCount: scanFileCount,
+      attachmentCount: caseInstructionsFiles.length + caseSourceExtraFiles.length,
+      stages: sel.stages,
+    }));
+    return {
+      id,
+      patientName: patientName.trim(),
+      practice: isLab ? (selectedLab?.name ?? CLINIC_PORTAL_PRACTICE) : CLINIC_PORTAL_PRACTICE,
+      dentist: selectedDentist?.name ?? '—',
+      lab: isLab ? LAB_PORTAL_LAB : (selectedLab?.name ?? LAB_PORTAL_LAB),
+      services: serviceItems.map(si => si.name),
+      serviceItems,
+      status: 'new',
+      createdAt: created,
+      updatedAt: created,
+      requestedDelivery: deliveryDate ? isoToCaseDate(deliveryDate) : null,
+      hasAlert: false,
+      scanner: (caseSourceScanner || 'iTero') as Case['scanner'],
+      source: caseSource === 'Via Scanner' ? 'scanner'
+        : caseSource === 'Email' ? 'email'
+        : caseSource === 'Impressions (By Post)' ? 'post'
+        : 'manual',
+    };
+  }
+
+  function rescanSubject(record: Case): RescanSubject {
+    return {
+      patientName: record.patientName,
+      practice: record.practice,
+      dentist: record.dentist,
+      lab: record.lab,
+      services: record.services,
+      teeth: selections.flatMap(sel => sel.teeth ?? []),
+      scanFileCount,
+      createdAt: record.createdAt,
+    };
+  }
+
+  // Pending submission held while the user decides on a potential rescan.
+  const [rescanPrompt, setRescanPrompt] = useState<{ record: Case; matches: RescanMatch[] } | null>(null);
+
   function handleSubmit() {
     if (!canSubmit) {
       toast.error(`Add a patient name, pick a ${cpNoun}, and at least one service.`);
       return;
     }
+    // Every new case is checked against recent cases before it's completed.
+    // A hit pauses here for the user's decision — Smile Genius never
+    // classifies a rescan on its own.
+    const record = buildCaseRecord(nextCaseId());
+    const matches = detectRescanMatches(rescanSubject(record), [...getCreatedCases(), ...mockCases]);
+    if (matches.length > 0) {
+      setRescanPrompt({ record, matches });
+      return;
+    }
+    finalizeSubmission(record);
+  }
+
+  /**
+   * Complete the submission. `rescanOf` is set when the user chose "Mark as
+   * Rescan" — the created case is linked to the original, which writes the
+   * relationship both case timelines read from.
+   */
+  function finalizeSubmission(record: Case, rescanOf?: RescanMatch) {
+    addCreatedCase(record);
+    if (rescanOf) {
+      markAsRescan({
+        rescanId: record.id,
+        originalId: rescanOf.case.id,
+        score: rescanOf.score,
+        by: selectedDentist?.name ?? 'Case creator',
+      });
+    }
     // Successful submission — discard any pending draft and move on.
     clearDraft();
-    toast.success(`Case created for ${patientName}`);
+    toast.success(
+      rescanOf
+        ? `${record.id} created and linked as a rescan of ${rescanOf.case.id}`
+        : `Case created for ${patientName}`
+    );
     // Offline lab: one last nudge that the case lives on the clinic's side —
     // the lab won't see it on the platform or move the status along.
     if (!isLab && selectedLab?.platformStatus) {
@@ -1577,16 +1706,63 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
     // "Connect Email" notice stays on the case instead.
     if (isLab && liveScore.applicable) {
       const category = categoryForTier(liveScore.tier);
+      const dentistName = dentists.find(d => d.id === dentistId)?.name ?? 'the dentist';
+      // Placeholder values shared by both channels — the message content
+      // differs per channel, the case data behind it does not.
+      const templateVars: Record<string, string> = {
+        'Dentist Name': dentistName,
+        'Patient Name': patientName || 'the patient',
+        'Case ID': record.id,
+        'Service Name': record.services[0] ?? 'the service',
+        'Missing Items Summary': missingRequirements.length
+          ? missingRequirements.map(m => `• ${m.label}`).join('\n')
+          : '• (nothing outstanding)',
+        'Case Link': `https://app.smilegenius.co.uk/cases/${record.id}`,
+        'Lab Name': 'Smile Genius Lab',
+      };
+
       if (category && scoringEmails.automation[category].enabled) {
         if (scoringEmails.connection.status === 'connected') {
           if (scoringEmails.sendMode === 'automatic') {
             const tpl = findTemplate(category, scoringEmails.automation[category].templateId, scoringEmails.customTemplates);
-            const dentistName = dentists.find(d => d.id === dentistId)?.name ?? 'the dentist';
+            recordEmail({
+              caseId: record.id,
+              trigger: 'automated',
+              event: category,
+              recipientName: dentistName,
+              recipientAddress: scoringEmails.connection.email ?? MOCK_LAB_EMAIL,
+              sender: scoringEmails.connection.email,
+              subject: fillTemplateVars(tpl.subject, templateVars),
+              body: fillTemplateVars(tpl.body, templateVars),
+            });
             toast.info(`Case scored ${CATEGORY_META[category].label} — "${tpl.name}" sent automatically to ${dentistName} from ${scoringEmails.connection.email}.`);
           } else {
             // Manual mode — nothing sends by itself; nudge toward the case.
             toast.info(`Case scored ${CATEGORY_META[category].label} — manual sending is on, so email the dentist from the case's Conversation hub.`);
           }
+        }
+      }
+
+      // ── Automated WhatsApp — the same trigger event and the same recipient
+      // as the email above, sent from the lab's WhatsApp Business number using
+      // the message configured for this outcome. The channel is independent of
+      // the email connection: a lab can run WhatsApp with no mailbox linked.
+      // Nothing sends while the WhatsApp setting is off; an attempt made while
+      // the account is disconnected is recorded on the case as a failure.
+      if (category && whatsappComms.automation[category].enabled && whatsappComms.enabled) {
+        const tpl = findWhatsAppTemplate(category, whatsappComms.automation[category].templateId, whatsappComms.customTemplates);
+        const result = sendWhatsAppMessage({
+          caseId: record.id,
+          trigger: 'automated',
+          event: category,
+          recipientName: dentistName,
+          recipientAddress: whatsappNumberFor(dentistName),
+          body: fillTemplateVars(tpl.body, templateVars),
+        });
+        if (result.status === 'sent') {
+          toast.info(`Case scored ${CATEGORY_META[category].label} — "${tpl.name}" sent automatically to ${dentistName} on WhatsApp from ${result.sender}.`);
+        } else if (result.status === 'failed') {
+          toast.error(`Automated WhatsApp message for ${record.id} could not be sent — ${whatsappBlockReason(whatsappComms) === 'disconnected' ? 'no WhatsApp Business account is connected' : 'WhatsApp is unavailable'}. The failure is recorded on the case.`);
         }
       }
     }
@@ -2920,6 +3096,17 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             removeService(confirmRemoveId);
             setConfirmRemoveId(null);
           }}
+        />
+      )}
+
+      {/* ── Potential rescan — shown BEFORE the case is completed. Either
+          answer finishes the submission; only "Mark as Rescan" links it. ── */}
+      {rescanPrompt && (
+        <RescanDecisionModal
+          matches={rescanPrompt.matches}
+          onClose={() => setRescanPrompt(null)}
+          onContinueAsNew={() => { const p = rescanPrompt; setRescanPrompt(null); finalizeSubmission(p.record); }}
+          onMarkAsRescan={(match) => { const p = rescanPrompt; setRescanPrompt(null); finalizeSubmission(p.record, match); }}
         />
       )}
     </div>
