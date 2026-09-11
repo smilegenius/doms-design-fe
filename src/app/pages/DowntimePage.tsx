@@ -23,9 +23,10 @@ const SmileGeniusLogo = () => (
 // Placeholder maintenance window for the demo — date + time, with the zone
 // shown alongside so clients aren't left guessing.
 const WINDOW = {
-  started: { date: 'Fri, 11 Sep 2026', time: '22:00' },
-  expectedBack: { date: 'Fri, 11 Sep 2026', time: '23:30' },
-  timezone: 'IST (UTC+05:30)',
+  started: { date: 'Saturday, 12 September 2026', time: '10:00 PM' },
+  expectedBack: { date: 'Sunday, 13 September 2026', time: '1:00 AM' },
+  duration: 'approximately 3 hours',
+  timezone: 'UK Time (BST, UTC+01:00)',
 };
 
 const SUPPORT_EMAIL = 'support@smilegenius.com';
@@ -61,7 +62,7 @@ export default function DowntimePage() {
             </span>
             <h1 className="text-3xl sm:text-4xl font-bold text-[#030213] mb-3">We'll be back shortly</h1>
             <p className="text-sm text-[#717182] leading-relaxed max-w-md mx-auto">
-              Smile Genius is temporarily unavailable while we carry out scheduled maintenance.
+              The Smile Genius Portal will be unavailable for {WINDOW.duration} while we carry out scheduled maintenance.
             </p>
           </div>
 
