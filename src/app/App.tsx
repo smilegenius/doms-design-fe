@@ -8,6 +8,7 @@ import LoginPage from './pages/LoginPage';
 import InvitePage from './pages/InvitePage';
 import OnboardingPage from './pages/OnboardingPage';
 import PortalSelectPage from './pages/PortalSelectPage';
+import DowntimePage from './pages/DowntimePage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
 import LabApp from './LabApp';
@@ -415,6 +416,8 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/invite" element={<InvitePage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
+      {/* Client-facing flows (no auth) */}
+      <Route path="/downtime" element={<DowntimePage />} />
       <Route
         path="/supplier/*"
         element={

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Building2, ShieldCheck, ArrowRight, LogOut, Sparkles, UserPlus, LogIn, Stethoscope, FlaskConical } from 'lucide-react';
+import { Building2, ShieldCheck, ArrowRight, LogOut, Sparkles, UserPlus, LogIn, Stethoscope, FlaskConical, Wrench, Workflow } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const SmileGeniusLogo = () => (
@@ -100,6 +100,52 @@ function PortalGroup({
   );
 }
 
+// ─── Flows ───────────────────────────────────────────────────────────────────
+// Standalone pages that aren't tied to a portal (downtime, etc.). Each row
+// opens the flow directly — no sign-in needed.
+interface FlowOption {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  badge: string;
+  accent: string;
+  accentSoft: string;
+  onClick: () => void;
+}
+
+function FlowCard({ flow }: { flow: FlowOption }) {
+  return (
+    <button
+      onClick={flow.onClick}
+      className="group relative w-full text-left bg-white border border-[#E0E0E6] rounded-2xl p-5 overflow-hidden hover:shadow-xl hover:border-current transition-all"
+      style={{ color: flow.accent }}
+    >
+      <div
+        className="absolute inset-0 pointer-events-none opacity-50"
+        style={{ background: `radial-gradient(circle at top right, ${flow.accent}10, transparent 70%)` }}
+      />
+      <div className="relative flex items-center gap-3">
+        <div
+          className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: flow.accentSoft }}
+        >
+          {flow.icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-bold text-[#030213] leading-tight truncate">{flow.title}</h3>
+            <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full border bg-[#F0EFF6] text-[#717182] border-[#E0E0E6] flex-shrink-0">
+              {flow.badge}
+            </span>
+          </div>
+          <p className="text-xs text-[#717182] mt-0.5 leading-relaxed">{flow.description}</p>
+        </div>
+        <ArrowRight className="w-4 h-4 flex-shrink-0 group-hover:translate-x-0.5 transition-transform" />
+      </div>
+    </button>
+  );
+}
+
 export default function PortalSelectPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -168,6 +214,19 @@ export default function PortalSelectPage() {
       badgeTone: 'amber',
       cta: isAuthed ? 'Open admin' : 'Sign in to admin',
       onClick: () => (isAuthed ? navigate('/admin') : navigate('/login?portal=admin')),
+    },
+  ];
+
+  // ── Flows — standalone pages, not tied to a portal ──
+  const flows: FlowOption[] = [
+    {
+      title: 'Downtime page',
+      description: 'What clients see while the platform is under maintenance.',
+      icon: <Wrench className="w-5 h-5 text-[#E65100]" />,
+      badge: 'Client-facing',
+      accent: '#E65100',
+      accentSoft: '#FFF3E0',
+      onClick: () => navigate('/downtime'),
     },
   ];
 
@@ -245,6 +304,18 @@ export default function PortalSelectPage() {
             journeys={adminJourneys}
           />
         </div>
+
+        {/* Flows */}
+        <section className="w-full max-w-5xl mt-12">
+          <div className="flex items-center gap-2 mb-4">
+            <Workflow className="w-4 h-4 text-[#A59DFF]" />
+            <h2 className="text-base font-bold text-[#030213]">Flows</h2>
+            <span className="text-xs text-[#717182]">· Standalone pages outside the portals</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {flows.map((f) => <FlowCard key={f.title} flow={f} />)}
+          </div>
+        </section>
 
         {/* Footer hint */}
         <div className="mt-10 text-center">
