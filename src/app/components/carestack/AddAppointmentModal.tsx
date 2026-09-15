@@ -51,7 +51,7 @@ export default function AddAppointmentModal({
   const title = step === 'choose' ? 'Add Appointment' : step === 'link' ? 'Link an Existing Appointment' : 'Create New Appointment';
 
   return (
-    <Modal
+    <Modal zIndex="z-[120]"
       isOpen
       onClose={onClose}
       title={title}

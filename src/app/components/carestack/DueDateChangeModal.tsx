@@ -17,7 +17,7 @@ export default function DueDateChangeModal({
 }) {
   const [reason, setReason] = useState('');
   return (
-    <Modal
+    <Modal zIndex="z-[120]"
       isOpen
       onClose={onCancel}
       title="Change lab work due date"

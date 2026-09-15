@@ -10,9 +10,12 @@ interface ModalProps {
   children: ReactNode;
   footer?: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  /** Stacking layer — raise it (e.g. 'z-[120]') when the modal opens from
+      inside a side drawer (drawers sit at z-[100]). */
+  zIndex?: string;
 }
 
-export default function Modal({ isOpen, onClose, title, children, footer, size = 'md' }: ModalProps) {
+export default function Modal({ isOpen, onClose, title, children, footer, size = 'md', zIndex = 'z-50' }: ModalProps) {
   if (!isOpen) return null;
 
   const sizes = {
@@ -24,7 +27,7 @@ export default function Modal({ isOpen, onClose, title, children, footer, size =
 
   return (
     <ModalPortal>
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className={`fixed inset-0 ${zIndex} flex items-center justify-center`}>
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className={`relative bg-white rounded-xl shadow-xl w-full ${sizes[size]} mx-4 max-h-[90vh] flex flex-col`}>
         <div className="flex items-center justify-between p-6 border-b border-[#E0E0E6] flex-shrink-0">

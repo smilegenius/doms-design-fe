@@ -18,7 +18,7 @@ export default function ReceivedModal({
   const [receivedAt, setReceivedAt] = useState(nowLocalIso());
   const [notes, setNotes] = useState('');
   return (
-    <Modal
+    <Modal zIndex="z-[120]"
       isOpen
       onClose={onClose}
       title="Mark as received"

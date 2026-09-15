@@ -32,7 +32,7 @@ export default function CorrectDetailsModal({
   };
 
   return (
-    <Modal
+    <Modal zIndex="z-[120]"
       isOpen
       onClose={onClose}
       title={entity === 'patient' ? 'Correct patient details' : 'Correct dentist details'}

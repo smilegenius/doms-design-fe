@@ -7,8 +7,9 @@ import {
   Superscript, Subscript, Undo2, Redo2, Paperclip, Eye, Plus, Minus,
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply, Pencil,
-  Copy,
+  Copy, Plug, GitBranch,
 } from 'lucide-react';
+import SideDrawer from '../components/SideDrawer';
 import ModalPortal from '../components/ModalPortal';
 import UrgentBadge from '../components/UrgentBadge';
 import UrgentConfirmModal from '../components/UrgentConfirmModal';
@@ -38,7 +39,7 @@ import RelatedCasesCard, { RelationshipPill } from '../components/RelatedCasesCa
 import RescanDecisionModal from '../components/RescanDecisionModal';
 import type { Case as RescanCase } from './CasesPage';
 import { CURRENT_USER } from './CasesPage';
-import { latestDueDateChange, recordDueDateChange, recordReceipt, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
+import { ensureCaseValidation, latestDueDateChange, recordDueDateChange, recordReceipt, summariseCase, SUMMARY_META, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
 import type { CaseCareStack, CaseLike as CareStackCaseLike } from '../data/carestack';
 import CareStackCaseSection from '../components/carestack/CareStackCaseSection';
 import DueDateChangeModal from '../components/carestack/DueDateChangeModal';
@@ -3550,6 +3551,15 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const csComms = useCaseCommunications(caseData.id).filter(r => r.source === 'carestack');
   const [dueDateModal, setDueDateModal] = useState<{ previous: string; next: string } | null>(null);
   const [receivedModal, setReceivedModal] = useState<{ label?: string } | null>(null);
+  // Both live in side drawers (opened from the identity-card header) so the
+  // case page itself stays compact.
+  const [csDrawerOpen, setCsDrawerOpen] = useState(false);
+  const [relatedDrawerOpen, setRelatedDrawerOpen] = useState(false);
+  const csSummary = summariseCase(csRecord);
+  const csMeta = SUMMARY_META[csSummary];
+  // Validation runs as soon as the case is opened — not when the drawer is —
+  // so the header button reflects the live state straight away.
+  useEffect(() => { if (csEnabled) ensureCaseValidation(csCase); }, [csEnabled, caseData.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Completeness score from the case's real data — identical to the cases list.
   // Drives the "what's missing" messaging and the missing-info email/reply loop.
@@ -3618,6 +3628,41 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           Back to Cases
         </button>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Case at a glance: patient · practice, how it arrived, and the two
+              side-drawer entry points. Kept up here (not in the identity card
+              header) so that header carries only status / timeline / alerts. */}
+          {/* Received via — synced to the case source */}
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[#F3F3F5] text-[#5A5568] border border-[#E0E0E6]" title="How this case arrived">
+            {caseData.source === 'email'
+              ? <Mail className="w-3 h-3 text-[#717182]" />
+              : <Paperclip className="w-3 h-3 text-[#717182]" />}
+            {receivedVia}
+          </span>
+          {/* Conversation — opens the case-level side drawer (email + WhatsApp) */}
+          {(hasEmailThread || csComms.length > 0) && (
+            <button
+              onClick={() => setThreadOpen(true)}
+              title="Open the conversation with the dentist (email + WhatsApp)"
+              className="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#1565C0] border border-[#C8D8FC] bg-[#EEF4FF] hover:bg-[#DBEAFE] transition-colors"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              Conversation hub
+              {!replyReceived && <span className="w-1.5 h-1.5 rounded-full bg-[#D4183D]" />}
+            </button>
+          )}
+          {/* CareStack — mapping, appointment and sync log open in a side drawer. */}
+          {csEnabled && (
+            <button
+              onClick={() => setCsDrawerOpen(true)}
+              title="Open the CareStack integration for this case (mapping, appointment, sync log)"
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-opacity hover:opacity-80 ${csMeta.cls}`}
+            >
+              <Plug className="w-3.5 h-3.5" />
+              CareStack
+              <span className="font-normal opacity-80">· {csMeta.label}</span>
+            </button>
+          )}
+          <span className="hidden sm:block w-px h-6 bg-[#E0E0E6] mx-1" />
           {/* Completeness score + its follow-up action in ONE card — the score
               and "Email dentist" (or the thread state that replaces it) read
               as a single unit: score on the left, what-to-do-about-it right. */}
@@ -3775,8 +3820,17 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               entries. */}
           <CaseTimelinePill caseData={caseData} onClick={() => setTimelineOpen(true)} />
 
-          {/* Original / Rescan identity — only on cases in a relationship. */}
-          <RelationshipPill caseId={caseData.id} />
+          {/* Original / Rescan identity — only on cases in a relationship.
+              A button: the related cases themselves live in a side drawer. */}
+          {relationship !== 'none' && (
+            <button
+              onClick={() => setRelatedDrawerOpen(true)}
+              title="View related cases"
+              className="inline-flex items-center gap-1.5 rounded-full hover:opacity-80 transition-opacity"
+            >
+              <RelationshipPill caseId={caseData.id} />
+            </button>
+          )}
 
           {/* AI suggestion chip */}
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-[#FFF7ED] text-[#B45309] border border-[#FED7AA]">
@@ -3784,34 +3838,18 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             New case received from {caseData.practice}
           </span>
 
-          {/* Right side: collapsed patient hint + expand toggle + timeline pill */}
-          <div className="ml-auto flex items-center gap-3 flex-shrink-0">
-            {!detailsOpen && (
-              <span className="hidden sm:flex items-center gap-1.5 text-[11px] text-[#717182]">
-                <span className="font-medium text-[#030213]">{caseData.patientName}</span>
-                <span className="text-[#D4CEE1]">·</span>
-                <span className="truncate max-w-[120px]">{caseData.practice}</span>
-              </span>
-            )}
-            {/* Received via — always visible (incl. collapsed), synced to source */}
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[#F3F3F5] text-[#5A5568] border border-[#E0E0E6]" title="How this case arrived">
-              {caseData.source === 'email'
-                ? <Mail className="w-3 h-3 text-[#717182]" />
-                : <Paperclip className="w-3 h-3 text-[#717182]" />}
-              {receivedVia}
-            </span>
-            {/* Conversation — opens the case-level side drawer (email + WhatsApp) */}
-            {(hasEmailThread || csComms.length > 0) && (
-              <button
-                onClick={() => setThreadOpen(true)}
-                title="Open the conversation with the dentist (email + WhatsApp)"
-                className="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#1565C0] border border-[#C8D8FC] bg-[#EEF4FF] hover:bg-[#DBEAFE] transition-colors"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                Conversation hub
-                {!replyReceived && <span className="w-1.5 h-1.5 rounded-full bg-[#D4183D]" />}
-              </button>
-            )}
+          {/* Second line: who the case is for (left) + the details toggle
+              (right). The received-via pill and the drawer buttons
+              (Conversation hub, CareStack) sit in the top bar next to the
+              score card so this header carries only identity + status. */}
+          <div className="w-full flex items-center justify-between gap-3 mt-1">
+            <p className="flex items-center gap-2 min-w-0 text-[11px] font-medium">
+              <span className="text-[#030213] truncate">{caseData.patientName}</span>
+              <span className="text-[#D4CEE1]">·</span>
+              <span className="text-[#717182] truncate">{caseData.practice}</span>
+              <span className="text-[#D4CEE1] hidden sm:inline">·</span>
+              <span className="text-[#717182] truncate hidden sm:inline">{caseData.dentist}</span>
+            </p>
             <button
               onClick={() => setDetailsOpen(v => !v)}
               title={detailsOpen ? 'Collapse details' : 'Expand details'}
@@ -3895,13 +3933,6 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         )}
       </div>
 
-      {/* ── Related Cases — the relationship both sides of a rescan pair show. ── */}
-      {relationship !== 'none' && (
-        <div className="mx-6 mt-3">
-          <RelatedCasesCard caseId={caseData.id} onOpenCase={onOpenRelatedCase} />
-        </div>
-      )}
-
       {/* ── Status-override banner — shown when a user advanced this case while
             requirements were still missing (reason + who/when). ── */}
       {caseData.statusOverride && (
@@ -3919,19 +3950,6 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             )}
             <p className="text-[10px] text-[#A0895A] mt-1">Edited by {caseData.statusOverride.by} · {caseData.statusOverride.at}</p>
           </div>
-        </div>
-      )}
-
-      {/* ── CareStack Integration — mapping status, the CareStack appointment
-            and the sync log. Only while the group's integration is on. ── */}
-      {csEnabled && (
-        <div className="mx-6 mt-3">
-          <CareStackCaseSection
-            caseData={csCase}
-            onRequestShipmentDetails={onRequestShipmentDetails}
-            onMarkReceived={() => setReceivedModal({})}
-            currentUser={CURRENT_USER}
-          />
         </div>
       )}
 
@@ -4032,6 +4050,45 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           </div>
         </div>
         </ModalPortal>
+      )}
+
+      {/* CareStack side drawer — mapping status, the CareStack appointment and
+          the sync log. Opened from the "CareStack" button in the header. */}
+      {csEnabled && (
+        <SideDrawer
+          open={csDrawerOpen}
+          onClose={() => setCsDrawerOpen(false)}
+          title="CareStack Integration"
+          subtitle={`${caseData.id} · enabled by Smile Genius Group`}
+          icon={<Plug className="w-4 h-4 text-[#0F766E]" />}
+          iconBg="bg-[#ECFEFF]"
+        >
+          <CareStackCaseSection
+            variant="drawer"
+            caseData={csCase}
+            onRequestShipmentDetails={() => { setCsDrawerOpen(false); onRequestShipmentDetails?.(); }}
+            onMarkReceived={() => { setCsDrawerOpen(false); setReceivedModal({}); }}
+            currentUser={CURRENT_USER}
+          />
+        </SideDrawer>
+      )}
+
+      {/* Related cases side drawer — both sides of a rescan pair. Opened from
+          the relationship pill in the header. */}
+      {relationship !== 'none' && (
+        <SideDrawer
+          open={relatedDrawerOpen}
+          onClose={() => setRelatedDrawerOpen(false)}
+          title="Related cases"
+          subtitle={`${caseData.id} · ${caseData.patientName}`}
+          icon={<GitBranch className="w-4 h-4 text-[#7C3AED]" />}
+          iconBg="bg-[#F3EEFF]"
+        >
+          <RelatedCasesCard
+            caseId={caseData.id}
+            onOpenCase={(id) => { setRelatedDrawerOpen(false); onOpenRelatedCase?.(id); }}
+          />
+        </SideDrawer>
       )}
 
       {/* Lab Notes modal */}

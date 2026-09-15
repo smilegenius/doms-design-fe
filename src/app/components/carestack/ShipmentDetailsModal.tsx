@@ -35,7 +35,7 @@ export default function ShipmentDetailsModal({
   };
 
   return (
-    <Modal
+    <Modal zIndex="z-[120]"
       isOpen
       onClose={onClose}
       title="Shipment details"

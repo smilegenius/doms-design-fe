@@ -36,7 +36,7 @@ export default function AppointmentNotRequiredModal({
   };
 
   return (
-    <Modal
+    <Modal zIndex="z-[120]"
       isOpen
       onClose={onClose}
       title="Appointment Not Required"

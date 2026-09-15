@@ -22,13 +22,16 @@ import AppointmentNotRequiredModal from './AppointmentNotRequiredModal';
 // milestones arrive through the store from the status flow.
 
 export default function CareStackCaseSection({
-  caseData, onRequestShipmentDetails, onMarkReceived, currentUser = CS_CURRENT_USER,
+  caseData, onRequestShipmentDetails, onMarkReceived, currentUser = CS_CURRENT_USER, variant = 'card',
 }: {
   caseData: CaseLike;
   onRequestShipmentDetails?: () => void;
   /** "Mark as Received" — the practice confirms the lab work arrived. */
   onMarkReceived?: () => void;
   currentUser?: string;
+  /** 'card' = collapsible card inline on the page; 'drawer' = always-open body
+      inside a side drawer (the drawer supplies the title + status). */
+  variant?: 'card' | 'drawer';
 }) {
   const record = useCaseCareStack(caseData.id);
   const log = useCareStackLog(caseData.id);
@@ -37,7 +40,8 @@ export default function CareStackCaseSection({
   // Collapsed by default once the case is settled (linked / not required);
   // open while something needs the user's attention.
   const settled = summary === 'linked' || summary === 'not-required';
-  const [open, setOpen] = useState(!settled);
+  const inDrawer = variant === 'drawer';
+  const [open, setOpen] = useState(inDrawer || !settled);
   const [logOpen, setLogOpen] = useState(false);
   const [correct, setCorrect] = useState<'patient' | 'dentist' | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -55,8 +59,22 @@ export default function CareStackCaseSection({
   const awaitingReceipt = caseData.status === 'shipped' && !rec.receipt;
 
   return (
-    <div className="bg-white border border-[#E0E0E6] rounded-xl">
-      {/* Header */}
+    <div className={inDrawer ? 'bg-white border border-[#E0E0E6] rounded-xl' : 'bg-white border border-[#E0E0E6] rounded-xl'}>
+      {/* Header — in the drawer the panel title carries the name, so only the
+          status strip is shown here (not collapsible). */}
+      {inDrawer ? (
+        <div className="px-5 py-3 flex items-center gap-1.5 flex-wrap">
+          {(['patient', 'dentist', 'practice'] as const).map(k => (
+            <span key={k} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${MAPPING_PILL[rec[k].status]}`}>
+              {k === 'patient' ? 'Patient' : k === 'dentist' ? 'Dentist' : 'Practice'} · {MAPPING_LABEL[rec[k].status]}
+            </span>
+          ))}
+          <span className={`ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${meta.cls}`}>
+            {(summary === 'checking' || summary === 'searching') && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+            {meta.label}
+          </span>
+        </div>
+      ) : (
       <button
         onClick={() => setOpen(v => !v)}
         className="w-full px-5 py-3.5 flex items-center gap-3 text-left"
@@ -81,13 +99,14 @@ export default function CareStackCaseSection({
         </span>
         {open ? <ChevronUp className="w-4 h-4 text-[#A0A0B0] flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-[#A0A0B0] flex-shrink-0" />}
       </button>
+      )}
 
       {open && (
         <div className="border-t border-[#F0EFF6] px-5 py-4 space-y-5">
           {/* ── Mapping ── */}
           <div>
             <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest mb-2.5">Mapping</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className={`grid grid-cols-1 gap-3 ${inDrawer ? '' : 'md:grid-cols-3'}`}>
               <EntityRow
                 icon={<User className="w-3.5 h-3.5" />}
                 label="Patient"
