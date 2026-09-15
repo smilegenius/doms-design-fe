@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { ScoringEmailCategory } from './caseScoringEmails';
+import type { CareStackEmailEvent } from './carestack';
 import {
   BLOCK_REASON_TEXT,
   getWhatsAppSettings,
@@ -17,7 +18,9 @@ import {
 
 export type CommChannel = 'email' | 'whatsapp';
 export type CommTrigger = 'automated' | 'manual';
-export type CommStatus = 'sent' | 'failed';
+// 'queued' — held for a consolidated digest (CareStack "Appointment Required"
+// goes out end-of-day, not per case). Flips to 'sent' when the digest runs.
+export type CommStatus = 'sent' | 'failed' | 'queued';
 
 export interface CaseCommunication {
   id: string;
@@ -29,6 +32,8 @@ export interface CaseCommunication {
   /** Who it went to, and at which address / number. */
   recipientName: string;
   recipientAddress: string;
+  /** CC line, when the notification copies someone (e.g. the receptionist). */
+  cc?: string;
   /** The sending account — the lab's mailbox or WhatsApp Business number. */
   sender?: string;
   subject?: string;
@@ -38,6 +43,10 @@ export interface CaseCommunication {
   status: CommStatus;
   /** Why a failed send failed. Shown on the case timeline. */
   failureReason?: string;
+  /** Set on notifications raised by the CareStack integration. */
+  source?: 'carestack';
+  /** Which CareStack event fired this — see data/carestack.ts. */
+  csEvent?: CareStackEmailEvent;
 }
 
 const LS_KEY = 'cases.communications';
@@ -76,6 +85,20 @@ export function recordCommunication(input: Omit<CaseCommunication, 'id' | 'at'> 
   };
   commit([...records, rec]);
   return rec;
+}
+
+/** A queued (digest) message has now gone out. No-op if the id is unknown. */
+export function markCommunicationSent(id: string): CaseCommunication | undefined {
+  const rec = records.find(r => r.id === id);
+  if (!rec || rec.status === 'sent') return rec;
+  const next: CaseCommunication = { ...rec, status: 'sent', at: new Date().toISOString() };
+  commit(records.map(r => (r.id === id ? next : r)));
+  return next;
+}
+
+/** Demo reset — drop every CareStack-raised notification. */
+export function removeCareStackCommunications() {
+  commit(records.filter(r => r.source !== 'carestack'));
 }
 
 /** Everything sent (or attempted) on a case, newest last. */

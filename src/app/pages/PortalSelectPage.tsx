@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Building2, ShieldCheck, ArrowRight, LogOut, Sparkles, UserPlus, LogIn, Stethoscope, FlaskConical, Wrench, Workflow } from 'lucide-react';
+import { Building2, ShieldCheck, ArrowRight, LogOut, Sparkles, UserPlus, LogIn, Stethoscope, FlaskConical, Wrench, Workflow, Plug } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const SmileGeniusLogo = () => (
@@ -227,6 +227,17 @@ export default function PortalSelectPage() {
       accent: '#E65100',
       accentSoft: '#FFF3E0',
       onClick: () => navigate('/downtime'),
+    },
+    {
+      // CareStack integration epic. Opens the step-by-step walkthrough page,
+      // which deep-links into the exact clinic / admin screens for each step.
+      title: 'CareStack integration',
+      description: 'Step-by-step walkthrough for a DSO-enabled clinic — mapping, appointment linking, lab milestones and notifications.',
+      icon: <Plug className="w-5 h-5 text-[#0F766E]" />,
+      badge: 'Walkthrough',
+      accent: '#0F766E',
+      accentSoft: '#ECFEFF',
+      onClick: () => navigate('/flows/carestack'),
     },
   ];
 

@@ -44,6 +44,12 @@ import {
 } from '../data/rescanDetection';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
+import {
+  DueDateChange, formatStamp, hasReceipt, hasShipment, latestDueDateChange, recordAcceptance, recordReceipt,
+  useCareStackEnabled, useDueDateChanges,
+} from '../data/carestack';
+import CareStackStatusChip from '../components/carestack/CareStackStatusChip';
+import ShipmentDetailsModal from '../components/carestack/ShipmentDetailsModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -951,6 +957,25 @@ function OverrideTag({ override }: { override: StatusOverride }) {
   );
 }
 
+// Amber chip next to a delivery date the lab has moved — hover shows the
+// previous date, the reason (when given) and who changed it, when.
+function DueDateChangedTag({ change }: { change: DueDateChange }) {
+  const tip = `Previously ${change.previous ?? '—'} · ${change.reason ?? 'No reason given'} · changed by ${change.by} · ${formatStamp(change.at)}`;
+  return (
+    <span tabIndex={0} title={tip} className="group relative inline-flex ml-1.5 align-middle cursor-help focus:outline-none">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#FFF8E1] text-[#92400E] border border-[#FDE68A]">
+        <RefreshCw className="w-2.5 h-2.5" />
+        Changed
+      </span>
+      <span className="pointer-events-none absolute z-50 left-1/2 -translate-x-1/2 top-full mt-1 hidden group-hover:block group-focus:block bg-[#030213] text-white text-[10px] font-medium leading-snug px-2 py-1.5 rounded-md shadow-lg whitespace-normal w-56 text-left">
+        <span className="block"><span className="text-white/60">Previous</span> {change.previous ?? '—'} → <span className="font-semibold">{change.next}</span></span>
+        <span className="block mt-0.5"><span className="text-white/60">Reason</span> {change.reason ?? 'Not given'}</span>
+        <span className="block mt-0.5 text-white/60">{change.by} · {formatStamp(change.at)}</span>
+      </span>
+    </span>
+  );
+}
+
 // Checkbox with indeterminate support — used for bulk row selection. A parent
 // (case-level) checkbox shows the indeterminate dash when only some of its
 // sub-case services are selected.
@@ -1358,6 +1383,11 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // link to and open.
   const createdCases = useCreatedCases();
   const rescanLinks = useRescanLinks();
+  // CareStack integration (group-level flag). Drives the CareStack column and
+  // the milestone hooks below; the due-date history is flag-independent.
+  const csEnabled = useCareStackEnabled();
+  const dueDateChanges = useDueDateChanges();
+  const [shipmentModalCase, setShipmentModalCase] = useState<Case | null>(null);
   const [cases, setCases] = useState<Case[]>(() => {
     const base = caseViewLimit != null ? [upgradeDemoCase, ...mockCases] : mockCases;
     return [...getCreatedCases(), ...base];
@@ -1406,7 +1436,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   const [timeFilter, setTimeFilter] = useState<'all' | '1h' | '1d' | '7d'>('all');
 
   // ── Column visibility — saved per-user in localStorage so preferences persist ──
-  type ColId = 'status' | 'caseId' | 'createdAt' | 'updatedAt' | 'deliveryDate' | 'patient' | 'service' | 'score' | 'practice' | 'lab';
+  type ColId = 'status' | 'caseId' | 'createdAt' | 'updatedAt' | 'deliveryDate' | 'patient' | 'service' | 'score' | 'practice' | 'lab' | 'carestack';
   const DEFAULT_COLS: Record<ColId, boolean> = {
     status: true,
     caseId: true,
@@ -1418,6 +1448,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     score: true,
     practice: true,       // merged "Practice / Dentist" column
     lab: false,           // off by default — opt-in
+    carestack: true,      // only rendered while the CareStack integration is on
   };
   const COL_LABELS: Record<ColId, string> = {
     status: 'Status',
@@ -1425,11 +1456,14 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     caseId: 'Case ID',
     createdAt: 'Created On',
     updatedAt: 'Updated On',
-    deliveryDate: 'Delivery Date',
+    // One column for the date the lab is working to — the requested delivery
+    // date, or the lab's revised due date (flagged "Changed") when it moved.
+    deliveryDate: 'Delivery / Due Date',
     patient: 'Patient Name',
     service: 'Service(s)',
     practice: 'Practice / Dentist',
     lab: 'Lab',
+    carestack: 'CareStack',
   };
   const [visibleCols, setVisibleCols] = useState<Record<ColId, boolean>>(() => {
     if (typeof window === 'undefined') return DEFAULT_COLS;
@@ -1714,6 +1748,21 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     setSelectedCase(prev => prev && prev.id === c.id ? { ...prev, status: toStatus, statusOverride: override ?? prev.statusOverride } : prev);
     if (override) toast.success(`${c.id} → ${STATUS_LABEL[toStatus]} (override recorded)`);
     else toast.success(`${c.id} → ${STATUS_LABEL[toStatus]}`);
+    // CareStack milestones — mirrored onto the linked appointment as notes and
+    // emailed to the practice. Accepted by Lab = In Production; Shipped asks
+    // for courier/tracking; Received by Practice = Delivered.
+    if (csEnabled && toStatus !== c.status) {
+      if (toStatus === 'in-production') recordAcceptance(c, CURRENT_USER);
+      if (toStatus === 'shipped' && !hasShipment(c.id)) setShipmentModalCase({ ...c, status: 'shipped' });
+      if (toStatus === 'delivered' && !hasReceipt(c.id)) recordReceipt(c, { receivedAt: new Date().toISOString(), receivedBy: CURRENT_USER });
+    }
+  }
+
+  // Delivery / due date edited on the detail page — keep list + open snapshot
+  // in step (the CareStack history + notifications are recorded by the caller).
+  function applyDeliveryDateChange(c: Case, next: string) {
+    setCases(prev => prev.map(x => x.id === c.id ? { ...x, requestedDelivery: next || null } : x));
+    setSelectedCase(prev => prev && prev.id === c.id ? { ...prev, requestedDelivery: next || null } : prev);
   }
 
   // Missing requirements for the case in the status modal — drives whether an
@@ -1792,6 +1841,8 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           onArchiveToggle={() => toggleArchive(selectedCase)}
           onRequestStatusChange={() => setStatusModalCase(selectedCase)}
           onSetStatus={(toStatus) => applyStatusChange(selectedCase, toStatus)}
+          onDeliveryDateChange={(next) => applyDeliveryDateChange(selectedCase, next)}
+          onRequestShipmentDetails={() => setShipmentModalCase(selectedCase)}
           showOfflineLabNotice={showOfflineLabNotice}
           showConnectEmailNotice={showConnectEmailNotice}
           allCases={cases}
@@ -1802,6 +1853,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
             onCaseSelected?.(target.id);
           }}
         />
+        {shipmentModalCase && (
+          <ShipmentDetailsModal caseData={shipmentModalCase} onClose={() => setShipmentModalCase(null)} currentUser={CURRENT_USER} />
+        )}
         {statusModalCase && (
           <StatusChangeModal
             caseData={statusModalCase}
@@ -2020,7 +2074,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                     </th>
                   )}
                   {visibleCols.deliveryDate && (
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Delivery Date</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Delivery / Due Date</th>
+                  )}
+                  {csEnabled && visibleCols.carestack && (
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">CareStack</th>
                   )}
                   {visibleCols.patient && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Patient</th>
@@ -2050,7 +2107,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                         <div className="absolute right-0 top-full mt-1 z-30 w-64 bg-white border border-[#E0E0E6] rounded-xl shadow-2xl py-2">
                           <div className="px-3 py-1.5 text-[10px] font-bold text-[#A0A0B0] uppercase tracking-widest">Columns</div>
                           <div className="max-h-[260px] overflow-y-auto">
-                            {(Object.keys(COL_LABELS) as ColId[]).map((id) => (
+                            {(Object.keys(COL_LABELS) as ColId[]).filter(id => id !== 'carestack' || csEnabled).map((id) => (
                               <button
                                 key={id}
                                 type="button"
@@ -2084,7 +2141,11 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
               </thead>
               <tbody>
                 {paginated.map(c => {
-                  const overdue = isOverdue(c.requestedDelivery);
+                  // The lab's latest due-date change is the date the case is
+                  // working to — it wins over the original requested date.
+                  const dueDateChange = latestDueDateChange(c.id, dueDateChanges);
+                  const effectiveDelivery = dueDateChange?.next ?? c.requestedDelivery;
+                  const overdue = isOverdue(effectiveDelivery);
                   const isExpanded = expandedRows.has(c.id);
                   const isMulti = c.serviceItems.length > 1;
                   const caseScore = scoreCase(c);
@@ -2179,11 +2240,17 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                       )}
                       {visibleCols.deliveryDate && (
                         <td className={`px-4 py-3 whitespace-nowrap text-xs ${lockBlur}`}>
-                          {c.requestedDelivery ? (
+                          {effectiveDelivery ? (
                             overdue
-                              ? <span className="font-semibold text-[#D4183D]">{c.requestedDelivery}</span>
-                              : <span className="text-[#030213]">{c.requestedDelivery}</span>
+                              ? <span className="font-semibold text-[#D4183D]">{effectiveDelivery}</span>
+                              : <span className="text-[#030213]">{effectiveDelivery}</span>
                           ) : <span className="text-[#B0B0C0]">—</span>}
+                          {dueDateChange && <DueDateChangedTag change={dueDateChange} />}
+                        </td>
+                      )}
+                      {csEnabled && visibleCols.carestack && (
+                        <td className={`px-4 py-3 whitespace-nowrap ${lockBlur}`}>
+                          <CareStackStatusChip caseId={c.id} />
                         </td>
                       )}
                       {visibleCols.patient && (
@@ -2329,6 +2396,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                         )}
                         {visibleCols.practice  && <td className="px-4 py-2" />}
                         {visibleCols.lab       && <td className="px-4 py-2" />}
+                        {csEnabled && visibleCols.carestack && <td className="px-4 py-2" />}
                         <td className="px-4 py-2" />
                       </tr>
                     ))}
@@ -2360,7 +2428,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
             onClick={() => setGridMenuOpen(null)}
           >
             {paginated.map(c => {
-              const overdue = isOverdue(c.requestedDelivery);
+              const dueDateChange = latestDueDateChange(c.id, dueDateChanges);
+              const effectiveDelivery = dueDateChange?.next ?? c.requestedDelivery;
+              const overdue = isOverdue(effectiveDelivery);
               const caseScore = scoreCase(c);
               return (
                 <div
@@ -2485,10 +2555,19 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                       <span className="text-[#8B8B9E]">Score</span>
                       <ScoreBadge score={caseScore} size="xs" onFix={onConfigureScoring} />
                     </div>
-                    {c.requestedDelivery && (
+                    {effectiveDelivery && (
                       <div className="flex items-center justify-between">
-                        <span className="text-[#8B8B9E]">Delivery Date</span>
-                        <span className={overdue ? 'font-semibold text-[#D4183D]' : 'text-[#5A5568]'}>{c.requestedDelivery}</span>
+                        <span className="text-[#8B8B9E]">Delivery / Due Date</span>
+                        <span className={overdue ? 'font-semibold text-[#D4183D]' : 'text-[#5A5568]'}>
+                          {effectiveDelivery}
+                          {dueDateChange && <DueDateChangedTag change={dueDateChange} />}
+                        </span>
+                      </div>
+                    )}
+                    {csEnabled && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#8B8B9E]">CareStack</span>
+                        <CareStackStatusChip caseId={c.id} />
                       </div>
                     )}
                   </div>
@@ -2548,6 +2627,11 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           }}
           onClose={() => setOrderFormCase(null)}
         />
+      )}
+
+      {/* CareStack — shipment details captured when a row moves to Shipped. */}
+      {shipmentModalCase && (
+        <ShipmentDetailsModal caseData={shipmentModalCase} onClose={() => setShipmentModalCase(null)} currentUser={CURRENT_USER} />
       )}
 
       {/* Change-status modal — opened from a row's "Change status" action. When

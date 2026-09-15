@@ -9,6 +9,7 @@ import InvitePage from './pages/InvitePage';
 import OnboardingPage from './pages/OnboardingPage';
 import PortalSelectPage from './pages/PortalSelectPage';
 import DowntimePage from './pages/DowntimePage';
+import CareStackFlowPage from './pages/CareStackFlowPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
 import LabApp from './LabApp';
@@ -418,6 +419,8 @@ export default function App() {
       <Route path="/onboarding" element={<OnboardingPage />} />
       {/* Client-facing flows (no auth) */}
       <Route path="/downtime" element={<DowntimePage />} />
+      {/* Flow walkthroughs — step-by-step index pages that deep-link into the portals */}
+      <Route path="/flows/carestack" element={<CareStackFlowPage />} />
       <Route
         path="/supplier/*"
         element={

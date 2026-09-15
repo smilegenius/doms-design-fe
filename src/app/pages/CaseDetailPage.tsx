@@ -37,6 +37,12 @@ import { WHATSAPP_DEMO_CASE_ID } from './CasesPage';
 import RelatedCasesCard, { RelationshipPill } from '../components/RelatedCasesCard';
 import RescanDecisionModal from '../components/RescanDecisionModal';
 import type { Case as RescanCase } from './CasesPage';
+import { CURRENT_USER } from './CasesPage';
+import { latestDueDateChange, recordDueDateChange, recordReceipt, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
+import type { CaseCareStack, CaseLike as CareStackCaseLike } from '../data/carestack';
+import CareStackCaseSection from '../components/carestack/CareStackCaseSection';
+import DueDateChangeModal from '../components/carestack/DueDateChangeModal';
+import ReceivedModal from '../components/carestack/ReceivedModal';
 import {
   detectRescanMatches,
   linkFor,
@@ -235,6 +241,12 @@ interface CaseDetailPageProps {
       business email connected, show the "Connect Email" notice (automated
       case scoring emails can't be sent until an account is connected). */
   showConnectEmailNotice?: boolean;
+  /** The delivery / due date was edited on the identity card — the host list
+      keeps its record in step. */
+  onDeliveryDateChange?: (next: string) => void;
+  /** CareStack — open the shipment-details capture for this case (the case is
+      Shipped but courier / tracking haven't been recorded yet). */
+  onRequestShipmentDetails?: () => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -483,12 +495,15 @@ function CommunicationTimelineEntries({ caseId }: { caseId: string }) {
               </span>
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-[#030213] leading-relaxed">
-                  {failed ? 'Failed to send' : 'Sent'} {wa ? 'WhatsApp message' : 'email'} to {c.recipientName}
-                  <span className="font-normal text-[#717182]"> · {c.trigger === 'automated' ? 'Automated' : 'Manual'}</span>
+                  {failed ? 'Failed to send' : c.status === 'queued' ? 'Queued' : 'Sent'} {wa ? 'WhatsApp message' : 'email'} to {c.recipientName}
+                  <span className="font-normal text-[#717182]"> · {c.trigger === 'automated' ? 'Automated' : 'Manual'}{c.source === 'carestack' ? ' · CareStack' : ''}</span>
                 </p>
+                {c.subject && <p className="text-[11px] text-[#5A5568] mt-0.5 truncate" title={c.subject}>{c.subject}</p>}
                 <p className="text-[10px] text-[#A0A0B0] mt-0.5">
                   {stamp} · {c.recipientAddress}
+                  {c.cc ? ` · cc ${c.cc}` : ''}
                   {c.sender ? ` · from ${c.sender}` : ''}
+                  {c.status === 'queued' ? ' · end-of-day digest' : ''}
                 </p>
                 {failed && c.failureReason && (
                   <p className="text-[10px] text-[#B91C1C] mt-0.5">{c.failureReason}</p>
@@ -1298,11 +1313,14 @@ function CaseSummaryOverview({
   caseData,
   onSelectService,
   onOpenTimeline,
+  onMarkReceived,
 }: {
   serviceItems: ServiceItem[];
   caseData: CaseForDetail;
   onSelectService: (id: string) => void;
   onOpenTimeline?: () => void;
+  /** "Mark as Received" — the host confirms receipt (date/time, user, notes). */
+  onMarkReceived?: (si: ServiceItem) => void;
 }) {
   // Per-card status state — starts from the service item's initial status
   const [cardStatuses, setCardStatuses] = useState<Record<string, CaseStatus>>(
@@ -1496,7 +1514,7 @@ function CaseSummaryOverview({
                   </span>
                 ) : (
                   <button
-                    onClick={(e) => { e.stopPropagation(); /* future: update status inline */ }}
+                    onClick={(e) => { e.stopPropagation(); onMarkReceived?.(si); }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm"
                   >
                     <Check className="w-3.5 h-3.5" />
@@ -1727,6 +1745,8 @@ interface ConvMsg {
   // Flagged urgent by the sender — badged in the thread and (in the real app)
   // escalates reminder notifications until the recipient replies.
   urgent?: boolean;
+  /** Sender badge override — e.g. "CareStack" for integration notifications. */
+  tag?: string;
 }
 
 // First meaningful line of an email body — the quoted preview in replies.
@@ -1776,7 +1796,7 @@ function ChannelBubble({ msg, showChannel }: { msg: ConvMsg; showChannel?: boole
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-1 flex-wrap">
           <span className="text-xs font-semibold text-[#030213]">{msg.name}</span>
-          <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-px rounded ${out ? 'bg-[#EEF4FF] text-[#1565C0]' : 'bg-[#F3F3F5] text-[#717182]'}`}>{out ? 'Lab' : 'Dentist'}</span>
+          <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-px rounded ${msg.tag ? 'bg-[#ECFEFF] text-[#0F766E]' : out ? 'bg-[#EEF4FF] text-[#1565C0]' : 'bg-[#F3F3F5] text-[#717182]'}`}>{msg.tag ?? (out ? 'Lab' : 'Dentist')}</span>
           {msg.urgent && <UrgentBadge />}
           {showChannel && (
             <span className={`inline-flex items-center gap-0.5 text-[9px] font-semibold ${wa ? 'text-[#15803D]' : 'text-[#1565C0]'}`}>
@@ -1892,7 +1912,24 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
     return () => cancelAnimationFrame(raf);
   }, [msgs, activeTab]);
 
-  if (!score.applicable) {
+  // CareStack notifications (Appointment Required, Accepted, Shipped,
+  // Received, Due Date Changed) are recorded on the case, so they show in the
+  // Email tab alongside the scoring thread — read-only, tagged "CareStack".
+  const csEmails = useCaseCommunications(caseData.id).filter(r => r.channel === 'email' && r.source === 'carestack');
+  const csMsgs: ConvMsg[] = csEmails.map(r => {
+    const when = new Date(r.at);
+    const ok = !Number.isNaN(when.getTime());
+    return {
+      id: r.id, channel: 'email', dir: 'out', name: 'Smile Genius', initials: 'SG',
+      date: ok ? when.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : r.at,
+      time: ok ? when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '',
+      subject: r.subject,
+      body: `To: ${r.recipientName}${r.cc ? `\nCc: ${r.cc}` : ''}\n\n${r.body}`,
+      tag: r.status === 'queued' ? 'CareStack · queued' : 'CareStack',
+    };
+  });
+
+  if (!score.applicable && csMsgs.length === 0) {
     return (
       <div className="bg-white border border-[#E0E0E6] rounded-xl p-8 flex flex-col items-center text-center">
         <span className="w-10 h-10 rounded-full bg-[#F0FDF4] inline-flex items-center justify-center mb-3"><CheckCircle2 className="w-5 h-5 text-[#15803D]" /></span>
@@ -1902,9 +1939,10 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
     );
   }
 
-  const emailMsgs = msgs.filter(m => m.channel === 'email');
-  const waMsgs = msgs.filter(m => m.channel === 'whatsapp');
-  const shown = activeTab === 'email' ? emailMsgs : activeTab === 'whatsapp' ? waMsgs : msgs;
+  const allMsgs = csMsgs.length ? [...msgs, ...csMsgs] : msgs;
+  const emailMsgs = allMsgs.filter(m => m.channel === 'email');
+  const waMsgs = allMsgs.filter(m => m.channel === 'whatsapp');
+  const shown = activeTab === 'email' ? emailMsgs : activeTab === 'whatsapp' ? waMsgs : allMsgs;
   const hasReply = msgs.some(m => m.channel === 'email' && m.dir === 'in');
 
   // Follow-up emails thread under the original subject ("Re: …") and quote
@@ -2103,7 +2141,7 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
   };
 
   const tabs: { id: 'latest' | 'email' | 'whatsapp' | 'ai'; label: string; count: number | null }[] = [
-    { id: 'latest', label: 'Latest', count: msgs.length },
+    { id: 'latest', label: 'Latest', count: allMsgs.length },
     { id: 'email', label: 'Email', count: emailMsgs.length },
     { id: 'whatsapp', label: 'WhatsApp', count: waMsgs.length },
     { id: 'ai', label: 'AI', count: null },
@@ -2601,11 +2639,15 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
   );
 }
 
-function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
+function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onMarkReceived, shipment }: {
   service: ServiceItem;
   caseData: CaseForDetail;
   onOpenNotes: () => void;
   onOpenFullView: () => void;
+  /** "Mark as Received" on a phase — the host confirms receipt. */
+  onMarkReceived?: (label: string) => void;
+  /** Shipment recorded through the CareStack flow — fills the Shipping sub-tab. */
+  shipment?: CaseCareStack['shipment'];
 }) {
   const [subTab, setSubTab] = useState<ServiceSubTab>('details');
   // ── Stage / phase orders (denture catalog · aligner phasing) ────────────
@@ -2937,7 +2979,10 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
                                   Received
                                 </span>
                               ) : (
-                                <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm">
+                                <button
+                                  onClick={() => onMarkReceived?.(`${service.name} · ${phase.label}`)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm"
+                                >
                                   <Check className="w-3.5 h-3.5" />
                                   Mark as Received
                                 </button>
@@ -3014,7 +3059,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView }: {
           </>
         )}
         {subTab === 'invoice'  && <InvoiceTab  caseId={caseData.id} />}
-        {subTab === 'shipping' && <ShippingTab />}
+        {subTab === 'shipping' && <ShippingTab shipment={shipment} serviceName={service.name} />}
       </div>
       </div>
 
@@ -3366,7 +3411,7 @@ function InvoiceTab({ caseId }: { caseId: string }) {
 
 // ─── Shipping Tab ─────────────────────────────────────────────────────────────
 
-function ShippingTab() {
+function ShippingTab({ shipment, serviceName }: { shipment?: CaseCareStack['shipment']; serviceName?: string }) {
   return (
     <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
       <div className="grid grid-cols-5 px-5 py-3 border-b border-[#F0EFF6] bg-[#F8F9FC]">
@@ -3374,12 +3419,31 @@ function ShippingTab() {
           <p key={h} className="text-[10px] font-semibold text-[#A0A0B0] uppercase tracking-wider">{h}</p>
         ))}
       </div>
-      <div className="flex flex-col items-center justify-center py-16 gap-3">
-        <div className="w-16 h-16 rounded-2xl bg-[#F0EFF6] flex items-center justify-center">
-          <MapPin className="w-8 h-8 text-[#C8C0F0]" />
+      {shipment ? (
+        <>
+          <div className="grid grid-cols-5 px-5 py-3 items-center">
+            <p className="text-xs font-semibold text-[#030213] font-mono">{shipment.trackingNumber || '—'}</p>
+            <p className="text-xs text-[#5A5568]">{serviceName ?? '—'}</p>
+            <p className="text-xs text-[#5A5568]">{shipment.courier}</p>
+            <p className="text-xs">
+              {shipment.trackingUrl
+                ? <a href={shipment.trackingUrl} target="_blank" rel="noreferrer" className="text-[#4D8EF7] font-semibold hover:underline">Track parcel</a>
+                : <span className="text-[#A0A0B0]">—</span>}
+            </p>
+            <p className="text-xs text-[#030213] tabular-nums">{shipment.shipmentDate}</p>
+          </div>
+          <p className="px-5 py-2.5 border-t border-[#F0EFF6] text-[10px] text-[#A0A0B0]">
+            Expected delivery {shipment.expectedDelivery || '—'} · recorded by {shipment.by} · {new Date(shipment.at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          </p>
+        </>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-16 gap-3">
+          <div className="w-16 h-16 rounded-2xl bg-[#F0EFF6] flex items-center justify-center">
+            <MapPin className="w-8 h-8 text-[#C8C0F0]" />
+          </div>
+          <p className="text-xs text-[#A0A0B0]">No shipping details attached</p>
         </div>
-        <p className="text-xs text-[#A0A0B0]">No shipping details attached</p>
-      </div>
+      )}
     </div>
   );
 }
@@ -3393,10 +3457,12 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
-export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase }: CaseDetailPageProps) {
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onDeliveryDateChange, onRequestShipmentDetails }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
-  const [deliveryDate, setDeliveryDate] = useState(caseData.requestedDelivery ?? '');
+  // The lab's latest due-date change (if any) is the date the case is working
+  // to — same rule as the Delivery / Due Date column on the list.
+  const [deliveryDate, setDeliveryDate] = useState(latestDueDateChange(caseData.id)?.next ?? caseData.requestedDelivery ?? '');
   // Conversion helpers — the rest of the app uses "DD-MMM-YYYY"; the date input expects ISO.
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] as const;
   const toIsoDate = (d: string): string => {
@@ -3469,6 +3535,21 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // sending mode. Reactive: the banner below disappears the moment an account
   // is connected, and "Email dentist" honours Automatic vs Manual sending.
   const { connection: emailConnection, sendMode: emailSendMode } = useCaseScoringEmails();
+
+  // ── CareStack integration ──────────────────────────────────────────────────
+  // Group-level flag. While on: the CareStack section renders, delivery-date
+  // edits go through the due-date-change modal, and "Mark as Received"
+  // captures receipt details before the case moves to Delivered.
+  const csEnabled = useCareStackEnabled();
+  const csRecord = useCaseCareStack(caseData.id);
+  const csCase: CareStackCaseLike = {
+    id: caseData.id, patientName: caseData.patientName, practice: caseData.practice, dentist: caseData.dentist,
+    lab: caseData.lab ?? '', services: caseData.services, createdAt: caseData.createdAt,
+    requestedDelivery: caseData.requestedDelivery, status: caseData.status, source: caseData.source, scanner: caseData.scanner,
+  };
+  const csComms = useCaseCommunications(caseData.id).filter(r => r.source === 'carestack');
+  const [dueDateModal, setDueDateModal] = useState<{ previous: string; next: string } | null>(null);
+  const [receivedModal, setReceivedModal] = useState<{ label?: string } | null>(null);
 
   // Completeness score from the case's real data — identical to the cases list.
   // Drives the "what's missing" messaging and the missing-info email/reply loop.
@@ -3720,7 +3801,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               {receivedVia}
             </span>
             {/* Conversation — opens the case-level side drawer (email + WhatsApp) */}
-            {hasEmailThread && (
+            {(hasEmailThread || csComms.length > 0) && (
               <button
                 onClick={() => setThreadOpen(true)}
                 title="Open the conversation with the dentist (email + WhatsApp)"
@@ -3791,7 +3872,14 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               <input
                 type="date"
                 value={toIsoDate(deliveryDate)}
-                onChange={(e) => setDeliveryDate(fromIsoDate(e.target.value))}
+                onChange={(e) => {
+                  const next = fromIsoDate(e.target.value);
+                  // With CareStack on, a real change is a due-date change: capture
+                  // the reason and mirror it (note + email) before committing.
+                  if (csEnabled && next && next !== deliveryDate) { setDueDateModal({ previous: deliveryDate, next }); return; }
+                  setDeliveryDate(next);
+                  onDeliveryDateChange?.(next);
+                }}
                 className={`w-full text-xs px-2 py-1.5 rounded-md border outline-none transition-colors ${
                   missingDeliveryDate
                     ? 'border-[#FECDD3] bg-[#FFF1F2] focus:border-[#D4183D]'
@@ -3831,6 +3919,19 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             )}
             <p className="text-[10px] text-[#A0895A] mt-1">Edited by {caseData.statusOverride.by} · {caseData.statusOverride.at}</p>
           </div>
+        </div>
+      )}
+
+      {/* ── CareStack Integration — mapping status, the CareStack appointment
+            and the sync log. Only while the group's integration is on. ── */}
+      {csEnabled && (
+        <div className="mx-6 mt-3">
+          <CareStackCaseSection
+            caseData={csCase}
+            onRequestShipmentDetails={onRequestShipmentDetails}
+            onMarkReceived={() => setReceivedModal({})}
+            currentUser={CURRENT_USER}
+          />
         </div>
       )}
 
@@ -3888,6 +3989,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             caseData={caseData}
             onSelectService={(id) => setTopTab(id)}
             onOpenTimeline={() => setTimelineOpen(true)}
+            onMarkReceived={(si) => setReceivedModal({ label: si.name })}
           />
         </div>
       ) : (
@@ -3900,6 +4002,8 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 caseData={caseData}
                 onOpenNotes={() => setNotesOpen(true)}
                 onOpenFullView={() => setFullViewOpen(true)}
+                onMarkReceived={(label) => setReceivedModal({ label })}
+                shipment={csRecord?.shipment}
               />
             : null;
         })()
@@ -3951,6 +4055,41 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
       {/* Case Timeline modal — opens from the compact pill in the identity card */}
       {timelineOpen && (
         <CaseTimelineModal caseData={caseData} onClose={() => setTimelineOpen(false)} />
+      )}
+
+      {/* CareStack — due-date change: reason → record → note (if linked) → email.
+          Cancel leaves the date untouched (the input re-renders from state). */}
+      {dueDateModal && (
+        <DueDateChangeModal
+          previous={dueDateModal.previous}
+          next={dueDateModal.next}
+          onCancel={() => setDueDateModal(null)}
+          onConfirm={(reason) => {
+            const { previous, next } = dueDateModal;
+            setDeliveryDate(next);
+            onDeliveryDateChange?.(next);
+            recordDueDateChange({ ...csCase, requestedDelivery: next }, { previous: previous || null, next, reason }, CURRENT_USER);
+            setDueDateModal(null);
+            toast.success(`Due date updated to ${next} — practice notified`);
+          }}
+        />
+      )}
+
+      {/* Mark as Received — confirm receipt, then the case moves to Delivered. */}
+      {receivedModal && (
+        <ReceivedModal
+          caseId={caseData.id}
+          patientName={caseData.patientName}
+          serviceLabel={receivedModal.label}
+          currentUser={CURRENT_USER}
+          onClose={() => setReceivedModal(null)}
+          onConfirm={({ receivedAt, notes }) => {
+            if (csEnabled) recordReceipt(csCase, { receivedAt, receivedBy: CURRENT_USER, notes });
+            onSetStatus?.('delivered');
+            setReceivedModal(null);
+            toast.success(`${caseData.id} marked as received`);
+          }}
+        />
       )}
 
       {/* Rescan decision — the user's call, never the system's. */}

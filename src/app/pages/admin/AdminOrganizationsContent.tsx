@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Search, X, Check, ChevronDown, MoreVertical, Building2, FlaskConical,
   Download, Upload, UploadCloud, Users, Stethoscope, AlertTriangle,
@@ -8,6 +9,7 @@ import ModalPortal from '../../components/ModalPortal';
 import { useToast } from '../../context/ToastContext';
 import { mockPractices, mockStaffMembers, Practice, StaffMember } from '../../data/clinicsData';
 import { mockSuppliers } from '../../data/suppliersData';
+import CareStackIntegrationsTab from '../../components/carestack/CareStackIntegrationsTab';
 
 // ─── Organizations overview (Super Admin) ────────────────────────────────────
 // Mirrors the production admin's Organizations screen: one table listing every
@@ -247,7 +249,9 @@ function Field({ label, value }: { label: string; value?: string }) {
 }
 
 // ─── Org detail modal ────────────────────────────────────────────────────────
-function OrgDetailModal({ org, onClose }: { org: Organization; onClose: () => void }) {
+type OrgDetailTab = 'details' | 'hierarchy' | 'integrations';
+
+function OrgDetailModal({ org, onClose, initialTab }: { org: Organization; onClose: () => void; initialTab?: OrgDetailTab }) {
   const { toast } = useToast();
   const isGroup = org.type === 'dental-group';
   const m = STATUS_META[org.status];
@@ -255,7 +259,10 @@ function OrgDetailModal({ org, onClose }: { org: Organization; onClose: () => vo
 
   // Modal-level tabs (dental groups only): Details = the production view;
   // DSO Hierarchy = the onboarding implementation (hierarchy + favourites).
-  const [detailTab, setDetailTab] = useState<'details' | 'hierarchy'>('details');
+  // Integrations = group-level connectors (CareStack) — configured once per
+  // DSO, never per clinic. `initialTab` lets a deep link open straight onto
+  // a tab (e.g. /admin?org=org-dso-1&tab=integrations).
+  const [detailTab, setDetailTab] = useState<OrgDetailTab>(isGroup && initialTab ? initialTab : 'details');
   // DSO hierarchy tab + search
   const [tab, setTab] = useState<'clinics' | 'dentists' | 'users'>('clinics');
   const [query, setQuery] = useState('');
@@ -337,8 +344,9 @@ function OrgDetailModal({ org, onClose }: { org: Organization; onClose: () => vo
           {isGroup && (
             <div className="px-6 sm:px-8 pt-2 flex items-center gap-1 border-b border-[#F0EFF6] flex-wrap">
               {([
-                { id: 'details',   label: 'Details' },
-                { id: 'hierarchy', label: 'DSO Hierarchy' },
+                { id: 'details',      label: 'Details' },
+                { id: 'hierarchy',    label: 'DSO Hierarchy' },
+                { id: 'integrations', label: 'Integrations' },
               ] as const).map(t => (
                 <button
                   key={t.id}
@@ -403,6 +411,11 @@ function OrgDetailModal({ org, onClose }: { org: Organization; onClose: () => vo
               </div>
             </div>
             </>)}
+
+            {/* ── Integrations tab — CareStack, configured at group level ── */}
+            {isGroup && detailTab === 'integrations' && (
+              <CareStackIntegrationsTab org={{ id: org.id, name: org.name }} clinics={DSO_CLINICS} dentists={DSO_DENTISTS} />
+            )}
 
             {/* ── DSO Hierarchy tab — the onboarding implementation ── */}
             {isGroup && detailTab === 'hierarchy' && (
@@ -732,6 +745,18 @@ export default function AdminOrganizationsContent() {
   const [typeFilter, setTypeFilter] = useState<'all' | OrgType>('all');
   const [selected, setSelected] = useState<Organization | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // Deep link: ?org=<id>&tab=<details|hierarchy|integrations> opens that
+  // organisation's modal on the given tab (used by the flow walkthroughs).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepOrgId = searchParams.get('org');
+  const deepTabParam = searchParams.get('tab');
+  const deepTab: OrgDetailTab | undefined =
+    deepTabParam === 'hierarchy' || deepTabParam === 'integrations' || deepTabParam === 'details' ? deepTabParam : undefined;
+  useEffect(() => {
+    if (!deepOrgId) return;
+    const o = ORGANIZATIONS.find(x => x.id === deepOrgId);
+    if (o) setSelected(o);
+  }, [deepOrgId]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -867,7 +892,13 @@ export default function AdminOrganizationsContent() {
         </div>
       </div>
 
-      {selected && <OrgDetailModal org={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <OrgDetailModal
+          org={selected}
+          initialTab={selected.id === deepOrgId ? deepTab : undefined}
+          onClose={() => { setSelected(null); if (deepOrgId) setSearchParams({}, { replace: true }); }}
+        />
+      )}
     </div>
   );
 }

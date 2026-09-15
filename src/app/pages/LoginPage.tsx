@@ -32,6 +32,9 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const portalHint = searchParams.get('portal'); // 'supplier' | 'admin' | 'clinic' | null
+  // Deep link to land on after sign-in (flow walkthroughs open a specific
+  // screen). Only same-origin paths are honoured.
+  const nextPath = (() => { const n = searchParams.get('next'); return n && n.startsWith('/') ? n : null; })();
   const [view, setView] = useState<AuthView>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -77,7 +80,8 @@ export default function LoginPage() {
       login(email, password);
       // If the login was initiated by clicking a specific portal card, take
       // the user there directly. Otherwise drop them on the portal-select page.
-      if (portalHint === 'admin') navigate('/admin');
+      if (nextPath) navigate(nextPath);
+      else if (portalHint === 'admin') navigate('/admin');
       else if (portalHint === 'supplier') navigate('/supplier');
       else if (portalHint === 'clinic') navigate('/clinic');
       else if (portalHint === 'lab') navigate('/lab');
