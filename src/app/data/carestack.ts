@@ -216,9 +216,45 @@ export const CS_APPOINTMENTS: CsAppointment[] = [
   { id: 'CS-APT-7810', patientId: 'CS-PAT-30095', providerId: 'CS-PRV-2020', locationId: 'CS-LOC-1001', startsAt: '2026-07-14T11:00:00', durationMin: 40, type: 'Crown Fit' },
 ];
 
-// Appointments Smile Genius created (Create New) — kept apart so the seed list
-// above stays static.
-let createdAppointments: CsAppointment[] = [];
+// Appointments Smile Genius created (Create New) or surfaced for the demo —
+// kept apart so the seed list above stays static. Persisted so a linked one
+// still resolves (date/time on the chip) after a refresh.
+const LS_APPTS = 'carestack.appointments';
+let createdAppointments: CsAppointment[] = (() => {
+  try { const raw = localStorage.getItem(LS_APPTS); const v = raw ? JSON.parse(raw) : []; return Array.isArray(v) ? v as CsAppointment[] : []; } catch { return []; }
+})();
+function commitAppointments(next: CsAppointment[]) {
+  createdAppointments = next;
+  try { localStorage.setItem(LS_APPTS, JSON.stringify(next)); } catch { /* storage blocked */ }
+}
+
+/**
+ * Demo: a patient with nothing on file still gets a few plausible CareStack
+ * appointments to pick from — three slots around the case due date with the
+ * mapped provider and location. Deterministic ids, registered once.
+ */
+export function ensureDemoAppointments(c: CaseLike, rec: CaseCareStack): CsAppointment[] {
+  const patientId = rec.patient.csId;
+  const providerId = rec.dentist.csId;
+  const locationId = rec.practice.csId;
+  if (!patientId || !providerId || !locationId) return [];
+  const existing = appointmentsForPatient(patientId);
+  if (existing.length) return existing;
+  const base = parseDmy(c.requestedDelivery) ?? new Date(2026, 4, 26);
+  const seed = hashName(c.id);
+  const slots: { offsetDays: number; hour: number; minute: number; type: string }[] = [
+    { offsetDays: 1, hour: 9 + (seed % 3), minute: 30, type: 'Lab Work Fit' },
+    { offsetDays: 3, hour: 11 + (seed % 2), minute: 0, type: 'Review' },
+    { offsetDays: 8, hour: 14 + (seed % 3), minute: seed % 2 ? 15 : 45, type: 'Try-in' },
+  ];
+  const made = slots.map((s, i) => {
+    const d = new Date(base); d.setDate(d.getDate() + s.offsetDays); d.setHours(s.hour, s.minute, 0, 0);
+    const iso = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}:00`;
+    return { id: `CS-APT-${8100 + (seed % 800)}${i + 1}`, patientId, providerId, locationId, startsAt: iso, durationMin: i === 0 ? 40 : 30, type: s.type } as CsAppointment;
+  });
+  commitAppointments([...createdAppointments, ...made]);
+  return made;
+}
 
 export function locationById(id?: string) { return CS_LOCATIONS.find(l => l.id === id); }
 export function providerById(id?: string) { return CS_PROVIDERS.find(p => p.id === id); }
@@ -432,7 +468,7 @@ export function useCareStackSyncing(): boolean {
 export function resetCareStackDemo() {
   validationTimers.forEach(t => window.clearTimeout(t));
   validationTimers.clear();
-  createdAppointments = [];
+  commitAppointments([]);
   commitCases({});
   commitLog([]);
   commitDue(SEED_DUE_DATE_CHANGES);
@@ -576,6 +612,21 @@ export function ensureCaseValidation(c: CaseLike) {
   validationTimers.set(c.id, t);
 }
 
+/**
+ * Draft / creation form: the patient, dentist or practice just changed, so
+ * throw the previous result away and validate again from scratch.
+ */
+export function revalidateCase(c: CaseLike) {
+  const t = validationTimers.get(c.id);
+  if (t) { window.clearTimeout(t); validationTimers.delete(c.id); }
+  if (cases[c.id]) {
+    const next = { ...cases };
+    delete next[c.id];
+    commitCases(next);
+  }
+  ensureCaseValidation(c);
+}
+
 /** The user picked the right CareStack record — re-run the lookup for that entity. */
 export function retryEntityLookup(c: CaseLike, entity: 'patient' | 'dentist', pick: { csId: string; csLabel: string }, by: string) {
   const rec = cases[c.id];
@@ -677,7 +728,7 @@ export function createAndLinkAppointment(
     durationMin: 30,
     type: input.type,
   };
-  createdAppointments = [...createdAppointments, appt];
+  commitAppointments([...createdAppointments, appt]);
   const at = nowIso();
   patchCase(c.id, { appointment: { state: 'linked', appointmentId: appt.id, createdBySg: true, linkedBy: by, linkedAt: at } });
   addLog({ caseId: c.id, kind: 'appointment', outcome: 'ok', by, text: `Appointment ${appt.id} created in CareStack and linked (${formatAppointmentTime(appt.startsAt)} · ${providerById(input.providerId)?.name ?? input.providerId})` });

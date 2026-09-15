@@ -8,6 +8,9 @@ import {
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
+import CareStackDraftPanel from '../components/carestack/CareStackDraftPanel';
+import { MappingIcon } from '../components/carestack/shared';
+import { useCareStackEnabled, useCaseCareStack } from '../data/carestack';
 import { extractCaseEntities } from '../data/instructionExtraction';
 import ModalPortal from '../components/ModalPortal';
 import { OFFLINE_LABS, OfflineLabNotice } from '../components/OfflineLabNotice';
@@ -1157,6 +1160,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // Fields seeded from an email/document-sourced draft were extracted by AI, so
   // they're flagged with a sparkle for the user to review.
   const aiPrefilled = !!prefillDraft && prefillDraft.source === 'email';
+  // CareStack mapping state for this draft — drives the tick / cross shown
+  // next to the Patient and Dentist labels while the integration is on.
+  const csEnabled = useCareStackEnabled();
+  const csRec = useCaseCareStack(prefillDraft?.id ?? 'CASE-NEW');
 
   // Load any pending draft once on mount. If present, every useState below
   // seeds itself with the draft value instead of the bare default.
@@ -2352,6 +2359,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 : undefined
               }>
                 <PatientSearchSelect
+                  trailing={csEnabled && csRec && patientName ? <MappingIcon mapping={csRec.patient} entity="Patient" /> : undefined}
                   value={patientName}
                   onChange={(v) => { setPatientName(v); clearAiMark('patientName'); }}
                   onPickExisting={(p) => {
@@ -2414,6 +2422,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-[#F0EFF6]">
               <Mini label="Dentist" accessory={aiPrefilled && dentistId ? <AiSparkle label /> : undefined}>
                 <DentistSearchSelect
+                  trailing={csEnabled && csRec && dentistId ? <MappingIcon mapping={csRec.dentist} entity="Dentist" /> : undefined}
                   dentists={dentists}
                   value={dentistId}
                   onChange={setDentistId}
@@ -2476,7 +2485,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
               Styled as a dropdown trigger: greyed placeholder when unset,
               teal accent once a method is picked; a small count badge shows
               attached files. Click opens the method-picker popup. ── */}
-          <div className="order-2 flex justify-end">
+          <div className="order-2 flex items-center justify-end gap-2 flex-wrap">
             {(() => {
               const fileCount = Object.values(caseSourceFiles).filter(Boolean).length + caseSourceExtraFiles.length;
               return (
@@ -2510,6 +2519,24 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </button>
               );
             })()}
+            {/* CareStack appointment — the same control as the cases-list
+                column, sized like the picker beside it. Renders nothing while
+                the group's integration is off. */}
+            <CareStackDraftPanel
+              caseLike={{
+                id: prefillDraft?.id ?? 'CASE-NEW',
+                patientName,
+                practice: isLab ? (selectedLab?.name ?? CLINIC_PORTAL_PRACTICE) : CLINIC_PORTAL_PRACTICE,
+                dentist: dentists.find(d => d.id === dentistId)?.name ?? '',
+                lab: isLab ? 'Smile Genius Lab' : (selectedLab?.name ?? ''),
+                services: selections.map(sel => CATALOG_ID_TO_SERVICE_NAME[sel.itemId] ?? getServiceDisplayName(sel)),
+                createdAt: prefillDraft?.createdAt ?? '',
+                requestedDelivery: deliveryDate || null,
+                status: 'draft',
+                source: prefillDraft?.source,
+                scanner: prefillDraft?.scanner,
+              }}
+            />
           </div>
 
           {/* ── Services — multi-select with cards. Card background uses the
@@ -5383,10 +5410,13 @@ function AggregatedTeethChart({ selections, pendingTeeth = [], onToggleTooth, on
 // Typing a brand-new name that doesn't match any patient is preserved as a
 // free-text entry so the user can register a new patient without clicking
 // out of the field.
-function PatientSearchSelect({ value, onChange, onPickExisting }: {
+function PatientSearchSelect({ value, onChange, onPickExisting, trailing }: {
   value: string;
   onChange: (v: string) => void;
   onPickExisting: (patient: ExistingPatient) => void;
+  /** Adornment shown inside the input, left of the search icon (e.g. the
+      CareStack mapping tick). */
+  trailing?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -5431,8 +5461,11 @@ function PatientSearchSelect({ value, onChange, onPickExisting }: {
           onChange={(e) => { onChange(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           placeholder="Search existing or type new patient name"
-          className="w-full h-[38px] pl-9 py-2 pr-7 text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/20"
+          className={`w-full h-[38px] pl-9 py-2 ${trailing ? 'pr-14' : 'pr-7'} text-xs text-[#030213] placeholder-[#A0A0B0] border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/20`}
         />
+        {trailing && (
+          <span className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center">{trailing}</span>
+        )}
         {/* Search icon on the right doubles as the dropdown affordance */}
         <button
           type="button"
@@ -5534,13 +5567,16 @@ function PatientSearchSelect({ value, onChange, onPickExisting }: {
 // ─── Dentist search select — searchable dropdown over the practice roster ───
 // Native <select> with 100+ dentists is unusable; this lets the user type
 // part of a name to narrow the list. Same pattern as LabSearchSelect.
-function DentistSearchSelect({ dentists, value, onChange, allowCreate = false, onCreate }: {
+function DentistSearchSelect({ dentists, value, onChange, allowCreate = false, onCreate, trailing }: {
   dentists: typeof mockStaffMembers;
   value: string;
   onChange: (id: string) => void;
   /** Lab portal: allow typing a new name to create a dentist on the fly. */
   allowCreate?: boolean;
   onCreate?: (name: string) => void;
+  /** Adornment shown inside the trigger, left of the chevron (e.g. the
+      CareStack mapping tick). */
+  trailing?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -5583,7 +5619,10 @@ function DentistSearchSelect({ dentists, value, onChange, allowCreate = false, o
         <span className={`truncate ${selected ? 'text-[#030213]' : 'text-[#A0A0B0] italic'}`}>
           {selected?.name || 'Pick a dentist…'}
         </span>
-        <ChevronDown className={`w-3 h-3 text-[#A0A0B0] flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <span className="ml-auto inline-flex items-center gap-1.5 flex-shrink-0">
+          {trailing}
+          <ChevronDown className={`w-3 h-3 text-[#A0A0B0] flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </span>
       </button>
       {open && (
         <div className="absolute z-30 mt-1 left-0 right-0 bg-white border border-[#E8EAF6] rounded-lg shadow-[0_10px_30px_rgba(77,142,247,0.15)] overflow-hidden">

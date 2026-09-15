@@ -12,16 +12,30 @@ import { SUMMARY_META, summariseCase, summaryLabel, useCaseCareStack } from '../
 //   • Everything else    → read-only state (checking / mapping incomplete).
 
 export default function CareStackAppointmentCell({
-  caseId, onLink, onNotRequired,
+  caseId, onLink, onNotRequired, onOpenDetails, size = 'chip',
 }: {
   caseId: string;
   onLink: () => void;
   onNotRequired: () => void;
+  /** When given, the read-only states (checking / mapping incomplete) become
+      a button that opens the CareStack drawer to resolve them. */
+  onOpenDetails?: () => void;
+  /** 'chip' (default) = the compact list cell; 'button' = the taller
+      picker-style control used on the creation form next to the case-source
+      button (same height, radius and min width as that button). */
+  size?: 'chip' | 'button';
 }) {
   const rec = useCaseCareStack(caseId);
   const summary = summariseCase(rec);
   const meta = SUMMARY_META[summary];
   const busy = summary === 'checking' || summary === 'searching';
+  const big = size === 'button';
+  // Picker-style trigger (creation form) vs compact chip (list column).
+  const base = big
+    ? 'inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 rounded-lg text-xs font-semibold min-w-[160px] border whitespace-nowrap transition-colors'
+    : 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap';
+  const iconCls = big ? 'w-3.5 h-3.5 flex-shrink-0' : 'w-3 h-3';
+  const chevronCls = big ? 'w-3.5 h-3.5 flex-shrink-0 opacity-70' : 'w-3 h-3';
 
   // "Choose" dropdown — portalled to <body> at the button's screen position
   // so the table's horizontal scroll container can't clip it.
@@ -60,12 +74,13 @@ export default function CareStackAppointmentCell({
           ref={btnRef}
           onClick={toggle}
           title="Choose how to resolve the CareStack appointment"
-          className={`inline-flex items-center gap-1 pl-2.5 pr-1.5 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap transition-colors ${
+          className={`${base} ${
             open ? 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]' : 'bg-[#FFF8E1] text-[#B45309] border-[#FDE68A] hover:bg-[#FEF3C7]'
           }`}
         >
-          Choose
-          <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+          {big && <CalendarCheck2 className={iconCls} />}
+          <span className={big ? 'flex-1 text-left truncate' : ''}>{big ? 'Appointment · Choose' : 'Choose'}</span>
+          <ChevronDown className={`${chevronCls} transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
         {open && pos && createPortal(
           <div
@@ -100,11 +115,12 @@ export default function CareStackAppointmentCell({
       <button
         onClick={e => { e.stopPropagation(); onLink(); }}
         title="Linked CareStack appointment — click to change it"
-        className={`group inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap hover:opacity-80 transition-opacity ${meta.cls}`}
+        className={`group ${base} hover:opacity-80 transition-opacity ${meta.cls}`}
       >
-        <CalendarCheck2 className="w-3 h-3 group-hover:hidden" />
-        <RefreshCw className="w-3 h-3 hidden group-hover:block" />
-        {summaryLabel(rec)}
+        <CalendarCheck2 className={`${iconCls} group-hover:hidden`} />
+        <RefreshCw className={`${iconCls} hidden group-hover:block`} />
+        <span className={big ? 'flex-1 text-left truncate' : ''}>{summaryLabel(rec)}</span>
+        {big && <ChevronDown className={chevronCls} />}
       </button>
     );
   }
@@ -114,22 +130,42 @@ export default function CareStackAppointmentCell({
       <button
         onClick={e => { e.stopPropagation(); onLink(); }}
         title={rec?.appointment.notRequired ? `${rec.appointment.notRequired.reason} — click to link an appointment after all` : 'Click to link an appointment'}
-        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap hover:opacity-80 transition-opacity ${meta.cls}`}
+        className={`${base} hover:opacity-80 transition-opacity ${meta.cls}`}
       >
-        <CalendarX2 className="w-3 h-3" />
-        {meta.label}
+        <CalendarX2 className={iconCls} />
+        <span className={big ? 'flex-1 text-left truncate' : ''}>{big ? `Appointment · ${meta.label}` : meta.label}</span>
+        {big && <ChevronDown className={chevronCls} />}
       </button>
     );
   }
 
+  const chip = (
+    <>
+      {busy && <Loader2 className={`${big ? 'w-3.5 h-3.5' : 'w-2.5 h-2.5'} animate-spin flex-shrink-0`} />}
+      {summary === 'mapping-incomplete' && <Lock className={big ? 'w-3.5 h-3.5 flex-shrink-0' : 'w-2.5 h-2.5'} />}
+      {big && summary === 'pending' && <CalendarCheck2 className={iconCls} />}
+      <span className={big ? 'flex-1 text-left truncate' : ''}>{big ? `Appointment · ${meta.label}` : meta.label}</span>
+      {big && onOpenDetails && <ChevronDown className={chevronCls} />}
+    </>
+  );
+  const chipCls = `${base} ${meta.cls}`;
+  if (onOpenDetails) {
+    return (
+      <button
+        onClick={e => { e.stopPropagation(); onOpenDetails(); }}
+        title={summary === 'mapping-incomplete' ? 'Patient, dentist or practice could not be mapped — open CareStack to resolve' : 'Open CareStack details'}
+        className={`${chipCls} hover:opacity-80 transition-opacity`}
+      >
+        {chip}
+      </button>
+    );
+  }
   return (
     <span
       title={summary === 'mapping-incomplete' ? 'Patient, dentist or practice could not be mapped — resolve it in the case' : undefined}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${meta.cls}`}
+      className={chipCls}
     >
-      {busy && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-      {summary === 'mapping-incomplete' && <Lock className="w-2.5 h-2.5" />}
-      {meta.label}
+      {chip}
     </span>
   );
 }

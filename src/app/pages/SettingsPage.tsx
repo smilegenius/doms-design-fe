@@ -31,7 +31,7 @@ import NotificationPreferences from './NotificationPreferencesPage';
 import EscalationMatrix from './EscalationMatrixPage';
 import LabScoringSettingsPage from './LabScoringSettingsPage';
 import ScannerSettingsPage from './ScannerSettingsPage';
-import CareStackStatusCard from '../components/carestack/CareStackStatusCard';
+import PortalIntegrationsPanel from '../components/carestack/PortalIntegrationsPanel';
 import { useCareStackEnabled } from '../data/carestack';
 import Toggle from '../components/Toggle';
 import { useCustomServices, removeCustomService } from '../data/customServices';
@@ -57,7 +57,7 @@ const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
 // Smile Genius admin's job at group level. Labs aren't part of a DSO, so the
 // lab portal never shows it.
 const INTEGRATIONS_TAB: { id: TabId; label: string; description: string; icon: any } =
-  { id: 'integrations', label: 'Integrations', description: 'CareStack — managed by your DSO', icon: Plug };
+  { id: 'integrations', label: 'Integrations', description: 'Dentally, CareStack', icon: Plug };
 
 // Lab-only Settings sections — mirrors the live lab portal, where the
 // Prescription Builder and Case Scoring (weights, bands and Case Scoring
@@ -885,7 +885,7 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
           ?tab=integrations. Configuration lives with the Smile Genius admin. */}
       {activeTab === 'integrations' && portal !== 'lab' && (
         <SectionCard title="Integrations">
-          <CareStackStatusCard portal={portal} />
+          <PortalIntegrationsPanel portal={portal} />
         </SectionCard>
       )}
 

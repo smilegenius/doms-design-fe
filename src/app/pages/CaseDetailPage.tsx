@@ -10,6 +10,7 @@ import {
   Copy, Plug, GitBranch,
 } from 'lucide-react';
 import SideDrawer from '../components/SideDrawer';
+import ActionMenu from '../components/ActionMenu';
 import ModalPortal from '../components/ModalPortal';
 import UrgentBadge from '../components/UrgentBadge';
 import UrgentConfirmModal from '../components/UrgentConfirmModal';
@@ -42,6 +43,7 @@ import { CURRENT_USER } from './CasesPage';
 import { ensureCaseValidation, latestDueDateChange, recordDueDateChange, recordReceipt, summariseCase, summaryLabel, SUMMARY_META, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
 import type { CaseCareStack, CaseLike as CareStackCaseLike } from '../data/carestack';
 import CareStackCaseSection from '../components/carestack/CareStackCaseSection';
+import { MappingIcon } from '../components/carestack/shared';
 import DueDateChangeModal from '../components/carestack/DueDateChangeModal';
 import ReceivedModal from '../components/carestack/ReceivedModal';
 import {
@@ -54,6 +56,9 @@ import {
   subjectFromCase,
   useRescanLinks,
 } from '../data/rescanDetection';
+
+// Conversation hub entry point — parked while the CareStack flow is reviewed.
+const SHOW_CONVERSATION_HUB = false;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -3638,8 +3643,10 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               : <Paperclip className="w-3 h-3 text-[#717182]" />}
             {receivedVia}
           </span>
-          {/* Conversation — opens the case-level side drawer (email + WhatsApp) */}
-          {(hasEmailThread || csComms.length > 0) && (
+          {/* Conversation — opens the case-level side drawer (email + WhatsApp).
+              Hidden for now (SHOW_CONVERSATION_HUB) while the CareStack flow
+              is reviewed; the drawer itself stays deep-linkable. */}
+          {SHOW_CONVERSATION_HUB && (hasEmailThread || csComms.length > 0) && (
             <button
               onClick={() => setThreadOpen(true)}
               title="Open the conversation with the dentist (email + WhatsApp)"
@@ -3648,18 +3655,6 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               <MessageSquare className="w-3.5 h-3.5" />
               Conversation hub
               {!replyReceived && <span className="w-1.5 h-1.5 rounded-full bg-[#D4183D]" />}
-            </button>
-          )}
-          {/* CareStack — mapping, appointment and sync log open in a side drawer. */}
-          {csEnabled && (
-            <button
-              onClick={() => setCsDrawerOpen(true)}
-              title="Open the CareStack integration for this case (mapping, appointment, sync log)"
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-opacity hover:opacity-80 ${csMeta.cls}`}
-            >
-              <Plug className="w-3.5 h-3.5" />
-              CareStack Appointment
-              <span className="font-normal opacity-80">· {summaryLabel(csRecord)}</span>
             </button>
           )}
           <span className="hidden sm:block w-px h-6 bg-[#E0E0E6] mx-1" />
@@ -3786,6 +3781,30 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         </div>
       )}
 
+      {/* ── Status timeline strip — mirrors the live portal: each status the
+            case has passed through, who did it and when, above the case card.
+            Click any step for the full timeline modal. ── */}
+      <button
+        onClick={() => setTimelineOpen(true)}
+        title="Open the full case timeline"
+        className="mx-6 mt-2 rounded-xl border border-[#DBEAFE] bg-[#EEF4FF]/60 px-5 py-3 flex items-start gap-8 overflow-x-auto text-left hover:bg-[#EEF4FF] transition-colors"
+      >
+        {buildCasePipeline(caseData).filter(s => s.done || s.state === 'current' || s.state === 'blocked').map((s, i, arr) => {
+          const current = s.state === 'current';
+          const blocked = s.state === 'blocked';
+          const actor = i <= 1 || s.label === 'Delivered' ? caseData.practice : (caseData.lab ?? 'Lab');
+          return (
+            <span key={s.label} className="relative flex flex-col items-start min-w-[150px] flex-shrink-0">
+              {i < arr.length - 1 && <span className="absolute left-2 top-1 h-px w-[calc(100%+2rem)] bg-[#C8D8FC]" />}
+              <span className={`relative w-2 h-2 rounded-full mb-2 ${blocked ? 'bg-[#C62828]' : current ? 'bg-[#A59DFF] ring-4 ring-[#A59DFF]/25' : 'bg-[#4D8EF7]'}`} />
+              <span className="text-sm font-semibold text-[#030213] leading-tight">{s.label}</span>
+              <span className="text-[11px] text-[#717182] mt-0.5 truncate max-w-[150px]">{actor}</span>
+              <span className="text-[11px] text-[#717182]">{s.timestamp ? `${s.timestamp}, ${i <= 1 ? '09:15 AM' : '02:40 PM'}` : current ? 'In progress' : '—'}</span>
+            </span>
+          );
+        })}
+      </button>
+
       {/* ── Identity card (with compact timeline pill in the header row) ── */}
       <div className="mx-6 mt-2 bg-white border border-[#E0E0E6] rounded-xl">
         <div className="px-5 py-4 border-b border-[#F0EFF6] flex items-center gap-3 flex-wrap">
@@ -3813,13 +3832,6 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             </span>
           )}
 
-          {/* Compact timeline pill — the identity card is where this was always
-              meant to sit. Previously only multi-service cases could reach the
-              timeline (via the Case Summary strip), so single-service cases had
-              no route to it at all — including their rescan relationship
-              entries. */}
-          <CaseTimelinePill caseData={caseData} onClick={() => setTimelineOpen(true)} />
-
           {/* Original / Rescan identity — only on cases in a relationship.
               A button: the related cases themselves live in a side drawer. */}
           {relationship !== 'none' && (
@@ -3832,44 +3844,39 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             </button>
           )}
 
-          {/* AI suggestion chip */}
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-[#FFF7ED] text-[#B45309] border border-[#FED7AA]">
-            <Lightbulb className="w-3 h-3" />
-            New case received from {caseData.practice}
-          </span>
-
-          {/* Second line: who the case is for (left) + the details toggle
-              (right). The received-via pill and the drawer buttons
-              (Conversation hub, CareStack) sit in the top bar next to the
-              score card so this header carries only identity + status. */}
-          <div className="w-full flex items-center justify-between gap-3 mt-1">
-            <p className="flex items-center gap-2 min-w-0 text-[11px] font-medium">
-              <span className="text-[#030213] truncate">{caseData.patientName}</span>
-              <span className="text-[#D4CEE1]">·</span>
-              <span className="text-[#717182] truncate">{caseData.practice}</span>
-              <span className="text-[#D4CEE1] hidden sm:inline">·</span>
-              <span className="text-[#717182] truncate hidden sm:inline">{caseData.dentist}</span>
-            </p>
-            <button
-              onClick={() => setDetailsOpen(v => !v)}
-              title={detailsOpen ? 'Collapse details' : 'Expand details'}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-[#717182] hover:text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors border border-transparent hover:border-[#C8D8FC]"
-            >
-              {detailsOpen
-                ? <><ChevronUp   className="w-3.5 h-3.5" /> Hide details</>
-                : <><ChevronDown className="w-3.5 h-3.5" /> Show details</>
-              }
-            </button>
+          {/* Right: primary action + overflow menu — the live case card's
+              layout. The timeline is reachable from the strip above and the
+              menu; the details grid below is always open. */}
+          <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+            {caseData.status !== 'delivered' && caseData.status !== 'completed' && (
+              <button
+                onClick={() => setReceivedModal({})}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity shadow-sm"
+              >
+                <Check className="w-4 h-4" />
+                Mark as Received
+              </button>
+            )}
+            <ActionMenu
+              items={[
+                ...(onRequestStatusChange ? [{ label: 'Change status', icon: <Pencil className="w-4 h-4" />, onClick: onRequestStatusChange }] : []),
+                { label: 'View timeline', icon: <Clock className="w-4 h-4" />, onClick: () => setTimelineOpen(true) },
+                ...(onArchiveToggle ? [{ label: caseData.archived ? 'Unarchive case' : 'Archive case', icon: caseData.archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />, onClick: onArchiveToggle, dividerAbove: true }] : []),
+              ]}
+            />
           </div>
         </div>
 
-        {/* Collapsible details grid */}
-        {detailsOpen && (
+        {/* Details grid — always shown, like the live case card */}
+        {(
           <div className="px-5 py-5 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-6 gap-y-5 border-t border-[#F0EFF6]">
             {/* Patient */}
             <div>
               <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider font-semibold mb-1">Patient</p>
-              <p className="text-xs font-semibold text-[#030213]">{caseData.patientName}</p>
+              <p className="text-xs font-semibold text-[#030213] flex items-center gap-1.5">
+                <span className="truncate">{caseData.patientName}</span>
+                {csEnabled && csRecord && <MappingIcon mapping={csRecord.patient} entity="Patient" />}
+              </p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Age / Gender</p>
               <p className="text-[11px] text-[#717182]">—</p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Patient ID</p>
@@ -3879,7 +3886,10 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             {/* Clinic */}
             <div>
               <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider font-semibold mb-1">Clinic</p>
-              <p className="text-xs font-semibold text-[#030213] truncate">{caseData.practice}</p>
+              <p className="text-xs font-semibold text-[#030213] flex items-center gap-1.5">
+                <span className="truncate">{caseData.practice}</span>
+                {csEnabled && csRecord && <MappingIcon mapping={csRecord.practice} entity="Practice" />}
+              </p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Address</p>
               <p className="text-[11px] text-[#717182]">—</p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Phone</p>
@@ -3889,9 +3899,14 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             {/* Dentist */}
             <div>
               <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider font-semibold mb-1">Dentist</p>
-              <p className="text-xs font-semibold text-[#030213]">{caseData.dentist}</p>
-              <p className="text-[10px] text-[#A0A0B0] mt-2">Phone</p>
-              <p className="text-[11px] text-[#717182]">—</p>
+              <p className="text-xs font-semibold text-[#030213] flex items-center gap-1.5">
+                <span className="truncate">{caseData.dentist}</span>
+                {csEnabled && csRecord && <MappingIcon mapping={csRecord.dentist} entity="Dentist" />}
+              </p>
+              <p className="text-[10px] text-[#A0A0B0] mt-2">Created By</p>
+              <p className="text-[11px] text-[#717182]">Smile Genius Lab <span className="text-[#A0A0B0]">(Clinic)</span></p>
+              <p className="text-[10px] text-[#A0A0B0] mt-2">Received via</p>
+              <p className="text-[11px] text-[#717182]">{receivedVia}</p>
             </div>
 
             {/* Assignee / Created */}
@@ -3924,10 +3939,24 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                     : 'border-[#E0E0E6] focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/20'
                 }`}
               />
-              <p className="text-[10px] text-[#A0A0B0] mt-3">Created By</p>
-              <p className="text-[11px] text-[#717182]">Smile Genius Lab <span className="text-[#A0A0B0]">(Clinic)</span></p>
-              <p className="text-[10px] text-[#A0A0B0] mt-2">Received via</p>
-              <p className="text-[11px] text-[#717182]">{receivedVia}</p>
+              {/* CareStack appointment — status (with the linked date/time)
+                  opens the CareStack drawer; sits under the delivery date. */}
+              {csEnabled && (
+                <>
+                  <p className="text-[10px] text-[#A0A0B0] mt-3">CareStack Appointment</p>
+                  <button
+                    onClick={() => setCsDrawerOpen(true)}
+                    title="Open the CareStack integration for this case (mapping, appointment, sync log)"
+                    className={`mt-1 inline-flex items-start gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-opacity hover:opacity-80 max-w-full text-left ${csMeta.cls}`}
+                  >
+                    <Plug className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span className="leading-snug">{summaryLabel(csRecord)}</span>
+                  </button>
+                  {csRecord?.appointment.state === 'linked' && csRecord.appointment.appointmentId && (
+                    <p className="text-[10px] text-[#A0A0B0] mt-1">{csRecord.appointment.appointmentId}</p>
+                  )}
+                </>
+              )}
             </div>
           </div>
         )}

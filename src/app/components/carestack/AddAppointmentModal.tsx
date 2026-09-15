@@ -4,7 +4,7 @@ import Modal from '../Modal';
 import { useToast } from '../../context/ToastContext';
 import type { CaseCareStack, CaseLike } from '../../data/carestack';
 import {
-  APPOINTMENT_TYPES, appointmentsForPatient, createAndLinkAppointment, formatAppointmentTime,
+  APPOINTMENT_TYPES, createAndLinkAppointment, ensureDemoAppointments, formatAppointmentTime,
   linkExistingAppointment, locationById, mappedActiveProviders, providerById, rankByDueDate,
 } from '../../data/carestack';
 import { CS_CURRENT_USER, ghostBtn, inputCls, labelCls, primaryBtn, todayIso, dmyToIso } from './shared';
@@ -29,10 +29,12 @@ export default function AddAppointmentModal({
   const candidates = new Set(record.appointment.candidateIds ?? []);
   const currentId = record.appointment.state === 'linked' ? record.appointment.appointmentId : undefined;
   // Nearest to the due date first; the lookup's suggestion (or, failing that,
-  // the nearest) starts selected — the user still has to press Link.
+  // the nearest) starts selected — the user still has to press Link. Patients
+  // with nothing on file get a few example slots so there is always a list.
   const existing = useMemo(
-    () => rankByDueDate(appointmentsForPatient(record.patient.csId), caseData.requestedDelivery),
-    [record.patient.csId, caseData.requestedDelivery],
+    () => rankByDueDate(ensureDemoAppointments(caseData, record), caseData.requestedDelivery),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [record.patient.csId, record.dentist.csId, record.practice.csId, caseData.id, caseData.requestedDelivery],
   );
   const nearestId = existing[0]?.id;
   const [pickedId, setPickedId] = useState<string | null>(record.appointment.suggestedId ?? (existing.length ? nearestId : null));

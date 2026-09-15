@@ -94,6 +94,16 @@ const STAGES: Stage[] = [
     blurb: 'After a scanner or email case is created, Smile Genius checks the patient, dentist and practice against CareStack. Creation is never blocked.',
     steps: [
       {
+        title: 'Email case still in Draft — matching while you complete it',
+        persona: 'practice',
+        icon: <Mail className="w-4 h-4" />,
+        description: 'A prescription that arrived by email opens as a draft in the creation form. A CareStack panel above Services checks the patient, dentist and practice as you type, and once all three match the same Choose → Link Appointment / Not Required control is available before the case is submitted.',
+        shows: ['Patient · Dentist · Practice — Loading → Matched / Not Found, live', 'Appointment: Choose → Link Appointment / Not Required'],
+        tryIt: ['Edit the patient name and watch the mapping re-check', 'Above Services, press Choose → Link Appointment'],
+        path: '/clinic/cases/quick-new/CASE-DRAFT-001',
+        portal: 'clinic',
+      },
+      {
         title: 'Happy path — everything matched, appointment already linked',
         persona: 'system',
         icon: <UserCheck className="w-4 h-4" />,
