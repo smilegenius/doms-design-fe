@@ -281,7 +281,9 @@ function OrgDetailModal({ org, onClose, initialTab }: { org: Organization; onClo
   return (
     <ModalPortal>
       <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto p-4 sm:p-8">
-        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+        {/* Fixed (not absolute) so the dim layer stays over the whole viewport
+            while the tall modal scrolls inside this container. */}
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl animate-in fade-in zoom-in-95 duration-150 overflow-hidden">
 
           {/* ── Gradient header + timeline (mirrors production) ── */}

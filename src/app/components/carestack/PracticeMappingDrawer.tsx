@@ -100,6 +100,9 @@ export default function PracticeMappingDrawer({
 }
 
 function PracticeDetail({ entry, onBack, onOpenCase }: { entry: PracticeDirectoryEntry; onBack?: () => void; onOpenCase?: (id: string) => void }) {
+  const [tab, setTab] = useState<'dentists' | 'patients'>('dentists');
+  const unmappedPatients = entry.patients.filter(p => p.status === 'unmapped').length;
+  const inactive = entry.providers.filter(p => !p.active).length;
   return (
     <div className="space-y-4">
       {onBack && (
@@ -125,7 +128,29 @@ function PracticeDetail({ entry, onBack, onOpenCase }: { entry: PracticeDirector
         </div>
       </div>
 
+      {/* Dentists ↔ Patients switch — same chip tabs the admin org modal uses */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {([
+          { id: 'dentists', label: 'Dentists', icon: Stethoscope, count: entry.providers.length, flag: inactive ? `${inactive} inactive` : null },
+          { id: 'patients', label: 'Patients', icon: Users, count: entry.patients.length, flag: unmappedPatients ? `${unmappedPatients} unmapped` : null },
+        ] as const).map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+              tab === t.id ? 'bg-[#EEF4FF] text-[#1565C0] border-[#BFDBFE]' : 'bg-white text-[#5A5568] border-[#E0E0E6] hover:border-[#BFDBFE] hover:text-[#1565C0]'
+            }`}
+          >
+            <t.icon className="w-3.5 h-3.5" />
+            {t.label}
+            <span className="text-[10px] font-bold tabular-nums opacity-70">({t.count})</span>
+            {t.flag && <span className="text-[10px] font-semibold text-[#B45309]">· {t.flag}</span>}
+          </button>
+        ))}
+      </div>
+
       {/* Dentists */}
+      {tab === 'dentists' && (
       <Section icon={<Stethoscope className="w-3.5 h-3.5 text-[#0F766E]" />} title="Dentists / providers" count={entry.providers.length}>
         {entry.providers.length === 0 && <Empty text="No CareStack providers at this location." />}
         {entry.providers.map(p => (
@@ -140,8 +165,10 @@ function PracticeDetail({ entry, onBack, onOpenCase }: { entry: PracticeDirector
           />
         ))}
       </Section>
+      )}
 
       {/* Patients */}
+      {tab === 'patients' && (
       <Section icon={<Users className="w-3.5 h-3.5 text-[#1565C0]" />} title="Patients" count={entry.patients.length}>
         {entry.patients.length === 0 && <Empty text="No patients seen at this practice yet." />}
         {entry.patients.map(p => (
@@ -161,6 +188,7 @@ function PracticeDetail({ entry, onBack, onOpenCase }: { entry: PracticeDirector
           />
         ))}
       </Section>
+      )}
     </div>
   );
 }
