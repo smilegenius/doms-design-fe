@@ -45,11 +45,13 @@ import {
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
 import {
-  DueDateChange, formatStamp, hasReceipt, hasShipment, latestDueDateChange, recordAcceptance, recordReceipt,
-  useCareStackEnabled, useDueDateChanges,
+  CaseCareStackSummary, DueDateChange, ensureCaseValidation, formatStamp, hasReceipt, hasShipment, latestDueDateChange, recordAcceptance, recordReceipt,
+  summariseCase, useAllCaseCareStack, useCareStackEnabled, useDueDateChanges,
 } from '../data/carestack';
-import CareStackStatusChip from '../components/carestack/CareStackStatusChip';
+import CareStackAppointmentCell from '../components/carestack/CareStackAppointmentCell';
 import ShipmentDetailsModal from '../components/carestack/ShipmentDetailsModal';
+import AddAppointmentModal from '../components/carestack/AddAppointmentModal';
+import AppointmentNotRequiredModal from '../components/carestack/AppointmentNotRequiredModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1387,7 +1389,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // the milestone hooks below; the due-date history is flag-independent.
   const csEnabled = useCareStackEnabled();
   const dueDateChanges = useDueDateChanges();
+  const csRecords = useAllCaseCareStack();
   const [shipmentModalCase, setShipmentModalCase] = useState<Case | null>(null);
+  // Appointment actions taken straight from the list's CareStack column.
+  const [apptAction, setApptAction] = useState<{ c: Case; kind: 'link' | 'not-required' } | null>(null);
   const [cases, setCases] = useState<Case[]>(() => {
     const base = caseViewLimit != null ? [upgradeDemoCase, ...mockCases] : mockCases;
     return [...getCreatedCases(), ...base];
@@ -1432,6 +1437,8 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // were submitted against.
   const [rescanFilter, setRescanFilter] = useState<'all' | 'rescan' | 'original'>('all');
   const [deliveryFilter, setDeliveryFilter] = useState<'all' | 'overdue' | 'upcoming' | 'no-date'>('all');
+  // CareStack appointment state — only offered while the integration is on.
+  const [appointmentFilter, setAppointmentFilter] = useState<'all' | 'linked' | 'required' | 'not-required' | 'mapping-incomplete' | 'checking'>('all');
   // Quick time-window chip — operates on the case's last updated timestamp.
   const [timeFilter, setTimeFilter] = useState<'all' | '1h' | '1d' | '7d'>('all');
 
@@ -1458,12 +1465,12 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     updatedAt: 'Updated On',
     // One column for the date the lab is working to — the requested delivery
     // date, or the lab's revised due date (flagged "Changed") when it moved.
-    deliveryDate: 'Delivery / Due Date',
+    deliveryDate: 'Delivery Date',
     patient: 'Patient Name',
     service: 'Service(s)',
     practice: 'Practice / Dentist',
     lab: 'Lab',
-    carestack: 'CareStack',
+    carestack: 'Appointment',
   };
   const [visibleCols, setVisibleCols] = useState<Record<ColId, boolean>>(() => {
     if (typeof window === 'undefined') return DEFAULT_COLS;
@@ -1592,9 +1599,15 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
       if (deliveryFilter === 'no-date')   matchDelivery = !c.requestedDelivery;
       // Time window — uses last-updated timestamp ("recent activity").
       const matchTime = !cutoff || parseDate(c.updatedAt) >= cutoff;
-      return matchSearch && matchStatus && matchService && matchPractice && matchDentist && matchScanner && matchAlert && matchDelivery && matchTime && matchRescan;
+      // CareStack appointment state — 'checking' groups everything still in flight.
+      let matchAppointment = true;
+      if (appointmentFilter !== 'all') {
+        const s: CaseCareStackSummary = summariseCase(csRecords[c.id]);
+        matchAppointment = appointmentFilter === 'checking' ? (s === 'pending' || s === 'checking' || s === 'searching') : s === appointmentFilter;
+      }
+      return matchSearch && matchStatus && matchService && matchPractice && matchDentist && matchScanner && matchAlert && matchDelivery && matchTime && matchRescan && matchAppointment;
     });
-  }, [cases, showArchived, searchQuery, statusFilter, serviceFilter, practiceFilter, dentistFilter, scannerFilter, alertFilter, deliveryFilter, timeFilter, rescanFilter, rescanLinks]);
+  }, [cases, showArchived, searchQuery, statusFilter, serviceFilter, practiceFilter, dentistFilter, scannerFilter, alertFilter, deliveryFilter, timeFilter, rescanFilter, rescanLinks, appointmentFilter, csRecords]);
 
   // Archived count for the toggle label.
   const archivedCount = useMemo(() => cases.filter(c => c.archived).length, [cases]);
@@ -1622,6 +1635,14 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / itemsPerPage));
   const paginated = sorted.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  // CareStack validation is a background job that runs after case creation —
+  // for the demo it kicks off for the rows on screen, so the column shows real
+  // states (Linked / Appointment required …) without opening each case.
+  useEffect(() => {
+    if (!csEnabled) return;
+    paginated.forEach(c => { if (c.status !== 'draft') ensureCaseValidation(c); });
+  }, [csEnabled, paginated]);
 
   // Header select-all is scoped to the current page (matching the Invoices
   // pattern): checked when every eligible case on the page is fully selected,
@@ -1655,6 +1676,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     setDeliveryFilter('all');
     setTimeFilter('all');
     setRescanFilter('all');
+    setAppointmentFilter('all');
     setCurrentPage(1);
   }
 
@@ -1680,6 +1702,14 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     { value: 'upcoming', label: 'Upcoming (not yet due)' },
     { value: 'no-date',  label: 'No delivery date set' },
   ];
+  const appointmentOptions = [
+    { value: 'all',                label: 'All cases' },
+    { value: 'linked',             label: 'Linked' },
+    { value: 'required',           label: 'Appointment required' },
+    { value: 'not-required',       label: 'Not required' },
+    { value: 'mapping-incomplete', label: 'Mapping incomplete' },
+    { value: 'checking',           label: 'Checking / finding appointment' },
+  ];
 
   // Count of currently-active drawer filters (used for the chip group below)
   const activeFilters: { label: string; value: string; onClear: () => void }[] = [];
@@ -1691,6 +1721,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   if (alertFilter    !== 'all') activeFilters.push({ label: 'Alerts',    value: 'With alerts',                            onClear: () => setAlertFilter('all') });
   if (deliveryFilter !== 'all') activeFilters.push({ label: 'Delivery',  value: deliveryOptions.find(o => o.value === deliveryFilter)?.label ?? deliveryFilter, onClear: () => setDeliveryFilter('all') });
   if (rescanFilter   !== 'all') activeFilters.push({ label: 'Rescan',    value: rescanOptions.find(o => o.value === rescanFilter)?.label ?? rescanFilter,       onClear: () => setRescanFilter('all') });
+  if (appointmentFilter !== 'all') activeFilters.push({ label: 'Appointment', value: appointmentOptions.find(o => o.value === appointmentFilter)?.label ?? appointmentFilter, onClear: () => setAppointmentFilter('all') });
 
   const sortOptions = [
     { value: 'created-newest', label: 'Created (Newest)' },
@@ -2054,6 +2085,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                   {visibleCols.score && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Score</th>
                   )}
+                  {csEnabled && visibleCols.carestack && (
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Appointment</th>
+                  )}
                   {visibleCols.caseId && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Case ID</th>
                   )}
@@ -2074,10 +2108,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                     </th>
                   )}
                   {visibleCols.deliveryDate && (
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Delivery / Due Date</th>
-                  )}
-                  {csEnabled && visibleCols.carestack && (
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">CareStack</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Delivery Date</th>
                   )}
                   {visibleCols.patient && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Patient</th>
@@ -2094,7 +2125,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                   {/* Settings / column picker — last column. Sticky so the
                       actions column never scrolls out of reach when many
                       columns overflow horizontally. */}
-                  <th className="text-right px-4 py-3 sticky right-0 z-20 bg-[#F3F3F5] shadow-[-8px_0_12px_-10px_rgba(3,2,19,0.25)]" onClick={(e) => e.stopPropagation()}>
+                  <th className="text-right px-4 py-3 sticky right-0 z-20 bg-transparent" onClick={(e) => e.stopPropagation()}>
                     <div className="relative inline-block" ref={colMenuRef}>
                       <button
                         onClick={() => setColMenuOpen((v) => !v)}
@@ -2224,6 +2255,17 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                           <ScoreBadge score={caseScore} onFix={onConfigureScoring} withDetails />
                         </td>
                       )}
+                      {csEnabled && visibleCols.carestack && (
+                        <td className={`px-4 py-3 whitespace-nowrap ${lockBlur}`}>
+                          {c.status === 'draft'
+                            ? <span className="text-[#B0B0C0] text-xs" title="Validated once the case is submitted">—</span>
+                            : <CareStackAppointmentCell
+                                caseId={c.id}
+                                onLink={() => setApptAction({ c, kind: 'link' })}
+                                onNotRequired={() => setApptAction({ c, kind: 'not-required' })}
+                              />}
+                        </td>
+                      )}
                       {visibleCols.caseId && (
                         <td className={`px-4 py-3 text-xs font-semibold text-[#030213] whitespace-nowrap ${lockBlur}`}>
                           <span className="inline-flex items-center gap-1.5">
@@ -2246,11 +2288,6 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                               : <span className="text-[#030213]">{effectiveDelivery}</span>
                           ) : <span className="text-[#B0B0C0]">—</span>}
                           {dueDateChange && <DueDateChangedTag change={dueDateChange} />}
-                        </td>
-                      )}
-                      {csEnabled && visibleCols.carestack && (
-                        <td className={`px-4 py-3 whitespace-nowrap ${lockBlur}`}>
-                          <CareStackStatusChip caseId={c.id} />
                         </td>
                       )}
                       {visibleCols.patient && (
@@ -2285,10 +2322,12 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                           its own bg (matching row hover) so scrolled columns
                           slide underneath. */}
                       <td
-                        className={`px-4 py-3 sticky right-0 z-10 bg-white group-hover:bg-[#F8F9FC] transition-colors shadow-[-8px_0_12px_-10px_rgba(3,2,19,0.25)] ${lockBlur}`}
+                        className={`px-4 py-3 sticky right-0 z-10 bg-transparent group-hover:bg-[#F8F9FC] transition-colors group-hover:shadow-[-8px_0_12px_-10px_rgba(3,2,19,0.25)] ${lockBlur}`}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="flex items-center justify-end gap-1">
+                        {/* Row actions surface on hover (or keyboard focus) only — the
+                            list stays quiet until a row is pointed at. */}
+                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                           {/* Email-thread indicator — email/iTero cases carry a reply
                               from the dentist; a red dot flags the unread thread. */}
                           {c.source === 'email' && (
@@ -2369,6 +2408,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                             <ScoreBadge score={scoreCase({ ...c, serviceItems: [si] })} size="xs" onFix={onConfigureScoring} />
                           </td>
                         )}
+                        {csEnabled && visibleCols.carestack && <td className="px-4 py-2" />}
                         {/* Case ID — sub-case number: CASE-007-1, CASE-007-2 … */}
                         {visibleCols.caseId && (
                           <td className="px-4 py-2 whitespace-nowrap">
@@ -2396,7 +2436,6 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                         )}
                         {visibleCols.practice  && <td className="px-4 py-2" />}
                         {visibleCols.lab       && <td className="px-4 py-2" />}
-                        {csEnabled && visibleCols.carestack && <td className="px-4 py-2" />}
                         <td className="px-4 py-2" />
                       </tr>
                     ))}
@@ -2557,17 +2596,21 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                     </div>
                     {effectiveDelivery && (
                       <div className="flex items-center justify-between">
-                        <span className="text-[#8B8B9E]">Delivery / Due Date</span>
+                        <span className="text-[#8B8B9E]">Delivery Date</span>
                         <span className={overdue ? 'font-semibold text-[#D4183D]' : 'text-[#5A5568]'}>
                           {effectiveDelivery}
                           {dueDateChange && <DueDateChangedTag change={dueDateChange} />}
                         </span>
                       </div>
                     )}
-                    {csEnabled && (
+                    {csEnabled && c.status !== 'draft' && (
                       <div className="flex items-center justify-between">
-                        <span className="text-[#8B8B9E]">CareStack</span>
-                        <CareStackStatusChip caseId={c.id} />
+                        <span className="text-[#8B8B9E]">Appointment</span>
+                        <CareStackAppointmentCell
+                          caseId={c.id}
+                          onLink={() => setApptAction({ c, kind: 'link' })}
+                          onNotRequired={() => setApptAction({ c, kind: 'not-required' })}
+                        />
                       </div>
                     )}
                   </div>
@@ -2604,6 +2647,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           { label: 'Delivery Date', value: deliveryFilter, options: deliveryOptions, onChange: (v) => { setDeliveryFilter(v as typeof deliveryFilter); setCurrentPage(1); } },
           { label: 'Alerts',        value: alertFilter,    options: alertOptions,    onChange: (v) => { setAlertFilter(v as typeof alertFilter); setCurrentPage(1); } },
           { label: 'Rescan',        value: rescanFilter,   options: rescanOptions,   onChange: (v) => { setRescanFilter(v as typeof rescanFilter); setCurrentPage(1); } },
+          ...(csEnabled ? [{ label: 'Appointment', value: appointmentFilter, options: appointmentOptions, onChange: (v: string) => { setAppointmentFilter(v as typeof appointmentFilter); setCurrentPage(1); } }] : []),
         ]}
         onApply={() => setFilterDrawerOpen(false)}
         onReset={() => { clearFilters(); setFilterDrawerOpen(false); }}
@@ -2632,6 +2676,13 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
       {/* CareStack — shipment details captured when a row moves to Shipped. */}
       {shipmentModalCase && (
         <ShipmentDetailsModal caseData={shipmentModalCase} onClose={() => setShipmentModalCase(null)} currentUser={CURRENT_USER} />
+      )}
+      {/* CareStack — appointment resolved straight from the list column. */}
+      {apptAction?.kind === 'link' && csRecords[apptAction.c.id] && (
+        <AddAppointmentModal caseData={apptAction.c} record={csRecords[apptAction.c.id]} onClose={() => setApptAction(null)} currentUser={CURRENT_USER} />
+      )}
+      {apptAction?.kind === 'not-required' && (
+        <AppointmentNotRequiredModal caseData={apptAction.c} onClose={() => setApptAction(null)} currentUser={CURRENT_USER} />
       )}
 
       {/* Change-status modal — opened from a row's "Change status" action. When

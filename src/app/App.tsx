@@ -278,7 +278,7 @@ function SupplierApp() {
             }}
           />
         )}
-        {activePage === 'settings' && <SettingsPage />}
+        {activePage === 'settings' && <SettingsPage portal="supplier" />}
         {activePage === 'notifications' && <NotificationsPage onOpenSettings={() => navigate('/supplier/settings?tab=notifications')} />}
         {activePage === 'cases' && <CasesPage initialCaseId={caseInitialId} />}
         {activePage === 'suppliers' && (

@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Plug, RefreshCw, Loader2, MapPin, Stethoscope, Users, CheckCircle2, AlertTriangle, Link2 } from 'lucide-react';
+import { Plug, RefreshCw, Loader2, MapPin, Stethoscope, Users, CheckCircle2, AlertTriangle, Link2, ChevronRight } from 'lucide-react';
 import Toggle from '../Toggle';
+import PracticeMappingDrawer from './PracticeMappingDrawer';
 import { useToast } from '../../context/ToastContext';
 import type { Practice, StaffMember } from '../../data/clinicsData';
 import {
-  CS_LOCATIONS, CS_PATIENTS, CS_PROVIDERS, formatStamp, setCareStackEnabled, simulateSync,
+  CS_LOCATIONS, CS_PATIENTS, CS_PROVIDERS, careStackFigures, formatStamp, setCareStackEnabled, simulateSync,
   unmappedPatients, useAllCaseCareStack, useCareStackSettings, useCareStackSyncing,
 } from '../../data/carestack';
 import { ghostBtn } from './shared';
@@ -45,6 +46,8 @@ export default function CareStackIntegrationsTab({
   const [tab, setTab] = useState<MapTab>('locations');
   // Demo-only local mapping of an unmapped practice → CS location.
   const [localMap, setLocalMap] = useState<Record<string, string>>({});
+  // Practice explorer — click a practice row to see its dentists + patients.
+  const [explorer, setExplorer] = useState<{ open: boolean; practice?: string }>({ open: false });
 
   // Practices shown = the group's clinics that have a CareStack counterpart
   // or sit in the generated case data, plus a handful more for realism.
@@ -69,7 +72,7 @@ export default function CareStackIntegrationsTab({
   }), [dentists]);
 
   const unmapped = unmappedPatients(records);
-  const mappedPatientCount = 1240 + Object.values(records).filter(r => r.patient.status === 'matched').length;
+  const mappedPatientCount = careStackFigures(records).patients.mapped;
 
   const toggle = () => {
     setCareStackEnabled(!settings.enabled);
@@ -155,12 +158,17 @@ export default function CareStackIntegrationsTab({
             <table className="w-full text-left min-w-[640px]">
               <thead>
                 <tr className="bg-[#F8F9FC] [&>th]:px-5 [&>th]:py-2.5 [&>th]:text-[10px] [&>th]:font-semibold [&>th]:text-[#A0A0B0] [&>th]:uppercase [&>th]:tracking-wider [&>th]:border-b [&>th]:border-[#F0EFF6]">
-                  <th>Smile Genius practice</th><th>Code</th><th>CareStack location</th><th>Location ID</th><th>Status</th>
+                  <th>Smile Genius practice</th><th>Code</th><th>CareStack location</th><th>Location ID</th><th>Status</th><th></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#F0EFF6]">
                 {practiceRows.map(r => (
-                  <tr key={r.name} className="[&>td]:px-5 [&>td]:py-2.5 [&>td]:text-xs">
+                  <tr
+                    key={r.name}
+                    onClick={() => setExplorer({ open: true, practice: r.name })}
+                    title="Open this practice — dentists and patients with their CareStack status"
+                    className="[&>td]:px-5 [&>td]:py-2.5 [&>td]:text-xs cursor-pointer hover:bg-[#F8F9FC] transition-colors"
+                  >
                     <td className="font-semibold text-[#030213]">{r.name}</td>
                     <td className="text-[#717182] font-mono text-[11px]">{r.code}</td>
                     <td className="text-[#5A5568]">
@@ -169,6 +177,7 @@ export default function CareStackIntegrationsTab({
                           value=""
                           onChange={e => { if (e.target.value) { setLocalMap(m => ({ ...m, [r.name]: e.target.value })); toast.success(`${r.name} mapped to ${CS_LOCATIONS.find(l => l.id === e.target.value)?.name}`); } }}
                           className="text-[11px] px-2 py-1 rounded-lg border border-[#E0E0E6] bg-white text-[#5A5568] outline-none focus:border-[#4D8EF7]"
+                          onClick={e => e.stopPropagation()}
                         >
                           <option value="">Map to CareStack location…</option>
                           {unmappedLocations.map(l => <option key={l.id} value={l.id}>{l.name} · {l.id}</option>)}
@@ -177,6 +186,7 @@ export default function CareStackIntegrationsTab({
                     </td>
                     <td className="font-mono text-[11px] text-[#717182]">{r.loc?.id ?? '—'}</td>
                     <td>{r.loc ? pill(PILL.mapped, 'Mapped') : pill(PILL.unmapped, 'Unmapped')}</td>
+                    <td className="text-right"><ChevronRight className="w-4 h-4 text-[#A0A0B0] inline-block" /></td>
                   </tr>
                 ))}
                 {csOnly.map(l => (
@@ -186,6 +196,7 @@ export default function CareStackIntegrationsTab({
                     <td className="text-[#5A5568]">{l.name}</td>
                     <td className="font-mono text-[11px] text-[#717182]">{l.id}</td>
                     <td>{pill(PILL.csOnly, 'CareStack only')}</td>
+                    <td />
                   </tr>
                 ))}
               </tbody>
@@ -248,6 +259,13 @@ export default function CareStackIntegrationsTab({
           )}
         </div>
       </div>
+
+      <PracticeMappingDrawer
+        open={explorer.open}
+        onClose={() => setExplorer({ open: false })}
+        practiceNames={practiceRows.map(r => r.name)}
+        initialPractice={explorer.practice}
+      />
     </div>
   );
 }

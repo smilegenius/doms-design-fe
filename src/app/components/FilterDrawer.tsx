@@ -53,7 +53,7 @@ export default function FilterDrawer({
       />
 
       {/* Drawer */}
-      <div className="fixed right-0 top-0 bottom-0 w-full sm:w-96 max-w-md bg-white shadow-xl z-[70] overflow-y-auto">
+      <div className="fixed right-0 top-0 bottom-0 w-full sm:w-96 max-w-md bg-white shadow-xl z-[70] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-[#E0E0E6]">
           <h3 className="font-semibold text-[#030213]">Filter By</h3>
@@ -65,8 +65,9 @@ export default function FilterDrawer({
           </button>
         </div>
 
-        {/* Filters */}
-        <div className="p-4 space-y-4">
+        {/* Filters — the only scrolling region, so the footer never covers
+            the last controls. */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-6 space-y-4">
           {filters.map((filter, index) => (
             <div key={index}>
               <label className="block text-sm font-medium text-[#030213] mb-2">
@@ -108,7 +109,7 @@ export default function FilterDrawer({
         </div>
 
         {/* Footer */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-[#E0E0E6] bg-white">
+        <div className="flex-shrink-0 p-4 border-t border-[#E0E0E6] bg-white">
           <div className="flex gap-3">
             <Button
               variant="outline"

@@ -93,6 +93,11 @@ export type AppointmentState = 'blocked' | 'searching' | 'linked' | 'required' |
 
 export interface CaseCareStack {
   caseId: string;
+  /** Who / where the case is for — kept so group-level views (practice
+      explorer) can list patients and dentists per practice. */
+  patientName?: string;
+  dentistName?: string;
+  practiceName?: string;
   patient: EntityMapping;
   dentist: EntityMapping;
   practice: EntityMapping;
@@ -107,6 +112,8 @@ export interface CaseCareStack {
     linkedBy?: string;
     linkedAt?: string;
     notRequired?: { reason: string; by: string; at: string };
+    /** Ambiguous lookups — the candidate nearest to the case due date. */
+    suggestedId?: string;
   };
   acceptedAt?: string;
   shipment?: {
@@ -162,6 +169,7 @@ export const CS_LOCATIONS: CsLocation[] = [
   { id: 'CS-LOC-1006', name: 'Smile Genius Birmingham 2', address: '77 Hagley Road, Birmingham B16 8QG', sgPracticeName: 'Smile Genius Birmingham 2', practiceManager: { name: 'Meera Shah', email: 'meera.shah@smilegenius.com' }, receptionist: { name: 'Owen Reid', email: 'reception.bham2@smilegenius.com' } },
   { id: 'CS-LOC-1007', name: 'Smile Genius Glasgow', address: '101 Buchanan Street, Glasgow G1 3HF', sgPracticeName: 'Smile Genius Glasgow', practiceManager: { name: 'Fiona Ross', email: 'fiona.ross@smilegenius.com' }, receptionist: { name: 'Callum Gray', email: 'reception.glasgow@smilegenius.com' } },
   { id: 'CS-LOC-1008', name: 'Smile Genius Bristol', address: '9 Queen Square, Bristol BS1 4JQ', sgPracticeName: 'Smile Genius Bristol', practiceManager: { name: 'Rachel Moore', email: 'rachel.moore@smilegenius.com' }, receptionist: { name: 'Sam Hale', email: 'reception.bristol@smilegenius.com' } },
+  { id: 'CS-LOC-1010', name: 'Smile Genius Sheffield', address: '2 Leopold Square, Sheffield S1 2JG', sgPracticeName: 'Smile Genius Sheffield', practiceManager: { name: 'Grace Holt', email: 'grace.holt@smilegenius.com' }, receptionist: { name: 'Kai Morgan', email: 'reception.sheffield@smilegenius.com' } },
   // CareStack-only — no Smile Genius practice mapped to it yet.
   { id: 'CS-LOC-1009', name: 'Smile Genius Salford', address: '14 Chapel Street, Salford M3 7AA', sgPracticeName: null, practiceManager: { name: 'Nina Patel', email: 'nina.patel@smilegenius.com' }, receptionist: { name: 'Ade Okafor', email: 'reception.salford@smilegenius.com' } },
 ];
@@ -184,6 +192,9 @@ export const CS_PROVIDERS: CsProvider[] = [
   { id: 'CS-PRV-2015', name: 'Dr. Anderson',  locationId: '*',           active: true,  sgName: 'Dr. Anderson' },
   { id: 'CS-PRV-2016', name: 'Dr. Campbell',  locationId: '*',           active: true,  sgName: 'Dr. Campbell' },
   { id: 'CS-PRV-2017', name: 'Dr. Evans',     locationId: '*',           active: false, sgName: 'Dr. Evans' },
+  { id: 'CS-PRV-2018', name: 'Dr. Harper',    locationId: '*',           active: true,  sgName: 'Dr. Harper' },
+  { id: 'CS-PRV-2019', name: 'Dr. Reed',      locationId: '*',           active: true,  sgName: 'Dr. Reed' },
+  { id: 'CS-PRV-2020', name: 'Dr. Amelia Hart', locationId: '*',         active: true,  sgName: 'Dr. Amelia Hart' },
 ];
 
 export const CS_PATIENTS: CsPatient[] = [
@@ -202,6 +213,7 @@ export const CS_APPOINTMENTS: CsAppointment[] = [
   { id: 'CS-APT-7760', patientId: 'CS-PAT-30042', providerId: 'CS-PRV-2001', locationId: 'CS-LOC-1001', startsAt: '2026-05-27T10:00:00', durationMin: 30, type: 'Try-in' },
   { id: 'CS-APT-7761', patientId: 'CS-PAT-30042', providerId: 'CS-PRV-2001', locationId: 'CS-LOC-1001', startsAt: '2026-05-27T15:30:00', durationMin: 30, type: 'Review' },
   { id: 'CS-APT-7790', patientId: 'CS-PAT-30077', providerId: 'CS-PRV-2002', locationId: 'CS-LOC-1003', startsAt: '2026-06-08T11:00:00', durationMin: 30, type: 'Review' },
+  { id: 'CS-APT-7810', patientId: 'CS-PAT-30095', providerId: 'CS-PRV-2020', locationId: 'CS-LOC-1001', startsAt: '2026-07-14T11:00:00', durationMin: 40, type: 'Crown Fit' },
 ];
 
 // Appointments Smile Genius created (Create New) — kept apart so the seed list
@@ -245,6 +257,19 @@ export function appointmentsForPatient(patientId?: string): CsAppointment[] {
     .filter(a => a.patientId === patientId)
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 }
+/**
+ * Order appointments by closeness to the case's requested delivery / due
+ * date — the one the practice most likely booked for this lab work comes
+ * first. Without a due date, soonest first.
+ */
+export function rankByDueDate(appts: CsAppointment[], requestedDelivery?: string | null): CsAppointment[] {
+  const due = parseDmy(requestedDelivery);
+  const key = (a: CsAppointment) => {
+    const t = new Date(a.startsAt).getTime();
+    return due ? Math.abs(t - due.getTime()) : t;
+  };
+  return [...appts].sort((a, b) => key(a) - key(b));
+}
 
 // ─── Date helpers ────────────────────────────────────────────────────────────
 
@@ -275,6 +300,13 @@ export function formatAppointmentTime(iso: string): string {
   if (Number.isNaN(d.getTime())) return iso;
   const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
   return `${day} ${p2(d.getDate())} ${MONTHS[d.getMonth()]} ${d.getFullYear()} · ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+/** ISO → 'Fri 29 May · 14:00' — the compact form for chips and buttons. */
+export function formatAppointmentShort(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+  return `${day} ${p2(d.getDate())} ${MONTHS[d.getMonth()]} · ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 export function caseLink(caseId: string): string {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -444,6 +476,8 @@ interface DemoOverride {
 }
 const DEMO_OVERRIDES: Record<string, DemoOverride> = {
   'CASE-RS-2001': { linkedAppointmentId: 'CS-APT-7701' },
+  // Tops the clinic list — reads as the everyday "linked" state.
+  'CASE-WA-3001': { linkedAppointmentId: 'CS-APT-7810' },
   'CASE-RS-2002': {
     patient: {
       status: 'not-found',
@@ -506,6 +540,7 @@ export function ensureCaseValidation(c: CaseLike) {
     ...cases,
     [c.id]: {
       caseId: c.id,
+      patientName: c.patientName, dentistName: c.dentist, practiceName: c.practice,
       patient: checking,
       dentist: checking,
       practice: checking,
@@ -605,12 +640,15 @@ export function startAppointmentLookup(c: CaseLike) {
       return;
     }
     const reason: 'none' | 'ambiguous' = candidates.length === 0 ? 'none' : 'ambiguous';
-    patchCase(c.id, { appointment: { state: 'required', requiredReason: reason, candidateIds: candidates.map(a => a.id) } });
+    // Ambiguous: keep every candidate, nearest to the due date first, and
+    // remember that one as the suggestion. Never linked without the user.
+    const ranked = rankByDueDate(candidates, c.requestedDelivery);
+    patchCase(c.id, { appointment: { state: 'required', requiredReason: reason, candidateIds: ranked.map(a => a.id), suggestedId: ranked[0]?.id } });
     addLog({
       caseId: c.id, kind: 'appointment', outcome: 'failed',
       text: reason === 'none'
         ? 'No CareStack appointment found — Appointment Required'
-        : `${candidates.length} possible appointments found — not auto-selected, Appointment Required`,
+        : `${candidates.length} possible appointments found — not auto-selected, Appointment Required. Nearest to the ${c.requestedDelivery ?? 'requested'} due date: ${ranked[0].id} (${formatAppointmentShort(ranked[0].startsAt)})`,
     });
     queueAppointmentRequiredEmail(c);
   }, 1500);
@@ -932,7 +970,43 @@ export function recordReceipt(c: CaseLike, receipt: { receivedAt: string; receiv
 function ensureRecord(c: CaseLike) {
   if (cases[c.id]) return;
   const idle: EntityMapping = { status: 'idle' };
-  commitCases({ ...cases, [c.id]: { caseId: c.id, patient: idle, dentist: idle, practice: idle, appointment: { state: 'blocked' } } });
+  commitCases({ ...cases, [c.id]: { caseId: c.id, patientName: c.patientName, dentistName: c.dentist, practiceName: c.practice, patient: idle, dentist: idle, practice: idle, appointment: { state: 'blocked' } } });
+}
+
+// ─── Practice explorer (group-level) ─────────────────────────────────────────
+// One practice → its CareStack location, the providers available there and
+// the patients seen on its cases, each with mapping status.
+
+export interface PracticePatientRow { name: string; csId?: string; status: 'mapped' | 'unmapped' | 'pending'; caseId?: string; reason?: string }
+export interface PracticeDirectoryEntry {
+  name: string;
+  location?: CsLocation;
+  providers: CsProvider[];
+  patients: PracticePatientRow[];
+}
+
+export function practiceDirectory(practiceNames: string[], all: Record<string, CaseCareStack> = cases): PracticeDirectoryEntry[] {
+  const names = [...new Set([...practiceNames, ...CS_LOCATIONS.filter(l => l.sgPracticeName).map(l => l.sgPracticeName as string)])];
+  return names.map(name => {
+    const location = locationForPractice(name);
+    const providers = providersAtLocation(location?.id).filter(p => p.locationId !== '*' || p.sgName);
+    // Patients: every case seen at this practice (latest state per patient),
+    // plus directory patients registered at the location without a case yet.
+    const byPatient = new Map<string, PracticePatientRow>();
+    Object.values(all).filter(r => r.practiceName === name && r.patientName).forEach(r => {
+      const status: PracticePatientRow['status'] = r.patient.status === 'matched' ? 'mapped' : r.patient.status === 'not-found' ? 'unmapped' : 'pending';
+      const prev = byPatient.get(r.patientName as string);
+      if (!prev || status === 'unmapped') byPatient.set(r.patientName as string, { name: r.patientName as string, csId: r.patient.csId, status, caseId: r.caseId, reason: r.patient.reason });
+    });
+    if (location) {
+      CS_PATIENTS.filter(p => p.locationId === location.id).forEach(p => {
+        const full = `${p.firstName} ${p.lastName}`;
+        if (!byPatient.has(full)) byPatient.set(full, { name: full, csId: p.id, status: 'mapped' });
+      });
+    }
+    const patients = [...byPatient.values()].sort((a, b) => (a.status === 'unmapped' ? -1 : 1) - (b.status === 'unmapped' ? -1 : 1) || a.name.localeCompare(b.name));
+    return { name, location, providers, patients };
+  }).sort((a, b) => (a.location ? 0 : 1) - (b.location ? 0 : 1) || a.name.localeCompare(b.name));
 }
 
 // ─── Summaries (list chip · admin tab) ───────────────────────────────────────
@@ -964,6 +1038,44 @@ export const SUMMARY_META: Record<CaseCareStackSummary, { label: string; cls: st
   required:             { label: 'Appointment required', cls: 'bg-[#FFF8E1] text-[#B45309] border-[#FDE68A]' },
   'not-required':       { label: 'Not required',         cls: 'bg-[#F3F3F5] text-[#5A5568] border-[#E0E0E6]' },
 };
+
+/** Chip / button text — a linked appointment's date and time ride along. */
+export function summaryLabel(rec?: CaseCareStack): string {
+  const s = summariseCase(rec);
+  if (s === 'linked' && rec?.appointment.appointmentId) {
+    const appt = appointmentById(rec.appointment.appointmentId);
+    if (appt) return `Linked · ${formatAppointmentShort(appt.startsAt)}`;
+  }
+  return SUMMARY_META[s].label;
+}
+
+/** Headline mapping figures — shared by the admin tab and the portal status cards. */
+export interface CareStackFigures {
+  patients: { mapped: number; unmapped: number };
+  providers: { mapped: number; inactive: number; unmapped: number };
+  locations: { mapped: number; unmapped: number; csOnly: number };
+}
+export function careStackFigures(all: Record<string, CaseCareStack> = cases, practiceNames: string[] = []): CareStackFigures {
+  const recs = Object.values(all);
+  return {
+    patients: {
+      // The directory is a slice — the rest of the group's patient base is
+      // represented by a base figure so the tile reads like a real tenant.
+      mapped: 1240 + recs.filter(r => r.patient.status === 'matched').length,
+      unmapped: recs.filter(r => r.patient.status === 'not-found').length,
+    },
+    providers: {
+      mapped: CS_PROVIDERS.filter(p => p.active && p.sgName).length,
+      inactive: CS_PROVIDERS.filter(p => !p.active).length,
+      unmapped: CS_PROVIDERS.filter(p => p.active && !p.sgName).length,
+    },
+    locations: {
+      mapped: CS_LOCATIONS.filter(l => l.sgPracticeName).length,
+      unmapped: practiceNames.filter(n => !CS_LOCATIONS.some(l => l.sgPracticeName === n)).length,
+      csOnly: CS_LOCATIONS.filter(l => !l.sgPracticeName).length,
+    },
+  };
+}
 
 /** Unmapped patients across every validated case — the admin's review list. */
 export function unmappedPatients(all: Record<string, CaseCareStack> = cases): { caseId: string; reason?: string }[] {

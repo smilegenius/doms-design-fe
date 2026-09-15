@@ -16,7 +16,7 @@ import { resetCareStackDemo, setCareStackEnabled, useCareStackSettings } from '.
 // first if needed). Standalone — no shell, no auth — like the downtime page.
 
 type Persona = 'admin' | 'practice' | 'lab' | 'system';
-type Portal = 'admin' | 'clinic';
+type Portal = 'admin' | 'clinic' | 'supplier';
 
 interface Step {
   title: string;
@@ -62,12 +62,28 @@ const STAGES: Stage[] = [
         portal: 'admin',
       },
       {
-        title: 'Cases list — CareStack column and the merged Delivery / Due Date column',
+        title: 'Clinic settings — Integrations (read-only status & figures)',
+        persona: 'practice',
+        icon: <Plug className="w-4 h-4" />,
+        description: 'What a practice sees: whether CareStack is on, last sync with a "Sync now" action, the patient / dentist / practice mapping figures, this practice’s own location mapping and the patients still needing review. Nothing is editable — the DSO admin owns the configuration.',
+        path: '/clinic/settings?tab=integrations',
+        portal: 'clinic',
+      },
+      {
+        title: 'DSO portal settings — Integrations (read-only status & figures)',
+        persona: 'admin',
+        icon: <Plug className="w-4 h-4" />,
+        description: 'The same status card at group level in the DSO portal: connection, last sync, Sync now and the mapping figures for the whole group.',
+        path: '/supplier/settings?tab=integrations',
+        portal: 'supplier',
+      },
+      {
+        title: 'Cases list — "Appointment" column, filter, and the Delivery Date column',
         persona: 'practice',
         icon: <ListChecks className="w-4 h-4" />,
-        description: 'Every case carries its CareStack state at a glance. The date column shows the lab’s latest due date with a "Changed" tag; hover it for the previous date and the reason.',
-        shows: ['Pending check → Checking… → Linked / Appointment required / Mapping incomplete / Not required', '"Changed" tag on CASE-RS-2003'],
-        tryIt: ['Search CASE-RS-2003 and hover the Changed tag', 'Open the column picker (last header) to hide / show CareStack'],
+        description: 'Every case shows its CareStack appointment state — linked ones with the appointment date and time. Cases still needing an appointment show a "Choose" button whose dropdown offers Link Appointment (opens the picker) or Not Required. The filter drawer can narrow the list by appointment state. The date column shows the lab’s latest due date with a "Changed" tag.',
+        shows: ['Linked · Fri 29 May · 14:00', 'Choose → Link Appointment / Not Required', 'Not required', 'Mapping incomplete', '"Changed" tag on CASE-RS-2003'],
+        tryIt: ['Press "Choose" on a row that needs an appointment → Link Appointment', 'Filter → Appointment → Linked', 'Search CASE-RS-2003 and hover the Changed tag'],
         path: '/clinic/cases',
         portal: 'clinic',
       },
@@ -124,8 +140,8 @@ const STAGES: Stage[] = [
         title: 'Ambiguous match → Appointment Required → link an existing appointment',
         persona: 'practice',
         icon: <Link2 className="w-4 h-4" />,
-        description: 'Two possible appointments were found, so none was auto-selected. The end-of-day "Appointment Required" email is queued to the dentist and practice manager (cc reception).',
-        tryIt: ['Add Appointment → Link an Existing Appointment → pick one of the two "Possible match" rows', 'Open the sync log and press "Send digest now (demo)"'],
+        description: 'Two possible appointments were found, so none was auto-selected. The one nearest to the case due date is suggested and preselected; the user confirms it. The end-of-day "Appointment Required" email is queued to the dentist and practice manager (cc reception).',
+        tryIt: ['Link Appointment → the list opens directly, "Nearest to due date" preselected → Link appointment', 'Open the sync log and press "Send digest now (demo)"'],
         path: '/clinic/cases/CASE-RS-2003',
         portal: 'clinic',
       },
@@ -134,7 +150,7 @@ const STAGES: Stage[] = [
         persona: 'practice',
         icon: <CalendarPlus className="w-4 h-4" />,
         description: 'Smile Genius creates the appointment in CareStack from the mapped Patient, Provider and Location IDs, then links it. Only active, mapped providers are offered.',
-        tryIt: ['Add Appointment → Create New Appointment → Create & link in CareStack'],
+        tryIt: ['Link Appointment → "Create a new appointment instead" → Create & link in CareStack'],
         path: '/clinic/cases/CASE-RS-2004',
         portal: 'clinic',
       },

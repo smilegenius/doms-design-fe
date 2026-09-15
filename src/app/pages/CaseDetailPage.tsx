@@ -39,7 +39,7 @@ import RelatedCasesCard, { RelationshipPill } from '../components/RelatedCasesCa
 import RescanDecisionModal from '../components/RescanDecisionModal';
 import type { Case as RescanCase } from './CasesPage';
 import { CURRENT_USER } from './CasesPage';
-import { ensureCaseValidation, latestDueDateChange, recordDueDateChange, recordReceipt, summariseCase, SUMMARY_META, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
+import { ensureCaseValidation, latestDueDateChange, recordDueDateChange, recordReceipt, summariseCase, summaryLabel, SUMMARY_META, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
 import type { CaseCareStack, CaseLike as CareStackCaseLike } from '../data/carestack';
 import CareStackCaseSection from '../components/carestack/CareStackCaseSection';
 import DueDateChangeModal from '../components/carestack/DueDateChangeModal';
@@ -3462,7 +3462,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   // The lab's latest due-date change (if any) is the date the case is working
-  // to — same rule as the Delivery / Due Date column on the list.
+  // to — same rule as the Delivery Date column on the list.
   const [deliveryDate, setDeliveryDate] = useState(latestDueDateChange(caseData.id)?.next ?? caseData.requestedDelivery ?? '');
   // Conversion helpers — the rest of the app uses "DD-MMM-YYYY"; the date input expects ISO.
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] as const;
@@ -3658,8 +3658,8 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-opacity hover:opacity-80 ${csMeta.cls}`}
             >
               <Plug className="w-3.5 h-3.5" />
-              CareStack
-              <span className="font-normal opacity-80">· {csMeta.label}</span>
+              CareStack Appointment
+              <span className="font-normal opacity-80">· {summaryLabel(csRecord)}</span>
             </button>
           )}
           <span className="hidden sm:block w-px h-6 bg-[#E0E0E6] mx-1" />
@@ -4058,8 +4058,8 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         <SideDrawer
           open={csDrawerOpen}
           onClose={() => setCsDrawerOpen(false)}
-          title="CareStack Integration"
-          subtitle={`${caseData.id} · enabled by Smile Genius Group`}
+          title="CareStack Appointment"
+          subtitle={`${caseData.id} · ${summaryLabel(csRecord)} · enabled by Smile Genius Group`}
           icon={<Plug className="w-4 h-4 text-[#0F766E]" />}
           iconBg="bg-[#ECFEFF]"
         >

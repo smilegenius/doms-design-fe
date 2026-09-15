@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
   Plug, ChevronDown, ChevronUp, Loader2, CalendarCheck2, CalendarX2, CalendarClock, CalendarPlus,
-  Lock, Truck, Send, ScrollText, Pencil, User, Stethoscope, MapPin, Sparkles, PackageCheck, Check,
+  Lock, Truck, Send, ScrollText, Pencil, User, Stethoscope, MapPin, Sparkles, PackageCheck, Check, Link2, RefreshCw,
 } from 'lucide-react';
 import type { CaseCareStack, CaseLike, EntityMapping, CareStackLogEntry } from '../../data/carestack';
 import {
-  appointmentById, ensureCaseValidation, formatAppointmentTime, formatStamp, locationById, providerById,
-  simulateDigestSend, useCareStackLog, useCaseCareStack, SUMMARY_META, summariseCase,
+  appointmentById, ensureCaseValidation, formatAppointmentShort, formatAppointmentTime, formatStamp, locationById, providerById,
+  simulateDigestSend, useCareStackLog, useCaseCareStack, SUMMARY_META, summariseCase, summaryLabel,
 } from '../../data/carestack';
 import { CS_CURRENT_USER, LogOutcomeIcon, MAPPING_LABEL, MAPPING_PILL, MappingIcon, primaryBtn, secondaryBtn } from './shared';
 import CorrectDetailsModal from './CorrectDetailsModal';
@@ -71,7 +71,7 @@ export default function CareStackCaseSection({
           ))}
           <span className={`ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${meta.cls}`}>
             {(summary === 'checking' || summary === 'searching') && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-            {meta.label}
+            {summaryLabel(rec)}
           </span>
         </div>
       ) : (
@@ -95,7 +95,7 @@ export default function CareStackCaseSection({
         </div>
         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${meta.cls}`}>
           {(summary === 'checking' || summary === 'searching') && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-          {meta.label}
+          {summaryLabel(rec)}
         </span>
         {open ? <ChevronUp className="w-4 h-4 text-[#A0A0B0] flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-[#A0A0B0] flex-shrink-0" />}
       </button>
@@ -309,8 +309,11 @@ function AppointmentPanel({
               <Kv label="Dentist" value={provider?.name ?? caseData.dentist} />
               <Kv label="Practice" value={loc?.name ?? caseData.practice} />
             </div>
-            <p className="text-[10px] text-[#4D7C5A] mt-2">
-              {appt?.type ? `${appt.type} · ` : ''}Linked by {a.linkedBy} · {formatStamp(a.linkedAt)} · lab-work updates post to this appointment as notes
+            <p className="text-[10px] text-[#4D7C5A] mt-2 flex items-center gap-2 flex-wrap">
+              <span>{appt?.type ? `${appt.type} · ` : ''}Linked by {a.linkedBy} · {formatStamp(a.linkedAt)} · lab-work updates post to this appointment as notes</span>
+              <button onClick={onAdd} className="inline-flex items-center gap-1 font-semibold text-[#15803D] hover:underline">
+                <RefreshCw className="w-3 h-3" />Change appointment
+              </button>
             </p>
           </div>
         </div>
@@ -347,6 +350,7 @@ function AppointmentPanel({
 
   if (a.state === 'required') {
     const digest = rec.digest;
+    const suggested = a.requiredReason === 'ambiguous' ? appointmentById(a.suggestedId) : undefined;
     return (
       <div className="rounded-xl border border-[#FDE68A] bg-[#FFF8E1] px-4 py-3">
         <div className="flex items-start gap-2.5">
@@ -357,7 +361,10 @@ function AppointmentPanel({
             <p className="text-xs font-bold text-[#92400E]">Appointment Required</p>
             <p className="text-[11px] text-[#A16207] leading-relaxed mt-0.5">
               {a.requiredReason === 'ambiguous'
-                ? 'More than one possible CareStack appointment was found, so none was selected automatically. Link the right one, create a new one, or mark the case as not needing an appointment.'
+                ? <>
+                    {a.candidateIds?.length ?? 'Several'} possible CareStack appointments were found, so none was selected automatically.
+                    {suggested && <> Nearest to the {caseData.requestedDelivery ?? 'requested'} due date: <span className="font-semibold">{formatAppointmentShort(suggested.startsAt)} · {suggested.type}</span> — confirm it or pick another.</>}
+                  </>
                 : 'Smile Genius could not find a matching CareStack appointment. Link an existing appointment, create a new one, or mark the case as not needing an appointment. Lab processing is not blocked.'}
             </p>
             {digest && (
@@ -367,7 +374,7 @@ function AppointmentPanel({
               </p>
             )}
             <div className="flex items-center gap-2 flex-wrap mt-3">
-              <button onClick={onAdd} className={primaryBtn}><CalendarPlus className="w-3.5 h-3.5" />Add Appointment</button>
+              <button onClick={onAdd} className={primaryBtn}><Link2 className="w-3.5 h-3.5" />Link Appointment</button>
               <button onClick={onNotRequired} className={secondaryBtn}><CalendarX2 className="w-3.5 h-3.5" />Appointment Not Required</button>
             </div>
           </div>

@@ -1,32 +1,41 @@
 import { useMemo, useState } from 'react';
-import { Link2, CalendarPlus, CheckCircle2, ArrowLeft, MapPin, Stethoscope } from 'lucide-react';
+import { Link2, CalendarPlus, CheckCircle2, ArrowLeft, MapPin, Stethoscope, CalendarClock } from 'lucide-react';
 import Modal from '../Modal';
 import { useToast } from '../../context/ToastContext';
 import type { CaseCareStack, CaseLike } from '../../data/carestack';
 import {
   APPOINTMENT_TYPES, appointmentsForPatient, createAndLinkAppointment, formatAppointmentTime,
-  linkExistingAppointment, locationById, mappedActiveProviders, providerById,
+  linkExistingAppointment, locationById, mappedActiveProviders, providerById, rankByDueDate,
 } from '../../data/carestack';
 import { CS_CURRENT_USER, ghostBtn, inputCls, labelCls, primaryBtn, todayIso, dmyToIso } from './shared';
 
-type Step = 'choose' | 'link' | 'create';
+type Step = 'link' | 'create';
 
-// "Add Appointment" — the two resolutions the Appointment Required email
-// offers: link one that already exists in CareStack, or have Smile Genius
-// create one there and link it.
+// "Link Appointment" — opens straight onto the patient's CareStack
+// appointments (nearest to the case due date first, suggested one
+// preselected). Creating a new appointment in CareStack is the secondary
+// path, reached from inside the same modal.
 export default function AddAppointmentModal({
-  caseData, record, onClose, currentUser = CS_CURRENT_USER,
+  caseData, record, onClose, currentUser = CS_CURRENT_USER, initialStep = 'link',
 }: {
   caseData: CaseLike;
   record: CaseCareStack;
   onClose: () => void;
   currentUser?: string;
+  initialStep?: Step;
 }) {
   const { toast } = useToast();
-  const [step, setStep] = useState<Step>('choose');
-  const [pickedId, setPickedId] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>(initialStep);
   const candidates = new Set(record.appointment.candidateIds ?? []);
-  const existing = useMemo(() => appointmentsForPatient(record.patient.csId), [record.patient.csId]);
+  const currentId = record.appointment.state === 'linked' ? record.appointment.appointmentId : undefined;
+  // Nearest to the due date first; the lookup's suggestion (or, failing that,
+  // the nearest) starts selected — the user still has to press Link.
+  const existing = useMemo(
+    () => rankByDueDate(appointmentsForPatient(record.patient.csId), caseData.requestedDelivery),
+    [record.patient.csId, caseData.requestedDelivery],
+  );
+  const nearestId = existing[0]?.id;
+  const [pickedId, setPickedId] = useState<string | null>(record.appointment.suggestedId ?? (existing.length ? nearestId : null));
   const location = locationById(record.practice.csId);
   const providers = useMemo(() => mappedActiveProviders(location?.id), [location?.id]);
 
@@ -48,23 +57,28 @@ export default function AddAppointmentModal({
     onClose();
   };
 
-  const title = step === 'choose' ? 'Add Appointment' : step === 'link' ? 'Link an Existing Appointment' : 'Create New Appointment';
-
   return (
     <Modal zIndex="z-[120]"
       isOpen
       onClose={onClose}
-      title={title}
+      title={step === 'link' ? (currentId ? 'Change Appointment' : 'Link Appointment') : 'Create New Appointment'}
       size="lg"
       footer={
-        step === 'choose' ? (
-          <button onClick={onClose} className={ghostBtn}>Cancel</button>
+        step === 'link' ? (
+          <>
+            <button onClick={() => setStep('create')} className="mr-auto inline-flex items-center gap-1 text-xs font-semibold text-[#4D8EF7] hover:underline">
+              <CalendarPlus className="w-3.5 h-3.5" />Create a new appointment instead
+            </button>
+            <button onClick={onClose} className={ghostBtn}>Cancel</button>
+            <button onClick={link} disabled={!pickedId || pickedId === currentId} className={primaryBtn}><Link2 className="w-3.5 h-3.5" />Link appointment</button>
+          </>
         ) : (
           <>
-            <button onClick={() => setStep('choose')} className={ghostBtn}><ArrowLeft className="w-3.5 h-3.5" />Back</button>
-            {step === 'link'
-              ? <button onClick={link} disabled={!pickedId} className={primaryBtn}><Link2 className="w-3.5 h-3.5" />Link appointment</button>
-              : <button onClick={create} disabled={!date || !time || !providerId} className={primaryBtn}><CalendarPlus className="w-3.5 h-3.5" />Create &amp; link in CareStack</button>}
+            <button onClick={() => setStep('link')} className="mr-auto inline-flex items-center gap-1 text-xs font-semibold text-[#4D8EF7] hover:underline">
+              <ArrowLeft className="w-3.5 h-3.5" />Back to existing appointments
+            </button>
+            <button onClick={onClose} className={ghostBtn}>Cancel</button>
+            <button onClick={create} disabled={!date || !time || !providerId} className={primaryBtn}><CalendarPlus className="w-3.5 h-3.5" />Create &amp; link in CareStack</button>
           </>
         )
       }
@@ -74,35 +88,14 @@ export default function AddAppointmentModal({
         <span><span className="text-[#A0A0B0]">Patient</span> <span className="font-semibold text-[#030213]">{caseData.patientName}</span> <span className="font-mono text-[#A0A0B0]">{record.patient.csId}</span></span>
         <span className="inline-flex items-center gap-1"><Stethoscope className="w-3 h-3 text-[#A0A0B0]" />{caseData.dentist}</span>
         <span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3 text-[#A0A0B0]" />{location?.name ?? caseData.practice}</span>
+        <span className="inline-flex items-center gap-1"><CalendarClock className="w-3 h-3 text-[#A0A0B0]" />Case due {caseData.requestedDelivery ?? 'not set'}</span>
       </div>
-
-      {step === 'choose' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <button
-            onClick={() => setStep('link')}
-            className="text-left rounded-xl border border-[#E0E0E6] p-4 hover:border-[#4D8EF7] hover:shadow-md transition-all"
-          >
-            <span className="w-9 h-9 rounded-lg bg-[#EEF4FF] text-[#1565C0] flex items-center justify-center mb-3"><Link2 className="w-4 h-4" /></span>
-            <p className="text-sm font-bold text-[#030213]">Link an Existing Appointment</p>
-            <p className="text-xs text-[#717182] mt-1 leading-relaxed">An appointment already exists in CareStack for this patient — pick it and Smile Genius will associate it with the case.</p>
-            {existing.length > 0 && <p className="text-[10px] font-semibold text-[#1565C0] mt-2">{existing.length} appointment{existing.length === 1 ? '' : 's'} on file</p>}
-          </button>
-          <button
-            onClick={() => setStep('create')}
-            className="text-left rounded-xl border border-[#E0E0E6] p-4 hover:border-[#4D8EF7] hover:shadow-md transition-all"
-          >
-            <span className="w-9 h-9 rounded-lg bg-[#ECFEFF] text-[#0F766E] flex items-center justify-center mb-3"><CalendarPlus className="w-4 h-4" /></span>
-            <p className="text-sm font-bold text-[#030213]">Create New Appointment</p>
-            <p className="text-xs text-[#717182] mt-1 leading-relaxed">Select the appointment details here and Smile Genius will create and link the appointment in CareStack.</p>
-          </button>
-        </div>
-      )}
 
       {step === 'link' && (
         <div className="space-y-3">
           {record.appointment.requiredReason === 'ambiguous' && (
             <p className="text-[11px] text-[#B45309] bg-[#FFF8E1] border border-[#FDE68A] rounded-lg px-3 py-2">
-              Smile Genius found more than one possible appointment and did not pick one automatically. Choose the correct appointment below.
+              Smile Genius found more than one possible appointment and did not pick one automatically. The one nearest to the case due date is suggested — confirm it or choose another.
             </p>
           )}
           <div className="border border-[#E0E0E6] rounded-xl overflow-hidden divide-y divide-[#F0EFF6]">
@@ -113,6 +106,7 @@ export default function AddAppointmentModal({
               const active = pickedId === a.id;
               const provider = providerById(a.providerId);
               const loc = locationById(a.locationId);
+              const isCurrent = a.id === currentId;
               return (
                 <button
                   key={a.id}
@@ -124,8 +118,14 @@ export default function AddAppointmentModal({
                     <p className="text-xs font-semibold text-[#030213] flex items-center gap-2 flex-wrap">
                       {formatAppointmentTime(a.startsAt)}
                       <span className="text-[10px] font-medium text-[#717182]">{a.type} · {a.durationMin} min</span>
-                      {candidates.has(a.id) && (
+                      {a.id === nearestId && (
+                        <span className="inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#ECFEFF] text-[#0F766E] border border-[#99F6E4]">Nearest to due date</span>
+                      )}
+                      {candidates.has(a.id) && a.id !== nearestId && (
                         <span className="inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#FFF8E1] text-[#B45309] border border-[#FDE68A]">Possible match</span>
+                      )}
+                      {isCurrent && (
+                        <span className="inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#F0FDF4] text-[#15803D] border border-[#BBF7D0]">Currently linked</span>
                       )}
                     </p>
                     <p className="text-[11px] text-[#717182] mt-0.5">{provider?.name ?? a.providerId} · {loc?.name ?? a.locationId} · <span className="font-mono">{a.id}</span></p>

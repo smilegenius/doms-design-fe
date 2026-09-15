@@ -31,6 +31,8 @@ import NotificationPreferences from './NotificationPreferencesPage';
 import EscalationMatrix from './EscalationMatrixPage';
 import LabScoringSettingsPage from './LabScoringSettingsPage';
 import ScannerSettingsPage from './ScannerSettingsPage';
+import CareStackStatusCard from '../components/carestack/CareStackStatusCard';
+import { useCareStackEnabled } from '../data/carestack';
 import Toggle from '../components/Toggle';
 import { useCustomServices, removeCustomService } from '../data/customServices';
 import { useToast } from '../context/ToastContext';
@@ -40,7 +42,7 @@ import FilterDrawer from '../components/FilterDrawer';
 import Pagination from '../components/Pagination';
 import Button from '../components/Button';
 
-type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners';
+type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners' | 'integrations';
 
 const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'personal',      label: 'Personal Info',   description: 'Your account profile',    icon: User },
@@ -49,6 +51,13 @@ const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'users',         label: 'User Management', description: 'Team members & roles',    icon: Users },
   { id: 'notifications', label: 'Notifications',   description: 'Alerts & escalations',    icon: Bell },
 ];
+
+// Clinic + DSO portals: the group's practice-management integration
+// (CareStack). Read-only here — enabling it and editing the mappings is the
+// Smile Genius admin's job at group level. Labs aren't part of a DSO, so the
+// lab portal never shows it.
+const INTEGRATIONS_TAB: { id: TabId; label: string; description: string; icon: any } =
+  { id: 'integrations', label: 'Integrations', description: 'CareStack — managed by your DSO', icon: Plug };
 
 // Lab-only Settings sections — mirrors the live lab portal, where the
 // Prescription Builder and Case Scoring (weights, bands and Case Scoring
@@ -122,13 +131,20 @@ function StatusPill({ status }: { status: Member['status'] }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' | 'lab' } = {}) {
+export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' | 'lab' | 'supplier' } = {}) {
   // Tabs are URL-driven (?tab=…&sub=…) so every settings section is
   // deep-linkable and survives refresh/back — e.g.
   //   /lab/settings?tab=notifications&sub=escalations
   // The portal shells parse only the pathname, so query params pass through.
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabs = portal === 'lab' ? LAB_TABS : TABS;
+  const tabs = portal === 'lab' ? LAB_TABS : [...TABS, INTEGRATIONS_TAB];
+  // Integrations reads as configured once the group's CareStack flag is on.
+  const csEnabled = useCareStackEnabled();
+  const configured = useMemo(() => {
+    const s = new Set<TabId>(CONFIGURED);
+    if (csEnabled) s.add('integrations');
+    return s;
+  }, [csEnabled]);
   const tabParam = searchParams.get('tab');
   const subParam = searchParams.get('sub');
   // Legacy deep links from when Case Scoring Emails lived elsewhere — both now
@@ -286,7 +302,7 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
           <nav className="bg-white border border-[#E0E0E6] rounded-xl p-2 lg:sticky lg:top-6">
             {tabs.map(({ id, label, description, icon: Icon }) => {
               const active = activeTab === id;
-              const done = CONFIGURED.has(id);
+              const done = configured.has(id);
               return (
                 <button
                   key={id}
@@ -322,12 +338,12 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
             <div className="mt-2 pt-2 border-t border-[#F0EFF6]">
               <div className="px-3 py-1.5 flex items-center justify-between">
                 <span className="text-[10px] font-medium text-[#717182] uppercase tracking-wide">Setup progress</span>
-                <span className="text-[11px] font-semibold text-[#030213]">{CONFIGURED.size}/{tabs.length}</span>
+                <span className="text-[11px] font-semibold text-[#030213]">{configured.size}/{tabs.length}</span>
               </div>
               <div className="mx-3 mb-1 h-1 rounded-full bg-[#F3F3F5] overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] transition-all"
-                  style={{ width: `${(CONFIGURED.size / tabs.length) * 100}%` }}
+                  style={{ width: `${(configured.size / tabs.length) * 100}%` }}
                 />
               </div>
             </div>
@@ -816,14 +832,14 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
             </button>
           </div>
 
-          {notifSubTab === 'escalations' && <EscalationMatrix portal={portal} />}
+          {notifSubTab === 'escalations' && <EscalationMatrix portal={portal === 'lab' ? 'lab' : 'clinic'} />}
 
           {/* Per-portal preference centre — only non-critical notifications
               are configurable; each portal carries its own catalogue. The
               clinic's old Order/Payment status toggle tables were replaced by
               the shared preference centre with the clinic catalogue. */}
           {notifSubTab === 'preferences' && (
-            <NotificationPreferences portal={portal} />
+            <NotificationPreferences portal={portal === 'lab' ? 'lab' : 'clinic'} />
           )}
         </div>
       )}
@@ -863,6 +879,15 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
           from every expiry notification and from the lab-wide banner:
             ?tab=scanners */}
       {activeTab === 'scanners' && portal === 'lab' && <ScannerSettingsPage />}
+
+      {/* ─── Integrations (clinic + DSO) ──────────────────────────────────── */}
+      {/* CareStack status, figures and Sync now — read-only; deep link
+          ?tab=integrations. Configuration lives with the Smile Genius admin. */}
+      {activeTab === 'integrations' && portal !== 'lab' && (
+        <SectionCard title="Integrations">
+          <CareStackStatusCard portal={portal} />
+        </SectionCard>
+      )}
 
         </section>
       </div>
