@@ -82,7 +82,7 @@ export function AddOption({ onAdd }: { onAdd: (v: string) => void }) {
   );
 }
 
-export default function LabScoringSettingsPage({ embedded = false, fixedSection, initialScoringTab, activeScoringTab, onScoringTabChange }: {
+export default function LabScoringSettingsPage({ embedded = false, fixedSection, initialScoringTab, activeScoringTab, onScoringTabChange, activeCommChannel, onCommChannelChange }: {
   /** Rendered inside a Settings tab (the live portal's home for this config):
       skips the page padding since the settings shell provides it. */
   embedded?: boolean;
@@ -97,6 +97,10 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
       (?sub=weights|bands|case-emails) so every tab is deep-linkable. */
   activeScoringTab?: 'weights' | 'thresholds' | 'email';
   onScoringTabChange?: (tab: 'weights' | 'thresholds' | 'email') => void;
+  /** Controlled Automated Communication channel — driven from the URL
+      (?channel=email|whatsapp) so the WhatsApp config is deep-linkable too. */
+  activeCommChannel?: 'email' | 'whatsapp';
+  onCommChannelChange?: (channel: 'email' | 'whatsapp') => void;
 } = {}) {
   const { toast } = useToast();
   const {
@@ -120,7 +124,12 @@ export default function LabScoringSettingsPage({ embedded = false, fixedSection,
   // Which channel's automated-communication config is on screen. The trigger
   // events are shared; only the account, the toggles and the message content
   // are per-channel.
-  const [commChannel, setCommChannel] = useState<'email' | 'whatsapp'>('email');
+  const [localCommChannel, setLocalCommChannel] = useState<'email' | 'whatsapp'>('email');
+  const commChannel = activeCommChannel ?? localCommChannel;
+  const setCommChannel = (c: 'email' | 'whatsapp') => {
+    setLocalCommChannel(c);
+    onCommChannelChange?.(c);
+  };
   const [activeService, setActiveService] = useState<string>(SCOREABLE_SERVICE_TYPES[0]);
   // The service whose "Configure" drawer is open (null = closed).
   const [configService, setConfigService] = useState<string | null>(null);

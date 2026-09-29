@@ -1864,7 +1864,7 @@ function buildConversation(caseData: CaseForDetail, replied: boolean, missing: s
   return msgs;
 }
 
-function ConversationPanel({ caseData, service, replied = false, onMarkReceived }: { caseData: CaseForDetail; service?: ServiceItem; replied?: boolean; onMarkReceived?: () => void }) {
+function ConversationPanel({ caseData, service, replied = false, onMarkReceived, initialTab = 'latest' }: { caseData: CaseForDetail; service?: ServiceItem; replied?: boolean; onMarkReceived?: () => void; initialTab?: 'latest' | 'email' | 'whatsapp' | 'ai' }) {
   const { scoreCase } = useCaseScoring();
   const { toast } = useToast();
   // With a service → score that one; without → score the whole case.
@@ -1872,7 +1872,7 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived 
   const score = scoreCase({ ...caseData, serviceItems: items } as any);
   const missing = score.services.filter(s => s.configured).flatMap(s => s.fields.filter(f => !f.filled).map(f => f.label));
 
-  const [activeTab, setActiveTab] = useState<'latest' | 'email' | 'whatsapp' | 'ai'>('latest');
+  const [activeTab, setActiveTab] = useState<'latest' | 'email' | 'whatsapp' | 'ai'>(initialTab);
   const [msgs, setMsgs] = useState<ConvMsg[]>(() => buildConversation(caseData, replied, missing));
   const [draft, setDraft] = useState('');
   const [composeChannel, setComposeChannel] = useState<Channel>('email');
@@ -4074,7 +4074,18 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               <button onClick={() => setThreadOpen(false)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors"><X className="w-4 h-4" /></button>
             </div>
             <div className="flex-1 min-h-0 bg-[#FAFBFC] p-4 flex flex-col">
-              <ConversationPanel caseData={caseData} replied={replyReceived} onMarkReceived={markReplyReceived} />
+              <ConversationPanel
+                caseData={caseData}
+                replied={replyReceived}
+                onMarkReceived={markReplyReceived}
+                initialTab={(() => {
+                  // ?channel=whatsapp|email|ai opens the hub straight on that
+                  // tab — the WhatsApp walkthrough deep-links to the WhatsApp
+                  // thread, where the automation replay lives.
+                  const ch = searchParams.get('channel');
+                  return ch === 'whatsapp' || ch === 'email' || ch === 'ai' ? ch : 'latest';
+                })()}
+              />
             </div>
           </div>
         </div>

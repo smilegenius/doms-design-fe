@@ -871,6 +871,14 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
             else next.set('sub', t === 'thresholds' ? 'bands' : 'case-emails');
             setSearchParams(next);
           }}
+          activeCommChannel={searchParams.get('channel') === 'whatsapp' ? 'whatsapp' : 'email'}
+          onCommChannelChange={(c) => {
+            const next = new URLSearchParams(searchParams);
+            next.set('tab', 'case-scoring');
+            next.set('sub', 'case-emails');
+            if (c === 'email') next.delete('channel'); else next.set('channel', c);
+            setSearchParams(next);
+          }}
         />
       )}
 

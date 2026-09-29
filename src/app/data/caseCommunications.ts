@@ -101,6 +101,11 @@ export function removeCareStackCommunications() {
   commit(records.filter(r => r.source !== 'carestack'));
 }
 
+/** Demo reset — drop every WhatsApp record (sent, queued and failed alike). */
+export function removeWhatsAppCommunications() {
+  commit(records.filter(r => r.channel !== 'whatsapp'));
+}
+
 /** Everything sent (or attempted) on a case, newest last. */
 export function communicationsFor(caseId: string, all: CaseCommunication[] = records): CaseCommunication[] {
   return all.filter(r => r.caseId === caseId).sort((a, b) => a.at.localeCompare(b.at));

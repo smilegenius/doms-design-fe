@@ -9,7 +9,9 @@ import InvitePage from './pages/InvitePage';
 import OnboardingPage from './pages/OnboardingPage';
 import PortalSelectPage from './pages/PortalSelectPage';
 import DowntimePage from './pages/DowntimePage';
+import FlowsPage from './pages/FlowsPage';
 import CareStackFlowPage from './pages/CareStackFlowPage';
+import WhatsAppFlowPage from './pages/WhatsAppFlowPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
 import LabApp from './LabApp';
@@ -419,8 +421,11 @@ export default function App() {
       <Route path="/onboarding" element={<OnboardingPage />} />
       {/* Client-facing flows (no auth) */}
       <Route path="/downtime" element={<DowntimePage />} />
-      {/* Flow walkthroughs — step-by-step index pages that deep-link into the portals */}
+      {/* Flow walkthroughs — step-by-step index pages that deep-link into the
+          portals. /flows is the grid the portal-select CTA opens. */}
+      <Route path="/flows" element={<FlowsPage />} />
       <Route path="/flows/carestack" element={<CareStackFlowPage />} />
+      <Route path="/flows/whatsapp" element={<WhatsAppFlowPage />} />
       <Route
         path="/supplier/*"
         element={
