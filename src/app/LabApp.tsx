@@ -144,9 +144,13 @@ export default function LabApp() {
           caseViewLimit={2}
           showConnectEmailNotice
           showScannerExpiryNotice
-          onCaseSelected={(caseId) =>
-            navigate(caseId ? `/lab/cases/${encodeURIComponent(caseId)}` : '/lab/cases')
-          }
+          onCaseSelected={(caseId, opts) => {
+            if (!caseId) { navigate('/lab/cases'); return; }
+            // A row action can ask for the Conversation hub — the drawer is
+            // URL-addressable, so it is just query on the case path.
+            const query = opts?.conversation ? `?conversation=1&channel=${opts.conversation}` : '';
+            navigate(`/lab/cases/${encodeURIComponent(caseId)}${query}`);
+          }}
         />
       )}
       {activePage === 'invoices' && (

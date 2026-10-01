@@ -29,6 +29,8 @@ import {
   Sparkles,
   Copy,
   GitBranch,
+  MessageCircle,
+  Info,
 } from 'lucide-react';
 import Button from '../components/Button';
 import ModalPortal from '../components/ModalPortal';
@@ -38,7 +40,11 @@ import SortDropdown from '../components/SortDropdown';
 import Pagination from '../components/Pagination';
 import FilterDrawer from '../components/FilterDrawer';
 import ScannerExpiryNotice from '../components/ScannerExpiryNotice';
+import CreatorAvatar from '../components/CreatorAvatar';
+import { caseCreator, needsReview, statusReach, statusReachReason, statusUpdateMessage, type StatusReach } from '../data/caseProvenance';
+import { useScannerConnections } from '../data/scannerConnections';
 import { getCreatedCases, useCreatedCases } from '../data/createdCases';
+import { hasEmailReply, hasWhatsAppReply, useCaseCommunications } from '../data/caseCommunications';
 import {
   RescanLink, originalIdOf, relatedIdsOf, relationshipOf, rescanIdsOf, useRescanLinks,
 } from '../data/rescanDetection';
@@ -87,6 +93,15 @@ export interface EmailPrescription {
   bodyPreview: string;       // 1-2 sentence excerpt of the email body
 }
 
+/**
+ * How a case should open. The portal shell turns this into the URL, so a row
+ * action can land on the Conversation hub's WhatsApp thread rather than just
+ * the case.
+ */
+export interface OpenCaseOptions {
+  conversation?: 'whatsapp' | 'email';
+}
+
 export interface Case {
   id: string;
   patientName: string;
@@ -110,6 +125,9 @@ export interface Case {
   // missing items were fetched from that reply (the case opens showing the
   // "score updated" confirmation). Orthogonal to status.
   emailReplyReceived?: boolean;
+  // Demo seed: the dentist answered on WhatsApp. Live replies are recorded in
+  // data/caseCommunications instead — the list flags either.
+  whatsappReplyReceived?: boolean;
   // Recorded when a user changes the status while requirements are still missing
   // (proceeding without waiting for the dentist). Surfaced on the case as the
   // override reason + who edited it.
@@ -127,6 +145,9 @@ export interface Case {
   // cases have neither, which is why they never affect the confidence score.
   scannerPatientId?: string;
   scannerCaseRef?: string;
+  // The user who submitted it through Quick Create. Seed cases derive their
+  // creator from the source instead (data/caseProvenance.ts).
+  createdBy?: string;
 }
 
 type ViewMode = 'table' | 'grid';
@@ -731,6 +752,9 @@ export const scannerIncompleteCases: Case[] = [
     hasAlert: true,
     scanner: '3Shape',
     source: 'scanner',
+    // The chase went out and Dr. Reed answered on WhatsApp — the row carries
+    // the WhatsApp indicator so the lab can see it without opening the case.
+    whatsappReplyReceived: true,
   },
   {
     // iTero case whose dentist has REPLIED — the missing items were fetched from
@@ -959,6 +983,59 @@ function OverrideTag({ override }: { override: StatusOverride }) {
   );
 }
 
+// Violet chip on email-made drafts: Smile Genius created the case, a person
+// still has to check it before it goes anywhere.
+function NeedsReviewTag() {
+  return (
+    <span
+      title="Created automatically from an email — review the details and submit it"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#F5F3FF] text-[#6D28D9] border border-[#DDD6FE]"
+    >
+      <Sparkles className="w-2.5 h-2.5" />
+      Needs your review
+    </span>
+  );
+}
+
+// Shown in the status modal (clinic side) when the new status won't reach the
+// lab on its own. Informational only — the change still goes through; it just
+// hands the user a ready message to pass on.
+function StatusReachNotice({ reach, caseData, toStatusLabel }: {
+  reach: Extract<StatusReach, { reaches: false }>;
+  caseData: Case;
+  toStatusLabel: string;
+}) {
+  const { toast } = useToast();
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(statusUpdateMessage(caseData, toStatusLabel));
+      toast.success('Message copied — paste it into an email or WhatsApp to the lab');
+    } catch {
+      toast.error('Couldn’t copy — please tell the lab directly');
+    }
+  };
+  return (
+    <div className="rounded-xl border border-[#BFDBFE] bg-[#EEF4FF] p-3">
+      <div className="flex items-start gap-2">
+        <Info className="w-4 h-4 text-[#1565C0] flex-shrink-0 mt-0.5" />
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-[#1565C0]">{caseData.lab} won’t see this change automatically</p>
+          <p className="text-[11px] text-[#35507A] mt-0.5 leading-relaxed">
+            {statusReachReason(reach)} Please let the lab know directly — by phone, email or WhatsApp.
+          </p>
+          <button
+            onClick={copy}
+            className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-[#1565C0] bg-white border border-[#BFDBFE] hover:bg-[#DBEAFE] transition-colors"
+          >
+            <Copy className="w-3 h-3" />
+            Copy update message
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Amber chip next to a delivery date the lab has moved — hover shows the
 // previous date, the reason (when given) and who changed it, when.
 function DueDateChangedTag({ change }: { change: DueDateChange }) {
@@ -1015,9 +1092,11 @@ function unitIdsOf(c: Case): string[] {
 // Modal for changing a case's status. If the case is still missing required
 // information, picking a new status reveals a mandatory override reason +
 // optional notes (the flow: warn → reason → notes → save → proceed).
-function StatusChangeModal({ caseData, missing, onClose, onConfirm }: {
+function StatusChangeModal({ caseData, missing, reach, onClose, onConfirm }: {
   caseData: Case;
   missing: string[];
+  /** Clinic-side portals only — whether the new status will reach the lab. */
+  reach?: StatusReach;
   onClose: () => void;
   onConfirm: (toStatus: CaseStatus, override?: StatusOverride) => void;
 }) {
@@ -1093,6 +1172,10 @@ function StatusChangeModal({ caseData, missing, onClose, onConfirm }: {
                   <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Add context for the override…" className="w-full px-3 py-2 rounded-lg border border-[#E0C56B] bg-white text-sm text-[#030213] focus:border-[#B45309] focus:outline-none resize-none" />
                 </div>
               </div>
+            )}
+
+            {changed && reach && !reach.reaches && (
+              <StatusReachNotice reach={reach} caseData={caseData} toStatusLabel={STATUS_LABEL[toStatus]} />
             )}
           </div>
 
@@ -1346,7 +1429,7 @@ function UpgradeModal({ onUpgrade, onBack }: { onUpgrade: () => void; onBack: ()
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice, showConnectEmailNotice, showScannerExpiryNotice, onCaseSelected }: {
+export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice, showConnectEmailNotice, showScannerExpiryNotice, showStatusReachNotice, onCaseSelected }: {
   initialCaseId?: string;
   onCreateCase?: () => void;
   // Called when the user clicks a draft case (status === 'draft'). The host
@@ -1372,9 +1455,14 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // Lab portal only — show the scanner token-expiry reminder above the case
   // list while a scanner token is expiring or has lapsed.
   showScannerExpiryNotice?: boolean;
+  // Clinic-side portals (Clinic + DSO) — a status changed here only reaches
+  // the lab through a live scanner integration. When it won't, the status
+  // modal, the case page and the confirmation toast say so and ask the user
+  // to tell the lab directly. The lab portal omits it.
+  showStatusReachNotice?: boolean;
   // Fired when the open case changes (id, or null on back-to-list) so the
   // host shell can keep the URL in sync — /…/cases/<id> is deep-linkable.
-  onCaseSelected?: (caseId: string | null) => void;
+  onCaseSelected?: (caseId: string | null, opts?: OpenCaseOptions) => void;
 } = {}) {
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
@@ -1384,12 +1472,19 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   // so a case marked as a rescan at creation is a real record its original can
   // link to and open.
   const createdCases = useCreatedCases();
+  // Every message recorded against a case. Read here so a WhatsApp reply that
+  // lands while the list is open lights up its row without a refresh.
+  const allComms = useCaseCommunications();
   const rescanLinks = useRescanLinks();
   // CareStack integration (group-level flag). Drives the CareStack column and
   // the milestone hooks below; the due-date history is flag-independent.
   const csEnabled = useCareStackEnabled();
   const dueDateChanges = useDueDateChanges();
   const csRecords = useAllCaseCareStack();
+  // Scanner integrations decide whether a clinic-side status change reaches
+  // the lab (only read when showStatusReachNotice is on).
+  const scannerConnections = useScannerConnections();
+  const reachFor = (c: Case) => statusReach(c, scannerConnections);
   const [shipmentModalCase, setShipmentModalCase] = useState<Case | null>(null);
   // Appointment actions taken straight from the list's CareStack column.
   const [apptAction, setApptAction] = useState<{ c: Case; kind: 'link' | 'not-required' } | null>(null);
@@ -1733,7 +1828,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
 
   // Draft cases route to the case-creation flow instead of the read-only
   // detail page — they get prefilled from the imported email/manual seed.
-  function openCase(c: Case) {
+  function openCase(c: Case, opts?: OpenCaseOptions) {
     // Clinic + lab pass onOpenDraft → a draft opens the QuickCreate screen
     // pre-filled (in draft state) instead of the read-only Case Detail page.
     if (c.status === 'draft' && onOpenDraft) {
@@ -1758,7 +1853,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     }
     if (caseViewLimit != null) setViewedCaseIds(prev => new Set(prev).add(c.id));
     setSelectedCase(c);
-    onCaseSelected?.(c.id);
+    onCaseSelected?.(c.id, opts);
   }
 
   // Archive / unarchive a case. Updates the list AND the open detail snapshot
@@ -1779,6 +1874,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     setSelectedCase(prev => prev && prev.id === c.id ? { ...prev, status: toStatus, statusOverride: override ?? prev.statusOverride } : prev);
     if (override) toast.success(`${c.id} → ${STATUS_LABEL[toStatus]} (override recorded)`);
     else toast.success(`${c.id} → ${STATUS_LABEL[toStatus]}`);
+    if (showStatusReachNotice && toStatus !== c.status && !reachFor(c).reaches) {
+      toast.info(`${c.lab} won’t see this automatically — please let them know the case is now ${STATUS_LABEL[toStatus]}.`);
+    }
     // CareStack milestones — mirrored onto the linked appointment as notes and
     // emailed to the practice. Accepted by Lab = In Production; Shipped asks
     // for courier/tracking; Received by Practice = Delivered.
@@ -1876,6 +1974,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           onRequestShipmentDetails={() => setShipmentModalCase(selectedCase)}
           showOfflineLabNotice={showOfflineLabNotice}
           showConnectEmailNotice={showConnectEmailNotice}
+          statusReach={showStatusReachNotice ? reachFor(selectedCase) : undefined}
           allCases={cases}
           onOpenRelatedCase={(id) => {
             const target = cases.find(c => c.id === id);
@@ -1891,6 +1990,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           <StatusChangeModal
             caseData={statusModalCase}
             missing={statusModalMissing}
+            reach={showStatusReachNotice ? reachFor(statusModalCase) : undefined}
             onClose={() => setStatusModalCase(null)}
             onConfirm={(toStatus, override) => { applyStatusChange(statusModalCase, toStatus, override); setStatusModalCase(null); }}
           />
@@ -2185,6 +2285,12 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                   // status would be. Clicking anywhere raises the upgrade modal.
                   const locked = c.forceUpgrade === true;
                   const lockBlur = locked ? 'blur-[3px] select-none pointer-events-none' : '';
+                  // Unread replies from the dentist. Unlike the other row
+                  // actions these are always on show — an unanswered reply is
+                  // news, and the lab shouldn't have to hover every row to
+                  // find it.
+                  const waReply = !locked && (c.whatsappReplyReceived || hasWhatsAppReply(c.id, allComms));
+                  const emailReply = !locked && (c.emailReplyReceived || hasEmailReply(c.id, allComms));
                   return (
                     <React.Fragment key={c.id}>
                     {/* ── Parent row ── */}
@@ -2208,15 +2314,41 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                         })()}
                       </td>
                       <td className={`pl-3 pr-2 py-3 relative ${lockBlur}`}>
-                        {(() => {
-                          const hasScans = (c.serviceItems[0]?.scanFileCount ?? 0) > 0;
-                          // Email cases carrying scanner scans (e.g. iTero) show
-                          // the scanner brand logo — no mail icon, no text label.
-                          if (c.source === 'email' && hasScans) {
-                            return <ScannerIcon scanner={c.scanner} />;
-                          }
-                          return <SourceIcon source={c.source} scanner={c.scanner} />;
-                        })()}
+                        {/* Source icon, followed by any unread reply at the same
+                            size. Set side by side rather than overlapping: the
+                            scanner tiles carry their brand name, and a circle
+                            this size laid over one clips the wordmark. */}
+                        <span className="relative inline-flex items-center">
+                          {(() => {
+                            const hasScans = (c.serviceItems[0]?.scanFileCount ?? 0) > 0;
+                            // Email cases carrying scanner scans (e.g. iTero) show
+                            // the scanner brand logo — no mail icon, no text label.
+                            if (c.source === 'email' && hasScans) {
+                              return <ScannerIcon scanner={c.scanner} />;
+                            }
+                            return <SourceIcon source={c.source} scanner={c.scanner} />;
+                          })()}
+                          {waReply && (
+                            <button
+                              title={`WhatsApp — ${c.dentist} replied · open the conversation`}
+                              onClick={(e) => { e.stopPropagation(); openCase(c, { conversation: 'whatsapp' }); }}
+                              className="relative ml-1 w-8 h-8 flex-shrink-0 rounded-full bg-[#F0FDF4] border border-[#BBF7D0] text-[#15803D] inline-flex items-center justify-center hover:bg-[#DCFCE7] transition-colors"
+                            >
+                              <MessageCircle className="w-4 h-4" />
+                              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#D4183D] ring-2 ring-white animate-pulse" />
+                            </button>
+                          )}
+                          {emailReply && (
+                            <button
+                              title={`Email — ${c.dentist} replied · open the conversation`}
+                              onClick={(e) => { e.stopPropagation(); openCase(c, { conversation: 'email' }); }}
+                              className="relative ml-1 w-8 h-8 flex-shrink-0 rounded-full bg-[#EEF4FF] border border-[#C8D8FC] text-[#1565C0] inline-flex items-center justify-center hover:bg-[#DBEAFE] transition-colors"
+                            >
+                              <Mail className="w-4 h-4" />
+                              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#D4183D] ring-2 ring-white animate-pulse" />
+                            </button>
+                          )}
+                        </span>
                       </td>
                       {visibleCols.status && (
                         <td className="px-4 py-3 whitespace-nowrap">
@@ -2244,6 +2376,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                           )}
                           {!locked && c.statusOverride && (
                             <div className="mt-1"><OverrideTag override={c.statusOverride} /></div>
+                          )}
+                          {!locked && needsReview(c) && (
+                            <div className="mt-1"><NeedsReviewTag /></div>
                           )}
                           {!locked && !visibleCols.caseId && (
                             <div className="text-[11px] font-semibold text-[#030213] mt-1">{c.id}</div>
@@ -2275,7 +2410,12 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                         </td>
                       )}
                       {visibleCols.createdAt && (
-                        <td className={`px-4 py-3 text-xs text-[#030213] whitespace-nowrap ${lockBlur}`}>{c.createdAt}</td>
+                        <td className={`px-4 py-3 text-xs text-[#030213] whitespace-nowrap ${lockBlur}`}>
+                          <span className="inline-flex items-center gap-2">
+                            <CreatorAvatar creator={caseCreator(c)} />
+                            {c.createdAt}
+                          </span>
+                        </td>
                       )}
                       {visibleCols.updatedAt && (
                         <td className={`px-4 py-3 text-xs text-[#717182] whitespace-nowrap ${lockBlur}`}>{c.updatedAt}</td>
@@ -2322,24 +2462,19 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                           its own bg (matching row hover) so scrolled columns
                           slide underneath. */}
                       <td
-                        className={`px-4 py-3 sticky right-0 z-10 bg-transparent group-hover:bg-[#F8F9FC] transition-colors group-hover:shadow-[-8px_0_12px_-10px_rgba(3,2,19,0.25)] ${lockBlur}`}
+                        // Transparent until hovered: this cell reserves room for
+                        // the hover actions, and a solid fill would blank out
+                        // that much of the scrolled columns on every row. The
+                        // always-visible reply chips carry their own opaque
+                        // pill, so they stay readable over whatever is behind.
+                        className={`px-4 py-3 sticky right-0 z-10 bg-transparent transition-colors group-hover:bg-[#F8F9FC] group-hover:shadow-[-8px_0_12px_-10px_rgba(3,2,19,0.25)] ${lockBlur}`}
                         onClick={(e) => e.stopPropagation()}
                       >
                         {/* Row actions surface on hover (or keyboard focus) only — the
-                            list stays quiet until a row is pointed at. */}
+                            list stays quiet until a row is pointed at. Unread replies
+                            are NOT here: they badge the source icon on the left, so
+                            they are visible without hovering every row. */}
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                          {/* Email-thread indicator — email/iTero cases carry a reply
-                              from the dentist; a red dot flags the unread thread. */}
-                          {c.source === 'email' && (
-                            <button
-                              title="Email thread — dentist replied"
-                              onClick={() => openCase(c)}
-                              className="relative p-1.5 rounded-lg text-[#1565C0] hover:bg-[#EEF4FF] transition-colors"
-                            >
-                              <Mail className="w-4 h-4" />
-                              <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-[#D4183D] border border-white" />
-                            </button>
-                          )}
                           {c.status !== 'draft' && (
                             <button
                               title="Change status"
@@ -2502,6 +2637,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                       <span className="inline-flex flex-col items-start gap-1">
                         <StatusBadge status={c.status} />
                         {c.statusOverride && <OverrideTag override={c.statusOverride} />}
+                        {needsReview(c) && <NeedsReviewTag />}
                       </span>
                     </span>
                     <div className="relative" onClick={(e) => e.stopPropagation()}>
@@ -2588,7 +2724,10 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-[#8B8B9E]">Created</span>
-                      <span className="text-[#5A5568]">{c.createdAt}</span>
+                      <span className="inline-flex items-center gap-1.5 text-[#5A5568]">
+                        <CreatorAvatar creator={caseCreator(c)} size={18} />
+                        {c.createdAt}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-[#8B8B9E]">Score</span>
@@ -2691,6 +2830,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
         <StatusChangeModal
           caseData={statusModalCase}
           missing={statusModalMissing}
+          reach={showStatusReachNotice ? reachFor(statusModalCase) : undefined}
           onClose={() => setStatusModalCase(null)}
           onConfirm={(toStatus, override) => { applyStatusChange(statusModalCase, toStatus, override); setStatusModalCase(null); }}
         />

@@ -185,6 +185,7 @@ export default function ClinicApp() {
           onCreateCase={() => setActivePage('quick-create-case')}
           onOpenDraft={(c) => navigate(`/clinic/cases/quick-new/${encodeURIComponent(c.id)}`)}
           showOfflineLabNotice
+          showStatusReachNotice
           onCaseSelected={(caseId) =>
             navigate(caseId ? `/clinic/cases/${encodeURIComponent(caseId)}` : '/clinic/cases')
           }

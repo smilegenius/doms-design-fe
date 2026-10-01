@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, MessageCircle, FlaskConical, Stethoscope, Cpu, RotateCcw, LogIn,
   Link2, Unlink, ToggleRight, FileText, PenLine, Play, AlertTriangle, ShieldAlert, ScrollText,
-  Sparkles, Smartphone,
+  Sparkles, Smartphone, Send, UserCog,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -79,17 +79,17 @@ const STAGES: Stage[] = [
         title: 'The master WhatsApp communication setting',
         persona: 'lab',
         icon: <ToggleRight className="w-4 h-4" />,
-        description: 'The lab-wide switch that gates every WhatsApp send, automated and manual alike. Off means nothing leaves the platform over WhatsApp — the account can stay linked.',
+        description: 'The lab-wide switch on the banner, beside the connection — both answer whether WhatsApp can be used at all. Off means nothing leaves the platform over WhatsApp; the account can stay linked.',
         shows: ['On — WhatsApp can be used', 'Off — “WhatsApp communication is turned off for this lab.”'],
         path: WA_SETTINGS,
       },
       {
-        title: 'Which scoring outcomes send a WhatsApp message',
+        title: 'Automatic or Manual, and which outcomes send',
         persona: 'lab',
         icon: <MessageCircle className="w-4 h-4" />,
-        description: 'WhatsApp reuses the case-scoring outcomes as its triggers — the same workflow that decides when an automated email goes out decides when a WhatsApp message goes out. Needs Review and Incomplete each have their own toggle and exactly one selected message.',
-        shows: ['Needs Review — on/off + one message', 'Incomplete — on/off + one message'],
-        tryIt: ['Turn Needs Review on', 'Open the message dropdown and switch between Default Message 1 and 2'],
+        description: 'The WhatsApp Automation card is built exactly like the Email one: an Automatic / Manual switch on the header, then a toggle and one selected message per scoring outcome. Automatic sends the moment a case is scored; Manual sends nothing by itself and greys the outcomes out — the lab sends from the case instead.',
+        shows: ['Automatic | Manual', 'Needs Review — on/off + one message', 'Incomplete — on/off + one message'],
+        tryIt: ['Switch to Manual and watch the outcomes dim', 'Back on Automatic, turn Needs Review on', 'Open the message dropdown and switch between Default Message 1 and 2'],
         path: WA_SETTINGS,
       },
       {
@@ -105,7 +105,7 @@ const STAGES: Stage[] = [
   },
   {
     label: 'Automated messages',
-    blurb: 'The automation fires once, silently, at the moment a case is scored. A seeded case replays the whole sequence step by step so it can actually be watched — and it reads the lab’s real settings, so the failure branch is one toggle away.',
+    blurb: 'With sending on Automatic, the automation fires once, silently, at the moment a case is scored. A seeded case replays the whole sequence step by step so it can actually be watched — and it reads the lab’s real settings, so the failure branch is one toggle away.',
     steps: [
       {
         title: 'The demo case — scored, matched, sent, delivered, read, replied',
@@ -118,11 +118,11 @@ const STAGES: Stage[] = [
         highlight: true,
       },
       {
-        title: 'Failure branch — the account is disconnected',
+        title: 'The branches that stop it',
         persona: 'system',
         icon: <ShieldAlert className="w-4 h-4" />,
-        description: 'Disconnect the account (or switch the setting off) in the controls above and run the same replay. Nothing goes out, and the attempt is still recorded against the case with the reason — a send that never happened is exactly what has to be auditable.',
-        shows: [BLOCK_REASON_TEXT.disconnected, BLOCK_REASON_TEXT.disabled, 'Recorded on the case as failed, with the reason'],
+        description: 'The replay reads the live settings, so each gate has its own ending. On Manual it stops at "Manual sending is on". With the channel off nothing is sent or recorded. With the account disconnected the attempt is still recorded against the case with the reason — a send that never happened is exactly what has to be auditable.',
+        shows: ['Manual sending is on', BLOCK_REASON_TEXT.disabled, BLOCK_REASON_TEXT.disconnected, 'Recorded on the case as failed, with the reason'],
         tryIt: ['Press "Disconnect" in the demo controls above', 'Run the simulation again and read the step that stops it'],
         path: DEMO_CASE,
       },
@@ -149,6 +149,25 @@ const STAGES: Stage[] = [
         shows: ['Template switcher', 'Recipient number on file — editable', 'Sending from +44 7700 900482'],
         tryIt: ['Pick WhatsApp in the composer → "Use template"', 'Switch the template, edit the body, send — the bubble appears in the thread'],
         path: '/lab/cases/CASE-051?conversation=1&channel=whatsapp',
+      },
+      {
+        title: 'Chase from the case header — Email or WhatsApp',
+        persona: 'lab',
+        icon: <Send className="w-4 h-4" />,
+        description: 'With both channels configured, the score card offers both: "Email dentist" and "WhatsApp dentist". Either one chases the same outcome, sends to the same dentist and moves the case to Sent for Review — only the channel differs. With WhatsApp unconfigured, only the email button shows, exactly as before.',
+        shows: ['Email dentist', 'WhatsApp dentist', 'Case → Sent for Review'],
+        tryIt: ['Press "WhatsApp dentist" on the score card', 'Read the message that lands in the hub — the missing items are filled in from the case'],
+        path: '/lab/cases/CASE-WA-3001',
+      },
+      {
+        title: 'No phone number on file',
+        persona: 'lab',
+        icon: <UserCog className="w-4 h-4" />,
+        description: 'Dr. Harper (CASE-051) has no number the lab can message. Pressing "WhatsApp dentist" says so and opens Private Information — the lab’s own email, number and notes for that dentist, which the dentist never sees and which do not change their clinic contact record. Saving a number sends the message straight away.',
+        shows: ['“No phone number on file for Dr. Harper”', 'Private Email · Private Phone No. · Private Notes', 'Save → the message goes out'],
+        tryIt: ['Press "WhatsApp dentist"', 'Type an invalid number to see it rejected, then +44 7700 900931 → Save'],
+        path: '/lab/cases/CASE-051',
+        highlight: true,
       },
       {
         title: 'Mark as Urgent',

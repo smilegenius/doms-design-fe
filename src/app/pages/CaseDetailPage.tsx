@@ -7,7 +7,7 @@ import {
   Superscript, Subscript, Undo2, Redo2, Paperclip, Eye, Plus, Minus,
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply, Pencil,
-  Copy, Plug, GitBranch,
+  Copy, Plug, GitBranch, Lock as LockIcon, Sparkles,
 } from 'lucide-react';
 import SideDrawer from '../components/SideDrawer';
 import ActionMenu from '../components/ActionMenu';
@@ -27,19 +27,24 @@ import {
   BLOCK_REASON_TEXT,
   DEFAULT_WHATSAPP_TEMPLATES,
   WhatsAppTemplate,
+  fillTemplateVars,
   findWhatsAppTemplate,
   isValidWhatsAppNumber,
   useWhatsAppComms,
   whatsappBlockReason,
   whatsappNumberFor,
 } from '../data/whatsappComms';
-import { recordEmail, sendWhatsAppMessage, useCaseCommunications } from '../data/caseCommunications';
+import { recordEmail, recordInboundEmail, sendWhatsAppMessage, useCaseCommunications } from '../data/caseCommunications';
+import { dentistPhoneFor, useDentistPrivateInfo } from '../data/dentistPrivateInfo';
+import PrivateInformationModal from '../components/PrivateInformationModal';
 import WhatsAppAutomationSimulator from '../components/WhatsAppAutomationSimulator';
 import { WHATSAPP_DEMO_CASE_ID } from './CasesPage';
 import RelatedCasesCard, { RelationshipPill } from '../components/RelatedCasesCard';
 import RescanDecisionModal from '../components/RescanDecisionModal';
 import type { Case as RescanCase } from './CasesPage';
 import { CURRENT_USER } from './CasesPage';
+import CreatorAvatar from '../components/CreatorAvatar';
+import { caseCreator, needsReview, statusReachReason, type StatusReach } from '../data/caseProvenance';
 import { ensureCaseValidation, latestDueDateChange, recordDueDateChange, recordReceipt, summariseCase, summaryLabel, SUMMARY_META, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
 import type { CaseCareStack, CaseLike as CareStackCaseLike } from '../data/carestack';
 import CareStackCaseSection from '../components/carestack/CareStackCaseSection';
@@ -156,6 +161,10 @@ interface CaseForDetail {
   serviceItems?: ServiceItem[];
   /** Whether this case is archived (hidden from the main Cases list). */
   archived?: boolean;
+  /** Email-made cases — the email Smile Genius built the case from. */
+  emailPrescription?: { fromName: string; subject: string; receivedAt: string };
+  /** Who submitted it through Quick Create (see data/caseProvenance). */
+  createdBy?: string;
 }
 
 // "Received via" label — derived from the real case source so the detail view
@@ -253,6 +262,10 @@ interface CaseDetailPageProps {
   /** CareStack — open the shipment-details capture for this case (the case is
       Shipped but courier / tracking haven't been recorded yet). */
   onRequestShipmentDetails?: () => void;
+  /** Clinic-side portals only — whether a status changed here reaches the
+      lab. When it doesn't, a notice under the status strip says to tell the
+      lab directly. The lab portal never passes it. */
+  statusReach?: StatusReach;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1864,7 +1877,7 @@ function buildConversation(caseData: CaseForDetail, replied: boolean, missing: s
   return msgs;
 }
 
-function ConversationPanel({ caseData, service, replied = false, onMarkReceived, initialTab = 'latest' }: { caseData: CaseForDetail; service?: ServiceItem; replied?: boolean; onMarkReceived?: () => void; initialTab?: 'latest' | 'email' | 'whatsapp' | 'ai' }) {
+function ConversationPanel({ caseData, service, replied = false, onMarkReceived, initialTab = 'latest', pendingOutbound }: { caseData: CaseForDetail; service?: ServiceItem; replied?: boolean; onMarkReceived?: () => void; initialTab?: 'latest' | 'email' | 'whatsapp' | 'ai'; pendingOutbound?: { channel: Channel; body: string } | null }) {
   const { scoreCase } = useCaseScoring();
   const { toast } = useToast();
   // With a service → score that one; without → score the whole case.
@@ -1873,7 +1886,18 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived,
   const missing = score.services.filter(s => s.configured).flatMap(s => s.fields.filter(f => !f.filled).map(f => f.label));
 
   const [activeTab, setActiveTab] = useState<'latest' | 'email' | 'whatsapp' | 'ai'>(initialTab);
-  const [msgs, setMsgs] = useState<ConvMsg[]>(() => buildConversation(caseData, replied, missing));
+  const [msgs, setMsgs] = useState<ConvMsg[]>(() => {
+    const seeded = buildConversation(caseData, replied, missing);
+    // A message the header sent as it opened this drawer — append it so the
+    // thread shows what just went out rather than looking untouched.
+    return pendingOutbound
+      ? [...seeded, {
+          id: 'pending-out', channel: pendingOutbound.channel, dir: 'out',
+          name: 'Smile Genius Lab', initials: 'SG', date: 'Today', time: 'now',
+          body: pendingOutbound.body,
+        }]
+      : seeded;
+  });
   const [draft, setDraft] = useState('');
   const [composeChannel, setComposeChannel] = useState<Channel>('email');
 
@@ -1886,7 +1910,10 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived,
   // Recipient — the same one manual email uses: the case's dentist. The number
   // on file is editable in the composer before sending, exactly as the email
   // draft's "To" is.
-  const [waNumber, setWaNumber] = useState(() => whatsappNumberFor(caseData.dentist));
+  // The number on file — the lab's private one first, then whatever the clinic
+  // shared. Blank when there is none, which the composer treats as "can't send
+  // yet" rather than inventing a number.
+  const [waNumber, setWaNumber] = useState(() => dentistPhoneFor(caseData.dentist) ?? '');
   // The WhatsApp draft modal — the template-led path, mirroring the email draft.
   const [waDraft, setWaDraft] = useState<{ tplId: string; to: string; body: string } | null>(null);
   const [waTplMenuOpen, setWaTplMenuOpen] = useState(false);
@@ -2120,7 +2147,17 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived,
     deliver(t, false);
   };
   const simulateReply = () => {
-    setMsgs(prev => [...prev, { id: `reply-${++idRef.current}`, channel: 'email', dir: 'in', name: caseData.dentist, initials: nameInitials(caseData.dentist), date: 'Today', time: 'now', subject: threadSubject, replyTo: quoteOf(lastOutEmail), body: `Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production.` }]);
+    const body = `Thanks — I've uploaded the missing files and updated the case. Please go ahead and start production.`;
+    setMsgs(prev => [...prev, { id: `reply-${++idRef.current}`, channel: 'email', dir: 'in', name: caseData.dentist, initials: nameInitials(caseData.dentist), date: 'Today', time: 'now', subject: threadSubject, replyTo: quoteOf(lastOutEmail), body }]);
+    // Recorded as well as shown, so the cases list flags the reply once this
+    // drawer is closed — same as the WhatsApp side.
+    recordInboundEmail({
+      caseId: caseData.id,
+      senderName: caseData.dentist,
+      senderAddress: dentistEmailOnFile ?? `${caseData.dentist.split(' ').slice(-1)[0].toLowerCase()}@practice.co.uk`,
+      subject: threadSubject,
+      body,
+    });
     onMarkReceived?.();
   };
 
@@ -3126,7 +3163,12 @@ function OrderFormBody({ caseData, service, wide = false }: {
         />
         <KV label="Practice Name" value={caseData.practice} />
         <KV label="Dentist Name" value={caseData.dentist} />
-        <KV label="Dentist Contact Number" value="—" muted />
+        {/* The number the lab can actually reach this dentist on — the private
+            one it saved, else whatever the clinic shared. */}
+        {(() => {
+          const phone = dentistPhoneFor(caseData.dentist);
+          return <KV label="Dentist Contact Number" value={phone ?? '—'} muted={!phone} />;
+        })()}
         <GroupDivider />
         <KV label="Patient Name" value={caseData.patientName} />
         <KV label="DOB / Gender" value="— / —" muted />
@@ -3463,7 +3505,7 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
-export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onDeliveryDateChange, onRequestShipmentDetails }: CaseDetailPageProps) {
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   // The lab's latest due-date change (if any) is the date the case is working
@@ -3529,11 +3571,20 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // and survives refresh / back-forward — e.g. /lab/cases/CASE-054?conversation=1.
   const [searchParams, setSearchParams] = useSearchParams();
   const threadOpen = searchParams.get('conversation') === '1';
-  const setThreadOpen = (open: boolean) => {
+  const setThreadOpen = (open: boolean, channel?: 'email' | 'whatsapp' | 'ai') => {
     const next = new URLSearchParams(searchParams);
     if (open) next.set('conversation', '1'); else next.delete('conversation');
+    if (open && channel) next.set('channel', channel);
+    if (!open) next.delete('channel');
     setSearchParams(next);
   };
+  // A message the header just sent, handed to the hub so the bubble is there
+  // when it opens. The panel is unmounted while the drawer is closed, so it
+  // reads this once in its initialiser and never needs to clear it.
+  const [pendingOutbound, setPendingOutbound] = useState<{ channel: 'email' | 'whatsapp'; body: string } | null>(null);
+  // The lab's private record for this case's dentist. Opens on demand, and
+  // automatically when a WhatsApp send has no number to go to.
+  const [privateInfoOpen, setPrivateInfoOpen] = useState(false);
 
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
@@ -3541,6 +3592,17 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // sending mode. Reactive: the banner below disappears the moment an account
   // is connected, and "Email dentist" honours Automatic vs Manual sending.
   const { connection: emailConnection, sendMode: emailSendMode } = useCaseScoringEmails();
+
+  // ── Chasing the dentist: which channels are offered ────────────────────────
+  // "Email dentist" has always been the follow-up action on the score card.
+  // WhatsApp joins it as a second button once the lab has that channel ready —
+  // the same three gates the automated send obeys: the setting on, an account
+  // linked, and this outcome's automation enabled. With both configured the
+  // user picks the channel; with WhatsApp unconfigured, nothing changes.
+  const headerWhatsapp = useWhatsAppComms();
+  // Subscribe so a number saved in the Private Information modal is picked up
+  // without a reload — dentistPhoneFor() reads the same store.
+  useDentistPrivateInfo();
 
   // ── CareStack integration ──────────────────────────────────────────────────
   // Group-level flag. While on: the CareStack section renders, delivery-date
@@ -3584,18 +3646,70 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // items are provided, so the badge reads complete (matching the confirmation).
   const caseScore = replyReceived ? scoreCase(fillMissingForScore(caseData) as any) : baseScore;
 
+  // The scoring outcome this case falls in — what both chase channels send for.
+  const chaseCategory: ScoringEmailCategory = categoryForTier(baseScore.tier) ?? 'needs-review';
+  const whatsappChaseReady =
+    whatsappBlockReason(headerWhatsapp) === null && headerWhatsapp.automation[chaseCategory].enabled;
+
   function sendMissingInfoEmail() {
     // Manual sending mode (Settings → Case Scoring → Case Scoring Emails):
     // nothing sends automatically — just open the Conversation hub, where the
     // user picks a template and sends it themselves.
     if (emailSendMode === 'manual') {
-      setThreadOpen(true);
+      setThreadOpen(true, 'email');
       return;
     }
     setEmailSent(true);
     onSetStatus?.('sent-for-review');
-    setThreadOpen(true);
+    setThreadOpen(true, 'email');
     toast.success(`Missing-info email sent to ${caseData.dentist} — case set to “Sent for Review”.`);
+  }
+
+  // The WhatsApp twin of the button above: same outcome, same recipient, same
+  // "case has been chased" result — only the channel differs.
+  function sendMissingInfoWhatsApp() {
+    // No number on file — nothing can be sent, on either sending mode. Say why
+    // and open the lab's private record for this dentist, which is where a
+    // number gets added; saving it retries the send straight away.
+    const phone = dentistPhoneFor(caseData.dentist);
+    if (!phone) {
+      toast.error(`No phone number on file for ${caseData.dentist} — add a private number to message them on WhatsApp.`);
+      setPrivateInfoOpen(true);
+      return;
+    }
+    if (headerWhatsapp.sendMode === 'manual') {
+      setThreadOpen(true, 'whatsapp');
+      return;
+    }
+    const tpl = findWhatsAppTemplate(chaseCategory, headerWhatsapp.automation[chaseCategory].templateId, headerWhatsapp.customTemplates);
+    const body = fillTemplateVars(tpl.body, {
+      'Dentist Name': caseData.dentist,
+      'Patient Name': caseData.patientName ?? 'the patient',
+      'Case ID': caseData.id,
+      'Service Name': caseData.services?.[0] ?? 'the service',
+      'Missing Items Summary': missingRequirements.length ? missingRequirements.map(m => `• ${m}`).join('\n') : '• (nothing outstanding)',
+      'Case Link': `https://app.smilegenius.co.uk/cases/${caseData.id}`,
+      'Lab Name': caseData.lab ?? 'Smile Genius Lab',
+    });
+    const result = sendWhatsAppMessage({
+      caseId: caseData.id,
+      trigger: 'manual',
+      event: chaseCategory,
+      recipientName: caseData.dentist,
+      recipientAddress: phone,
+      body,
+    });
+    if (result.status === 'sent') {
+      setEmailSent(true);
+      onSetStatus?.('sent-for-review');
+      setPendingOutbound({ channel: 'whatsapp', body });
+      setThreadOpen(true, 'whatsapp');
+      toast.success(`Missing-info message sent to ${caseData.dentist} on WhatsApp — case set to “Sent for Review”.`);
+    } else {
+      // The send path records the failure; the case is NOT marked as chased,
+      // because nothing reached the dentist.
+      toast.error(result.message);
+    }
   }
   function markReplyReceived() {
     setReplyReceived(true);
@@ -3682,16 +3796,33 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 Conversation hub · awaiting {caseData.dentist}
               </button>
             ) : isIncomplete ? (
-              <button
-                onClick={sendMissingInfoEmail}
-                title={emailSendMode === 'manual'
-                  ? 'Open the conversation — manual sending is on, pick a template and send it yourself'
-                  : 'Auto-email the dentist the list of missing items'}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity whitespace-nowrap"
-              >
-                <Send className="w-3.5 h-3.5" />
-                Email dentist
-              </button>
+              /* One button per configured channel. Email is always offered;
+                 WhatsApp appears beside it once that channel is ready, so a
+                 lab running both picks how to chase this case. */
+              <span className="inline-flex items-center gap-1.5">
+                <button
+                  onClick={sendMissingInfoEmail}
+                  title={emailSendMode === 'manual'
+                    ? 'Open the conversation — manual sending is on, pick a template and send it yourself'
+                    : 'Auto-email the dentist the list of missing items'}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity whitespace-nowrap"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Email dentist
+                </button>
+                {whatsappChaseReady && (
+                  <button
+                    onClick={sendMissingInfoWhatsApp}
+                    title={headerWhatsapp.sendMode === 'manual'
+                      ? 'Open the conversation — manual sending is on, pick a message and send it yourself'
+                      : `Send the list of missing items to ${caseData.dentist} on WhatsApp`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-[#15803D] hover:bg-[#166534] transition-colors whitespace-nowrap"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    WhatsApp dentist
+                  </button>
+                )}
+              </span>
             ) : null}
           </div>
           {missingDeliveryDate && (
@@ -3781,6 +3912,37 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         </div>
       )}
 
+      {/* ── Email-made draft — Smile Genius created it, nobody has checked
+          it yet. Same message as the creation screen, so the review ask
+          reads the same wherever the draft is opened. ── */}
+      {needsReview(caseData) && (
+        <div className="mx-6 mt-1 flex items-start gap-3 px-4 py-3 rounded-xl border border-[#DDD6FE] bg-gradient-to-r from-[#F5F3FF] to-[#EEF4FF]">
+          <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white flex items-center justify-center flex-shrink-0">
+            <Sparkles className="w-3.5 h-3.5" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-[#030213]">This case was created automatically from an email — it needs your review</p>
+            <p className="text-[11px] text-[#5A5568] leading-snug mt-0.5">
+              <span className="font-semibold text-[#030213]">Smile Genius</span> created this draft
+              {caseData.emailPrescription && <> from {caseData.emailPrescription.fromName}’s email <span className="text-[#717182]">(“{caseData.emailPrescription.subject}”, {caseData.emailPrescription.receivedAt})</span></>}
+              . It isn’t a live case yet — check the details before it’s submitted.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Status reach (clinic side) — this case has no live scanner link
+          to the lab, so a status changed here won't show up for them. ── */}
+      {statusReach && !statusReach.reaches && caseData.status !== 'draft' && (
+        <div className="mx-6 mt-1 flex items-start gap-2.5 px-4 py-2.5 rounded-xl border border-[#BFDBFE] bg-[#EEF4FF]">
+          <Info className="w-4 h-4 text-[#1565C0] flex-shrink-0 mt-0.5" />
+          <p className="text-[11px] text-[#35507A] leading-snug">
+            <span className="font-semibold text-[#1565C0]">Status updates won’t reach {caseData.lab ?? 'the lab'} automatically.</span>{' '}
+            {statusReachReason(statusReach)} When you change the status, let the lab know directly.
+          </p>
+        </div>
+      )}
+
       {/* ── Status timeline strip — mirrors the live portal: each status the
             case has passed through, who did it and when, above the case card.
             Click any step for the full timeline modal. ── */}
@@ -3824,6 +3986,8 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             {s.label}
             {onRequestStatusChange && <ChevronDown className="w-3 h-3 opacity-70" />}
           </button>
+
+          <CreatorAvatar creator={caseCreator(caseData)} showName />
 
           {caseData.archived && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#F3F3F5] text-[#616161] border border-[#BDBDBD]">
@@ -3902,6 +4066,16 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               <p className="text-xs font-semibold text-[#030213] flex items-center gap-1.5">
                 <span className="truncate">{caseData.dentist}</span>
                 {csEnabled && csRecord && <MappingIcon mapping={csRecord.dentist} entity="Dentist" />}
+                {/* The lab's own record for this dentist — the same modal the
+                    WhatsApp send opens when there is no number on file. */}
+                <button
+                  type="button"
+                  onClick={() => setPrivateInfoOpen(true)}
+                  title={`Private information — the lab's own email, number and notes for ${caseData.dentist}`}
+                  className="flex-shrink-0 inline-flex items-center justify-center w-4 h-4 rounded text-[#A0A0B0] hover:text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors"
+                >
+                  <LockIcon className="w-3 h-3" />
+                </button>
               </p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Created By</p>
               <p className="text-[11px] text-[#717182]">Smile Genius Lab <span className="text-[#A0A0B0]">(Clinic)</span></p>
@@ -4078,6 +4252,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 caseData={caseData}
                 replied={replyReceived}
                 onMarkReceived={markReplyReceived}
+                pendingOutbound={pendingOutbound}
                 initialTab={(() => {
                   // ?channel=whatsapp|email|ai opens the hub straight on that
                   // tab — the WhatsApp walkthrough deep-links to the WhatsApp
@@ -4091,6 +4266,17 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         </div>
         </ModalPortal>
       )}
+
+      {/* The lab's private record for this dentist. Opens on its own when a
+          WhatsApp send has no number to go to; saving one retries that send,
+          so the user lands back where they were trying to get to. */}
+      <PrivateInformationModal
+        isOpen={privateInfoOpen}
+        dentist={caseData.dentist}
+        focusField="phone"
+        onClose={() => setPrivateInfoOpen(false)}
+        onSaved={(info) => { if (info.phone) sendMissingInfoWhatsApp(); }}
+      />
 
       {/* CareStack side drawer — mapping status, the CareStack appointment and
           the sync log. Opened from the "CareStack" button in the header. */}

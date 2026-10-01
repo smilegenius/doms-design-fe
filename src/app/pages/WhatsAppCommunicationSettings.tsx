@@ -22,9 +22,9 @@ import {
   selectWhatsAppTemplate,
   setWhatsAppAutomationEnabled,
   setWhatsAppEnabled,
+  setWhatsAppSendMode,
   updateCustomWhatsAppTemplate,
   useWhatsAppComms,
-  whatsappBlockReason,
 } from '../data/whatsappComms';
 
 // ─── Settings → Automated Communication → WhatsApp ───────────────────────────
@@ -63,6 +63,10 @@ function ToneChip({ tone }: { tone: string }) {
   const map: Record<string, string> = {
     Professional: 'bg-[#EEF4FF] text-[#1565C0] border-[#C8D8FC]',
     Friendly: 'bg-[#F0FDF4] text-[#15803D] border-[#BBF7D0]',
+    // Urgent matches the amber the email tones use for the same word.
+    Urgent: 'bg-[#FFF8E1] text-[#B45309] border-[#FDE68A]',
+    Brief: 'bg-[#F3F3F5] text-[#5A5568] border-[#E0E0E6]',
+    'Follow-up': 'bg-[#ECFEFF] text-[#0F766E] border-[#99F6E4]',
     Custom: 'bg-[#F3EEFF] text-[#7C3AED] border-[#DDD6FE]',
   };
   return (
@@ -91,9 +95,8 @@ interface EditorState { mode: 'create' | 'edit'; id?: string; name: string; body
 export default function WhatsAppCommunicationSettings() {
   const { toast } = useToast();
   const settings = useWhatsAppComms();
-  const { enabled, connection, automation, customTemplates } = settings;
+  const { enabled, sendMode, connection, automation, customTemplates } = settings;
   const connected = connection.status === 'connected';
-  const blocked = whatsappBlockReason(settings);
 
   const [integrationOpen, setIntegrationOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -198,10 +201,30 @@ export default function WhatsAppCommunicationSettings() {
         </span>
         <div className="flex-1 min-w-[220px] text-xs text-[#2F4F3A] leading-relaxed">
           <span className="font-semibold text-[#15803D]">WhatsApp Communication.</span>{' '}
-          Case updates over WhatsApp — automatically on the same scoring events as email, or manually from a case —
-          all from your own WhatsApp Business number.
+          Case updates from your own WhatsApp Business number.
         </div>
+        {/* Channel-level row: the master switch sits beside the connection,
+            because both answer "can WhatsApp be used at all?". How the
+            messages go out is the Automation card's business, below.
+            The switch only appears once an account is linked — there is
+            nothing to turn on until then, and the pill beside it already
+            says so. */}
         <div className="flex items-center gap-2 flex-shrink-0">
+          {connected && (
+            <>
+              <span className={`text-[11px] font-semibold ${enabled ? 'text-[#15803D]' : 'text-[#A0A0B0]'}`}>
+                {enabled ? 'On' : 'Off'}
+              </span>
+              <Toggle
+                on={enabled}
+                title={enabled ? 'Turn WhatsApp communication off' : 'Turn WhatsApp communication on'}
+                onChange={() => {
+                  setWhatsAppEnabled(!enabled);
+                  toast.success(enabled ? 'WhatsApp turned off' : 'WhatsApp turned on');
+                }}
+              />
+            </>
+          )}
           <button
             onClick={() => setIntegrationOpen(true)}
             title={connected ? `Manage the WhatsApp integration — sending as ${connection.number}` : 'Connect your WhatsApp Business account'}
@@ -218,78 +241,81 @@ export default function WhatsAppCommunicationSettings() {
         </div>
       </div>
 
-      {enabled && !connected && (
-        <div className="bg-white border border-[#E0E0E6] rounded-xl px-5 py-4 flex items-start gap-2.5">
-          <AlertTriangle className="w-4 h-4 text-[#B45309] flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-[#717182] leading-relaxed">
-            <p><span className="font-semibold text-[#030213]">{BLOCK_REASON_TEXT.disconnected}</span>{' '}
-            Configure the automation now if you like — nothing sends until an account is linked, and any attempt is
-            recorded on the case as a failure.</p>
-            <button
-              onClick={() => setIntegrationOpen(true)}
-              className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-[#15803D] hover:bg-[#166534] transition-colors"
-            >
-              <Smartphone className="w-3.5 h-3.5" /> Connect WhatsApp Business
-            </button>
-          </div>
-        </div>
-      )}
+
+      {/* ── Everything below is gated on the connection, exactly as the email
+          panel is: no account, nothing to automate — the banner above is the
+          whole screen until one is linked. ── */}
+      {connected && (<>
 
       {/* ── WhatsApp Automation — one toggle + one message per outcome. The
-          trigger events are the case scoring outcomes, exactly as for email.
-          The master WhatsApp setting lives on this card's header, next to the
-          sending number: the switch and the number it sends from read as one
-          decision. It stays mounted when the channel is off — otherwise there
-          would be no way to turn it back on. ── */}
+          trigger events are the case scoring outcomes, exactly as for email,
+          and so is the Automatic/Manual sending mode on this card's header.
+          The card stays mounted when the channel is off — the master switch
+          lives on the banner above. ── */}
       <Card
         title="WhatsApp Automation"
         actions={
           <div className="flex items-center gap-2 flex-wrap">
-            {connected && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-[#15803D] bg-[#F0FDF4] border border-[#BBF7D0]">
-                <Smartphone className="w-3 h-3" />
-                Sending from {connection.number}
-              </span>
-            )}
-            <span className={`text-[11px] font-semibold ${enabled ? 'text-[#15803D]' : 'text-[#A0A0B0]'}`}>
-              {enabled ? 'On' : 'Off'}
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-[#15803D] bg-[#F0FDF4] border border-[#BBF7D0]">
+              <Smartphone className="w-3 h-3" />
+              {connection.number}
             </span>
-            <Toggle
-              on={enabled}
-              title={enabled ? 'Turn WhatsApp communication off' : 'Turn WhatsApp communication on'}
-              onChange={() => {
-                setWhatsAppEnabled(!enabled);
-                toast.success(enabled
-                  ? 'WhatsApp communication turned off — no WhatsApp messages will be sent'
-                  : 'WhatsApp communication turned on');
-              }}
-            />
+            <div className="inline-flex p-0.5 bg-[#F3F3F5] rounded-lg flex-shrink-0">
+              {(['automatic', 'manual'] as const).map(mode => (
+                <button
+                  key={mode}
+                  aria-pressed={sendMode === mode}
+                  disabled={!enabled}
+                  title={mode === 'automatic'
+                    ? 'Send the selected message automatically the moment a case is scored'
+                    : 'Send nothing automatically — message from each case\'s Conversation hub'}
+                  onClick={() => {
+                    if (sendMode === mode) return;
+                    setWhatsAppSendMode(mode);
+                    setTemplateMenuFor(null);
+                    toast.success(mode === 'automatic'
+                      ? 'Automatic sending on — scored cases message the dentist immediately'
+                      : 'Manual sending on — send from each case\'s Conversation hub');
+                  }}
+                  className={`px-3 py-1.5 rounded-md text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    sendMode === mode ? 'bg-white text-[#15803D] font-semibold shadow-sm' : 'text-[#717182] font-medium hover:text-[#030213]'
+                  }`}
+                >
+                  {mode === 'automatic' ? 'Automatic' : 'Manual'}
+                </button>
+              ))}
+            </div>
           </div>
         }
       >
         {!enabled ? (
           /* The channel is off — say so plainly. Nothing below applies while
-             no WhatsApp message can be sent, so the config is not shown. */
+             no WhatsApp message can be sent, so the config is not shown. The
+             master switch on the banner above turns it back on. */
           <div className="flex items-start gap-2.5">
             <AlertTriangle className="w-4 h-4 text-[#B45309] flex-shrink-0 mt-0.5" />
             <p className="text-xs text-[#717182] leading-relaxed">
               <span className="font-semibold text-[#030213]">{BLOCK_REASON_TEXT.disabled}</span>{' '}
-              Automated WhatsApp messages are not sent, and lab users cannot send a WhatsApp message from a case.
-              Turn the setting on to configure the channel.
+              Turn it on above to configure the channel.
             </p>
           </div>
         ) : (<>
         <p className="text-xs text-[#717182] leading-relaxed mb-4">
-          A scored case sends the selected message to the same recipient the email automation uses — the case&apos;s
-          dentist. Each outcome has its own on/off toggle and exactly one selected message.
+          {sendMode === 'manual'
+            ? 'Nothing sends by itself — every message is offered in the case\'s Conversation hub.'
+            : 'The selected message goes to the case\'s dentist the moment it is scored.'}
         </p>
 
         {/* The two outcome descriptions wrap to different line counts, so the
             grey headers are different heights — which pushes the message
             dropdowns out of line. Subgrid puts BOTH cards' headers in the same
             grid row and both message rows in the next, so the headers share a
-            height and the dropdowns line up. */}
-        <div className={`grid grid-cols-1 lg:grid-cols-2 lg:grid-rows-[auto_1fr] gap-4 ${connected ? '' : 'opacity-60'}`}>
+            height and the dropdowns line up.
+            In MANUAL mode the whole block is disabled, exactly as for email. */}
+        <div
+          aria-disabled={sendMode === 'manual'}
+          className={`grid grid-cols-1 lg:grid-cols-2 lg:grid-rows-[auto_1fr] gap-4 ${sendMode === 'manual' ? 'opacity-50 pointer-events-none select-none' : ''}`}
+        >
           {CATEGORIES.map(cat => {
             const meta = CATEGORY_META[cat];
             const conf = automation[cat];
@@ -411,12 +437,7 @@ export default function WhatsAppCommunicationSettings() {
                     </button>
                     {!conf.enabled && (
                       <p className="w-full text-[10px] text-[#A0A0B0]">
-                        Paused — no {meta.label} WhatsApp messages are sent while disabled.
-                      </p>
-                    )}
-                    {conf.enabled && blocked === 'disconnected' && (
-                      <p className="w-full text-[10px] text-[#B45309]">
-                        Configured, but nothing can send — connect a WhatsApp Business account.
+                        Paused — nothing sent for {meta.label}.
                       </p>
                     )}
                   </div>
@@ -443,8 +464,7 @@ export default function WhatsAppCommunicationSettings() {
       >
         {customTemplates.length === 0 ? (
           <p className="text-xs text-[#717182] leading-relaxed">
-            No custom messages yet. The default messages above cover both outcomes — add your own when you want
-            different wording.
+            No custom messages yet — the defaults above cover both outcomes.
           </p>
         ) : (
           <div className="space-y-2">
@@ -480,6 +500,8 @@ export default function WhatsAppCommunicationSettings() {
       </Card>
       )}
 
+      </>)}
+
       {/* ── WhatsApp Integration modal — connect / reconnect / disconnect ── */}
       {integrationOpen && (
         <ModalPortal>
@@ -513,16 +535,15 @@ export default function WhatsAppCommunicationSettings() {
                       </div>
                     </div>
                     <p className="text-[11px] text-[#717182] leading-relaxed">
-                      Every automated and manual WhatsApp message on a case sends from this number, so the dentist
-                      sees the lab — not Smile Genius.
+                      Every case message sends from this number — the dentist sees the lab, not Smile Genius.
                     </p>
                   </div>
                 ) : showLinkForm ? (
                   /* Never connected (or linking a different account) */
                   <div className="space-y-3">
                     <p className="text-xs text-[#717182] leading-relaxed">
-                      Link the lab&apos;s WhatsApp Business account. Case messages then send from your number, and
-                      dentist replies come back to it. Nothing sends until an account is connected.
+                      Link the lab&apos;s WhatsApp Business account. Case messages send from your number, and replies
+                      come back to it.
                     </p>
                     <div>
                       <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0] mb-1">Business display name</p>
@@ -570,8 +591,7 @@ export default function WhatsAppCommunicationSettings() {
                       </div>
                     </div>
                     <p className="text-[11px] text-[#717182] leading-relaxed">
-                      Reconnect to resume, or connect a different account — your automation settings and messages are
-                      kept either way.
+                      Reconnect to resume — your settings and messages are kept.
                     </p>
                   </div>
                 )}
@@ -681,8 +701,7 @@ export default function WhatsAppCommunicationSettings() {
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5">
               <h3 className="text-base font-semibold text-[#030213] mb-1">Disconnect WhatsApp Business?</h3>
               <p className="text-xs text-[#717182] leading-relaxed">
-                Automated WhatsApp messages stop immediately and lab users cannot send a WhatsApp message from a
-                case. Anything the automation tries to send while disconnected is recorded on the case as a failure.
+                Sending stops immediately. Attempts made while disconnected are recorded on the case as failures.
               </p>
               <div className="flex items-center justify-end gap-2 mt-4">
                 <button onClick={() => setDisconnectOpen(false)} className="px-3.5 py-2 rounded-lg text-xs font-semibold text-[#030213] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">Cancel</button>
@@ -721,7 +740,7 @@ export default function WhatsAppCommunicationSettings() {
                   </p>
                 </div>
                 <p className="text-[10px] text-[#A0A0B0] mt-2">
-                  Highlighted values are filled in from the case when the message is sent.
+                  Highlighted values are filled from the case at send time.
                 </p>
               </div>
             </div>
@@ -751,6 +770,46 @@ export default function WhatsAppCommunicationSettings() {
                     className="w-full px-3 py-2 rounded-lg border border-[#E0E0E6] text-sm text-[#030213] focus:border-[#15803D] focus:outline-none"
                   />
                 </div>
+                {/* Start from — copies an existing message into the editor as a
+                    starting point, the same affordance the email template
+                    editor offers. Offered on create only: on an edit the body
+                    is already the thing being worked on. Custom messages are
+                    listed too, so a lab can fork its own wording. */}
+                {editor.mode === 'create' && (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0] mb-1">Start from</p>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        if (!id) { setEditor(s => s && ({ ...s, body: '' })); return; }
+                        const src = [
+                          ...CATEGORIES.flatMap(c => DEFAULT_WHATSAPP_TEMPLATES[c]),
+                          ...customTemplates,
+                        ].find(t => t.id === id);
+                        if (src) setEditor(s => s && ({ ...s, body: src.body }));
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-[#E0E0E6] text-sm text-[#030213] bg-white focus:border-[#15803D] focus:outline-none"
+                      title="Copy an existing message as your starting point"
+                    >
+                      <option value="">Blank</option>
+                      {CATEGORIES.map(cat => (
+                        <optgroup key={cat} label={CATEGORY_META[cat].label}>
+                          {DEFAULT_WHATSAPP_TEMPLATES[cat].map(t => (
+                            <option key={t.id} value={t.id}>{t.name} ({t.tone})</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                      {customTemplates.length > 0 && (
+                        <optgroup label="Your custom messages">
+                          {customTemplates.map(t => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-[#A0A0B0] mb-1">Message</p>
                   <textarea

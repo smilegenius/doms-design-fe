@@ -22,10 +22,19 @@ export type CommTrigger = 'automated' | 'manual';
 // goes out end-of-day, not per case). Flips to 'sent' when the digest runs.
 export type CommStatus = 'sent' | 'failed' | 'queued';
 
+/**
+ * Which way the message went. Absent means outbound — the store began life as
+ * a record of what the lab sends, and every existing record predates this
+ * field. Inbound records exist so a dentist's reply survives the drawer being
+ * closed and can be spotted from the cases list.
+ */
+export type CommDirection = 'out' | 'in';
+
 export interface CaseCommunication {
   id: string;
   caseId: string;
   channel: CommChannel;
+  direction?: CommDirection;
   trigger: CommTrigger;
   /** Which automated event fired this — absent on manual sends. */
   event?: ScoringEmailCategory;
@@ -104,6 +113,63 @@ export function removeCareStackCommunications() {
 /** Demo reset — drop every WhatsApp record (sent, queued and failed alike). */
 export function removeWhatsAppCommunications() {
   commit(records.filter(r => r.channel !== 'whatsapp'));
+}
+
+// ── Inbound ───────────────────────────────────────────────────────────────────
+/**
+ * A reply from the dentist. Recorded like any other message on the case so the
+ * cases list can flag "they answered" without opening the conversation.
+ */
+export function recordInboundWhatsApp(input: {
+  caseId: string;
+  senderName: string;
+  senderAddress: string;
+  body: string;
+}): CaseCommunication {
+  return recordCommunication({
+    caseId: input.caseId,
+    channel: 'whatsapp',
+    direction: 'in',
+    trigger: 'manual',
+    recipientName: input.senderName,
+    recipientAddress: input.senderAddress,
+    body: input.body,
+    status: 'sent',
+  });
+}
+
+/** A reply from the dentist. Same shape as the WhatsApp one, other channel. */
+export function recordInboundEmail(input: {
+  caseId: string;
+  senderName: string;
+  senderAddress: string;
+  subject?: string;
+  body: string;
+}): CaseCommunication {
+  return recordCommunication({
+    caseId: input.caseId,
+    channel: 'email',
+    direction: 'in',
+    trigger: 'manual',
+    recipientName: input.senderName,
+    recipientAddress: input.senderAddress,
+    subject: input.subject,
+    body: input.body,
+    status: 'sent',
+  });
+}
+
+/** Has the dentist replied on this channel for this case? */
+export function hasReply(caseId: string, channel: CommChannel, all: CaseCommunication[] = records): boolean {
+  return all.some(r => r.caseId === caseId && r.channel === channel && r.direction === 'in');
+}
+
+export function hasWhatsAppReply(caseId: string, all: CaseCommunication[] = records): boolean {
+  return hasReply(caseId, 'whatsapp', all);
+}
+
+export function hasEmailReply(caseId: string, all: CaseCommunication[] = records): boolean {
+  return hasReply(caseId, 'email', all);
 }
 
 /** Everything sent (or attempted) on a case, newest last. */

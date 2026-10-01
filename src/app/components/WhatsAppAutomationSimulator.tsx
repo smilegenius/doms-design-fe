@@ -11,7 +11,7 @@ import {
   whatsappBlockReason,
   whatsappNumberFor,
 } from '../data/whatsappComms';
-import { sendWhatsAppMessage } from '../data/caseCommunications';
+import { recordInboundWhatsApp, sendWhatsAppMessage } from '../data/caseCommunications';
 
 // ─── Automated WhatsApp — end-to-end simulation ──────────────────────────────
 // The automation normally fires once, silently, at the moment a case is scored,
@@ -125,6 +125,18 @@ export default function WhatsAppAutomationSimulator({
       return;
     }
 
+    // Manual sending — the automation never fires; the lab sends from the hub
+    // below instead. Same rule the email half follows.
+    if (live.sendMode === 'manual') {
+      script.push({
+        id: 'manual', label: 'Manual sending is on',
+        detail: 'Nothing sends by itself. Use the composer below to send the message yourself.',
+        tone: 'fail',
+      });
+      playScript(script);
+      return;
+    }
+
     script.push({
       id: 'channel', label: 'Channel checked',
       detail: blockedNow
@@ -191,9 +203,15 @@ export default function WhatsAppAutomationSimulator({
         id: 'replied', label: 'Dentist replied',
         detail: 'The reply lands in the same case conversation — no separate inbox to watch.',
         tone: 'ok',
-        act: () => onInbound(missing.length
-          ? `Thanks — uploading the ${missing.slice(0, 2).join(' and ')}${missing.length > 2 ? ' and the rest' : ''} now. Should be with you in ten minutes.`
-          : `Thanks — all good on my side, go ahead.`),
+        act: () => {
+          const reply = missing.length
+            ? `Thanks — uploading the ${missing.slice(0, 2).join(' and ')}${missing.length > 2 ? ' and the rest' : ''} now. Should be with you in ten minutes.`
+            : `Thanks — all good on my side, go ahead.`;
+          // Recorded as well as shown, so the cases list can flag the reply
+          // once this drawer is closed.
+          recordInboundWhatsApp({ caseId, senderName: dentist, senderAddress: number, body: reply });
+          onInbound(reply);
+        },
       },
       {
         id: 'resolved', label: 'Case updated',

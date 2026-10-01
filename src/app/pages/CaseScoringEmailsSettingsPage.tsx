@@ -225,9 +225,7 @@ export default function CaseScoringEmailsSettings() {
         </span>
         <div className="flex-1 min-w-[220px] text-xs text-[#3A4A63] leading-relaxed">
           <span className="font-semibold text-[#1565C0]">Automated Case Scoring Emails.</span>{' '}
-          Cases scored <span className="font-semibold">Needs Review</span> or{' '}
-          <span className="font-semibold">Incomplete</span> email the dentist automatically — from your own
-          business email account, not Smile Genius.
+          Case updates from your own business email account.
         </div>
         <button
           onClick={() => setIntegrationOpen(true)}
@@ -281,8 +279,8 @@ export default function CaseScoringEmailsSettings() {
       >
         <p className="text-xs text-[#717182] leading-relaxed mb-4">
           {sendMode === 'manual'
-            ? 'Manual sending — nothing sends by itself, and every template is offered when you email from a case\'s Conversation hub, so the automation below is disabled.'
-            : 'Automatic sending — the selected template is emailed the moment a case is scored. Each outcome has its own on/off toggle and exactly one selected template.'}
+            ? 'Nothing sends by itself — every template is offered in the case\'s Conversation hub.'
+            : 'The selected template goes to the case\'s dentist the moment it is scored.'}
         </p>
 
         {/* Outcomes sit side by side on large screens to keep the page short.
@@ -444,8 +442,7 @@ export default function CaseScoringEmailsSettings() {
           nothing to escalate. */}
       <Card title="Escalation">
         <p className="text-xs text-[#717182] leading-relaxed mb-4">
-          If the dentist doesn't respond to the Case Scoring email — and the case isn't updated — the request
-          escalates to a clinic contact before the case due date.
+          No reply and no case update — the request escalates to a clinic contact before the due date.
         </p>
         {/* Outcomes sit side by side on large screens to keep the page short. */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
@@ -497,10 +494,10 @@ export default function CaseScoringEmailsSettings() {
                       <div className="mb-3 flex items-start gap-2 px-3 py-2 rounded-lg border border-[#FDE68A] bg-[#FFFBEB]">
                         <AlertTriangle className="w-3.5 h-3.5 text-[#B45309] flex-shrink-0 mt-0.5" />
                         <p className="text-[11px] text-[#A16207] leading-relaxed">
-                          Escalation starts from the moment a Case Scoring email is successfully sent —{' '}
+                          Escalation starts from a sent email —{' '}
                           {!connected
-                            ? 'connect your business email above so the emails can go out.'
-                            : `enable the ${meta.label} email automation above so there is an email to escalate.`}
+                            ? 'connect your business email above.'
+                            : `enable the ${meta.label} automation above.`}
                         </p>
                       </div>
                     )}
@@ -541,9 +538,7 @@ export default function CaseScoringEmailsSettings() {
                           ))}
                         </select>
                         <p className="text-[11px] text-[#A0A0B0] leading-relaxed mt-2">
-                          If the case due date is closer than this timeframe when the Case Scoring email is sent, the
-                          escalation triggers immediately. If the dentist responds or the case is updated before the
-                          timeframe expires, no escalation is sent.
+                          A due date nearer than this escalates immediately; a reply or case update cancels it.
                         </p>
                         <div className="mt-2">
                           <p className="text-[11px] font-semibold text-[#5A5568]">Escalation only occurs when:</p>
@@ -592,9 +587,8 @@ export default function CaseScoringEmailsSettings() {
             </div>
             <p className="text-sm font-semibold text-[#030213] mb-1">No custom templates yet</p>
             <p className="text-xs text-[#717182] max-w-sm mx-auto">
-              Create your own email wording and select it under <span className="font-semibold">Needs Review</span> or{' '}
-              <span className="font-semibold">Incomplete</span> above. Placeholders like{' '}
-              <span className="font-mono text-[#1565C0]">{'{{Patient Name}}'}</span> are filled automatically from the case.
+              Write your own wording and select it under an outcome above. Placeholders like{' '}
+              <span className="font-mono text-[#1565C0]">{'{{Patient Name}}'}</span> are filled from the case.
             </p>
           </div>
         ) : (
@@ -680,16 +674,15 @@ export default function CaseScoringEmailsSettings() {
                       </div>
                     </div>
                     <p className="text-[11px] text-[#717182] leading-relaxed">
-                      All automated case scoring emails are sent from this account rather than from Smile Genius,
-                      and dentist replies land in its inbox.
+                      Every case email sends from this account — replies land in its inbox, not Smile Genius.
                     </p>
                   </div>
                 ) : showProviderPicker ? (
                   /* Never connected (or choosing a different account) */
                   <div className="space-y-3">
                     <p className="text-xs text-[#717182] leading-relaxed">
-                      Automated case scoring emails are sent from the account you connect — dentists see your lab's
-                      address, and their replies land in your own inbox. Nothing sends until an account is connected.
+                      Connect the lab's business email. Case emails send from your address, and replies come back
+                      to it.
                     </p>
                     <div className="space-y-2">
                       {(Object.keys(PROVIDER_META) as EmailProvider[]).map(p => (
@@ -726,8 +719,7 @@ export default function CaseScoringEmailsSettings() {
                       </div>
                     </div>
                     <p className="text-[11px] text-[#717182] leading-relaxed">
-                      Reconnect to resume, or connect a different account — your automation settings and templates
-                      are kept either way.
+                      Reconnect to resume — your settings and templates are kept.
                     </p>
                   </div>
                 )}
@@ -842,9 +834,9 @@ export default function CaseScoringEmailsSettings() {
                 </div>
                 <h3 className="text-base font-semibold text-[#030213] mb-1">Disconnect email account?</h3>
                 <p className="text-sm text-[#717182] leading-relaxed">
-                  Automated case scoring emails will stop sending until you reconnect{' '}
-                  <span className="font-mono text-[#030213]">{connection.email}</span> or connect a different account.
-                  Your automation settings and templates are kept.
+                  Sending stops until you reconnect{' '}
+                  <span className="font-mono text-[#030213]">{connection.email}</span>. Your settings and templates
+                  are kept.
                 </p>
               </div>
               <div className="flex items-center justify-end gap-2 px-6 py-4 bg-[#F8F9FC] border-t border-[#F0EFF6]">
@@ -1035,21 +1027,31 @@ export default function CaseScoringEmailsSettings() {
                       <select
                         defaultValue=""
                         onChange={(e) => {
-                          const [cat, idx] = e.target.value.split(':');
-                          if (!cat) { setEditor({ ...editor, subject: '', body: '' }); return; }
-                          const src = DEFAULT_TEMPLATES[cat as ScoringEmailCategory][Number(idx)];
-                          setEditor({ ...editor, subject: src.subject, body: src.body });
+                          const id = e.target.value;
+                          if (!id) { setEditor({ ...editor, subject: '', body: '' }); return; }
+                          const src = [
+                            ...CATEGORIES.flatMap(c => DEFAULT_TEMPLATES[c]),
+                            ...customTemplates,
+                          ].find(t => t.id === id);
+                          if (src) setEditor({ ...editor, subject: src.subject, body: src.body });
                         }}
                         className="w-full px-3 py-2 text-sm border border-[#E0E0E6] rounded-lg outline-none focus:border-[#4D8EF7] bg-white"
-                        title="Copy a default template as your starting point"
+                        title="Copy an existing template as your starting point"
                       >
                         <option value="">Blank</option>
-                        {CATEGORIES.flatMap(cat =>
-                          DEFAULT_TEMPLATES[cat].map((t, i) => (
-                            <option key={t.id} value={`${cat}:${i}`}>
-                              {CATEGORY_META[cat].label} · {t.name} ({t.tone})
-                            </option>
-                          ))
+                        {CATEGORIES.map(cat => (
+                          <optgroup key={cat} label={CATEGORY_META[cat].label}>
+                            {DEFAULT_TEMPLATES[cat].map(t => (
+                              <option key={t.id} value={t.id}>{t.name} ({t.tone})</option>
+                            ))}
+                          </optgroup>
+                        ))}
+                        {customTemplates.length > 0 && (
+                          <optgroup label="Your custom templates">
+                            {customTemplates.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </optgroup>
                         )}
                       </select>
                     </div>

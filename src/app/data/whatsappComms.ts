@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { ScoringEmailCategory } from './caseScoringEmails';
+import type { ScoringEmailCategory, SendMode } from './caseScoringEmails';
 
 // ─── Lab WhatsApp communication ──────────────────────────────────────────────
 // The lab can talk to dentists over WhatsApp as well as email — automatically
@@ -83,6 +83,41 @@ We have had a look at {{Case ID}} for {{Patient Name}} and just need a couple of
 
 Update the case here whenever you get a moment: {{Case Link}}`,
     },
+    {
+      id: 'wa-nr-3',
+      name: 'Default Message 3',
+      tone: 'Urgent',
+      body: `Hi {{Dentist Name}}, {{Lab Name}} here.
+
+{{Case ID}} ({{Patient Name}}) is waiting on you and the delivery date is at risk:
+
+{{Missing Items Summary}}
+
+Please update the case today so we can start production: {{Case Link}}`,
+    },
+    {
+      id: 'wa-nr-4',
+      name: 'Default Message 4',
+      tone: 'Brief',
+      body: `{{Lab Name}}: {{Case ID}} ({{Patient Name}}) needs {{Missing Items Summary}} before we can start.
+
+{{Case Link}}`,
+    },
+    {
+      id: 'wa-nr-5',
+      name: 'Default Message 5',
+      tone: 'Follow-up',
+      body: `Hi {{Dentist Name}}, following up on {{Case ID}} for {{Patient Name}}.
+
+Still outstanding:
+
+{{Missing Items Summary}}
+
+Once these are in we will get straight on it: {{Case Link}}
+
+Thanks,
+{{Lab Name}}`,
+    },
   ],
   incomplete: [
     {
@@ -110,6 +145,41 @@ We cannot start {{Case ID}} for {{Patient Name}} just yet, a few required detail
 {{Missing Items Summary}}
 
 Send them over here and we will get straight on it: {{Case Link}}`,
+    },
+    {
+      id: 'wa-inc-3',
+      name: 'Default Message 3',
+      tone: 'Urgent',
+      body: `Hi {{Dentist Name}}, {{Lab Name}} here.
+
+{{Case ID}} ({{Patient Name}}) is on hold and cannot move until we have:
+
+{{Missing Items Summary}}
+
+Every day without these pushes the delivery date back. Please add them here: {{Case Link}}`,
+    },
+    {
+      id: 'wa-inc-4',
+      name: 'Default Message 4',
+      tone: 'Brief',
+      body: `{{Lab Name}}: {{Case ID}} ({{Patient Name}}) is on hold — missing {{Missing Items Summary}}.
+
+{{Case Link}}`,
+    },
+    {
+      id: 'wa-inc-5',
+      name: 'Default Message 5',
+      tone: 'Follow-up',
+      body: `Hi {{Dentist Name}}, checking in on {{Case ID}} for {{Patient Name}}.
+
+It is still on hold and we need:
+
+{{Missing Items Summary}}
+
+Add them here and production starts the same day: {{Case Link}}
+
+Thanks,
+{{Lab Name}}`,
     },
   ],
 };
@@ -147,6 +217,13 @@ export interface WhatsAppCategoryAutomation {
 export interface WhatsAppSettings {
   /** The lab's WhatsApp communication setting — the master switch. */
   enabled: boolean;
+  /**
+   * How the configured messages go out, exactly as for email: 'automatic'
+   * sends the selected message the moment a case is scored; 'manual' sends
+   * nothing by itself — the lab sends it from the case's Conversation hub.
+   * Independent of `enabled`, which gates the channel as a whole.
+   */
+  sendMode: SendMode;
   connection: WhatsAppConnection;
   automation: Record<ScoringEmailCategory, WhatsAppCategoryAutomation>;
   customTemplates: WhatsAppTemplate[];
@@ -154,6 +231,7 @@ export interface WhatsAppSettings {
 
 const DEFAULT_SETTINGS: WhatsAppSettings = {
   enabled: true,
+  sendMode: 'automatic',
   connection: { status: 'disconnected' },
   automation: {
     'needs-review': { enabled: false, templateId: 'wa-nr-1' },
@@ -172,6 +250,7 @@ function load(): WhatsAppSettings {
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
+      sendMode: parsed.sendMode === 'manual' ? 'manual' : 'automatic',
       connection: { ...DEFAULT_SETTINGS.connection, ...(parsed.connection ?? {}) },
       automation: {
         'needs-review': { ...DEFAULT_SETTINGS.automation['needs-review'], ...(parsed.automation?.['needs-review'] ?? {}) },
@@ -227,6 +306,10 @@ export const BLOCK_REASON_TEXT: Record<Exclude<WhatsAppBlockReason, null>, strin
 // ── Actions ───────────────────────────────────────────────────────────────────
 export function setWhatsAppEnabled(enabled: boolean) {
   commit({ ...settings, enabled });
+}
+
+export function setWhatsAppSendMode(mode: SendMode) {
+  commit({ ...settings, sendMode: mode });
 }
 
 export function connectWhatsApp(number: string = MOCK_LAB_WHATSAPP_NUMBER, businessName: string = MOCK_LAB_WHATSAPP_NAME) {

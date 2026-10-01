@@ -4,7 +4,7 @@ import {
   Plus, X, Check, ChevronDown, ChevronRight,
   Pencil, Zap, Star, Upload, UploadCloud, Box, Image as ImageIcon,
   AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen, Copy, ExternalLink, Building2,
-  CloudOff, Loader2,
+  CloudOff, Loader2, Sparkles,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
@@ -65,7 +65,7 @@ function initialsFor(name: string): string {
   const letters = name.replace(/[^A-Za-z ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0] ?? '').join('');
   return (letters || name.slice(0, 2)).toUpperCase();
 }
-import { mockCases } from './CasesPage';
+import { mockCases, CURRENT_USER } from './CasesPage';
 import type { Case, EmailPrescription } from './CasesPage';
 import { LAB_POSTAL_ADDRESSES } from './CaseDetailPage';
 import { ScoreBadge } from '../components/ScoreBadge';
@@ -1643,6 +1643,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         : caseSource === 'Email' ? 'email'
         : caseSource === 'Impressions (By Post)' ? 'post'
         : 'manual',
+      // An email draft keeps its email, so the case page can still say where
+      // it came from; the submitter is recorded as its reviewer.
+      emailPrescription: caseSource === 'Email' ? prefillDraft?.emailPrescription : undefined,
+      createdBy: CURRENT_USER,
     };
   }
 
@@ -1758,18 +1762,24 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       // the account is disconnected is recorded on the case as a failure.
       if (category && whatsappComms.automation[category].enabled && whatsappComms.enabled) {
         const tpl = findWhatsAppTemplate(category, whatsappComms.automation[category].templateId, whatsappComms.customTemplates);
-        const result = sendWhatsAppMessage({
-          caseId: record.id,
-          trigger: 'automated',
-          event: category,
-          recipientName: dentistName,
-          recipientAddress: whatsappNumberFor(dentistName),
-          body: fillTemplateVars(tpl.body, templateVars),
-        });
-        if (result.status === 'sent') {
-          toast.info(`Case scored ${CATEGORY_META[category].label} — "${tpl.name}" sent automatically to ${dentistName} on WhatsApp from ${result.sender}.`);
-        } else if (result.status === 'failed') {
-          toast.error(`Automated WhatsApp message for ${record.id} could not be sent — ${whatsappBlockReason(whatsappComms) === 'disconnected' ? 'no WhatsApp Business account is connected' : 'WhatsApp is unavailable'}. The failure is recorded on the case.`);
+        if (whatsappComms.sendMode === 'manual') {
+          // Manual mode — nothing sends by itself; nudge toward the case, the
+          // same way the email half above does.
+          toast.info(`Case scored ${CATEGORY_META[category].label} — manual sending is on, so message the dentist from the case's Conversation hub.`);
+        } else {
+          const result = sendWhatsAppMessage({
+            caseId: record.id,
+            trigger: 'automated',
+            event: category,
+            recipientName: dentistName,
+            recipientAddress: whatsappNumberFor(dentistName),
+            body: fillTemplateVars(tpl.body, templateVars),
+          });
+          if (result.status === 'sent') {
+            toast.info(`Case scored ${CATEGORY_META[category].label} — "${tpl.name}" sent automatically to ${dentistName} on WhatsApp from ${result.sender}.`);
+          } else if (result.status === 'failed') {
+            toast.error(`Automated WhatsApp message for ${record.id} could not be sent — ${whatsappBlockReason(whatsappComms) === 'disconnected' ? 'no WhatsApp Business account is connected' : 'WhatsApp is unavailable'}. The failure is recorded on the case.`);
+          }
         }
       }
     }
@@ -2302,13 +2312,26 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           </div>
         )}
 
-        {/* ── AI extraction notice (auto-fetched cases only). ── */}
+        {/* ── Needs-your-review notice (email-made drafts only). Nobody typed
+            this case: Smile Genius built it from an incoming email, so it
+            says so up front — who sent it, when — and that nothing goes to
+            the lab until a person has checked it and pressed submit. ── */}
         {aiPrefilled && (
-          <div className="max-w-6xl mx-auto mb-3 flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl border border-[#FECACA] bg-[#FEF2F2]">
-            <AiSparkle label title="" className="mt-px" />
-            <p className="text-[11px] text-[#5A5568] leading-snug">
-              <span className="font-semibold text-[#030213]">Smile Genius</span> has automatically extracted prescription information from the provided files. Verify all details before submitting the case.
-            </p>
+          <div className="max-w-6xl mx-auto mb-3 flex items-start gap-3 px-3.5 py-3 rounded-xl border border-[#DDD6FE] bg-gradient-to-r from-[#F5F3FF] to-[#EEF4FF]">
+            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-3.5 h-3.5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-xs font-bold text-[#030213]">This case was created automatically from an email — it needs your review</p>
+                <span className="inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-white text-[#6D28D9] border border-[#DDD6FE]">Draft</span>
+              </div>
+              <p className="text-[11px] text-[#5A5568] leading-snug mt-0.5">
+                <span className="font-semibold text-[#030213]">Smile Genius</span> created this draft
+                {prefillDraft?.emailPrescription && <> from {prefillDraft.emailPrescription.fromName}’s email <span className="text-[#717182]">(“{prefillDraft.emailPrescription.subject}”, {prefillDraft.emailPrescription.receivedAt})</span></>}
+                {' '}and filled in the details it could read. It isn’t a live case yet — check every field, then submit.
+              </p>
+            </div>
           </div>
         )}
 

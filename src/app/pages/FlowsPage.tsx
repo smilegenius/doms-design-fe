@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays } from 'lucide-react';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 
 // ─── Flows ───────────────────────────────────────────────────────────────────
@@ -19,9 +19,23 @@ export interface FlowEntry {
   accent: string;
   accentSoft: string;
   path: string;
+  /** When it shipped — shown as a chip so the newest round is easy to spot. */
+  date?: string;
 }
 
 export const FLOWS: FlowEntry[] = [
+  {
+    // A round of small cross-portal fixes, walked through like an epic.
+    title: 'Hotfixes — review, status reach & creator',
+    description: 'Email-made drafts ask for a review, the clinic is told when a status change won’t reach the lab, and every case shows who created it.',
+    detail: 'Clinic · Lab · DSO',
+    icon: <Wrench className="w-5 h-5 text-[#7C3AED]" />,
+    badge: 'Hotfixes',
+    accent: '#7C3AED',
+    accentSoft: '#F5F3FF',
+    path: '/flows/hotfixes-30-sep',
+    date: '30 Sep 2026',
+  },
   {
     // CareStack integration epic. The walkthrough deep-links into the exact
     // clinic / admin screens for each step.
@@ -81,6 +95,12 @@ export function FlowCard({ flow, onOpen }: { flow: FlowEntry; onOpen: () => void
             <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full border bg-[#F0EFF6] text-[#717182] border-[#E0E0E6] flex-shrink-0">
               {flow.badge}
             </span>
+            {flow.date && (
+              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full border flex-shrink-0" style={{ background: flow.accentSoft, color: flow.accent, borderColor: `${flow.accent}40` }}>
+                <CalendarDays className="w-2.5 h-2.5" />
+                {flow.date}
+              </span>
+            )}
           </div>
           <p className="text-xs text-[#717182] mt-1 leading-relaxed">{flow.description}</p>
           <p className="text-[10px] font-semibold uppercase tracking-widest mt-2.5" style={{ color: flow.accent }}>

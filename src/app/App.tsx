@@ -12,6 +12,7 @@ import DowntimePage from './pages/DowntimePage';
 import FlowsPage from './pages/FlowsPage';
 import CareStackFlowPage from './pages/CareStackFlowPage';
 import WhatsAppFlowPage from './pages/WhatsAppFlowPage';
+import HotfixesFlowPage from './pages/HotfixesFlowPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
 import LabApp from './LabApp';
@@ -282,7 +283,7 @@ function SupplierApp() {
         )}
         {activePage === 'settings' && <SettingsPage portal="supplier" />}
         {activePage === 'notifications' && <NotificationsPage onOpenSettings={() => navigate('/supplier/settings?tab=notifications')} />}
-        {activePage === 'cases' && <CasesPage initialCaseId={caseInitialId} />}
+        {activePage === 'cases' && <CasesPage initialCaseId={caseInitialId} showStatusReachNotice />}
         {activePage === 'suppliers' && (
           <SuppliersPage
             onSupplierClick={(s) => setActivePage('supplier-detail', s.id)}
@@ -426,6 +427,7 @@ export default function App() {
       <Route path="/flows" element={<FlowsPage />} />
       <Route path="/flows/carestack" element={<CareStackFlowPage />} />
       <Route path="/flows/whatsapp" element={<WhatsAppFlowPage />} />
+      <Route path="/flows/hotfixes-30-sep" element={<HotfixesFlowPage />} />
       <Route
         path="/supplier/*"
         element={
