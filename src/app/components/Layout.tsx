@@ -117,7 +117,7 @@ const supplierNavItems = [
 
 const clinicNavItems = [
   { id: 'overview',  label: 'Overview',  icon: OverviewIcon,    isCustom: true  },
-  { id: 'cases',     label: 'Cases',     icon: CasesIcon,       isCustom: true  },
+  { id: 'cases',     label: 'Lab Work',  icon: CasesIcon,       isCustom: true  },
   // Invoices reuses the supplier-portal InvoicesPage as-is; statuses will be
   // customised for the clinic context later.
   { id: 'invoices',  label: 'Invoices',  icon: FilledFileText,  isCustom: false },

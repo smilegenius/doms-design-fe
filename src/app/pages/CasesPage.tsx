@@ -40,8 +40,9 @@ import SortDropdown from '../components/SortDropdown';
 import Pagination from '../components/Pagination';
 import FilterDrawer from '../components/FilterDrawer';
 import ScannerExpiryNotice from '../components/ScannerExpiryNotice';
-import CreatorAvatar from '../components/CreatorAvatar';
-import { caseCreator, needsReview, statusReach, statusReachReason, statusUpdateMessage, type StatusReach } from '../data/caseProvenance';
+import CreatedByIcon from '../components/CreatedByIcon';
+import { AiReviewTag } from '../components/AiReviewNotice';
+import { SCANNER_SYNC_COPY, scannerSyncUnsupported, caseCreatedBy, needsReview, statusReach, type CreatedSide, type StatusReach, type ViewerPortal } from '../data/caseProvenance';
 import { useScannerConnections } from '../data/scannerConnections';
 import { getCreatedCases, useCreatedCases } from '../data/createdCases';
 import { hasEmailReply, hasWhatsAppReply, useCaseCommunications } from '../data/caseCommunications';
@@ -148,6 +149,12 @@ export interface Case {
   // The user who submitted it through Quick Create. Seed cases derive their
   // creator from the source instead (data/caseProvenance.ts).
   createdBy?: string;
+  // Which side created it, when known (Quick Create stamps it). Otherwise
+  // derived from the source — see caseCreatedBy.
+  createdBySide?: CreatedSide;
+  // When the scan was taken on the scanner, if the integration supplies it.
+  // The clinic list's "Scanner Creation Date" falls back to Created On.
+  scannerCreatedAt?: string;
 }
 
 type ViewMode = 'table' | 'grid';
@@ -649,6 +656,8 @@ export const draftCases: Case[] = [
     hasAlert: false,
     scanner: 'iTero',
     source: 'manual',
+    // Keyed in by the lab on the practice's behalf — shows the lab icon.
+    createdBySide: 'lab',
   },
   {
     // Email-received case whose attached files are iTero scans — surfaces the
@@ -983,55 +992,14 @@ function OverrideTag({ override }: { override: StatusOverride }) {
   );
 }
 
-// Violet chip on email-made drafts: Smile Genius created the case, a person
-// still has to check it before it goes anywhere.
-function NeedsReviewTag() {
+// The one message for a status change that stays in Smile Genius — the
+// scanner doesn't support it (iTero: anything but On Hold) or the case has
+// no live scanner link (clinic side). PM copy, verbatim; informational only.
+function ScannerSyncNotice() {
   return (
-    <span
-      title="Created automatically from an email — review the details and submit it"
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#F5F3FF] text-[#6D28D9] border border-[#DDD6FE]"
-    >
-      <Sparkles className="w-2.5 h-2.5" />
-      Needs your review
-    </span>
-  );
-}
-
-// Shown in the status modal (clinic side) when the new status won't reach the
-// lab on its own. Informational only — the change still goes through; it just
-// hands the user a ready message to pass on.
-function StatusReachNotice({ reach, caseData, toStatusLabel }: {
-  reach: Extract<StatusReach, { reaches: false }>;
-  caseData: Case;
-  toStatusLabel: string;
-}) {
-  const { toast } = useToast();
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(statusUpdateMessage(caseData, toStatusLabel));
-      toast.success('Message copied — paste it into an email or WhatsApp to the lab');
-    } catch {
-      toast.error('Couldn’t copy — please tell the lab directly');
-    }
-  };
-  return (
-    <div className="rounded-xl border border-[#BFDBFE] bg-[#EEF4FF] p-3">
-      <div className="flex items-start gap-2">
-        <Info className="w-4 h-4 text-[#1565C0] flex-shrink-0 mt-0.5" />
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-[#1565C0]">{caseData.lab} won’t see this change automatically</p>
-          <p className="text-[11px] text-[#35507A] mt-0.5 leading-relaxed">
-            {statusReachReason(reach)} Please let the lab know directly — by phone, email or WhatsApp.
-          </p>
-          <button
-            onClick={copy}
-            className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-[#1565C0] bg-white border border-[#BFDBFE] hover:bg-[#DBEAFE] transition-colors"
-          >
-            <Copy className="w-3 h-3" />
-            Copy update message
-          </button>
-        </div>
-      </div>
+    <div className="rounded-xl border border-[#BFDBFE] bg-[#EEF4FF] p-3 flex items-start gap-2">
+      <Info className="w-4 h-4 text-[#1565C0] flex-shrink-0 mt-0.5" />
+      <p className="text-[11px] text-[#35507A] leading-relaxed">{SCANNER_SYNC_COPY}</p>
     </div>
   );
 }
@@ -1089,22 +1057,30 @@ function unitIdsOf(c: Case): string[] {
   return c.serviceItems.length > 0 ? c.serviceItems.map(si => si.id) : ['__self__'];
 }
 
-// Modal for changing a case's status. If the case is still missing required
-// information, picking a new status reveals a mandatory override reason +
-// optional notes (the flow: warn → reason → notes → save → proceed).
-function StatusChangeModal({ caseData, missing, reach, onClose, onConfirm }: {
+// Modal for changing a case's status. Two shapes, both matching the live portal:
+//   • compact — `initialStatus` set: the status was already picked from the
+//     status dropdown on the case, so only what stands in the way shows (the
+//     missing-information override and/or the Smile Genius-only message) with
+//     Cancel / Confirm Override.
+//   • picker — no `initialStatus` (list row action): the status list first,
+//     then the same blocks underneath.
+function StatusChangeModal({ caseData, missing, reach, initialStatus, onClose, onConfirm }: {
   caseData: Case;
   missing: string[];
   /** Clinic-side portals only — whether the new status will reach the lab. */
   reach?: StatusReach;
+  /** Status already chosen from the dropdown → compact confirm popup. */
+  initialStatus?: CaseStatus;
   onClose: () => void;
   onConfirm: (toStatus: CaseStatus, override?: StatusOverride) => void;
 }) {
-  const [toStatus, setToStatus] = useState<CaseStatus>(caseData.status);
+  const compact = !!initialStatus;
+  const [toStatus, setToStatus] = useState<CaseStatus>(initialStatus ?? caseData.status);
   const [reason, setReason] = useState('');
   const [notes, setNotes] = useState('');
   const changed = toStatus !== caseData.status;
   const needsOverride = changed && missing.length > 0;
+  const syncOnly = changed && (scannerSyncUnsupported(caseData, toStatus) || (!!reach && !reach.reaches));
   const canConfirm = changed && (!needsOverride || !!reason);
 
   function confirm() {
@@ -1119,74 +1095,75 @@ function StatusChangeModal({ caseData, missing, reach, onClose, onConfirm }: {
     <ModalPortal>
       <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
         <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
-        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-[#F0EFF6]">
-            <div className="min-w-0">
-              <h3 className="text-base font-semibold text-[#030213]">Change status</h3>
-              <p className="text-[11px] text-[#717182] truncate">{caseData.id} · {caseData.patientName}</p>
+        <div className={`relative bg-white rounded-2xl shadow-2xl w-full ${compact ? 'max-w-[680px]' : 'max-w-lg'} max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150`}>
+          {!compact && (
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6]">
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-[#030213]">Change status</h3>
+                <p className="text-[11px] text-[#717182] truncate">{caseData.id} · {caseData.patientName}</p>
+              </div>
+              <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors"><X className="w-4 h-4" /></button>
             </div>
-            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors"><X className="w-4 h-4" /></button>
-          </div>
+          )}
 
-          <div className="p-5 space-y-4">
-            <div>
-              <label className="block text-[11px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-2">New status</label>
-              <div className="grid grid-cols-2 gap-2">
-                {CHANGEABLE_STATUSES.map(st => {
-                  const sty = STATUS_STYLE[st];
-                  const Icon = sty.icon;
-                  const active = toStatus === st;
-                  return (
+          <div className={`${compact ? 'px-6 pt-6' : 'p-6'} space-y-4`}>
+            {!compact && (
+              <div>
+                <label className="block text-[11px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-2">New status</label>
+                <div className="rounded-xl border border-[#E0E0E6] overflow-hidden">
+                  {CHANGEABLE_STATUSES.map(st => (
                     <button
                       key={st}
                       onClick={() => setToStatus(st)}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${active ? 'border-[#4D8EF7] bg-[#EEF4FF] text-[#1565C0]' : 'border-[#E0E0E6] bg-white text-[#5A5568] hover:border-[#C8D8FC]'}`}
+                      className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left border-b border-[#F0EFF6] last:border-b-0 transition-colors ${toStatus === st ? 'bg-[#EEF4FF] text-[#030213] font-medium' : 'text-[#030213] hover:bg-[#F8F9FC]'}`}
                     >
-                      <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                        {st === toStatus && <CheckCircle2 className="w-4 h-4 text-[#2E7D32]" />}
+                      </span>
                       <span className="truncate">{STATUS_LABEL[st]}</span>
-                      {st === caseData.status && <span className="ml-auto text-[9px] text-[#A0A0B0] flex-shrink-0">current</span>}
+                      {st === caseData.status && <span className="ml-auto text-[10px] text-[#A0A0B0] flex-shrink-0">current</span>}
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {needsOverride && (
-              <div className="rounded-xl border border-[#FDE68A] bg-[#FFF8E1] p-3 space-y-3">
+              <div className="rounded-xl border border-[#FDE68A] bg-[#FFFBEA] p-4 space-y-3">
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 text-[#B45309] flex-shrink-0 mt-0.5" />
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold text-[#B45309]">This case is still missing required information</p>
-                    <p className="text-[11px] text-[#92610A] mt-0.5 leading-relaxed">Missing: {missing.join(', ')}. Moving it to “{STATUS_LABEL[toStatus]}” without waiting for the dentist requires an override reason.</p>
+                    <p className="text-sm font-semibold text-[#92400E]">This case is still missing required information</p>
+                    <p className="text-xs text-[#92400E] mt-1 leading-relaxed">Missing: {missing.join(', ')}. Moving it to “{STATUS_LABEL[toStatus]}” without waiting for the dentist requires an override reason.</p>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-[#92610A] mb-1">Override reason <span className="text-[#B91C1C]">*</span></label>
-                  <select value={reason} onChange={(e) => setReason(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-[#E0C56B] bg-white text-sm text-[#030213] focus:border-[#B45309] focus:outline-none">
+                  <label className="block text-xs font-semibold text-[#92400E] mb-1.5">Override reason <span className="text-[#B91C1C]">*</span></label>
+                  <select value={reason} onChange={(e) => setReason(e.target.value)} className="w-full px-3 py-3 rounded-lg border border-[#E0C56B] bg-white text-sm text-[#030213] focus:border-[#B45309] focus:outline-none">
                     <option value="">Select a reason…</option>
                     {OVERRIDE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-[#92610A] mb-1">Additional notes <span className="font-normal text-[#A0895A]">(optional)</span></label>
-                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Add context for the override…" className="w-full px-3 py-2 rounded-lg border border-[#E0C56B] bg-white text-sm text-[#030213] focus:border-[#B45309] focus:outline-none resize-none" />
-                </div>
+                {!compact && (
+                  <div>
+                    <label className="block text-xs font-semibold text-[#92400E] mb-1.5">Additional notes <span className="font-normal text-[#A0895A]">(optional)</span></label>
+                    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Add context for the override…" className="w-full px-3 py-2 rounded-lg border border-[#E0C56B] bg-white text-sm text-[#030213] focus:border-[#B45309] focus:outline-none resize-none" />
+                  </div>
+                )}
               </div>
             )}
 
-            {changed && reach && !reach.reaches && (
-              <StatusReachNotice reach={reach} caseData={caseData} toStatusLabel={STATUS_LABEL[toStatus]} />
-            )}
+            {syncOnly && <ScannerSyncNotice />}
           </div>
 
-          <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-[#F0EFF6] bg-[#FAFBFC]">
-            <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-[#5A5568] border border-[#E0E0E6] bg-white hover:bg-[#F3F3F5] transition-colors">Cancel</button>
+          <div className="flex items-center justify-end gap-3 px-6 py-5">
+            <button onClick={onClose} className="min-w-[140px] px-5 py-3 rounded-xl text-sm font-semibold text-[#1E1B4B] bg-[#F3F3F5] hover:bg-[#E9E9EE] transition-colors">Cancel</button>
             <button
               onClick={confirm}
               disabled={!canConfirm}
-              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-opacity ${canConfirm ? 'bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90' : 'bg-[#C8C0F0] cursor-not-allowed opacity-60'}`}
+              className={`min-w-[180px] px-5 py-3 rounded-xl text-sm font-semibold transition-opacity ${canConfirm ? 'text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90' : 'text-[#5A5568] bg-[#E0E0E6] cursor-not-allowed'}`}
             >
-              {needsOverride ? <><AlertTriangle className="w-4 h-4" /> Override &amp; change status</> : <><Check className="w-4 h-4" /> Change status</>}
+              {needsOverride ? 'Confirm Override' : 'Confirm'}
             </button>
           </div>
         </div>
@@ -1227,6 +1204,8 @@ function BulkStatusModal({ selections, missingByCase, onClose, onConfirm }: {
   const missingSelected = selections.filter(s => missingByCase.has(s.c.id));
   const needsOverride = missingSelected.length > 0;
   const canContinue = !!toStatus && (!needsOverride || !!reason);
+  // Selected iTero cases whose new status can't be pushed to the scanner portal.
+  const scannerOnlyCount = toStatus ? selections.filter(s => scannerSyncUnsupported(s.c, toStatus)).length : 0;
   // "current" tag only makes sense when every selected case shares one status.
   const commonStatus = selections.every(s => s.c.status === selections[0].c.status) ? selections[0].c.status : null;
   const pl = (n: number) => (n === 1 ? '' : 's');
@@ -1351,6 +1330,12 @@ function BulkStatusModal({ selections, missingByCase, onClose, onConfirm }: {
                     {partialCount} partially-selected case{pl(partialCount)} keep{partialCount === 1 ? 's' : ''} the current case-level status — only the checked services change.
                   </li>
                 )}
+                {scannerOnlyCount > 0 && (
+                  <li className="flex items-start gap-2">
+                    <Info className="w-3.5 h-3.5 text-[#B45309] flex-shrink-0 mt-0.5" />
+                    <span>{SCANNER_SYNC_COPY} <span className="text-[#A0A0B0]">({scannerOnlyCount} case{pl(scannerOnlyCount)})</span></span>
+                  </li>
+                )}
                 {needsOverride && (
                   <li className="flex items-start gap-2">
                     <AlertTriangle className="w-3.5 h-3.5 text-[#B45309] flex-shrink-0 mt-0.5" />
@@ -1429,7 +1414,13 @@ function UpgradeModal({ onUpgrade, onBack }: { onUpgrade: () => void; onBack: ()
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice, showConnectEmailNotice, showScannerExpiryNotice, showStatusReachNotice, onCaseSelected }: {
+export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice, showConnectEmailNotice, showScannerExpiryNotice, showStatusReachNotice, onCaseSelected }: {
+  // The portal showing the list. The Clinic portal follows the live clinic
+  // portal: the page is "Lab Work" and the default columns are Status · Case ID
+  // · Scanner Creation Date · Created / Updated On · Delivery Date · Patient ·
+  // Service · Dentist · Lab. It also decides the lab / clinic "created by" icon
+  // for email drafts.
+  portal?: ViewerPortal;
   initialCaseId?: string;
   onCreateCase?: () => void;
   // Called when the user clicks a draft case (status === 'draft'). The host
@@ -1538,24 +1529,28 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   const [timeFilter, setTimeFilter] = useState<'all' | '1h' | '1d' | '7d'>('all');
 
   // ── Column visibility — saved per-user in localStorage so preferences persist ──
-  type ColId = 'status' | 'caseId' | 'createdAt' | 'updatedAt' | 'deliveryDate' | 'patient' | 'service' | 'score' | 'practice' | 'lab' | 'carestack';
+  type ColId = 'status' | 'caseId' | 'scannerDate' | 'createdAt' | 'updatedAt' | 'deliveryDate' | 'patient' | 'service' | 'score' | 'practice' | 'dentist' | 'lab' | 'carestack';
+  const isClinic = portal === 'clinic';
   const DEFAULT_COLS: Record<ColId, boolean> = {
     status: true,
     caseId: true,
+    scannerDate: isClinic,  // live clinic portal column
     createdAt: true,
     updatedAt: true,
     deliveryDate: true,
     patient: true,
     service: true,
-    score: true,
-    practice: true,       // merged "Practice / Dentist" column
-    lab: false,           // off by default — opt-in
-    carestack: true,      // only rendered while the CareStack integration is on
+    score: !isClinic,       // the clinic list on live has no score column
+    practice: !isClinic,    // merged "Practice / Dentist" column (lab / DSO)
+    dentist: isClinic,      // a clinic is one practice — Dentist on its own
+    lab: isClinic,          // clinic: always on; elsewhere opt-in
+    carestack: true,        // only rendered while the CareStack integration is on
   };
   const COL_LABELS: Record<ColId, string> = {
     status: 'Status',
     score: 'Score',
     caseId: 'Case ID',
+    scannerDate: 'Scanner Creation Date',
     createdAt: 'Created On',
     updatedAt: 'Updated On',
     // One column for the date the lab is working to — the requested delivery
@@ -1564,13 +1559,16 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     patient: 'Patient Name',
     service: 'Service(s)',
     practice: 'Practice / Dentist',
+    dentist: 'Dentist',
     lab: 'Lab',
     carestack: 'Appointment',
   };
+  // Saved per portal — the clinic's column set differs from the lab's.
+  const COLS_KEY = isClinic ? 'cases.columns.clinic' : 'cases.columns';
   const [visibleCols, setVisibleCols] = useState<Record<ColId, boolean>>(() => {
     if (typeof window === 'undefined') return DEFAULT_COLS;
     try {
-      const saved = localStorage.getItem('cases.columns');
+      const saved = localStorage.getItem(COLS_KEY);
       if (saved) return { ...DEFAULT_COLS, ...JSON.parse(saved) };
     } catch {}
     return DEFAULT_COLS;
@@ -1579,7 +1577,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     setVisibleCols((prev) => ({ ...prev, [id]: !prev[id] }));
   }
   function persistCols() {
-    try { localStorage.setItem('cases.columns', JSON.stringify(visibleCols)); } catch {}
+    try { localStorage.setItem(COLS_KEY, JSON.stringify(visibleCols)); } catch {}
   }
   const [colMenuOpen, setColMenuOpen] = useState(false);
   const colMenuRef = useRef<HTMLDivElement>(null);
@@ -1603,6 +1601,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
   const [gridMenuOpen, setGridMenuOpen] = useState<string | null>(null);
   // The case whose "Change status" modal is currently open (from listing or detail).
   const [statusModalCase, setStatusModalCase] = useState<Case | null>(null);
+  // Status already picked from the case page dropdown → compact popup.
+  const [statusModalTarget, setStatusModalTarget] = useState<CaseStatus | undefined>(undefined);
+  const closeStatusModal = () => { setStatusModalCase(null); setStatusModalTarget(undefined); };
   // Plan-limit paywall (lab only): distinct case-detail views this session + the
   // upgrade popup shown when a further case is opened past the limit.
   const [viewedCaseIds, setViewedCaseIds] = useState<Set<string>>(() => new Set());
@@ -1874,8 +1875,8 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     setSelectedCase(prev => prev && prev.id === c.id ? { ...prev, status: toStatus, statusOverride: override ?? prev.statusOverride } : prev);
     if (override) toast.success(`${c.id} → ${STATUS_LABEL[toStatus]} (override recorded)`);
     else toast.success(`${c.id} → ${STATUS_LABEL[toStatus]}`);
-    if (showStatusReachNotice && toStatus !== c.status && !reachFor(c).reaches) {
-      toast.info(`${c.lab} won’t see this automatically — please let them know the case is now ${STATUS_LABEL[toStatus]}.`);
+    if (toStatus !== c.status && (scannerSyncUnsupported(c, toStatus) || (showStatusReachNotice && !reachFor(c).reaches))) {
+      toast.info(SCANNER_SYNC_COPY);
     }
     // CareStack milestones — mirrored onto the linked appointment as notes and
     // emailed to the practice. Accepted by Lab = In Production; Shipped asks
@@ -1901,6 +1902,19 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
     const sc = scoreCase(statusModalCase);
     return sc.applicable ? sc.services.filter(s => s.configured).flatMap(s => s.fields.filter(f => !f.filled).map(f => f.label)) : [];
   }, [statusModalCase, scoreCase]);
+
+  // A status picked from the case page dropdown (live-portal pattern). Goes
+  // straight through unless something needs the user first: missing
+  // information (override reason) or a change that stays in Smile Genius.
+  function pickStatus(c: Case, toStatus: CaseStatus) {
+    if (toStatus === c.status) return;
+    const sc = scoreCase(c);
+    const missing = sc.applicable ? sc.services.filter(s => s.configured).some(s => s.fields.some(f => !f.filled)) : false;
+    const stays = scannerSyncUnsupported(c, toStatus) || (!!showStatusReachNotice && !reachFor(c).reaches);
+    if (!missing && !stays) { applyStatusChange(c, toStatus); return; }
+    setStatusModalTarget(toStatus);
+    setStatusModalCase(c);
+  }
 
   // The current bulk selection, resolved against the live case list. Selection
   // survives paging/filtering — the bulk bar reflects everything checked so far.
@@ -1969,12 +1983,15 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           onBack={() => { setSelectedCase(null); onCaseSelected?.(null); }}
           onArchiveToggle={() => toggleArchive(selectedCase)}
           onRequestStatusChange={() => setStatusModalCase(selectedCase)}
+          onPickStatus={(s) => pickStatus(selectedCase, s as CaseStatus)}
           onSetStatus={(toStatus) => applyStatusChange(selectedCase, toStatus)}
           onDeliveryDateChange={(next) => applyDeliveryDateChange(selectedCase, next)}
           onRequestShipmentDetails={() => setShipmentModalCase(selectedCase)}
           showOfflineLabNotice={showOfflineLabNotice}
           showConnectEmailNotice={showConnectEmailNotice}
           statusReach={showStatusReachNotice ? reachFor(selectedCase) : undefined}
+          viewerPortal={portal}
+          listLabel={isClinic ? 'Lab Work' : 'Cases'}
           allCases={cases}
           onOpenRelatedCase={(id) => {
             const target = cases.find(c => c.id === id);
@@ -1991,8 +2008,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
             caseData={statusModalCase}
             missing={statusModalMissing}
             reach={showStatusReachNotice ? reachFor(statusModalCase) : undefined}
-            onClose={() => setStatusModalCase(null)}
-            onConfirm={(toStatus, override) => { applyStatusChange(statusModalCase, toStatus, override); setStatusModalCase(null); }}
+            initialStatus={statusModalTarget}
+            onClose={closeStatusModal}
+            onConfirm={(toStatus, override) => { applyStatusChange(statusModalCase, toStatus, override); closeStatusModal(); }}
           />
         )}
         {upgradeOpen && (
@@ -2024,7 +2042,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <div className="flex items-center gap-2.5 mb-1">
-            <h1 className="text-2xl sm:text-3xl font-semibold text-[#030213]">Cases</h1>
+            <h1 className="text-2xl sm:text-3xl font-semibold text-[#030213]">{isClinic ? 'Lab Work' : 'Cases'}</h1>
             <span
               className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-semibold text-[#1565C0] border"
               style={{
@@ -2036,7 +2054,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
             </span>
           </div>
           <p className="text-sm text-[#717182]">
-            Manage and track all lab cases across your practices
+            {isClinic ? 'Track the work you’ve sent to your labs' : 'Manage and track all lab cases across your practices'}
           </p>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
@@ -2191,6 +2209,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                   {visibleCols.caseId && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Case ID</th>
                   )}
+                  {visibleCols.scannerDate && (
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">Scanner Creation Date</th>
+                  )}
                   {visibleCols.createdAt && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider whitespace-nowrap">
                       <button className="inline-flex items-center gap-1 hover:text-[#030213] transition-colors" onClick={() => handleColSort('createdAt')}>
@@ -2218,6 +2239,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                   )}
                   {visibleCols.practice && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Practice / Dentist</th>
+                  )}
+                  {visibleCols.dentist && (
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Dentist</th>
                   )}
                   {visibleCols.lab && (
                     <th className="text-left px-4 py-3 text-xs font-semibold text-[#717182] uppercase tracking-wider">Lab</th>
@@ -2378,7 +2402,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                             <div className="mt-1"><OverrideTag override={c.statusOverride} /></div>
                           )}
                           {!locked && needsReview(c) && (
-                            <div className="mt-1"><NeedsReviewTag /></div>
+                            <div className="mt-1"><AiReviewTag /></div>
                           )}
                           {!locked && !visibleCols.caseId && (
                             <div className="text-[11px] font-semibold text-[#030213] mt-1">{c.id}</div>
@@ -2409,10 +2433,19 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                           </span>
                         </td>
                       )}
+                      {visibleCols.scannerDate && (
+                        // When the scan was taken on the scanner — only scanner
+                        // cases have one (live shows "--" otherwise).
+                        <td className={`px-4 py-3 text-xs whitespace-nowrap ${lockBlur}`}>
+                          {c.source === 'scanner'
+                            ? <span className="text-[#030213]">{c.scannerCreatedAt ?? c.createdAt}</span>
+                            : <span className="text-[#B0B0C0]">--</span>}
+                        </td>
+                      )}
                       {visibleCols.createdAt && (
                         <td className={`px-4 py-3 text-xs text-[#030213] whitespace-nowrap ${lockBlur}`}>
                           <span className="inline-flex items-center gap-2">
-                            <CreatorAvatar creator={caseCreator(c)} />
+                            <CreatedByIcon createdBy={caseCreatedBy(c, portal)} />
                             {c.createdAt}
                           </span>
                         </td>
@@ -2449,6 +2482,14 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                               <span title={c.dentist} className="truncate">{c.dentist}</span>
                             </span>
                           </div>
+                        </td>
+                      )}
+                      {visibleCols.dentist && (
+                        <td className={`px-4 py-3 ${lockBlur}`}>
+                          <span className="flex items-center gap-1 text-xs text-[#030213] max-w-[160px]">
+                            {c.hasAlert && <AlertTriangle className="w-3 h-3 text-[#E65100] flex-shrink-0" />}
+                            <span title={c.dentist} className="truncate">{c.dentist}</span>
+                          </span>
                         </td>
                       )}
                       {visibleCols.lab && (
@@ -2550,6 +2591,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                             <span className="text-[11px] font-bold text-[#4D8EF7]">{c.id}-{idx + 1}</span>
                           </td>
                         )}
+                        {visibleCols.scannerDate  && <td className="px-4 py-2" />}
                         {visibleCols.createdAt    && <td className="px-4 py-2" />}
                         {visibleCols.updatedAt    && <td className="px-4 py-2" />}
                         {/* Delivery date — service-level */}
@@ -2570,6 +2612,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                           </td>
                         )}
                         {visibleCols.practice  && <td className="px-4 py-2" />}
+                        {visibleCols.dentist   && <td className="px-4 py-2" />}
                         {visibleCols.lab       && <td className="px-4 py-2" />}
                         <td className="px-4 py-2" />
                       </tr>
@@ -2637,7 +2680,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                       <span className="inline-flex flex-col items-start gap-1">
                         <StatusBadge status={c.status} />
                         {c.statusOverride && <OverrideTag override={c.statusOverride} />}
-                        {needsReview(c) && <NeedsReviewTag />}
+                        {needsReview(c) && <AiReviewTag />}
                       </span>
                     </span>
                     <div className="relative" onClick={(e) => e.stopPropagation()}>
@@ -2725,7 +2768,7 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
                     <div className="flex items-center justify-between">
                       <span className="text-[#8B8B9E]">Created</span>
                       <span className="inline-flex items-center gap-1.5 text-[#5A5568]">
-                        <CreatorAvatar creator={caseCreator(c)} size={18} />
+                        <CreatedByIcon createdBy={caseCreatedBy(c, portal)} size={18} />
                         {c.createdAt}
                       </span>
                     </div>
@@ -2831,8 +2874,9 @@ export default function CasesPage({ initialCaseId, onCreateCase, onOpenDraft, on
           caseData={statusModalCase}
           missing={statusModalMissing}
           reach={showStatusReachNotice ? reachFor(statusModalCase) : undefined}
-          onClose={() => setStatusModalCase(null)}
-          onConfirm={(toStatus, override) => { applyStatusChange(statusModalCase, toStatus, override); setStatusModalCase(null); }}
+          initialStatus={statusModalTarget}
+          onClose={closeStatusModal}
+          onConfirm={(toStatus, override) => { applyStatusChange(statusModalCase, toStatus, override); closeStatusModal(); }}
         />
       )}
 

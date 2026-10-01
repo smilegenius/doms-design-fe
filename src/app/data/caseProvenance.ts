@@ -3,44 +3,43 @@ import { connectionStatus, type ScannerConnection } from './scannerConnections';
 
 // ─── Case provenance & status reach (hotfixes, 30-Sep-2026) ──────────────────
 // Two small questions every portal asks about a case:
-//   • WHO made it — a person, or Smile Genius itself (email → draft). Drives
-//     the creator avatar on the Cases list and the case header.
+//   • WHICH SIDE made it — the clinic or the lab. Drives the lab / clinic
+//     icon on the Cases list and the case header.
 //   • Will a status change made on the clinic side actually REACH the lab?
 //     Only when the case came in through a scanner whose integration is live.
 //     Anything else (email / manual / post, or an expired / missing scanner
 //     connection) the lab never sees, so the clinic has to tell them directly.
 
-export interface CaseCreator {
-  kind: 'person' | 'system';
-  /** "Smile Genius" for system-made cases, otherwise the person's name. */
-  name: string;
-  /** One line on how the case was made — the avatar tooltip. */
+/** Which side of the order made the case — the icon on the list and header. */
+export type CreatedSide = 'clinic' | 'lab';
+/** The portal looking at the case. DSO sees cases the way a clinic does. */
+export type ViewerPortal = 'clinic' | 'lab' | 'dso';
+
+export interface CaseCreatedBy {
+  side: CreatedSide;
+  /** The practice or lab that made it. */
+  org: string;
+  /** How it was made (+ who, when known) — the icon tooltip. */
   detail: string;
 }
 
-// Clinic users who key cases in by hand. Deterministic per case so a row
-// always shows the same creator.
-const CLINIC_STAFF = ['Emma Roberts', 'Liam Doyle', 'Priya Shah', 'Chloe Martin', 'Aaron Kelly'];
-
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-export function caseCreator(c: {
-  id: string; source?: Case['source']; scanner?: string; dentist: string;
-  emailPrescription?: { fromName: string }; createdBy?: string;
-}): CaseCreator {
-  if (c.source === 'email') {
-    const from = c.emailPrescription ? ` from ${c.emailPrescription.fromName}` : '';
-    const reviewed = c.createdBy ? ` · reviewed and submitted by ${c.createdBy}` : '';
-    return { kind: 'system', name: 'Smile Genius', detail: `Auto-created from an email${from}${reviewed}` };
-  }
-  if (c.createdBy) return { kind: 'person', name: c.createdBy, detail: 'Created in Smile Genius' };
-  if (c.source === 'scanner') return { kind: 'person', name: c.dentist, detail: `Sent from ${c.scanner}` };
-  const name = CLINIC_STAFF[hash(c.id) % CLINIC_STAFF.length];
-  return { kind: 'person', name, detail: c.source === 'post' ? 'Logged from impressions sent by post' : 'Entered manually' };
+export function caseCreatedBy(
+  c: {
+    source?: Case['source']; scanner?: string; practice: string; lab?: string;
+    createdBy?: string; createdBySide?: CreatedSide;
+  },
+  viewer: ViewerPortal = 'clinic',
+): CaseCreatedBy {
+  // An email draft is built from whichever inbox received the prescription —
+  // the lab's own inbox in the Lab portal, the practice's everywhere else.
+  const side: CreatedSide = c.createdBySide ?? (c.source === 'email' && viewer === 'lab' ? 'lab' : 'clinic');
+  const how =
+    c.source === 'email' ? 'Auto-created from an email'
+    : c.source === 'scanner' ? `Sent from ${c.scanner ?? 'a scanner'}`
+    : c.source === 'post' ? 'Impressions sent by post'
+    : 'Entered manually';
+  const who = c.createdBy ? ` · ${c.source === 'email' ? 'reviewed by' : 'by'} ${c.createdBy}` : '';
+  return { side, org: side === 'lab' ? (c.lab ?? 'Lab') : c.practice, detail: `${how}${who}` };
 }
 
 /** Email-made drafts nobody has reviewed yet — the "Needs your review" state. */
@@ -61,14 +60,19 @@ export function statusReach(c: { source?: Case['source']; scanner?: string }, co
   return { reaches: true, scanner: conn.name };
 }
 
-/** Why the lab won't see it — one sentence, used by the modal, banner and toast. */
-export function statusReachReason(r: Extract<StatusReach, { reaches: false }>): string {
-  if (r.why === 'no-scanner') return 'This case didn’t come in through a connected scanner, so status changes made here aren’t sent to the lab.';
-  if (r.why === 'expired') return `The ${r.scanner} connection has expired, so status changes made here aren’t reaching the lab.`;
-  return `${r.scanner} isn’t connected, so status changes made here aren’t sent to the lab.`;
-}
+// ── Scanner-portal sync ───────────────────────────────────────────────────────
+// iTero only has an "On Hold" status of its own. Any other status set on an
+// iTero case stays in Smile Genius — PM copy, verbatim.
+export const SCANNER_SYNC_COPY =
+  'This update is reflected in Smile Genius only. It will not be synchronised with the scanner portal because this status or action is not supported by the scanner.';
 
-/** Ready-to-send text for telling the lab by hand. */
-export function statusUpdateMessage(c: Pick<Case, 'id' | 'patientName' | 'lab'>, statusLabel: string): string {
-  return `Hi ${c.lab} team — quick update on case ${c.id} (${c.patientName}): we’ve moved it to “${statusLabel}”. Thanks!`;
+const SCANNER_SUPPORTED_STATUSES: Record<string, string[]> = {
+  iTero: ['on-hold'],
+};
+
+/** True when `toStatus` can't be pushed back to the case's scanner portal. */
+export function scannerSyncUnsupported(c: { source?: Case['source']; scanner?: string }, toStatus: string): boolean {
+  if (c.source !== 'scanner' || !c.scanner) return false;
+  const supported = SCANNER_SUPPORTED_STATUSES[c.scanner];
+  return !!supported && !supported.includes(toStatus);
 }

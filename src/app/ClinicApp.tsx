@@ -181,6 +181,7 @@ export default function ClinicApp() {
       )}
       {activePage === 'cases' && (
         <CasesPage
+          portal="clinic"
           initialCaseId={caseInitialId}
           onCreateCase={() => setActivePage('quick-create-case')}
           onOpenDraft={(c) => navigate(`/clinic/cases/quick-new/${encodeURIComponent(c.id)}`)}

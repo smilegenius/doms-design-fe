@@ -137,6 +137,7 @@ export default function LabApp() {
       )}
       {activePage === 'cases' && (
         <CasesPage
+          portal="lab"
           initialCaseId={caseInitialId}
           onCreateCase={() => navigate('/lab/cases/quick-new')}
           onConfigureScoring={() => setActivePage('configuration')}

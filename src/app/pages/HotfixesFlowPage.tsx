@@ -1,11 +1,12 @@
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, Wrench, Stethoscope, FlaskConical, Building2, Cpu, Sparkles, Mail,
-  FilePen, Info, UserCircle2, List, Plug, RefreshCw, Unlink,
+  FilePen, Info, UserCircle2, List, RefreshCw, Unlink,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import { connectionStatus, reconnectScanner, simulateStage, useScannerConnections } from '../data/scannerConnections';
+import { SCANNER_SYNC_COPY } from '../data/caseProvenance';
 
 // ─── Hotfixes · 30-Sep-2026 — flow walkthrough ───────────────────────────────
 // Same shape as the CareStack / WhatsApp walkthroughs, for a round of small
@@ -14,7 +15,8 @@ import { connectionStatus, reconnectScanner, simulateStage, useScannerConnection
 //      screen, case page).
 //   2. A status the clinic changes only reaches the lab through a live scanner
 //      integration — otherwise the clinic is told to let the lab know.
-//   3. The Cases list shows who created each case.
+//   3. Lab Work (clinic) follows the live clinic portal's naming + columns,
+//      and every case shows a lab / clinic icon for the side that created it.
 
 type Persona = 'clinic' | 'lab' | 'dso' | 'system';
 type Portal = 'clinic' | 'lab' | 'supplier';
@@ -50,10 +52,10 @@ const STAGES: Stage[] = [
     blurb: 'A prescription that arrives by email becomes a Draft case on its own. Nobody typed it, so every place the draft appears now says so — and that it isn’t a live case until a person has checked it and submitted it.',
     steps: [
       {
-        title: 'Flagged in the Cases list',
+        title: 'Flagged in Lab Work (clinic) and Cases (lab)',
         persona: 'clinic',
         icon: <List className="w-4 h-4" />,
-        description: 'Email drafts sit at the top of the list. Under the Draft status each one now carries a violet “Needs your review” tag, in both the table and the grid view.',
+        description: 'Email drafts sit at the top of the list — the clinic portal’s Lab Work page, the lab’s Cases page. Under the Draft status each one now carries a violet “Needs your review” tag, in both the table and the grid view.',
         shows: ['Draft', 'Needs your review'],
         tryIt: ['Hover the tag for the reason', 'Switch to grid view — the tag is on the card too'],
         path: '/clinic/cases',
@@ -65,7 +67,7 @@ const STAGES: Stage[] = [
         icon: <FilePen className="w-4 h-4" />,
         description: 'Opening an email draft lands on the Quick Create screen, pre-filled. The banner at the top replaces the old AI-extraction note: it says Smile Genius created the case, from whose email and when, and that it hasn’t gone anywhere yet.',
         shows: ['“This case was created automatically from an email — it needs your review”', 'Sender · subject · received'],
-        tryIt: ['Read the banner, check the fields, press Submit', 'Back on the list, the new case shows the Smile Genius creator avatar'],
+        tryIt: ['Read the banner, check the fields, press Submit', 'Back on Lab Work, the new case carries the clinic icon in Created On'],
         path: '/clinic/cases/quick-new/CASE-DRAFT-001',
         portal: 'clinic',
         highlight: true,
@@ -83,76 +85,78 @@ const STAGES: Stage[] = [
         title: 'On the case page — DSO',
         persona: 'dso',
         icon: <Sparkles className="w-4 h-4" />,
-        description: 'The DSO portal has no creation flow, so a draft opens on the Case Details page instead. The same review banner sits above the status strip, and the header shows “Created by Smile Genius”.',
-        shows: ['Review banner on Case Details', 'Created by Smile Genius'],
+        description: 'The DSO portal has no creation flow, so a draft opens on the Case Details page instead. The same review banner sits above the status strip.',
+        shows: ['Review banner on Case Details'],
         path: '/supplier/cases/CASE-DRAFT-001',
         portal: 'supplier',
       },
     ],
   },
   {
-    label: 'Status changes the lab won’t see',
-    blurb: 'When the clinic changes a case’s status, the lab only hears about it through a live scanner integration. Email, manual and posted cases have none, and neither does a scanner whose connection is missing or expired. In those cases the clinic is now told — and handed a message to pass on. Nothing is blocked.',
+    label: 'Status changes that stay in Smile Genius',
+    blurb: 'Some status changes can’t be passed on to the scanner portal: iTero only supports On Hold, and a case with no live scanner link (posted, manual, email) has nowhere to send them. In every such case the user sees one message, word for word, on the case, in the Change status popup and as a toast. Nothing is blocked.',
     steps: [
       {
-        title: 'Posted case — no scanner at all',
-        persona: 'clinic',
+        title: 'iTero case — any status except On Hold',
+        persona: 'lab',
         icon: <Info className="w-4 h-4" />,
-        description: 'CASE-054 (Harry Lewis) came in by post. The case page shows a blue notice under the header, and the Change status popup repeats it the moment a new status is picked, with a “Copy update message” button.',
-        shows: ['“Status updates won’t reach Smile Genius Lab automatically.”', 'Copy update message', 'Toast after saving: “…please let them know”'],
-        tryIt: ['Click the status pill → pick In Production', 'Press “Copy update message” and paste it anywhere', 'Save — the reminder toast follows'],
-        path: '/clinic/cases/CASE-054',
+        description: 'CASE-001 came from iTero. Picking In Production, Shipped or any status other than On Hold shows the message in the popup; picking On Hold doesn’t. Same in every portal, and in the bulk status summary.',
+        shows: [SCANNER_SYNC_COPY],
+        tryIt: ['Click the status pill → pick In Production, then On Hold', 'Save — the same message follows as a toast'],
+        path: '/clinic/cases/CASE-001',
         portal: 'clinic',
         highlight: true,
       },
       {
-        title: 'Scanner case — connection expired',
+        title: 'Case with no scanner link',
         persona: 'clinic',
         icon: <Unlink className="w-4 h-4" />,
-        description: 'CASE-002 was scanned on 3Shape, but the 3Shape TRIOS token has expired, so the notice names the connection. Reconnect it from the demo controls above and the notice disappears — the status reaches the lab again.',
-        shows: ['“The 3Shape TRIOS 5 connection has expired…”'],
-        tryIt: ['Open the case, then press “Reconnect 3Shape” above and reopen it'],
-        path: '/clinic/cases/CASE-002',
+        description: 'CASE-054 (Harry Lewis) came in by post, so no status change reaches a scanner portal. The case page carries the message under the header, and the popup repeats it for every status. CASE-002 (3Shape) behaves the same while its connection is down — toggle it with the demo controls above.',
+        shows: ['Message on the case page', 'Message in the popup', 'Toast after saving'],
+        path: '/clinic/cases/CASE-054',
         portal: 'clinic',
       },
       {
-        title: 'Scanner case — connected',
-        persona: 'clinic',
-        icon: <Plug className="w-4 h-4" />,
-        description: 'CASE-001 came from iTero, whose connection is live. No notice on the page or in the popup — the change goes through to the lab as before.',
-        path: '/clinic/cases/CASE-001',
-        portal: 'clinic',
-      },
-      {
-        title: 'Same notice in the DSO portal',
+        title: 'Same message in the DSO portal',
         persona: 'dso',
         icon: <Building2 className="w-4 h-4" />,
-        description: 'The DSO portal changes status on the clinics’ behalf, so it gets the same notice. The Lab portal doesn’t — the lab is the side being told.',
+        description: 'The DSO portal changes status on the clinics’ behalf, so it shows the same message on the same cases.',
         path: '/supplier/cases/CASE-054',
         portal: 'supplier',
       },
     ],
   },
   {
-    label: 'Who created the case',
-    blurb: 'Every row now shows who made the case, beside its Created On date — in every portal, because the list is shared.',
+    label: 'Lab Work columns & who created the case',
+    blurb: 'The clinic portal now matches the live one: the page is called Lab Work and its columns are Status · Case ID · Scanner Creation Date · Created On · Updated On · Delivery Date · Patient · Service · Dentist · Lab. Every portal also shows which side created each case — the clinic or the lab — as an icon beside Created On.',
     steps: [
       {
-        title: 'Creator avatar on the Cases list',
+        title: 'Lab Work — the clinic’s list, as on live',
+        persona: 'clinic',
+        icon: <List className="w-4 h-4" />,
+        description: 'The sidebar item, the page title and the case page’s back link all read “Lab Work”. The default columns match the live clinic portal: Scanner Creation Date (scanner cases only, “--” otherwise) and Dentist on its own replace Score and the merged Practice / Dentist, and Lab is on. The column picker still offers the rest, and the clinic’s choice is saved separately from the lab’s.',
+        shows: ['Lab Work', 'Scanner Creation Date', 'Dentist', 'Lab'],
+        tryIt: ['Open the column picker (gear) to add Score back'],
+        path: '/clinic/cases',
+        portal: 'clinic',
+        highlight: true,
+      },
+      {
+        title: 'Lab / clinic icon beside Created On',
         persona: 'system',
         icon: <UserCircle2 className="w-4 h-4" />,
-        description: 'A person’s initials, or the Smile Genius sparkle when the platform created the case from an email. Hover for the name and how it was made: sent from a scanner, entered manually, logged from a posted impression, or auto-created from an email (plus who reviewed and submitted it).',
-        shows: ['Sparkle — Smile Genius', 'Initials — a person', 'Tooltip: “Created by … · …”'],
-        tryIt: ['Hover a few avatars in the Created On column', 'Create a case with Quick Create — your name is on the new row'],
-        path: '/lab/cases',
-        portal: 'lab',
+        description: 'A violet clinic icon or a teal lab icon (the portal colours) shows which side created the case. Hover for the practice or lab and how it was made. Email drafts take the side whose inbox received them, and Quick Create stamps the portal it was submitted from. CASE-DRAFT-004 was keyed in by the lab on the practice’s behalf.',
+        shows: ['Clinic icon', 'Lab icon', 'Tooltip: “Created by the clinic — <practice> · …”'],
+        tryIt: ['Hover the icons in the Created On column', 'Compare the email drafts here with the same rows in the Lab portal'],
+        path: '/clinic/cases',
+        portal: 'clinic',
       },
       {
         title: 'And on the case page',
         persona: 'clinic',
         icon: <Sparkles className="w-4 h-4" />,
-        description: 'The case header carries the same avatar with the name written out, next to the status pill.',
-        shows: ['Created by <name>', 'Hover for how it was made'],
+        description: 'The case header carries the same icon with the side and the practice or lab written out, next to the status pill.',
+        shows: ['Created by Clinic · <practice>'],
         path: '/clinic/cases/CASE-001',
         portal: 'clinic',
       },
@@ -201,7 +205,7 @@ export default function HotfixesFlowPage() {
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[#F5F3FF] border border-[#DDD6FE] text-[#6D28D9] mb-3">
               Hotfixes · 30 Sep 2026
             </span>
-            <h1 className="text-2xl sm:text-3xl font-bold text-[#030213] mb-2">Case review, status reach &amp; case creator</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-[#030213] mb-2">Case review, status reach &amp; Lab Work</h1>
             <p className="text-sm text-[#717182] leading-relaxed max-w-xl mx-auto">
               Three fixes across the Clinic, Lab and DSO portals. Each step opens the exact screen; they read in order, but every button works on its own.
             </p>

@@ -7,7 +7,7 @@ import {
   Superscript, Subscript, Undo2, Redo2, Paperclip, Eye, Plus, Minus,
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply, Pencil,
-  Copy, Plug, GitBranch, Lock as LockIcon, Sparkles,
+  Copy, Plug, GitBranch, Lock as LockIcon,
 } from 'lucide-react';
 import SideDrawer from '../components/SideDrawer';
 import ActionMenu from '../components/ActionMenu';
@@ -43,8 +43,9 @@ import RelatedCasesCard, { RelationshipPill } from '../components/RelatedCasesCa
 import RescanDecisionModal from '../components/RescanDecisionModal';
 import type { Case as RescanCase } from './CasesPage';
 import { CURRENT_USER } from './CasesPage';
-import CreatorAvatar from '../components/CreatorAvatar';
-import { caseCreator, needsReview, statusReachReason, type StatusReach } from '../data/caseProvenance';
+import CreatedByIcon from '../components/CreatedByIcon';
+import { AiReviewNotice } from '../components/AiReviewNotice';
+import { SCANNER_SYNC_COPY, caseCreatedBy, needsReview, type CreatedSide, type StatusReach, type ViewerPortal } from '../data/caseProvenance';
 import { ensureCaseValidation, latestDueDateChange, recordDueDateChange, recordReceipt, summariseCase, summaryLabel, SUMMARY_META, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
 import type { CaseCareStack, CaseLike as CareStackCaseLike } from '../data/carestack';
 import CareStackCaseSection from '../components/carestack/CareStackCaseSection';
@@ -164,6 +165,7 @@ interface CaseForDetail {
   /** Email-made cases — the email Smile Genius built the case from. */
   emailPrescription?: { fromName: string; subject: string; receivedAt: string };
   /** Who submitted it through Quick Create (see data/caseProvenance). */
+  createdBySide?: CreatedSide;
   createdBy?: string;
 }
 
@@ -239,6 +241,9 @@ interface CaseDetailPageProps {
   /** Open the "Change status" modal (which enforces the override flow when the
       case is still missing requirements). Wired from the Cases list. */
   onRequestStatusChange?: () => void;
+  /** A status picked from the header dropdown — the host applies it or asks
+      first (override reason / Smile Genius-only message). */
+  onPickStatus?: (toStatus: CaseStatus) => void;
   /** Directly set the status (no override gate) — used by the in-case
       missing-info email flow (Sent for Review → Submitted). */
   onSetStatus?: (toStatus: CaseStatus) => void;
@@ -266,6 +271,10 @@ interface CaseDetailPageProps {
       lab. When it doesn't, a notice under the status strip says to tell the
       lab directly. The lab portal never passes it. */
   statusReach?: StatusReach;
+  /** The portal showing the case — decides the lab / clinic "created by" icon. */
+  viewerPortal?: ViewerPortal;
+  /** What the host calls its list — "Lab Work" in the clinic portal. */
+  listLabel?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -283,6 +292,68 @@ const STATUS_MAP: Record<CaseStatus, { label: string; bg: string; color: string;
   'on-hold':      { label: 'On Hold',       bg: '#FFF1F2', color: '#BE123C', border: '#FECDD3', banner: '#FFF1F2', dot: '#E11D48' },
   completed:      { label: 'Completed',     bg: '#DCFCE7', color: '#15803D', border: '#BBF7D0', banner: '#F0FDF4', dot: '#16A34A' },
 };
+
+// Statuses offered by the status dropdown — every lifecycle status except Draft.
+const PICKABLE_STATUSES = (Object.keys(STATUS_MAP) as CaseStatus[]).filter(st => st !== 'draft');
+
+// Live-portal status control: a split pill (status | ▾). The left half shows
+// the current status; the ▾ opens the status list with the current one ticked.
+// Picking hands the status to the host, which applies it or asks first.
+function StatusDropdown({ status, onPick }: { status: CaseStatus; onPick?: (s: CaseStatus) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  const s = STATUS_MAP[status];
+  const pickable = !!onPick && status !== 'draft';
+
+  return (
+    <div ref={ref} className="relative inline-flex">
+      <div className="inline-flex items-stretch rounded-full overflow-hidden text-[13px] font-semibold" style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}>
+        <span className="inline-flex items-center gap-1.5 pl-3 pr-3 py-1.5">
+          <CheckCircle2 className="w-4 h-4 text-[#2E7D32]" />
+          {s.label}
+        </span>
+        {pickable && (
+          <button
+            onClick={() => setOpen(o => !o)}
+            title="Change case status"
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            className="px-2.5 flex items-center hover:brightness-95 transition"
+            style={{ background: s.border, color: s.color }}
+          >
+            <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div role="listbox" className="absolute left-0 top-full mt-1.5 z-40 w-60 max-h-[340px] overflow-y-auto bg-white border border-[#E0E0E6] rounded-xl shadow-xl py-1">
+          {PICKABLE_STATUSES.map(st => (
+            <button
+              key={st}
+              role="option"
+              aria-selected={st === status}
+              onClick={() => { setOpen(false); onPick?.(st); }}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left text-[#030213] border-b border-[#F0EFF6] last:border-b-0 hover:bg-[#F8F9FC] transition-colors"
+            >
+              <span className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                {st === status && <CheckCircle2 className="w-4 h-4 text-[#2E7D32]" />}
+              </span>
+              {STATUS_MAP[st].label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const SERVICE_ICON_COLOR: Record<string, { bg: string; color: string }> = {
   'Veneers':         { bg: '#FFF7ED', color: '#F59E0B' },
@@ -3505,7 +3576,7 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
-export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach }: CaseDetailPageProps) {
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onPickStatus, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach, viewerPortal, listLabel = 'Cases' }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   // The lab's latest due-date change (if any) is the date the case is working
@@ -3744,7 +3815,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           className="inline-flex items-center gap-1.5 text-xs text-[#717182] hover:text-[#030213] transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Cases
+          Back to {listLabel}
         </button>
         <div className="flex items-center gap-2 flex-wrap">
           {/* Case at a glance: patient · practice, how it arrived, and the two
@@ -3912,34 +3983,16 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         </div>
       )}
 
-      {/* ── Email-made draft — Smile Genius created it, nobody has checked
-          it yet. Same message as the creation screen, so the review ask
-          reads the same wherever the draft is opened. ── */}
-      {needsReview(caseData) && (
-        <div className="mx-6 mt-1 flex items-start gap-3 px-4 py-3 rounded-xl border border-[#DDD6FE] bg-gradient-to-r from-[#F5F3FF] to-[#EEF4FF]">
-          <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white flex items-center justify-center flex-shrink-0">
-            <Sparkles className="w-3.5 h-3.5" />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs font-bold text-[#030213]">This case was created automatically from an email — it needs your review</p>
-            <p className="text-[11px] text-[#5A5568] leading-snug mt-0.5">
-              <span className="font-semibold text-[#030213]">Smile Genius</span> created this draft
-              {caseData.emailPrescription && <> from {caseData.emailPrescription.fromName}’s email <span className="text-[#717182]">(“{caseData.emailPrescription.subject}”, {caseData.emailPrescription.receivedAt})</span></>}
-              . It isn’t a live case yet — check the details before it’s submitted.
-            </p>
-          </div>
-        </div>
-      )}
+      {/* ── AI-review notice — email-made draft, same red banner + PM copy
+          as the creation screen. ── */}
+      {needsReview(caseData) && <AiReviewNotice className="mx-6 mt-1" />}
 
       {/* ── Status reach (clinic side) — this case has no live scanner link
           to the lab, so a status changed here won't show up for them. ── */}
       {statusReach && !statusReach.reaches && caseData.status !== 'draft' && (
         <div className="mx-6 mt-1 flex items-start gap-2.5 px-4 py-2.5 rounded-xl border border-[#BFDBFE] bg-[#EEF4FF]">
           <Info className="w-4 h-4 text-[#1565C0] flex-shrink-0 mt-0.5" />
-          <p className="text-[11px] text-[#35507A] leading-snug">
-            <span className="font-semibold text-[#1565C0]">Status updates won’t reach {caseData.lab ?? 'the lab'} automatically.</span>{' '}
-            {statusReachReason(statusReach)} When you change the status, let the lab know directly.
-          </p>
+          <p className="text-[11px] text-[#35507A] leading-snug">{SCANNER_SYNC_COPY}</p>
         </div>
       )}
 
@@ -3972,22 +4025,13 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         <div className="px-5 py-4 border-b border-[#F0EFF6] flex items-center gap-3 flex-wrap">
           <h1 className="text-base font-bold text-[#030213] tracking-tight">{caseData.id}</h1>
 
-          {/* Live case status — click to change it (the change-status modal
-              enforces the override flow when requirements are still missing).
-              Also flips automatically through the missing-info email loop. */}
-          <button
-            onClick={onRequestStatusChange}
-            disabled={!onRequestStatusChange}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold hover:opacity-80 transition-opacity disabled:cursor-default"
-            style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}
-            title="Change case status"
-          >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.dot }} />
-            {s.label}
-            {onRequestStatusChange && <ChevronDown className="w-3 h-3 opacity-70" />}
-          </button>
+          {/* Live case status — split pill; ▾ opens the status list (live
+              portal pattern). The host applies the pick, or opens the compact
+              override / Smile Genius-only popup first. Also flips
+              automatically through the missing-info email loop. */}
+          <StatusDropdown status={caseData.status} onPick={onPickStatus} />
 
-          <CreatorAvatar creator={caseCreator(caseData)} showName />
+          <CreatedByIcon createdBy={caseCreatedBy(caseData, viewerPortal)} showName />
 
           {caseData.archived && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#F3F3F5] text-[#616161] border border-[#BDBDBD]">

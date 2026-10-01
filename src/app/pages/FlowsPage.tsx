@@ -26,8 +26,8 @@ export interface FlowEntry {
 export const FLOWS: FlowEntry[] = [
   {
     // A round of small cross-portal fixes, walked through like an epic.
-    title: 'Hotfixes — review, status reach & creator',
-    description: 'Email-made drafts ask for a review, the clinic is told when a status change won’t reach the lab, and every case shows who created it.',
+    title: 'Hotfixes — review, status reach & Lab Work',
+    description: 'Email-made drafts ask for a review, the clinic is told when a status change won’t reach the lab, the clinic’s Lab Work list matches live, and every case shows whether the lab or the clinic created it.',
     detail: 'Clinic · Lab · DSO',
     icon: <Wrench className="w-5 h-5 text-[#7C3AED]" />,
     badge: 'Hotfixes',

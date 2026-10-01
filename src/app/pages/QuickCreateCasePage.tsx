@@ -4,7 +4,7 @@ import {
   Plus, X, Check, ChevronDown, ChevronRight,
   Pencil, Zap, Star, Upload, UploadCloud, Box, Image as ImageIcon,
   AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen, Copy, ExternalLink, Building2,
-  CloudOff, Loader2, Sparkles,
+  CloudOff, Loader2,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
@@ -66,6 +66,7 @@ function initialsFor(name: string): string {
   return (letters || name.slice(0, 2)).toUpperCase();
 }
 import { mockCases, CURRENT_USER } from './CasesPage';
+import { AiReviewNotice } from '../components/AiReviewNotice';
 import type { Case, EmailPrescription } from './CasesPage';
 import { LAB_POSTAL_ADDRESSES } from './CaseDetailPage';
 import { ScoreBadge } from '../components/ScoreBadge';
@@ -1647,6 +1648,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       // it came from; the submitter is recorded as its reviewer.
       emailPrescription: caseSource === 'Email' ? prefillDraft?.emailPrescription : undefined,
       createdBy: CURRENT_USER,
+      createdBySide: isLab ? 'lab' : 'clinic',
     };
   }
 
@@ -2312,28 +2314,9 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           </div>
         )}
 
-        {/* ── Needs-your-review notice (email-made drafts only). Nobody typed
-            this case: Smile Genius built it from an incoming email, so it
-            says so up front — who sent it, when — and that nothing goes to
-            the lab until a person has checked it and pressed submit. ── */}
-        {aiPrefilled && (
-          <div className="max-w-6xl mx-auto mb-3 flex items-start gap-3 px-3.5 py-3 rounded-xl border border-[#DDD6FE] bg-gradient-to-r from-[#F5F3FF] to-[#EEF4FF]">
-            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white flex items-center justify-center flex-shrink-0">
-              <Sparkles className="w-3.5 h-3.5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-xs font-bold text-[#030213]">This case was created automatically from an email — it needs your review</p>
-                <span className="inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-white text-[#6D28D9] border border-[#DDD6FE]">Draft</span>
-              </div>
-              <p className="text-[11px] text-[#5A5568] leading-snug mt-0.5">
-                <span className="font-semibold text-[#030213]">Smile Genius</span> created this draft
-                {prefillDraft?.emailPrescription && <> from {prefillDraft.emailPrescription.fromName}’s email <span className="text-[#717182]">(“{prefillDraft.emailPrescription.subject}”, {prefillDraft.emailPrescription.receivedAt})</span></>}
-                {' '}and filled in the details it could read. It isn’t a live case yet — check every field, then submit.
-              </p>
-            </div>
-          </div>
-        )}
+        {/* ── AI-review notice (email-made drafts only) — PM copy, red, same
+            component on the case page and the list tag. ── */}
+        {aiPrefilled && <AiReviewNotice className="max-w-6xl mx-auto mb-3" />}
 
         {/* ── Offline-lab notice — appears the moment a Low Potential or
             Non-participating lab is picked and STAYS pinned to the top of
