@@ -184,7 +184,7 @@ const SCANNERS: Scanner[] = ['iTero', '3Shape', 'Medit', 'Carestream'];
 
 function ScannerIcon({ scanner, size = 32 }: { scanner: Scanner; size?: number }) {
   const imgs: Record<Scanner, string> = {
-    iTero:      '/scanner-itero.png.png',
+    iTero:      '/scanner-itero.svg',
     '3Shape':   '/scanner-3shape.png.png',
     Medit:      '/scanner-medit.png.png',
     Carestream: '/scanner-3shape.png.png',

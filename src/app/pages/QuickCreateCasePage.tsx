@@ -926,7 +926,7 @@ function EmailPreviewPane({ caseData }: { caseData: Case }) {
 // Small iTero brand mark — reuses the scanner logo asset. Sized via className
 // so it can sit in the pane tab (w-4) or the pane header (w-5).
 function IteroLogo({ className = '' }: { className?: string }) {
-  return <img src="/scanner-itero.png.png" alt="iTero" className={`${className} rounded object-contain`} draggable={false} />;
+  return <img src="/scanner-itero.svg" alt="iTero" className={`${className} rounded object-contain`} draggable={false} />;
 }
 
 // ─── iTero email pane ────────────────────────────────────────────────────────

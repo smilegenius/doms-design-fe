@@ -34,7 +34,7 @@ import {
 // from Settings → Notifications (see NotificationPreferencesPage).
 
 const SCANNER_LOGO: Record<ScannerConnection['brand'], string> = {
-  iTero: '/scanner-itero.png.png',
+  iTero: '/scanner-itero.svg',
   '3Shape': '/scanner-3shape.png.png',
   Medit: '/scanner-medit.png.png',
   Carestream: '/scanner-3shape.png.png',

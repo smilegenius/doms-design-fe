@@ -42,7 +42,7 @@ export function caseCreatedBy(
   return { side, org: side === 'lab' ? (c.lab ?? 'Lab') : c.practice, detail: `${how}${who}` };
 }
 
-/** Email-made drafts nobody has reviewed yet — the "Needs your review" state. */
+/** Email-made drafts nobody has reviewed yet — the AI "Need Attention" state. */
 export function needsReview(c: { status: string; source?: Case['source'] }): boolean {
   return c.status === 'draft' && c.source === 'email';
 }
