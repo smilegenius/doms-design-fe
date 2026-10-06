@@ -9,6 +9,17 @@ export default {
       fontFamily: {
         sans: ['Poppins', 'sans-serif'],
       },
+      // Smile Genius Go (clinician mobile app) — themed via CSS variables in
+      // src/styles/go.css so one class works in both light and dark.
+      colors: {
+        go: Object.fromEntries(
+          ['bg', 'surface', 'raised', 'line', 'ink', 'ink2', 'muted', 'faint',
+           'brand', 'brand-ink', 'brand-soft', 'lav', 'violet', 'violet-soft',
+           'ok', 'ok-soft', 'warn', 'warn-soft', 'bad', 'bad-soft',
+           'teal', 'teal-soft', 'pink', 'pink-soft']
+            .map(k => [k, `rgb(var(--go-${k}) / <alpha-value>)`]),
+        ),
+      },
     },
   },
   plugins: [],

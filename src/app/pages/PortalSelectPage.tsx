@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Building2, ShieldCheck, ArrowRight, LogOut, Sparkles, UserPlus, LogIn, Stethoscope, FlaskConical, Workflow } from 'lucide-react';
+import { Building2, ShieldCheck, ArrowRight, LogOut, Sparkles, UserPlus, LogIn, Stethoscope, FlaskConical, Workflow, Smartphone } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { FLOWS } from './FlowsPage';
 
@@ -246,6 +246,36 @@ export default function PortalSelectPage() {
             journeys={adminJourneys}
           />
         </div>
+
+        {/* Smile Genius Go — the clinician / dentist mobile app. Full-width so
+            it reads as a different surface (phone) from the four web portals. */}
+        <section className="w-full max-w-5xl mt-6">
+          <button
+            onClick={() => navigate('/go')}
+            className="group relative w-full text-left bg-white border border-[#E0E0E6] rounded-2xl p-6 overflow-hidden hover:shadow-xl hover:border-[#4D8EF7] transition-all"
+          >
+            <div
+              className="absolute inset-0 pointer-events-none opacity-70"
+              style={{ background: 'radial-gradient(circle at right top, #4D8EF714, transparent 60%), radial-gradient(circle at 70% 120%, #A59DFF14, transparent 60%)' }}
+            />
+            <div className="relative flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] shadow-[0_8px_20px_-8px_rgba(77,142,247,.6)]">
+                <Smartphone className="w-6 h-6 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base font-bold text-[#030213] leading-tight">Smile Genius Go</h2>
+                  <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full border bg-[#EEF4FF] text-[#1565C0] border-[#DBEAFE] flex-shrink-0">Mobile app</span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full border bg-[#F5F3FF] text-[#7C3AED] border-[#EDE9FE] flex-shrink-0">New</span>
+                </div>
+                <p className="text-xs text-[#717182] mt-1 leading-relaxed">
+                  For dentists &amp; clinicians: photograph a prescription, dispatch and check in lab work, reply to labs and approve invoices from your phone. Light and dark themes.
+                </p>
+              </div>
+              <ArrowRight className="w-5 h-5 text-[#4D8EF7] flex-shrink-0 group-hover:translate-x-0.5 transition-transform" />
+            </div>
+          </button>
+        </section>
 
         {/* Flows — one call to action. The walkthroughs and the standalone
             pages live behind it on /flows, so this screen stays about picking

@@ -1,0 +1,96 @@
+/* ─── Smile Genius Go — clinician mobile app tokens ───────────────────────────
+   Light values are the web portals' de-facto palette (#4D8EF7 brand,
+   #A59DFF lavender, #030213 ink, #E0E0E6 line, status tints from the case
+   STATUS_STYLE map). Dark values are derived from the same hues so the app
+   reads as the same product in both themes. Consumed through the `go-*`
+   Tailwind colours (tailwind.config.js) as `rgb(var(--go-x) / alpha)`. */
+
+.go-theme {
+  --go-bg: 246 247 251;
+  --go-surface: 255 255 255;
+  --go-raised: 248 249 252;
+  --go-line: 224 224 230;
+  --go-ink: 3 2 19;
+  --go-ink2: 90 85 104;
+  --go-muted: 113 113 130;
+  --go-faint: 160 160 176;
+  --go-brand: 77 142 247;
+  --go-brand-ink: 21 101 192;
+  --go-brand-soft: 238 244 255;
+  --go-lav: 165 157 255;
+  --go-violet: 124 58 237;
+  --go-violet-soft: 245 243 255;
+  --go-ok: 21 128 61;
+  --go-ok-soft: 240 253 244;
+  --go-warn: 180 83 9;
+  --go-warn-soft: 255 247 237;
+  --go-bad: 212 24 61;
+  --go-bad-soft: 255 241 242;
+  --go-teal: 0 131 143;
+  --go-teal-soft: 224 247 250;
+  --go-pink: 190 24 93;
+  --go-pink-soft: 253 242 248;
+  --go-shadow: 16 24 64;
+  --go-g1: 77 142 247;
+  --go-g2: 165 157 255;
+  color-scheme: light;
+}
+
+.go-theme[data-theme='dark'] {
+  --go-bg: 7 7 16;
+  --go-surface: 16 16 30;
+  --go-raised: 23 23 41;
+  --go-line: 38 38 58;
+  --go-ink: 242 242 250;
+  --go-ink2: 200 200 216;
+  --go-muted: 150 150 172;
+  --go-faint: 96 96 120;
+  --go-brand: 107 162 255;
+  --go-brand-ink: 150 190 255;
+  --go-brand-soft: 22 34 64;
+  --go-lav: 178 170 255;
+  --go-violet: 180 150 255;
+  --go-violet-soft: 33 26 64;
+  --go-ok: 74 222 128;
+  --go-ok-soft: 14 42 28;
+  --go-warn: 251 191 36;
+  --go-warn-soft: 48 34 10;
+  --go-bad: 251 113 133;
+  --go-bad-soft: 54 16 28;
+  --go-teal: 45 212 191;
+  --go-teal-soft: 10 42 44;
+  --go-pink: 244 114 182;
+  --go-pink-soft: 54 18 40;
+  --go-shadow: 0 0 0;
+  --go-g1: 66 120 236;
+  --go-g2: 128 112 240;
+  color-scheme: dark;
+}
+
+.go-theme .go-scroll { scrollbar-width: none; overscroll-behavior: contain; }
+.go-theme .go-scroll::-webkit-scrollbar { display: none; }
+
+/* Brand gradient — the logo smile (#4D8EF7 → #A59DFF) */
+.go-grad { background-image: linear-gradient(135deg, rgb(var(--go-g1)), rgb(var(--go-g2))); }
+.go-grad-text {
+  background-image: linear-gradient(90deg, rgb(var(--go-brand)), rgb(var(--go-lav)));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.go-card-shadow { box-shadow: 0 1px 2px rgb(var(--go-shadow) / 0.04), 0 8px 24px -12px rgb(var(--go-shadow) / 0.12); }
+.go-glow { box-shadow: 0 10px 30px -8px rgb(var(--go-g1) / 0.55); }
+
+@keyframes go-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes go-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes go-toast-in { from { opacity: 0; transform: translateY(-12px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes go-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes go-scan { 0% { top: 8%; } 50% { top: 88%; } 100% { top: 8%; } }
+@keyframes go-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.go-sheet-in { animation: go-sheet-in .28s cubic-bezier(.2,.8,.2,1); }
+.go-fade-in { animation: go-fade-in .2s ease-out; }
+.go-toast-in { animation: go-toast-in .25s cubic-bezier(.2,.8,.2,1); }
+.go-rise { animation: go-rise .35s cubic-bezier(.2,.8,.2,1) both; }
+.go-scanline { animation: go-scan 2.6s ease-in-out infinite; }
+.go-pulse { animation: go-pulse 1.4s ease-in-out infinite; }
+
+/* Simulated keyboard open: the tab bar hides behind it like on iOS */
+.go-kb-open .go-tabbar { opacity: 0; pointer-events: none; transition: opacity .15s; }
