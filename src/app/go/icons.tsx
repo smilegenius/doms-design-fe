@@ -13,7 +13,7 @@ import {
   DocumentTextIcon, EnvelopeIcon, EnvelopeOpenIcon, ExclamationTriangleIcon, EyeIcon, EyeSlashIcon, HandThumbUpIcon, HomeIcon, InboxIcon,
   InformationCircleIcon, LinkIcon, LockClosedIcon, MagnifyingGlassIcon, MoonIcon, PaperAirplaneIcon, PaperClipIcon, PencilSquareIcon, PhotoIcon,
   PlusIcon, PrinterIcon, ShieldCheckIcon, SparklesIcon, Square3Stack3DIcon, SunIcon, TruckIcon, UserIcon, WalletIcon, WrenchScrewdriverIcon,
-  XCircleIcon, XMarkIcon,
+  XCircleIcon, XMarkIcon, FunnelIcon, MicrophoneIcon, StopIcon, UserPlusIcon, PlusCircleIcon, TrashIcon, StarIcon, PauseIcon, PlayIcon,
 } from '@heroicons/react/24/solid';
 
 export { ArrowBigUp, CornerDownLeft, Loader2 } from 'lucide-react';
@@ -83,3 +83,12 @@ export const X = filled(XMarkIcon);
 export const XCircle = filled(XCircleIcon);
 export const Zap = filled(BoltIcon);
 export const ZapOff = filled(BoltSlashIcon);
+export const Filter = filled(FunnelIcon);
+export const Mic = filled(MicrophoneIcon);
+export const Stop = filled(StopIcon);
+export const UserPlus = filled(UserPlusIcon);
+export const PlusCircle = filled(PlusCircleIcon);
+export const Trash = filled(TrashIcon);
+export const Star = filled(StarIcon);
+export const Pause = filled(PauseIcon);
+export const Play = filled(PlayIcon);

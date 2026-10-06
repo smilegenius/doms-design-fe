@@ -52,7 +52,7 @@ function LabelPreview({ c }: { c: LabCase }) {
           <p className="text-[22px] font-bold font-mono leading-none tracking-tight">{c.id}</p>
           <p className="text-[13px] font-semibold mt-1.5">{shortName(patientById(c.patientId).name)} · {caseTitle(c)}</p>
           <p className="text-[12px] text-[#5A5568] mt-0.5">To: {lab.name}, {lab.town}</p>
-          <p className="text-[12px] text-[#5A5568]">Return by {fmtDate(c.returnBy)}</p>
+          <p className="text-[12px] text-[#5A5568]">Delivery {fmtDate(c.returnBy)}</p>
         </div>
       </div>
       <p className="text-[10px] text-[#A0A0B0] mt-1">From {practiceName(c.practice)}</p>
@@ -215,7 +215,7 @@ export function ReceiveScreen() {
         <TextArea value={comment} onChange={e => setComment(e.target.value)} placeholder="e.g. Bag slightly damp, work fine" />
       </Section>
 
-      <Sheet open={problemOpen} onClose={() => setProblemOpen(false)} title="Report a problem" sub={`${lab} is notified and replies in the case thread.`}
+      <Sheet open={problemOpen} onClose={() => setProblemOpen(false)} title="Report a problem" sub={`${lab} is notified and replies in the case comments.`}
         footer={<Btn block variant="danger" disabled={!problems.length} onClick={report}>Report to {lab}</Btn>}>
         <Label>What’s wrong?</Label>
         <Chips options={PROBLEMS} value={problems} onChange={setProblems} multi />

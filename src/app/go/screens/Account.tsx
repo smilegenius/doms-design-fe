@@ -53,7 +53,7 @@ export function AccountScreen() {
             <div className="min-w-0">
               <p className="text-[18px] font-bold text-go-ink">{ME.name}</p>
               <p className="text-[13px] text-go-muted">{ME.role}</p>
-              <p className="text-[12px] text-go-faint truncate">{ME.email} · GDC {ME.gdc}</p>
+              <p className="text-[12px] text-go-faint truncate">{ME.email}</p>
             </div>
           </div>
         </Card>

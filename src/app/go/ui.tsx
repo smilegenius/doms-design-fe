@@ -5,7 +5,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronDown, Check, Search, X, Home, Layers, Plus, Wallet, User, CheckCircle2, AlertTriangle, Info, Camera, PenLine,
+  ChevronLeft, ChevronDown, Check, Search, X, Home, Layers, Plus, Wallet, User, CheckCircle2, AlertTriangle, Info, Camera, PenLine, Mic,
 } from './icons';
 import { useGo, useScoped } from './store';
 import { LabCase, ReadinessLevel, STAGES, Stage, isOverdue, readiness, stageIndex } from './data';
@@ -138,6 +138,7 @@ export function NewWorkSheet({ open, onClose }: { open: boolean; onClose: () => 
   return (
     <Sheet open={open} onClose={onClose} title="New lab work" sub="Choose how you want to create the prescription.">
       <div className="space-y-3">
+        <ActionTile icon={<Mic className="w-6 h-6" />} tone="pink" title="Dictate prescription" body="Speak the Rx. It is written up for you to check." onClick={() => go('/go/new/audio')} />
         <ActionTile icon={<Camera className="w-6 h-6" />} tone="brand" title="Photograph prescription" body="Snap a paper Rx — details are read for you to check." onClick={() => go('/go/new/capture')} />
         <ActionTile icon={<PenLine className="w-6 h-6" />} tone="violet" title="Create manually" body="Short guided form, three steps." onClick={() => go('/go/new/manual')} />
       </div>
@@ -146,6 +147,23 @@ export function NewWorkSheet({ open, onClose }: { open: boolean; onClose: () => 
 }
 
 /** App icon — the Smile Genius smile + dot on the brand gradient. */
+/** Large decorative brand swoosh in its original colours (gradient smile +
+ *  ink dot), as the smilegeniusdental.com site uses it before the footer. */
+export function BrandSwoosh({ width = 240, className }: { width?: number; className?: string }) {
+  const gid = useId();
+  return (
+    <svg viewBox="0 0 219 77" style={{ width, height: width * (77 / 219) }} aria-hidden="true" className={className}>
+      <defs>
+        <linearGradient id={gid} x1="194" y1="47" x2="1" y2="55" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#4D8EF7" /><stop offset="1" stopColor="#A59DFF" />
+        </linearGradient>
+      </defs>
+      <path fill={`url(#${gid})`} d="M191.419 32.4519C197.375 21.5101 188.444 25.3832 183.234 28.6874C97.2679 83.2079 21.5955 47.9542 7.28707 42.9781C0.305509 40.55 0.30552 40.55 0.30552 40.55C14.7773 57.4099 46.738 74.6491 96.8154 72.5271C151.038 70.2295 183.973 46.1293 191.419 32.4519Z" />
+      <path className="fill-go-ink/80" d="M206.562 24C202.867 24 199.829 22.8817 197.448 20.6452C195.149 18.3226 194 15.4839 194 12.129C194 8.68817 195.149 5.80645 197.448 3.48387C199.829 1.16129 202.867 0 206.562 0C210.174 0 213.13 1.16129 215.429 3.48387C217.81 5.80645 219 8.68817 219 12.129C219 15.4839 217.81 18.3226 215.429 20.6452C213.13 22.8817 210.174 24 206.562 24Z" />
+    </svg>
+  );
+}
+
 export function GoMark({ size = 36, plain }: { size?: number; plain?: boolean }) {
   const { theme } = useGo();
   const gid = useId();
@@ -172,10 +190,10 @@ export function GoMark({ size = 36, plain }: { size?: number; plain?: boolean })
 
 // ─── Surfaces ───────────────────────────────────────────────────────────────
 
-export function Card({ children, className, onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
+export function Card({ children, className, onClick, style }: { children: React.ReactNode; className?: string; onClick?: () => void; style?: React.CSSProperties }) {
   const C = onClick ? 'button' : 'div';
   return (
-    <C onClick={onClick} className={cx('block w-full text-left bg-go-surface rounded-[22px] border border-go-line/80 go-card-shadow', onClick && 'active:scale-[.99] transition hover:border-go-brand/40', className)}>
+    <C onClick={onClick} style={style} className={cx('block w-full text-left bg-go-surface rounded-[22px] border border-go-line/80 go-card-shadow', onClick && 'active:scale-[.99] transition hover:border-go-brand/40', className)}>
       {children}
     </C>
   );

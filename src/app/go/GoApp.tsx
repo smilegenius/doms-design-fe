@@ -55,7 +55,7 @@ const JUMPS: Jump[] = [
   ] },
   { group: 'Lab work', label: 'Reply to a lab question', to: '/go/work/SG-28485', scenarios: [
     { label: 'Case overview', to: '/go/work/SG-28485' },
-    { label: 'Straight to chat', to: '/go/work/SG-28485?tab=messages' },
+    { label: 'Straight to comments', to: '/go/work/SG-28485?tab=messages' },
   ] },
   { group: 'Lab work', label: 'Print label & dispatch', to: '/go/work/SG-28491/dispatch', scenarios: [
     { label: 'Crown · private', to: '/go/work/SG-28491/dispatch' },
@@ -66,6 +66,11 @@ const JUMPS: Jump[] = [
     { label: 'Arrives after the fit (at risk)', to: '/go/work/SG-28466/receive' },
   ] },
   { group: 'Lab work', label: 'Chase overdue work', to: '/go/work/SG-28479' },
+  { group: 'Create', label: 'Dictate prescription (audio)', to: '/go/new/audio', scenarios: [
+    { label: 'Single service', to: '/go/new/audio' },
+    { label: 'Multi-service case', to: '/go/new/audio?rx=multi' },
+    { label: 'Everything heard, no review', to: '/go/new/audio?rx=clean' },
+  ] },
   { group: 'Create', label: 'Photograph prescription', to: '/go/new/capture', scenarios: [
     { label: 'Single service', to: '/go/new/capture' },
     { label: 'Multi-service case', to: '/go/new/capture?rx=multi' },
@@ -244,7 +249,8 @@ function GoRoutes() {
           <Route path="work/:id" element={<CaseDetailScreen />} />
           <Route path="work/:id/dispatch" element={<DispatchScreen />} />
           <Route path="work/:id/receive" element={<ReceiveScreen />} />
-          <Route path="new/capture" element={<CaptureScreen />} />
+          <Route path="new/audio" element={<CaptureScreen key="audio" mode="audio" />} />
+          <Route path="new/capture" element={<CaptureScreen key="photo" mode="photo" />} />
           <Route path="new/manual" element={<ManualCaseScreen />} />
           <Route path="finance" element={<FinanceScreen />} />
           <Route path="finance/invoice/:id" element={<InvoiceScreen />} />
@@ -276,8 +282,9 @@ function GoFrame() {
   const kbTarget = useKeyboardTarget(sheetRoot, routePath);
   const navigate = useNavigate();
   useEffect(() => { document.title = 'Smile Genius Go'; }, []);
+  // Presentation (backdrop + side panel) stays light; only the phone follows the theme
   return (
-    <div className="go-theme font-sans antialiased" data-theme={theme}>
+    <div className="go-theme font-sans antialiased" data-theme="light">
       <div className="relative min-h-[100dvh] bg-go-bg sm:flex sm:items-center sm:justify-center sm:gap-16 sm:p-5 overflow-hidden">
         {/* Desktop backdrop — the portal-select wash, re-tinted per theme */}
         <div className="hidden sm:block pointer-events-none absolute inset-0 overflow-hidden">
@@ -298,9 +305,13 @@ function GoFrame() {
 
         {/* Device */}
         <div className="relative sm:flex-shrink-0 sm:overflow-hidden sm:rounded-[58px]" style={scale < 1 ? { width: 390 * scale, height: 844 * scale } : undefined}>
-          <div className="relative w-full h-[100dvh] sm:w-[390px] sm:h-[844px] sm:rounded-[58px] sm:p-[10px] sm:bg-[#0A0A12] sm:shadow-[0_40px_100px_-30px_rgba(16,24,64,.45),inset_0_0_0_1.5px_rgba(255,255,255,.08)] origin-top-left"
+          {/* Bezel: dark on the light theme, light grey on the dark theme so the screen edge reads */}
+          <div className={cx('relative w-full h-[100dvh] sm:w-[390px] sm:h-[844px] sm:rounded-[58px] sm:p-[10px] origin-top-left',
+            theme === 'dark'
+              ? 'sm:bg-[#C9CCD4] sm:shadow-[0_40px_100px_-30px_rgba(16,24,64,.45),inset_0_0_0_1.5px_rgba(255,255,255,.7),inset_0_0_0_3px_rgba(16,24,64,.08)]'
+              : 'sm:bg-[#0A0A12] sm:shadow-[0_40px_100px_-30px_rgba(16,24,64,.45),inset_0_0_0_1.5px_rgba(255,255,255,.08)]')}
             style={scale < 1 ? { transform: `scale(${scale})` } : undefined}>
-            <div className={cx('relative h-full w-full overflow-clip bg-go-bg sm:rounded-[48px] flex flex-col', kbTarget && 'go-kb-open')} ref={setSheetRoot}
+            <div data-theme={theme} className={cx('go-theme relative h-full w-full overflow-clip bg-go-bg sm:rounded-[48px] sm:[clip-path:inset(0_round_48px)] flex flex-col', kbTarget && 'go-kb-open')} ref={setSheetRoot}
               style={{ '--go-kb': kbTarget ? `${KB_HEIGHT}px` : '0px' } as React.CSSProperties}>
               <StatusBar />
               {/* Shrinks by the keyboard height so content + sticky actions ride up */}

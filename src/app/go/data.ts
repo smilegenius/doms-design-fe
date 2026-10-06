@@ -9,11 +9,19 @@ export const PRACTICES: { id: PracticeId; name: string; area: string }[] = [
 ];
 export const practiceName = (id: PracticeId) => PRACTICES.find(p => p.id === id)!.name;
 
-export const LABS = [
+export interface Lab { id: string; name: string; town: string; offline?: boolean; email?: string; phone?: string }
+// Mutable so a lab added on the spot (offline lab) is found everywhere.
+export const LABS: Lab[] = [
   { id: 'northstar', name: 'Northstar Dental Lab', town: 'Leeds' },
   { id: 'precision', name: 'Precision Dental Works', town: 'Manchester' },
   { id: 'brightarch', name: 'Bright Arch Laboratory', town: 'Bristol' },
+  { id: 'harbour', name: 'Harbour Dental Ceramics', town: 'Plymouth', offline: true },
 ];
+export function addLab(l: Omit<Lab, 'id' | 'offline'>): string {
+  const id = `lab-${Date.now().toString(36)}`;
+  LABS.push({ ...l, id, offline: true });
+  return id;
+}
 export const labName = (id: string) => LABS.find(l => l.id === id)?.name ?? id;
 
 export const CLINICIANS = [
@@ -23,7 +31,9 @@ export const CLINICIANS = [
 ];
 export const clinicianName = (id: string) => CLINICIANS.find(c => c.id === id)?.name ?? id;
 
-export const PATIENTS = [
+export interface Patient { id: string; name: string; dob: string; email?: string; phone?: string; gender?: string; isNew?: boolean }
+// Mutable so a patient created on the spot is found everywhere.
+export const PATIENTS: Patient[] = [
   { id: 'P-10231', name: 'Amelia Taylor', dob: '14/03/1988' },
   { id: 'P-10188', name: 'James Williams', dob: '02/11/1951' },
   { id: 'P-10342', name: 'Maya Patel', dob: '21/07/1994' },
@@ -36,6 +46,11 @@ export const PATIENTS = [
   { id: 'P-10450', name: 'Tom Hughes', dob: '03/08/1985' },
 ];
 export const patientById = (id: string) => PATIENTS.find(p => p.id === id)!;
+export function addPatient(p: Omit<Patient, 'id' | 'isNew'> & { id?: string }): string {
+  const id = p.id || `P-${10500 + PATIENTS.length}`;
+  PATIENTS.push({ ...p, id, isNew: true });
+  return id;
+}
 export const initials = (name: string) =>
   name.replace(/^Dr\s+/, '').split(/\s+/).map(s => s[0]).slice(0, 2).join('').toUpperCase();
 /** "Amelia Taylor" → "A. Taylor" — how lab work lists patients. */
@@ -44,9 +59,35 @@ export const shortName = (name: string) => {
   return `${parts[0][0]}. ${parts.slice(1).join(' ')}`;
 };
 
-export const SERVICES = ['Crown', 'Bridge', 'Veneer', 'Inlay / onlay', 'Implant restoration', 'Full denture', 'Partial denture', 'Retainer', 'Night guard', 'Whitening trays'];
+// Service catalogue — same categories as the web create-case form.
+export const SERVICE_CATEGORIES: { id: string; label: string; items: string[] }[] = [
+  { id: 'single', label: 'Single unit', items: ['Crown', 'Veneer', 'Inlay / onlay', 'Post and core crown', 'Screw retained crown', 'Implant abutment'] },
+  { id: 'bridge', label: 'Bridge', items: ['Bridge', 'Implant bridge', 'Pontic'] },
+  { id: 'ortho', label: 'Orthodontics', items: ['Retainer', 'Clear aligners'] },
+  { id: 'denture', label: 'Denture', items: ['Full denture', 'Partial denture', 'Immediate denture'] },
+  { id: 'appliance', label: 'Appliances', items: ['Night guard', 'Whitening trays', 'Splint'] },
+  { id: 'other', label: 'Other', items: ['Other'] },
+];
+export const SERVICES = SERVICE_CATEGORIES.flatMap(c => c.items);
+export const categoryOf = (service: string) => SERVICE_CATEGORIES.find(c => c.items.includes(service))?.id ?? 'other';
+/** Orthodontics and appliances don't take material + shade (as on the web form). */
+export const needsMaterial = (service: string) => !['ortho', 'appliance'].includes(categoryOf(service));
+/** Category-specific extra — same options as the web form. */
+export const SERVICE_EXTRAS: Record<string, { label: string; options: string[]; multi?: boolean }> = {
+  'Night guard': { label: 'Type', options: ['Hard', 'Soft', 'Dual-laminate'] },
+  'Whitening trays': { label: 'Reservoirs', options: ['Yes', 'No'] },
+  Splint: { label: 'Type', options: ['Michigan', 'Tanner', 'Other'] },
+  Retainer: { label: 'Retainer type', options: ['Essix', 'Bonded', 'Hawley'] },
+  'Clear aligners': { label: 'Days per aligner', options: ['7', '10', '14', '21'] },
+  'Full denture': { label: 'Stage', options: ['Special tray', 'Bite registration', 'Try-in', 'Finish'], multi: true },
+  'Partial denture': { label: 'Stage', options: ['Special tray', 'Bite registration', 'Try-in', 'Finish'], multi: true },
+  'Immediate denture': { label: 'Stage', options: ['Special tray', 'Bite registration', 'Try-in', 'Finish'], multi: true },
+  Bridge: { label: 'Abutment material', options: ['Chrome cobalt', 'Titanium', 'Zirconia', 'Zirconia with Ti-base'] },
+  'Implant bridge': { label: 'Abutment material', options: ['Chrome cobalt', 'Titanium', 'Zirconia', 'Zirconia with Ti-base'] },
+};
+export const CASE_SOURCES = ['Via scanner', 'Impressions (by post)', 'Photo of Rx', 'Voice note', 'Email', 'Other'];
 export const MATERIALS = ['Layered zirconia', 'Monolithic zirconia', 'Lithium disilicate (e.max)', 'Porcelain fused to metal', 'Full gold', 'Acrylic', 'Cobalt chrome', 'Flexible nylon', 'PMMA temporary'];
-export const SHADES = ['A1', 'A2', 'A3', 'A3.5', 'A4', 'B1', 'B2', 'B3', 'C1', 'C2', 'D2', 'D3', 'BL1', 'BL2'];
+export const SHADES = ['A1', 'A2', 'A3', 'A3.5', 'A4', 'B1', 'B2', 'B3', 'B4', 'C1', 'C2', 'C3', 'C4', 'D2', 'D3', 'D4', 'BL1', 'BL2', 'BL3', 'BL4'];
 export const COURIERS = ["Lab's own courier", 'Royal Mail Special Delivery', 'DPD', 'DHL Express', 'Hand delivered', 'Other'];
 export const STORAGE = ['Lab work drawer', 'Surgery 1', 'Surgery 2', 'Reception'];
 export const RECEIVE_CHECKS = [
@@ -103,12 +144,15 @@ export interface LabCase {
   appointment?: Appointment;
   /** Further items on the same prescription (multi-service case). The first item is service/teeth/material above. */
   items?: RxItem[];
+  /** Category extra for the first item, e.g. 'Type: Hard'. */
+  extra?: string;
+  caseSource?: string;
 }
 
-export interface RxItem { service: string; teeth: string[]; material: string; shade?: string }
+export interface RxItem { service: string; teeth: string[]; material: string; shade?: string; extra?: string }
 /** "Crown UR6" or "Veneer UR1, UL1 +1" for multi-service cases. */
 export const caseTitle = (c: LabCase) => `${c.service} ${c.teeth.join(', ')}${c.items?.length ? ` +${c.items.length}` : ''}`;
-export const allItems = (c: LabCase): RxItem[] => [{ service: c.service, teeth: c.teeth, material: c.material, shade: c.shade }, ...(c.items ?? [])];
+export const allItems = (c: LabCase): RxItem[] => [{ service: c.service, teeth: c.teeth, material: c.material, shade: c.shade, extra: c.extra }, ...(c.items ?? [])];
 
 export interface Appointment { at: string; kind: 'Fit' | 'Try-in' | 'Issue'; room: string }
 
@@ -192,7 +236,7 @@ export const SEED_CASES: LabCase[] = [
     id: 'SG-28466', appointment: { at: at(0, 11, 40), kind: 'Fit', room: 'Surgery 1' }, patientId: 'P-10290', practice: 'cds', lab: 'precision', clinician: 'reed', createdBy: 'Dr Olivia Reed',
     service: 'Bridge', teeth: ['LR4', 'LR5', 'LR6'], material: 'Porcelain fused to metal', shade: 'A3.5', funding: 'NHS',
     instructions: 'Three-unit bridge, LR5 pontic, modified ridge lap.',
-    returnBy: at(0, 12), stage: 'shipped', attachments: ['Prescription.pdf'], source: 'manual',
+    returnBy: at(1, 12), stage: 'shipped', attachments: ['Prescription.pdf'], source: 'manual',
     events: [
       { stage: 'authorised', at: at(-10, 9, 0), by: 'Dr Olivia Reed' },
       { stage: 'dispatched', at: at(-10, 16, 15), by: 'Reception' },
@@ -234,10 +278,37 @@ export const SEED_CASES: LabCase[] = [
     ],
     messages: [],
   },
+  {
+    id: 'SG-28503', appointment: { at: at(1, 11, 30), kind: 'Fit', room: 'Surgery 1' }, patientId: 'P-10450', practice: 'cds', lab: 'northstar', clinician: 'reed', createdBy: 'Dr Olivia Reed',
+    service: 'Crown', teeth: ['UL6'], material: 'Monolithic zirconia', shade: 'A2', funding: 'Private',
+    instructions: 'Tight contacts, flat fossae for bruxist.',
+    returnBy: at(0, 17), stage: 'production', attachments: ['Intraoral scan link'], source: 'manual',
+    events: [
+      { stage: 'authorised', at: at(-8, 9, 30), by: 'Dr Olivia Reed' },
+      { stage: 'dispatched', at: at(-8, 15, 0), by: 'Reception' },
+      { stage: 'at-lab', at: at(-7, 9, 10), by: 'Northstar Dental Lab' },
+      { stage: 'production', at: at(-6, 10, 0), by: 'Northstar Dental Lab' },
+    ],
+    messages: [],
+  },
+  {
+    id: 'SG-28506', appointment: { at: at(1, 14, 15), kind: 'Issue', room: 'Surgery 2' }, patientId: 'P-10290', practice: 'cds', lab: 'precision', clinician: 'reed', createdBy: 'Dr Olivia Reed',
+    service: 'Night guard', teeth: ['Lower arch'], material: 'Acrylic', funding: 'Private',
+    instructions: 'Soft-lined, 3 mm.',
+    returnBy: at(0, 15), stage: 'shipped', attachments: ['Prescription.pdf'], source: 'photo',
+    events: [
+      { stage: 'authorised', at: at(-9, 9, 0), by: 'Dr Olivia Reed' },
+      { stage: 'dispatched', at: at(-9, 16, 0), by: 'Reception' },
+      { stage: 'at-lab', at: at(-8, 9, 0), by: 'Precision Dental Works' },
+      { stage: 'production', at: at(-7, 9, 0), by: 'Precision Dental Works' },
+      { stage: 'shipped', at: at(-1, 15, 20), by: 'Precision Dental Works', text: 'DPD · 1 box' },
+    ],
+    messages: [],
+  },
 ];
 
 export const isOverdue = (c: LabCase) =>
-  c.stage !== 'received' && c.stage !== 'shipped' && new Date(c.returnBy).getTime() < Date.now();
+  c.stage !== 'received' && c.stage !== 'shipped' && dayOffset(c.returnBy) < 0;
 
 /** The one thing the practice should do next — drives the case's CTA. */
 export type NextAction = 'dispatch' | 'reply' | 'chase' | 'check-in' | 'wait' | 'done';
@@ -256,13 +327,15 @@ export type ReadinessLevel = 'in-practice' | 'arriving' | 'on-track' | 'attentio
 export interface Readiness { level: ReadinessLevel; label: string; detail: string }
 export function readiness(c: LabCase): Readiness {
   if (c.stage === 'received') return { level: 'in-practice', label: 'In practice', detail: c.receipt ? `In ${c.receipt.storedIn.toLowerCase()}` : 'Checked in' };
-  const appt = c.appointment ? new Date(c.appointment.at).getTime() : null;
-  const due = new Date(c.returnBy).getTime();
+  // Dates only — no times are captured for due dates or appointments.
+  const ad = c.appointment ? dayOffset(c.appointment.at) : null;
+  const dd = dayOffset(c.returnBy);
   if (isOverdue(c)) {
     const n = Math.max(1, -dayOffset(c.returnBy));
     return { level: 'at-risk', label: 'Late', detail: `Lab is ${n} day${n > 1 ? 's' : ''} late${c.chasedAt ? ' · chased' : ''}` };
   }
-  if (appt && due > appt) return { level: 'at-risk', label: 'At risk', detail: `Due back ${fmtTime(c.returnBy)}, after the ${c.appointment!.kind.toLowerCase()}` };
+  if (ad !== null && dd > ad) return { level: 'at-risk', label: 'At risk', detail: `Due ${relDay(c.returnBy).toLowerCase()}, after the ${c.appointment!.kind.toLowerCase()}` };
+  if (ad !== null && dd === ad && c.stage !== 'shipped') return { level: 'at-risk', label: 'At risk', detail: `Due the same day as the ${c.appointment!.kind.toLowerCase()}` };
   if (c.questionOpen) return { level: 'attention', label: 'Lab waiting', detail: 'Lab has a question for you' };
   if (c.stage === 'ready') return { level: 'attention', label: 'Ready to dispatch', detail: 'Still at the practice, not sent to the lab yet' };
   if (c.stage === 'shipped') return { level: 'arriving', label: 'Arriving', detail: `Due ${relDay(c.returnBy).toLowerCase()}` };

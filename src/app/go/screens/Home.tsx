@@ -8,7 +8,7 @@ import { Bell, Building2, CalendarClock, Check, ChevronDown } from '../icons';
 import { FilledChatBubble, FilledClock, FilledPackage, FilledTruck } from '../../components/icons/FilledNavIcons';
 import { ME, useGo, useScoped } from '../store';
 import {
-  ATTENTION, Attention, LabCase, PRACTICES, ReadinessLevel, caseTitle, dayOffset, fmtTime, fmtTimeParts, hourLabel, matchesAttention, patientById, readiness, shortName,
+  ATTENTION, Attention, LabCase, PRACTICES, ReadinessLevel, caseTitle, dayOffset, READINESS_ORDER, matchesAttention, patientById, readiness, shortName,
 } from '../data';
 import { Card, IconTile, Pill, READINESS_DOT, Screen, Sheet, cx } from '../ui';
 
@@ -20,8 +20,8 @@ export function PracticeSwitcher({ inline }: { inline?: boolean }) {
   return (
     <>
       {inline ? (
-        <button onClick={() => setOpen(true)} className="inline-flex items-center gap-0.5 text-[12.5px] font-semibold text-go-brand">
-          {label}<ChevronDown className="w-3.5 h-3.5" />
+        <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1 text-[22px] font-bold text-go-ink tracking-tight leading-tight text-left">
+          {label}<ChevronDown className="w-5 h-5 text-go-brand flex-shrink-0" />
         </button>
       ) : (
         <button onClick={() => setOpen(true)} className="flex items-center gap-2 h-10 pl-1.5 pr-3 rounded-full bg-go-surface border border-go-line max-w-[220px]">
@@ -59,40 +59,45 @@ const TEXT_TONE: Record<ReadinessLevel, string> = {
   'at-risk': 'text-go-bad', attention: 'text-go-warn', arriving: 'text-go-brand', 'on-track': 'text-go-violet', 'in-practice': 'text-go-ok',
 };
 
-const START = 8, END = 18;
-const pct = (d: Date) => Math.min(100, Math.max(0, ((d.getHours() + d.getMinutes() / 60 - START) / (END - START)) * 100));
+const COLLAPSED = 2;
+/** 'Show 2 more' / 'Show less' under a collapsed list. */
+function ShowMore({ total, open, onToggle }: { total: number; open: boolean; onToggle: () => void }) {
+  if (total <= COLLAPSED) return null;
+  return (
+    <button onClick={onToggle} aria-expanded={open}
+      className="w-full mt-1 pt-2.5 pb-0.5 border-t border-go-line flex items-center justify-center gap-1 text-[12.5px] font-semibold text-go-brand">
+      {open ? 'Show less' : `Show ${total - COLLAPSED} more`}
+      <ChevronDown className={cx('w-4 h-4 transition-transform', open && 'rotate-180')} />
+    </button>
+  );
+}
 
-/** One appointment, two short lines: "R. Evans · Bridge" / "Fit · At risk". */
+/** One appointment, two short lines: "R. Evans · Bridge" / "At risk · due tomorrow". Dates only — no times. */
 function ApptRow({ c, dim }: { c: LabCase; dim?: boolean }) {
   const navigate = useNavigate();
   const r = readiness(c);
-  const [t, ap] = fmtTimeParts(c.appointment!.at);
   return (
     <button onClick={() => navigate(`/go/work/${c.id}`)}
       className={cx('w-full flex items-center gap-3 px-1 py-2 rounded-xl text-left hover:bg-go-raised transition', dim && 'opacity-50')}>
-      <span className="w-10 text-right leading-none flex-shrink-0">
-        <span className="text-[13px] font-semibold text-go-ink tabular-nums">{t}</span>
-        <span className="block text-[9.5px] font-medium text-go-faint uppercase mt-0.5">{ap}</span>
-      </span>
-      <span className={cx('w-1 h-7 rounded-full flex-shrink-0', READINESS_DOT[r.level])} />
+      <span className={cx('w-1 h-8 rounded-full flex-shrink-0', READINESS_DOT[r.level])} />
       <span className="flex-1 min-w-0">
         <span className="block text-[13.5px] font-semibold text-go-ink truncate">
           {shortName(patientById(c.patientId).name)} <span className="font-normal text-go-muted">· {c.service}{c.items?.length ? ` +${c.items.length}` : ''}</span>
         </span>
         <span className="block text-[11.5px] text-go-muted truncate">
-          {c.appointment!.kind} · <span className={cx('font-semibold', TEXT_TONE[r.level])}>{r.label}</span>
+          <span className={cx('font-semibold', TEXT_TONE[r.level])}>{r.label}</span> · {r.detail}
         </span>
       </span>
+      <span className="text-[10.5px] font-semibold text-go-muted bg-go-raised border border-go-line rounded-full px-2 h-5 flex items-center flex-shrink-0">{c.appointment!.kind}</span>
     </button>
   );
 }
 
 function TodayRail({ cases }: { cases: LabCase[] }) {
-  const navigate = useNavigate();
+  const [more, setMore] = useState(false);
   const today = cases.filter(c => c.appointment && dayOffset(c.appointment.at) === 0)
-    .sort((a, b) => a.appointment!.at.localeCompare(b.appointment!.at));
-  const now = new Date();
-  const nowPct = pct(now);
+    .sort((a, b) => READINESS_ORDER.indexOf(readiness(a).level) - READINESS_ORDER.indexOf(readiness(b).level));
+  const ready = today.filter(c => readiness(c).level === 'in-practice').length;
   const risks = today.filter(c => readiness(c).level === 'at-risk').length;
 
   return (
@@ -107,28 +112,21 @@ function TodayRail({ cases }: { cases: LabCase[] }) {
         {risks > 0 ? <Pill tone="bad" dot>{risks} at risk</Pill> : today.length ? <Pill tone="ok" dot>All set</Pill> : null}
       </div>
 
-      {/* Rail */}
-      <div className="relative mt-3 h-8">
-        <div className="absolute inset-x-0 top-[11px] h-1.5 rounded-full bg-go-raised border border-go-line" />
-        <div className="absolute left-0 top-[11px] h-1.5 rounded-full go-grad opacity-40" style={{ width: `${nowPct}%` }} />
-        {[8, 12, 16].map(h => (
-          <span key={h} className="absolute top-[22px] -translate-x-1/2 text-[9.5px] text-go-faint" style={{ left: `${((h - START) / (END - START)) * 100}%` }}>{hourLabel(h)}</span>
-        ))}
-        {nowPct > 0 && nowPct < 100 && <span className="absolute top-[2px] -translate-x-1/2 w-0.5 h-[24px] bg-go-ink rounded-full" style={{ left: `${nowPct}%` }} />}
-        {today.map(c => {
-          const r = readiness(c);
-          return (
-            <button key={c.id} onClick={() => navigate(`/go/work/${c.id}`)} aria-label={`${fmtTime(c.appointment!.at)} ${patientById(c.patientId).name}`}
-              className={cx('absolute top-[6px] -translate-x-1/2 w-4 h-4 rounded-full ring-[3px] ring-go-surface', READINESS_DOT[r.level], r.level === 'at-risk' && 'go-pulse')}
-              style={{ left: `${pct(new Date(c.appointment!.at))}%` }} />
-          );
-        })}
-      </div>
+      {/* Day readiness — one segment per appointment, coloured by status */}
+      {!!today.length && (
+        <div className="relative mt-3">
+          <div className="flex gap-1">
+            {today.map(c => <span key={c.id} className={cx('h-1.5 flex-1 rounded-full', READINESS_DOT[readiness(c).level])} />)}
+          </div>
+          <p className="text-[11px] text-go-muted mt-1.5"><span className="font-semibold text-go-ink">{ready} of {today.length}</span> in practice and ready</p>
+        </div>
+      )}
 
       <div className="relative mt-1 -mx-1">
-        {today.map(c => <ApptRow key={c.id} c={c} dim={new Date(c.appointment!.at) < now && readiness(c).level === 'in-practice'} />)}
-        {!today.length && <p className="text-[13px] text-go-muted px-1 pb-1">Nothing booked today.</p>}
+        {(more ? today : today.slice(0, COLLAPSED)).map(c => <ApptRow key={c.id} c={c} dim={readiness(c).level === 'in-practice'} />)}
+        {!today.length && <p className="text-[13px] text-go-muted px-1 pt-2">Nothing booked today.</p>}
       </div>
+      <ShowMore total={today.length} open={more} onToggle={() => setMore(m => !m)} />
     </Card>
   );
 }
@@ -145,19 +143,21 @@ const STATUS_STYLE: Record<Attention, { short: string; icon: React.ComponentType
 
 function StatusActions({ cases }: { cases: LabCase[] }) {
   const navigate = useNavigate();
+  // Only statuses with something in them; the rest share the width evenly.
+  const live = ATTENTION.map(a => ({ a, n: cases.filter(c => matchesAttention(c, a.id)).length })).filter(x => x.n > 0);
+  if (!live.length) return null;
   return (
-    // One quiet card, four columns: icon + count on one line, short label under
-    <Card className="grid grid-cols-4 divide-x divide-go-line py-3">
-      {ATTENTION.map(a => {
-        const n = cases.filter(c => matchesAttention(c, a.id)).length;
+    // One quiet card: icon + count on one line, short label under
+    <Card className="grid divide-x divide-go-line py-3" style={{ gridTemplateColumns: `repeat(${live.length}, minmax(0, 1fr))` }}>
+      {live.map(({ a, n }) => {
         const s = STATUS_STYLE[a.id];
         const Icon = s.icon;
         return (
           <button key={a.id} onClick={() => navigate(`/go/work?f=${a.id}`)} aria-label={`${a.label}: ${n}`}
             className="flex flex-col items-center gap-1 px-1 active:scale-95 transition">
             <span className="flex items-center gap-1.5">
-              <Icon className={cx('w-[18px] h-[18px]', n ? s.color : 'text-go-faint')} />
-              <span className={cx('text-[20px] font-bold tabular-nums leading-none', n ? 'text-go-ink' : 'text-go-faint')}>{n}</span>
+              <Icon className={cx('w-[18px] h-[18px]', s.color)} />
+              <span className="text-[20px] font-bold tabular-nums leading-none text-go-ink">{n}</span>
             </span>
             <span className="text-[11px] font-medium text-go-muted whitespace-nowrap">{s.short}</span>
           </button>
@@ -176,6 +176,7 @@ function WeekAgenda({ cases }: { cases: LabCase[] }) {
       .sort((a, b) => a.appointment!.at.localeCompare(b.appointment!.at)),
   }));
   const [sel, setSel] = useState(() => days.find(d => d.items.length)?.off ?? 1);
+  const [more, setMore] = useState(false);
   const day = days.find(d => d.off === sel)!;
 
   return (
@@ -185,7 +186,7 @@ function WeekAgenda({ cases }: { cases: LabCase[] }) {
           const on = sel === off;
           const risk = items.some(c => readiness(c).level === 'at-risk');
           return (
-            <button key={off} onClick={() => setSel(off)} aria-pressed={on}
+            <button key={off} onClick={() => { setSel(off); setMore(false); }} aria-pressed={on}
               className={cx('rounded-2xl py-2 flex flex-col items-center transition',
                 on ? 'go-grad text-white go-glow' : risk ? 'bg-go-bad-soft' : 'hover:bg-go-raised')}>
               <span className={cx('text-[10px] font-semibold uppercase', on ? 'text-white/80' : 'text-go-muted')}>{d.toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 2)}</span>
@@ -198,9 +199,10 @@ function WeekAgenda({ cases }: { cases: LabCase[] }) {
         })}
       </div>
       <div className="mt-2 border-t border-go-line pt-1 -mx-1">
-        {day.items.map(c => <ApptRow key={c.id} c={c} />)}
+        {(more ? day.items : day.items.slice(0, COLLAPSED)).map(c => <ApptRow key={c.id} c={c} />)}
         {!day.items.length && <p className="text-[12.5px] text-go-muted text-center py-4">Nothing booked.</p>}
       </div>
+      <ShowMore total={day.items.length} open={more} onToggle={() => setMore(m => !m)} />
     </Card>
   );
 }
@@ -231,10 +233,11 @@ export default function HomeScreen() {
         <div className="absolute -top-28 -right-16 w-72 h-72 rounded-full bg-go-lav/20 blur-3xl pointer-events-none" />
         <div className="relative flex items-start justify-between gap-3 px-5 pt-3">
           <div className="min-w-0">
-            <h1 className="text-[22px] font-bold text-go-ink tracking-tight leading-tight">{greet}, Dr {ME.name.split(' ').pop()}</h1>
-            <p className="text-[12.5px] text-go-muted mt-0.5 flex items-center gap-1.5 flex-wrap">
-              {new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} · <PracticeSwitcher inline />
+            {/* Small greeting on top; the practice is the headline (and the switcher) */}
+            <p className="text-[12.5px] text-go-muted">
+              {greet}, <span className="font-semibold text-go-ink2">{ME.first}</span> · {new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
             </p>
+            <h1 className="mt-0.5"><PracticeSwitcher inline /></h1>
           </div>
           <button onClick={() => navigate('/go/notifications')} aria-label="Notifications"
             className="relative w-10 h-10 rounded-full bg-go-surface border border-go-line flex items-center justify-center text-go-ink flex-shrink-0">

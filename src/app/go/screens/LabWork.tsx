@@ -6,14 +6,14 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   CalendarClock, CheckCircle2, ClipboardCheck, Clock, FileText, FlaskConical, Image as ImageIcon, Inbox, MessageSquare, PackageCheck,
-  Paperclip, Search, Send, Truck, X, Hammer, Building,
+  Paperclip, Search, Send, Truck, X, Hammer, Building, Filter,
 } from '../icons';
 import { ME, useGo, useScoped } from '../store';
 import {
-  ATTENTION, LabCase, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, fmtTime, fmtTimeParts, labName, nextAction, nowIso,
+  ATTENTION, CLINICIANS, LABS, LabCase, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
   patientById, practiceName, readiness, relDay, shortName, stageIndex,
 } from '../data';
-import { Btn, Card, Chips, EmptyState, IconTile, Pill, READINESS_DOT, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, cx } from '../ui';
+import { Btn, Card, Chips, EmptyState, IconTile, Pill, PickerField, READINESS_DOT, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, cx } from '../ui';
 import { PIPELINE } from './Home';
 
 // ─── Rows ───────────────────────────────────────────────────────────────────
@@ -28,15 +28,10 @@ function ScheduleRow({ c }: { c: LabCase }) {
     <button onClick={() => navigate(`/go/work/${c.id}`)} className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-go-raised transition">
       <span className="w-11 flex-shrink-0 text-center">
         {d ? (
-          dayOffset(a!.at) <= 1
-            ? <>
-                <span className="block text-[13px] font-bold text-go-ink tabular-nums leading-none">{fmtTimeParts(a!.at)[0]}</span>
-                <span className="block text-[10px] font-medium text-go-muted uppercase mt-0.5">{fmtTimeParts(a!.at)[1]}</span>
-              </>
-            : <>
-                <span className="block text-[10px] font-semibold uppercase text-go-muted leading-none">{d.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
-                <span className="block text-[17px] font-bold text-go-ink tabular-nums leading-tight">{d.getDate()}</span>
-              </>
+          <>
+            <span className="block text-[10px] font-semibold uppercase text-go-muted leading-none">{d.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
+            <span className="block text-[17px] font-bold text-go-ink tabular-nums leading-tight">{d.getDate()}</span>
+          </>
         ) : <span className="block text-[11px] text-go-faint">—</span>}
       </span>
       <span className={cx('w-1 h-9 rounded-full flex-shrink-0', READINESS_DOT[r.level])} />
@@ -107,12 +102,18 @@ export function LabWorkScreen() {
   const rf = (params.get('r') as RFilter) || 'all';
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Dentist / lab filters (URL so they survive navigation)
+  const dentist = params.get('dentist');
+  const labF = params.get('lab');
+  const nFilters = (dentist ? 1 : 0) + (labF ? 1 : 0);
 
   const base = useMemo(() => cases.filter(c => {
     const hay = `${c.id} ${patientById(c.patientId).name} ${labName(c.lab)} ${allItems(c).map(it => `${it.service} ${it.teeth.join(' ')}`).join(' ')}`.toLowerCase();
     return hay.includes(q.toLowerCase()) && (day === null || (c.appointment && dayOffset(c.appointment.at) === day))
-      && (!status || matchesAttention(c, status));
-  }), [cases, q, day, status]);
+      && (!status || matchesAttention(c, status))
+      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF);
+  }), [cases, q, day, status, dentist, labF]);
   const shown = base.filter(c => rf === 'all' || readiness(c).level === rf);
   const setParam = (k: string, v: string | null) => {
     const n = new URLSearchParams(params);
@@ -125,10 +126,17 @@ export function LabWorkScreen() {
       <div className="bg-go-bg/85 backdrop-blur-xl px-4 pt-3 pb-3 space-y-3">
         <div className="flex items-center justify-between">
           <h1 className="text-[24px] font-bold text-go-ink tracking-tight">Lab work <span className="text-go-faint font-semibold text-[18px]">{cases.length}</span></h1>
+          <div className="flex items-center gap-2">
+          <button onClick={() => setFiltersOpen(true)} aria-label="Filter by dentist or lab"
+            className={cx('relative w-10 h-10 rounded-full flex items-center justify-center border transition', nFilters ? 'bg-go-brand-soft text-go-brand border-go-brand/30' : 'bg-go-surface text-go-ink border-go-line')}>
+            <Filter className="w-[18px] h-[18px]" />
+            {!!nFilters && <span className="absolute -top-0.5 -right-0.5 w-[18px] h-[18px] rounded-full go-grad text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-go-bg">{nFilters}</span>}
+          </button>
           <button onClick={() => { setSearching(s => !s); setQ(''); }} aria-label="Search"
             className={cx('w-10 h-10 rounded-full flex items-center justify-center border transition', searching ? 'bg-go-ink text-go-bg border-go-ink' : 'bg-go-surface text-go-ink border-go-line')}>
             {searching ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
           </button>
+          </div>
         </div>
         {searching && <SearchBox value={q} onChange={setQ} placeholder="Patient, order ID, lab or tooth" />}
         <Segmented value={view} onChange={v => setParam('view', v === 'board' ? 'board' : null)}
@@ -138,6 +146,16 @@ export function LabWorkScreen() {
       {view === 'schedule' ? (
         <>
           <div className="flex gap-2 overflow-x-auto go-scroll px-4 pb-1">
+            {dentist && (
+              <button onClick={() => setParam('dentist', null)} className="h-8 pl-3 pr-2 rounded-full text-[12.5px] font-semibold bg-go-brand text-white inline-flex items-center gap-1 flex-shrink-0">
+                {clinicianName(dentist)}<X className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {labF && (
+              <button onClick={() => setParam('lab', null)} className="h-8 pl-3 pr-2 rounded-full text-[12.5px] font-semibold bg-go-brand text-white inline-flex items-center gap-1 flex-shrink-0">
+                {labName(labF)}<X className="w-3.5 h-3.5" />
+              </button>
+            )}
             {status && (
               <button onClick={() => setParam('f', null)} className="h-8 pl-3 pr-2 rounded-full text-[12.5px] font-semibold bg-go-brand text-white inline-flex items-center gap-1 flex-shrink-0">
                 {ATTENTION.find(a => a.id === status)!.label.replace(' lab work', '')}<X className="w-3.5 h-3.5" />
@@ -198,6 +216,23 @@ export function LabWorkScreen() {
           })}
         </div>
       )}
+
+      <Sheet open={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filter lab work"
+        footer={
+          <div className="flex gap-2">
+            <Btn variant="secondary" onClick={() => { setParam('dentist', null); setParam('lab', null); }} disabled={!nFilters}>Clear</Btn>
+            <Btn block onClick={() => setFiltersOpen(false)}>Show {base.length} result{base.length === 1 ? '' : 's'}</Btn>
+          </div>
+        }>
+        <div className="space-y-4 pb-2">
+          <PickerField label="Dentist" searchable value={dentist ?? 'all'} onChange={v => setParam('dentist', v === 'all' ? null : v)}
+            options={[{ value: 'all', label: 'All dentists', sub: `${cases.length} lab work` },
+              ...CLINICIANS.map(c => ({ value: c.id, label: c.name, sub: `${cases.filter(x => x.clinician === c.id).length} lab work` }))]} />
+          <PickerField label="Lab" searchable value={labF ?? 'all'} onChange={v => setParam('lab', v === 'all' ? null : v)}
+            options={[{ value: 'all', label: 'All labs', sub: `${cases.length} lab work` },
+              ...LABS.map(l => ({ value: l.id, label: l.name, sub: `${l.town} · ${cases.filter(x => x.lab === l.id).length} lab work` }))]} />
+        </div>
+      </Sheet>
     </Screen>
   );
 }
@@ -256,12 +291,12 @@ function Messages({ c }: { c: LabCase }) {
             <p className={cx('text-[10.5px] text-go-muted mt-1', m.from === 'practice' && 'text-right')}>{m.author} · {fmtDateTime(m.at)}</p>
           </div>
         ))}
-        {!c.messages.length && <p className="text-[13px] text-go-muted text-center py-4">No messages with {labName(c.lab)} yet.</p>}
+        {!c.messages.length && <p className="text-[13px] text-go-muted text-center py-4">No comments with {labName(c.lab)} yet.</p>}
       </div>
       <div className="mt-4">
         {c.questionOpen && <Chips options={QUICK_REPLIES} value={null} onChange={(v: string) => setText(v)} />}
         <div className="flex items-end gap-2 mt-3">
-          <TextArea rows={2} value={text} onChange={e => setText(e.target.value)} placeholder={`Message ${labName(c.lab)}…`} className="!py-2.5" />
+          <TextArea rows={2} value={text} onChange={e => setText(e.target.value)} placeholder="Add a comment…" className="!py-2.5" />
           <button onClick={send} disabled={!text.trim()} aria-label="Send"
             className="w-12 h-12 rounded-2xl go-grad text-white flex items-center justify-center flex-shrink-0 disabled:opacity-40 active:scale-95 transition">
             <Send className="w-5 h-5" />
@@ -275,7 +310,7 @@ function Messages({ c }: { c: LabCase }) {
 function ChaseSheet({ c, open, onClose }: { c: LabCase; open: boolean; onClose: () => void }) {
   const { updateCase, toast } = useGo();
   const p = patientById(c.patientId);
-  const appt = c.appointment ? ` The patient is booked for a ${c.appointment.kind.toLowerCase()} on ${fmtDate(c.appointment.at)} at ${fmtTime(c.appointment.at)}.` : '';
+  const appt = c.appointment ? ` The patient is booked for a ${c.appointment.kind.toLowerCase()} on ${fmtDate(c.appointment.at)}.` : '';
   const [text, setText] = useState(
     `Hi ${labName(c.lab)}, ${c.id} (${shortName(p.name)}, ${c.service.toLowerCase()} ${c.teeth.join(', ')}) was due back ${fmtDate(c.returnBy)}.${appt} Can you confirm when it will ship?`,
   );
@@ -289,7 +324,7 @@ function ChaseSheet({ c, open, onClose }: { c: LabCase; open: boolean; onClose: 
     onClose();
   };
   return (
-    <Sheet open={open} onClose={onClose} title="Chase the lab" sub="Sent through Smile Genius. The lab replies in the case messages."
+    <Sheet open={open} onClose={onClose} title="Chase the lab" sub="Sent through Smile Genius. The lab replies in the case comments."
       footer={<Btn block disabled={!text.trim()} onClick={send} icon={<Send className="w-[18px] h-[18px]" />}>Send chase</Btn>}>
       <TextArea rows={6} value={text} onChange={e => setText(e.target.value)} />
     </Sheet>
@@ -321,7 +356,7 @@ export function CaseDetailScreen() {
     reply: { icon: <MessageSquare className="w-5 h-5" />, tone: 'pink' as Tone, title: `${labName(c.lab)} is waiting on you`, body: 'The case is paused until you reply.', cta: { label: 'Reply', run: () => setTab('messages') } },
     'check-in': { icon: <PackageCheck className="w-5 h-5" />, tone: 'brand' as Tone, title: 'Check it in when it lands', body: shipped ? `Shipped ${fmtDateTime(shipped.at)}${shipped.text ? ` · ${shipped.text}` : ''}` : 'On its way back.', cta: { label: 'Check in', run: () => navigate(`/go/work/${c.id}/receive`) } },
     chase: { icon: <Clock className="w-5 h-5" />, tone: 'bad' as Tone, title: 'Chase the lab', body: c.appointment ? 'Or move the patient’s appointment.' : `Was due ${fmtDate(c.returnBy)}.`, cta: { label: 'Chase', run: () => setChase(true) } },
-    wait: { icon: <FlaskConical className="w-5 h-5" />, tone: 'violet' as Tone, title: c.chasedAt ? `Chased ${relDay(c.chasedAt).toLowerCase()}` : 'Nothing to do', body: c.chasedAt ? 'You’ll be notified when the lab replies.' : `Lab due back ${fmtDate(c.returnBy)} ${fmtTime(c.returnBy)}.` },
+    wait: { icon: <FlaskConical className="w-5 h-5" />, tone: 'violet' as Tone, title: c.chasedAt ? `Chased ${relDay(c.chasedAt).toLowerCase()}` : 'Nothing to do', body: c.chasedAt ? 'You’ll be notified when the lab replies.' : `Due ${fmtDate(c.returnBy)}.` },
     done: { icon: <CheckCircle2 className="w-5 h-5" />, tone: 'ok' as Tone, title: c.problem ? 'Problem reported' : 'Ready for the patient', body: c.problem ?? (c.receipt ? `Stored in ${c.receipt.storedIn}.` : 'Checked in.') },
   }[a];
 
@@ -330,7 +365,7 @@ export function CaseDetailScreen() {
     ['Clinician', clinicianName(c.clinician)],
     ['Material', c.material],
     ['Shade', [c.shade, c.stumpShade && `stump ${c.stumpShade}`].filter(Boolean).join(' · ') || '—'],
-    ['Lab due back', `${fmtDate(c.returnBy)} ${fmtTime(c.returnBy)}`],
+    ['Delivery date', fmtDate(c.returnBy)],
     ['Funding', c.funding],
     ['Practice', practiceName(c.practice)],
     ['Created by', c.source === 'photo' ? `${c.createdBy} · photo` : c.createdBy],
@@ -339,7 +374,7 @@ export function CaseDetailScreen() {
   return (
     <Screen header={<TopBar back fallback="/go/work" title={p.name} sub={`${c.id} · DOB ${p.dob}`} />}
       // Sticky next-step bar: Dispatch / Reply / Check in / Chase stay in thumb reach.
-      // Hidden on the Chat tab while replying — the composer there is the action.
+      // Hidden on the Comments tab while replying — the composer there is the action.
       footer={step.cta && !(a === 'reply' && tab === 'messages') ? (
         <div className="flex items-center gap-3">
           <IconTile icon={step.icon} tone={step.tone} size="sm" />
@@ -368,7 +403,7 @@ export function CaseDetailScreen() {
           <IconTile icon={<CalendarClock className="w-5 h-5" />} tone={READINESS_TONE[r.level]} size="sm" />
           <div className="flex-1 min-w-0">
             <p className="text-[13.5px] font-semibold text-go-ink truncate">
-              {c.appointment ? `${c.appointment.kind} · ${fmtDate(c.appointment.at)} ${fmtTime(c.appointment.at)}` : 'No appointment booked'}
+              {c.appointment ? `${c.appointment.kind} · ${fmtDate(c.appointment.at)}` : 'No appointment booked'}
             </p>
             <p className={cx('text-[11.5px] truncate', r.level === 'at-risk' ? 'text-go-bad' : 'text-go-muted')}>
               {c.appointment ? `${c.appointment.room} · ` : ''}{r.detail}
@@ -396,7 +431,7 @@ export function CaseDetailScreen() {
         <Segmented value={tab} onChange={setTab} options={[
           { value: 'details', label: 'Rx' },
           { value: 'activity', label: 'Activity' },
-          { value: 'messages', label: 'Chat', count: c.messages.length || undefined },
+          { value: 'messages', label: 'Comments', count: c.messages.length || undefined },
           { value: 'files', label: 'Files', count: c.attachments.length },
         ]} />
       </div>

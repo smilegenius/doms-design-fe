@@ -11,7 +11,8 @@ export type ToastTone = 'ok' | 'info' | 'bad';
 export interface Toast { id: number; text: string; tone: ToastTone }
 export interface Notice { id: string; title: string; body: string; at: string; to: string; read: boolean; kind: 'question' | 'shipped' | 'invoice' | 'overdue' | 'statement' }
 
-export const ME = { name: 'Dr Olivia Reed', first: 'Olivia', role: 'Dentist · Practice principal', email: 'olivia.reed@example.test', gdc: '284119' };
+// Signed-in user — the app is used mostly by practice managers and nurses.
+export const ME = { name: 'John Carter', first: 'John', role: 'Practice manager', email: 'john.carter@example.test' };
 
 const safeGet = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const safeSet = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
