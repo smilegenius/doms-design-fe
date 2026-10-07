@@ -23,7 +23,7 @@ import { AccountScreen, NotificationsScreen } from './screens/Account';
 // Reviewer navigation. Each entry can carry scenarios: variants of the same
 // screen (single vs multi-service Rx, clean vs flagged invoice…) that deep-link
 // via route + query params, optionally scoping the practice switcher.
-interface Scenario { label: string; to: string; practice?: PracticeId | 'all' }
+interface Scenario { label: string; to: string; practice?: PracticeId | 'all'; solo?: PracticeId }
 interface Jump extends Scenario { group: string; scenarios?: Scenario[] }
 
 const JUMPS: Jump[] = [
@@ -34,49 +34,54 @@ const JUMPS: Jump[] = [
   { group: 'Start', label: 'Home', to: '/go/home', scenarios: [
     { label: 'All my practices', to: '/go/home', practice: 'all' },
     { label: 'Camden Dental Studio only', to: '/go/home', practice: 'cds' },
-    { label: 'Islington Smile Care only', to: '/go/home', practice: 'isc' },
+    { label: 'Single practice case', to: '/go/home', solo: 'isc' },
   ] },
   { group: 'Start', label: 'Notifications', to: '/go/notifications' },
   { group: 'Lab work', label: 'All lab work', to: '/go/work', scenarios: [
     { label: 'Schedule by appointment', to: '/go/work' },
-    { label: 'Board by stage', to: '/go/work?view=board' },
-    { label: 'Ready to dispatch', to: '/go/work?f=ready' },
-    { label: 'Arriving from lab', to: '/go/work?f=arriving' },
-    { label: 'Lab questions', to: '/go/work?f=questions' },
     { label: 'Overdue', to: '/go/work?f=overdue' },
+    { label: 'Ready to dispatch', to: '/go/work?f=ready' },
+    { label: 'On hold', to: '/go/work?f=on-hold' },
+    { label: 'Draft', to: '/go/work?f=draft' },
+    { label: 'Arriving from lab', to: '/go/work?f=arriving' },
+    { label: 'Additional information required', to: '/go/work?f=questions' },
     { label: 'At risk only', to: '/go/work?r=at-risk' },
     { label: 'Tomorrow’s appointments', to: '/go/work?day=1' },
   ] },
   { group: 'Lab work', label: 'Case detail', to: '/go/work/SG-28491', scenarios: [
     { label: 'Single service · not sent yet', to: '/go/work/SG-28491' },
-    { label: 'Multi-service case', to: '/go/work/SG-28472' },
+    { label: 'Multi-service case · on hold', to: '/go/work/SG-28472' },
     { label: 'Arrives after the fit (at risk)', to: '/go/work/SG-28466' },
     { label: 'In practice, ready for patient', to: '/go/work/SG-28460' },
   ] },
-  { group: 'Lab work', label: 'Reply to a lab question', to: '/go/work/SG-28485', scenarios: [
+  { group: 'Lab work', label: 'Reply to the lab', to: '/go/work/SG-28485', scenarios: [
     { label: 'Case overview', to: '/go/work/SG-28485' },
     { label: 'Straight to comments', to: '/go/work/SG-28485?tab=messages' },
   ] },
-  { group: 'Lab work', label: 'Print label & dispatch', to: '/go/work/SG-28491/dispatch', scenarios: [
+  { group: 'Lab work', label: 'Print label and dispatch', to: '/go/work/SG-28491/dispatch', scenarios: [
     { label: 'Crown · private', to: '/go/work/SG-28491/dispatch' },
     { label: 'Partial denture · NHS', to: '/go/work/SG-28497/dispatch' },
   ] },
-  { group: 'Lab work', label: 'Check in on arrival', to: '/go/work/SG-28488/receive', scenarios: [
+  { group: 'Lab work', label: 'Mark as received', to: '/go/work/SG-28488/receive', scenarios: [
     { label: 'Arrives before the appointment', to: '/go/work/SG-28488/receive' },
     { label: 'Arrives after the fit (at risk)', to: '/go/work/SG-28466/receive' },
   ] },
   { group: 'Lab work', label: 'Chase overdue work', to: '/go/work/SG-28479' },
-  { group: 'Create', label: 'Dictate prescription (audio)', to: '/go/new/audio', scenarios: [
+  { group: 'Create', label: 'Dictate a case (audio)', to: '/go/new/audio', scenarios: [
     { label: 'Single service', to: '/go/new/audio' },
     { label: 'Multi-service case', to: '/go/new/audio?rx=multi' },
     { label: 'Everything heard, no review', to: '/go/new/audio?rx=clean' },
   ] },
-  { group: 'Create', label: 'Photograph prescription', to: '/go/new/capture', scenarios: [
+  { group: 'Create', label: 'Photograph a lab form', to: '/go/new/capture', scenarios: [
     { label: 'Single service', to: '/go/new/capture' },
     { label: 'Multi-service case', to: '/go/new/capture?rx=multi' },
     { label: 'Everything read, no review', to: '/go/new/capture?rx=clean' },
   ] },
-  { group: 'Create', label: 'Create manually', to: '/go/new/manual' },
+  { group: 'Create', label: 'Fill in a case', to: '/go/new/manual', scenarios: [
+    { label: 'New case', to: '/go/new/manual' },
+    { label: 'Finish a draft · single service', to: '/go/new/manual?draft=SG-D1004' },
+    { label: 'Finish a draft · multi-service', to: '/go/new/manual?draft=SG-D1007' },
+  ] },
   { group: 'Finance', label: 'Invoices & statements', to: '/go/finance', scenarios: [
     { label: 'Invoices', to: '/go/finance' },
     { label: 'Statements', to: '/go/finance?tab=statements' },
@@ -87,7 +92,7 @@ const JUMPS: Jump[] = [
     { label: 'Possible duplicate (queried)', to: '/go/finance/invoice/DE-2026-118' },
   ] },
   { group: 'Finance', label: 'Statement review', to: '/go/finance/statement/ST-DSU-0926', scenarios: [
-    { label: 'Two exceptions to resolve', to: '/go/finance/statement/ST-DSU-0926' },
+    { label: 'Two lines to resolve', to: '/go/finance/statement/ST-DSU-0926' },
     { label: 'All lines matched', to: '/go/finance/statement/ST-NDL-0926' },
   ] },
   { group: 'Account', label: 'Account & appearance', to: '/go/account' },
@@ -117,19 +122,21 @@ function SidePanel() {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
   const here = pathname + search;
-  const { signIn, signOut, setPractice, practice: practiceNow } = useGo();
+  const { signIn, signOut, setPractice, practice: practiceNow, setSoloPractice } = useGo();
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<Set<string>>(() => new Set());
 
   const jump = (s: Scenario) => {
-    setPractice(s.practice ?? 'all');
+    setSoloPractice(s.solo ?? null);
+    setPractice(s.solo ?? s.practice ?? 'all');
     if (s.to === '/go/signin' || s.to === '/go/forgot') { signOut(); navigate(s.to); return; }
     signIn();
     // Let the sign-in screen's own redirect run first, then land on the target.
     setTimeout(() => navigate(s.to), 0);
   };
   const toggle = (k: string) => setOpen(o => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n; });
-  const isHere = (s: Scenario) => here === s.to && (s.practice === undefined || s.practice === practiceNow);
+  const { soloPractice } = useGo();
+  const isHere = (s: Scenario) => here === s.to && (s.solo ? s.solo === soloPractice : !soloPractice && (s.practice === undefined || s.practice === practiceNow));
 
   // Search matches the item, its group or any of its scenarios; scenario hits auto-expand.
   const term = q.trim().toLowerCase();
@@ -152,7 +159,7 @@ function SidePanel() {
         <GoMark size={44} />
         <div>
           <p className="text-[20px] font-bold text-go-ink leading-tight">Smile Genius <span className="go-grad-text">Go</span></p>
-          <p className="text-[12.5px] text-go-muted">Mobile app for dentists &amp; clinicians</p>
+          <p className="text-[12.5px] text-go-muted">Mobile app for dental practices</p>
         </div>
       </div>
       <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted mt-6 mb-2">Appearance</p>
@@ -236,9 +243,9 @@ function RequireAuth() {
 
 function GoRoutes() {
   const { signedIn } = useGo();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   return (
-    <div key={pathname} className="absolute inset-0 go-fade-in">
+    <div key={pathname.startsWith('/go/new') ? pathname + search : pathname} className="absolute inset-0 go-fade-in">
       <Routes>
         <Route path="signin" element={signedIn ? <Navigate to="/go/home" replace /> : <SignInScreen />} />
         <Route path="forgot" element={<ForgotScreen />} />

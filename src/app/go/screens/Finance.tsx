@@ -45,13 +45,13 @@ export function FinanceScreen() {
   const clean = open.filter(i => i.status === 'to-approve' && i.checks.every(c => c.state === 'pass'));
   const approveClean = () => {
     clean.forEach(i => setInvoiceStatus(i.id, 'approved', `Approved by ${ME.name}`));
-    toast(`${clean.length} invoices approved — sent for payment in the next run.`);
+    toast(`${clean.length} invoice${clean.length === 1 ? '' : 's'} approved for the next payment run`);
   };
 
   return (
     <Screen tabs header={
       <div className="bg-go-bg/85 backdrop-blur-xl px-4 pt-3 pb-3 space-y-3">
-        <h1 className="text-[24px] font-bold text-go-ink tracking-tight">Approvals</h1>
+        <h1 className="text-[24px] font-bold text-go-ink tracking-tight">Finance</h1>
         <Segmented value={tab} onChange={setTab} options={[
           { value: 'invoices', label: 'Invoices', count: open.length },
           { value: 'statements', label: 'Statements', count: toReview.length },
@@ -65,17 +65,17 @@ export function FinanceScreen() {
               <span className="absolute -right-12 -top-16 w-44 h-44 rounded-full bg-go-brand/10 blur-2xl pointer-events-none" />
               <div className="relative flex items-end justify-between gap-3">
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Awaiting you</p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Waiting for you</p>
                   <p className="text-[26px] font-bold text-go-ink tracking-tight tabular-nums leading-tight mt-0.5">{gbp(open.reduce((s, i) => s + gross(i), 0))}</p>
                 </div>
                 <div className="text-right text-[12px] leading-relaxed">
-                  <p className="text-go-ok font-semibold">{clean.length} clean</p>
+                  <p className="text-go-ok font-semibold">{clean.length} ready</p>
                   <p className="text-go-warn font-semibold">{open.length - clean.length} to check</p>
                 </div>
               </div>
               {!!clean.length && (
                 <Btn block size="md" className="mt-3 relative" onClick={approveClean} icon={<ThumbsUp className="w-4 h-4" />}>
-                  Approve {clean.length} clean · {gbp(clean.reduce((s, i) => s + gross(i), 0))}
+                  Approve {clean.length} ready · {gbp(clean.reduce((s, i) => s + gross(i), 0))}
                 </Btn>
               )}
             </Card>
@@ -104,7 +104,7 @@ export function FinanceScreen() {
                           {i.status === 'to-approve' || i.status === 'needs-review'
                             ? (flag
                               ? <><AlertTriangle className={cx('w-3.5 h-3.5 flex-shrink-0', flag.state === 'fail' ? 'text-go-bad' : 'text-go-warn')} /><span className={cx('truncate', flag.state === 'fail' ? 'text-go-bad' : 'text-go-warn')}>{flag.detail}</span></>
-                              : <><CheckCircle2 className="w-3.5 h-3.5 text-go-ok flex-shrink-0" /><span className="text-go-muted truncate">{passed}/{i.checks.length} checks · due {relDay(i.due).toLowerCase()}</span></>)
+                              : <><CheckCircle2 className="w-3.5 h-3.5 text-go-ok flex-shrink-0" /><span className="text-go-muted truncate">{passed}/{i.checks.length} checks passed · due {relDay(i.due).toLowerCase()}</span></>)
                             : <><Pill tone={s.tone} className="!h-5 !px-2 !text-[10.5px]">{s.label}</Pill><span className="text-go-muted truncate">{practiceName(i.practice)}</span></>}
                         </span>
                       </button>
@@ -138,7 +138,7 @@ export function FinanceScreen() {
                 </div>
                 <div className="mt-3">
                   {s.status === 'reconciled' ? <Pill tone="teal" dot>Reconciled</Pill>
-                    : ex ? <Pill tone="warn" dot>{ex} exception{ex > 1 ? 's' : ''} to resolve</Pill>
+                    : ex ? <Pill tone="warn" dot>{ex} line{ex > 1 ? 's' : ''} to resolve</Pill>
                     : <Pill tone="ok" dot>All lines matched</Pill>}
                 </div>
               </Card>
@@ -163,15 +163,15 @@ export function InvoiceScreen() {
   const [reason, setReason] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [reviewed, setReviewed] = useState(false);
-  if (!inv) return <Screen header={<TopBar back fallback="/go/finance" />}><EmptyState icon={<Receipt className="w-7 h-7" />} title="Not found" /></Screen>;
+  if (!inv) return <Screen header={<TopBar back fallback="/go/finance" />}><EmptyState icon={<Receipt className="w-7 h-7" />} title="Invoice not found" /></Screen>;
   const s = INV_STATUS[inv.status];
   const flagged = inv.checks.filter(c => c.state !== 'pass');
   const actionable = inv.status === 'to-approve' || inv.status === 'needs-review' || inv.status === 'queried';
   const close = () => { setSheet(null); setReasons([]); setReason(null); setMsg(''); setReviewed(false); };
 
-  const approve = () => { setInvoiceStatus(inv.id, 'approved', `Approved by ${ME.name}`); toast('Approved — sent for payment in the next run.'); close(); };
+  const approve = () => { setInvoiceStatus(inv.id, 'approved', `Approved by ${ME.name}`); toast('Invoice approved for the next payment run'); close(); };
   const query = () => { setInvoiceStatus(inv.id, 'queried', `Queried by ${ME.name}: ${reasons.join(', ')}`); toast(`Query sent to ${inv.supplier}`, 'info'); close(); };
-  const reject = () => { setInvoiceStatus(inv.id, 'rejected', `Rejected by ${ME.name}: ${reason}`); toast('Rejected — supplier has been notified.', 'bad'); close(); };
+  const reject = () => { setInvoiceStatus(inv.id, 'rejected', `Rejected by ${ME.name}: ${reason}`); toast('Invoice rejected. Supplier notified.', 'bad'); close(); };
 
   return (
     <Screen header={<TopBar back fallback="/go/finance" title={inv.supplier} sub={inv.id} />}
@@ -212,7 +212,7 @@ export function InvoiceScreen() {
         <div className="px-4 mt-3">
           <Card onClick={() => navigate(`/go/work/${inv.caseId}`)} className="p-4 flex items-center gap-3">
             <Link2 className="w-5 h-5 text-go-brand" />
-            <span className="flex-1 text-[14px] font-medium text-go-ink">Linked lab work <span className="font-mono text-go-muted">{inv.caseId}</span></span>
+            <span className="flex-1 text-[14px] font-medium text-go-ink">Linked case <span className="font-mono text-go-muted">{inv.caseId}</span></span>
             <ChevronRight className="w-5 h-5 text-go-faint" />
           </Card>
         </div>
@@ -233,7 +233,7 @@ export function InvoiceScreen() {
       <Section title="Document">
         <div className="rounded-[22px] border border-go-line bg-go-raised h-40 flex flex-col items-center justify-center gap-2 text-go-muted">
           <FileText className="w-8 h-8" />
-          <p className="text-[12.5px]">Demo preview. The real PDF appears here.</p>
+          <p className="text-[12.5px]">Demo only. The invoice PDF will show here.</p>
         </div>
       </Section>
 
@@ -248,7 +248,7 @@ export function InvoiceScreen() {
         </Card>
       </Section>
 
-      <Sheet open={sheet === 'approve'} onClose={close} title="Approve invoice" sub={`${gbp(gross(inv))} to ${inv.supplier}. It goes for payment in the next run.`}
+      <Sheet open={sheet === 'approve'} onClose={close} title="Approve invoice" sub={`${gbp(gross(inv))} to ${inv.supplier}, paid in the next payment run.`}
         footer={<Btn block disabled={!!flagged.length && !reviewed} onClick={approve} icon={<ThumbsUp className="w-[18px] h-[18px]" />}>Approve invoice</Btn>}>
         {flagged.length ? (
           <>
@@ -260,7 +260,7 @@ export function InvoiceScreen() {
             ))}
             <button onClick={() => setReviewed(r => !r)} className="flex items-center gap-3 mt-3 text-left">
               <span className={cx('w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0', reviewed ? 'go-grad text-white' : 'border-2 border-go-line')}>{reviewed && <CheckCircle2 className="w-4 h-4" />}</span>
-              <span className="text-[13.5px] text-go-ink">I’ve reviewed the flagged check and want to approve anyway</span>
+              <span className="text-[13.5px] text-go-ink">I’ve checked the warnings above and want to approve anyway</span>
             </button>
           </>
         ) : (
@@ -293,34 +293,34 @@ export function StatementScreen() {
   const [line, setLine] = useState<number | null>(null);
   const [res, setRes] = useState<string | null>(null);
   const [note, setNote] = useState('');
-  if (!st) return <Screen header={<TopBar back fallback="/go/finance" />}><EmptyState icon={<FileText className="w-7 h-7" />} title="Not found" /></Screen>;
+  if (!st) return <Screen header={<TopBar back fallback="/go/finance" />}><EmptyState icon={<FileText className="w-7 h-7" />} title="Statement not found" /></Screen>;
   const exceptions = st.lines.filter(l => l.state === 'difference' || l.state === 'missing');
   const matched = st.lines.filter(l => l.state !== 'difference' && l.state !== 'missing').length;
   const current = line !== null ? st.lines[line] : null;
 
   const resolve = () => {
-    updateStatement(st.id, s => ({ ...s, lines: s.lines.map((l, i) => (i === line ? { ...l, state: 'resolved', resolution: res! + (note ? ` — ${note}` : '') } : l)) }));
-    toast('Exception resolved');
+    updateStatement(st.id, s => ({ ...s, lines: s.lines.map((l, i) => (i === line ? { ...l, state: 'resolved', resolution: res! + (note ? ` · ${note}` : '') } : l)) }));
+    toast('Line resolved');
     setLine(null); setRes(null); setNote('');
   };
   const approve = () => {
     updateStatement(st.id, s => ({ ...s, status: 'reconciled' }));
-    toast('Statement approved and reconciled.');
+    toast('Statement approved and reconciled');
   };
 
   return (
     <Screen header={<TopBar back fallback="/go/finance" title={st.supplier} sub={`Statement · ${st.period}`} />}
       footer={st.status === 'to-review' ? (
-        <Btn block disabled={!!exceptions.length} onClick={approve}>{exceptions.length ? `Resolve ${exceptions.length} exception${exceptions.length > 1 ? 's' : ''} to approve` : 'Approve statement'}</Btn>
+        <Btn block disabled={!!exceptions.length} onClick={approve}>{exceptions.length ? `Resolve ${exceptions.length} line${exceptions.length > 1 ? 's' : ''} to approve` : 'Approve statement'}</Btn>
       ) : undefined}>
       <div className="px-4 pt-1">
         <Card className="p-5">
-          {st.status === 'reconciled' ? <Pill tone="teal" dot>Reconciled</Pill> : <Pill tone={exceptions.length ? 'warn' : 'ok'} dot>{exceptions.length ? 'Waiting for review' : 'All lines matched'}</Pill>}
+          {st.status === 'reconciled' ? <Pill tone="teal" dot>Reconciled</Pill> : <Pill tone={exceptions.length ? 'warn' : 'ok'} dot>{exceptions.length ? 'Needs review' : 'All lines matched'}</Pill>}
           <p className="text-[34px] font-bold tracking-tight tabular-nums mt-3 text-go-ink">{gbp(st.balance)}</p>
           <p className="text-[13px] text-go-muted">Balance · {practiceName(st.practice)}</p>
           <div className="grid grid-cols-2 gap-2 mt-4">
             <div className="rounded-2xl bg-go-ok-soft p-3"><p className="text-[22px] font-bold text-go-ok tabular-nums">{matched}</p><p className="text-[12px] text-go-ink2">Matched</p></div>
-            <div className={cx('rounded-2xl p-3', exceptions.length ? 'bg-go-warn-soft' : 'bg-go-raised')}><p className={cx('text-[22px] font-bold tabular-nums', exceptions.length ? 'text-go-warn' : 'text-go-faint')}>{exceptions.length}</p><p className="text-[12px] text-go-ink2">Exceptions</p></div>
+            <div className={cx('rounded-2xl p-3', exceptions.length ? 'bg-go-warn-soft' : 'bg-go-raised')}><p className={cx('text-[22px] font-bold tabular-nums', exceptions.length ? 'text-go-warn' : 'text-go-faint')}>{exceptions.length}</p><p className="text-[12px] text-go-ink2">To resolve</p></div>
           </div>
         </Card>
       </div>
@@ -348,7 +348,7 @@ export function StatementScreen() {
         </div>
       </Section>
 
-      <Sheet open={line !== null} onClose={() => setLine(null)} title="Resolve exception" sub={current ? `${current.ref} · ${current.note}` : undefined}
+      <Sheet open={line !== null} onClose={() => setLine(null)} title="Resolve line" sub={current ? `${current.ref} · ${current.note}` : undefined}
         footer={<Btn block disabled={!res} onClick={resolve}>Resolve</Btn>}>
         <div className="space-y-2">
           {EXCEPTION_RESOLUTIONS.map(r => (
@@ -358,7 +358,7 @@ export function StatementScreen() {
             </button>
           ))}
         </div>
-        <div className="mt-4"><Label optional>Note</Label><TextArea value={note} onChange={e => setNote(e.target.value)} placeholder="Anything finance should know" /></div>
+        <div className="mt-4"><Label optional>Note</Label><TextArea value={note} onChange={e => setNote(e.target.value)} placeholder="Anything the finance team should know" /></div>
       </Sheet>
     </Screen>
   );

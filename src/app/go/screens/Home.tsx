@@ -1,20 +1,27 @@
 // ─── Home — the clinician's day ──────────────────────────────────────────────
-// Top: the four status actions the client asked for (each opens Lab work
-// filtered). Middle: today's lab-dependent appointments on a time rail.
-// Bottom: the next 7 days as a strip plus the selected day's agenda.
-import { useState } from 'react';
+// One card: the four statuses the client asked for (Overdue · To dispatch ·
+// On hold · Draft) as tabs, with the selected status's cases broken down by
+// delivery date. Dates only, no times.
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Building2, CalendarClock, Check, ChevronDown } from '../icons';
+import { Bell, Building2, CalendarClock, Check, ChevronDown, ChevronRight, MessageSquare, Pause, PenLine, Receipt, XCircle } from '../icons';
 import { FilledChatBubble, FilledClock, FilledPackage, FilledTruck } from '../../components/icons/FilledNavIcons';
 import { ME, useGo, useScoped } from '../store';
 import {
-  ATTENTION, Attention, LabCase, PRACTICES, ReadinessLevel, caseTitle, dayOffset, READINESS_ORDER, matchesAttention, patientById, readiness, shortName,
+  ATTENTION, Attention, LabCase, PRACTICES, dayOffset, fmtDate, gbp, labName, matchesAttention, patientById, shortName,
 } from '../data';
-import { Card, IconTile, Pill, READINESS_DOT, Screen, Sheet, cx } from '../ui';
+import { Card, IconTile, Screen, Sheet, cx } from '../ui';
 
 export function PracticeSwitcher({ inline }: { inline?: boolean }) {
-  const { practice, setPractice, cases } = useGo();
+  const { practice, setPractice, cases, soloPractice } = useGo();
   const [open, setOpen] = useState(false);
+  // One-practice user: just the practice name, no dropdown
+  if (soloPractice) {
+    const name = PRACTICES.find(p => p.id === soloPractice)!.name;
+    return inline
+      ? <span className="text-[22px] font-bold text-go-ink tracking-tight leading-tight">{name}</span>
+      : <span className="text-[13px] font-semibold text-go-ink">{name}</span>;
+  }
   const label = practice === 'all' ? 'All my practices' : PRACTICES.find(p => p.id === practice)!.name;
   const opts = [{ id: 'all' as const, name: 'All my practices', area: `${PRACTICES.length} practices` }, ...PRACTICES];
   return (
@@ -30,7 +37,7 @@ export function PracticeSwitcher({ inline }: { inline?: boolean }) {
           <ChevronDown className="w-4 h-4 text-go-muted flex-shrink-0" />
         </button>
       )}
-      <Sheet open={open} onClose={() => setOpen(false)} title="Practice" sub="Lab work and approvals are shown for the practice you pick.">
+      <Sheet open={open} onClose={() => setOpen(false)} title="Practice" sub="Choose which practice’s lab work and invoices to show.">
         <div className="space-y-2">
           {opts.map(p => {
             const n = p.id === 'all' ? cases.length : cases.filter(c => c.practice === p.id).length;
@@ -41,7 +48,7 @@ export function PracticeSwitcher({ inline }: { inline?: boolean }) {
                 <IconTile icon={<Building2 className="w-5 h-5" />} tone={on ? 'brand' : 'neutral'} size="sm" />
                 <span className="flex-1 min-w-0">
                   <span className="block text-[15px] font-semibold text-go-ink">{p.name}</span>
-                  <span className="block text-[12px] text-go-muted">{p.area} · {n} lab work</span>
+                  <span className="block text-[12px] text-go-muted">{p.area} · {n} case{n === 1 ? '' : 's'}</span>
                 </span>
                 {on && <Check className="w-5 h-5 text-go-brand" strokeWidth={2.5} />}
               </button>
@@ -53,168 +60,224 @@ export function PracticeSwitcher({ inline }: { inline?: boolean }) {
   );
 }
 
-// ─── Today on a time rail ───────────────────────────────────────────────────
 
-const TEXT_TONE: Record<ReadinessLevel, string> = {
-  'at-risk': 'text-go-bad', attention: 'text-go-warn', arriving: 'text-go-brand', 'on-track': 'text-go-violet', 'in-practice': 'text-go-ok',
+// ─── One status card ────────────────────────────────────────────────────────
+// Status tabs on top; inside, the selected status's cases grouped by delivery date.
+
+const STATUS_STYLE: Record<Attention, { short: string; icon: React.ComponentType<{ className?: string }>; color: string; bar: string }> = {
+  overdue: { short: 'Overdue', icon: FilledClock, color: 'text-go-bad', bar: 'bg-go-bad' },
+  ready: { short: 'To dispatch', icon: FilledTruck, color: 'text-go-warn', bar: 'bg-go-warn' },
+  'on-hold': { short: 'On hold', icon: Pause, color: 'text-go-violet', bar: 'bg-go-violet' },
+  draft: { short: 'Draft', icon: PenLine, color: 'text-go-muted', bar: 'bg-go-faint' },
+  arriving: { short: 'Arriving', icon: FilledPackage, color: 'text-go-brand', bar: 'bg-go-brand' },
+  questions: { short: 'Info required', icon: FilledChatBubble, color: 'text-go-pink', bar: 'bg-go-pink' },
+  'not-approved': { short: 'Not approved', icon: XCircle, color: 'text-go-bad', bar: 'bg-go-bad' },
+  'date-changed': { short: 'Date changed', icon: CalendarClock, color: 'text-go-warn', bar: 'bg-go-warn' },
 };
 
-const COLLAPSED = 2;
-/** 'Show 2 more' / 'Show less' under a collapsed list. */
-function ShowMore({ total, open, onToggle }: { total: number; open: boolean; onToggle: () => void }) {
-  if (total <= COLLAPSED) return null;
+// ─── Below the card: the portal's other dashboard stats ─────────────────────
+// Always shown (even at 0) so Home is never empty when the four statuses are clear.
+
+const subhead = (t: string) => <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted px-1 mb-2">{t}</h2>;
+
+/** Not approved (rejected by lab) · Delivery date changed (needs review). */
+function MoreStatuses({ cases }: { cases: LabCase[] }) {
+  const navigate = useNavigate();
+  const items = (['not-approved', 'date-changed'] as Attention[]).map(id => ({
+    a: ATTENTION.find(x => x.id === id)!, n: cases.filter(c => matchesAttention(c, id)).length,
+  }));
   return (
-    <button onClick={onToggle} aria-expanded={open}
-      className="w-full mt-1 pt-2.5 pb-0.5 border-t border-go-line flex items-center justify-center gap-1 text-[12.5px] font-semibold text-go-brand">
-      {open ? 'Show less' : `Show ${total - COLLAPSED} more`}
-      <ChevronDown className={cx('w-4 h-4 transition-transform', open && 'rotate-180')} />
-    </button>
+    <div className="grid grid-cols-2 gap-2">
+      {items.map(({ a, n }) => {
+        const st = STATUS_STYLE[a.id];
+        const Icon = st.icon;
+        return (
+          <button key={a.id} onClick={() => navigate(`/go/work?f=${a.id}`)} aria-label={`${a.label}: ${n}`}
+            className={cx('text-left rounded-[20px] border bg-go-surface p-3.5 active:scale-[0.98] transition',
+              n && a.id === 'not-approved' ? 'border-go-bad/40' : 'border-go-line')}>
+            <span className="flex items-center justify-between">
+              <span className="text-[22px] font-bold tabular-nums leading-none text-go-ink">{n}</span>
+              <Icon className={cx('w-5 h-5', n ? st.color : 'text-go-faint')} />
+            </span>
+            <span className="block text-[12.5px] font-semibold text-go-ink mt-2">{a.short}</span>
+            <span className="block text-[11px] text-go-muted">{a.hint}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
-/** One appointment, two short lines: "R. Evans · Bridge" / "At risk · due tomorrow". Dates only — no times. */
-function ApptRow({ c, dim }: { c: LabCase; dim?: boolean }) {
+/** Open invoices · total · approved this month (portal: Financial actions). */
+function FinanceStrip() {
   const navigate = useNavigate();
-  const r = readiness(c);
+  const { invoices } = useScoped();
+  const open = invoices.filter(i => i.status !== 'approved' && i.status !== 'rejected');
+  const total = (xs: typeof invoices) => xs.reduce((s, i) => s + i.net + i.vat, 0);
+  const approved = invoices.filter(i => i.status === 'approved');
   return (
-    <button onClick={() => navigate(`/go/work/${c.id}`)}
-      className={cx('w-full flex items-center gap-3 px-1 py-2 rounded-xl text-left hover:bg-go-raised transition', dim && 'opacity-50')}>
-      <span className={cx('w-1 h-8 rounded-full flex-shrink-0', READINESS_DOT[r.level])} />
+    <Card onClick={() => navigate('/go/finance')} className="p-3.5 flex items-center gap-3">
+      <IconTile icon={<Receipt className="w-5 h-5" />} tone="brand" size="sm" />
+      <span className="flex-1 min-w-0">
+        <span className="block text-[13.5px] font-semibold text-go-ink"><span className="tabular-nums">{open.length}</span> open invoice{open.length === 1 ? '' : 's'}</span>
+        <span className="block text-[11.5px] text-go-muted truncate">{gbp(total(open))} to settle · {gbp(total(approved))} approved</span>
+      </span>
+      <ChevronRight className="w-4 h-4 text-go-faint flex-shrink-0" />
+    </Card>
+  );
+}
+
+/** Latest lab comments across cases (portal: Unread messages). */
+function LatestComments({ cases }: { cases: LabCase[] }) {
+  const navigate = useNavigate();
+  const latest = cases.flatMap(c => {
+    const m = c.messages[c.messages.length - 1];
+    return m && m.from === 'lab' ? [{ c, m }] : [];
+  }).sort((x, y) => y.m.at.localeCompare(x.m.at)).slice(0, 3);
+  if (!latest.length) {
+    return (
+      <Card className="p-4 flex items-center gap-3">
+        <IconTile icon={<MessageSquare className="w-5 h-5" />} tone="neutral" size="sm" />
+        <span className="text-[13px] text-go-muted">You’re all caught up. No new comments.</span>
+      </Card>
+    );
+  }
+  return (
+    <Card className="divide-y divide-go-line">
+      {latest.map(({ c, m }) => (
+        <button key={c.id} onClick={() => navigate(`/go/work/${c.id}?tab=messages`)} className="w-full flex items-start gap-3 p-3.5 text-left">
+          <IconTile icon={<MessageSquare className="w-4 h-4" />} tone="pink" size="sm" />
+          <span className="flex-1 min-w-0">
+            <span className="flex items-baseline gap-2">
+              <span className="flex-1 text-[13px] font-semibold text-go-ink truncate">{labName(c.lab)}</span>
+              <span className="text-[11px] text-go-faint flex-shrink-0">{fmtDate(m.at)}</span>
+            </span>
+            <span className="block text-[11.5px] text-go-muted truncate">{shortName(patientById(c.patientId).name)} · {c.id}</span>
+            <span className="block text-[12.5px] text-go-ink2 mt-0.5 line-clamp-2">{m.text}</span>
+          </span>
+        </button>
+      ))}
+    </Card>
+  );
+}
+
+
+/** "Today", "Tomorrow", "2 days late" — next to the date in each group header. */
+function dayTag(iso: string, late: boolean) {
+  const d = dayOffset(iso);
+  if (late && d < 0) return `${-d} day${d === -1 ? '' : 's'} late`;
+  return d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : d === -1 ? 'Yesterday' : d > 0 ? `In ${d} days` : `${-d} days ago`;
+}
+
+/** Patient · service, then status · lab · appointment. */
+function CaseRow({ c, status }: { c: LabCase; status: Attention }) {
+  const navigate = useNavigate();
+  const st = STATUS_STYLE[status];
+  const label = c.onHold ? `On hold (${c.onHold.side})` : st.short;
+  const sub = [c.lab ? labName(c.lab) : null, c.appointment ? `${c.appointment.kind} ${fmtDate(c.appointment.at)}` : null].filter(Boolean).join(' · ');
+  return (
+    <button onClick={() => navigate(c.stage === 'draft' ? `/go/new/manual?draft=${c.id}` : `/go/work/${c.id}`)}
+      className="w-full flex items-center gap-3 px-1 py-2 rounded-xl text-left hover:bg-go-raised transition">
+      <span className={cx('w-1 h-8 rounded-full flex-shrink-0', st.bar)} />
       <span className="flex-1 min-w-0">
         <span className="block text-[13.5px] font-semibold text-go-ink truncate">
           {shortName(patientById(c.patientId).name)} <span className="font-normal text-go-muted">· {c.service}{c.items?.length ? ` +${c.items.length}` : ''}</span>
         </span>
         <span className="block text-[11.5px] text-go-muted truncate">
-          <span className={cx('font-semibold', TEXT_TONE[r.level])}>{r.label}</span> · {r.detail}
+          <span className={cx('font-semibold', st.color)}>{label}</span>{sub ? ` · ${sub}` : ''}
         </span>
       </span>
-      <span className="text-[10.5px] font-semibold text-go-muted bg-go-raised border border-go-line rounded-full px-2 h-5 flex items-center flex-shrink-0">{c.appointment!.kind}</span>
+      <ChevronRight className="w-4 h-4 text-go-faint flex-shrink-0" />
     </button>
   );
 }
 
-function TodayRail({ cases }: { cases: LabCase[] }) {
-  const [more, setMore] = useState(false);
-  const today = cases.filter(c => c.appointment && dayOffset(c.appointment.at) === 0)
-    .sort((a, b) => READINESS_ORDER.indexOf(readiness(a).level) - READINESS_ORDER.indexOf(readiness(b).level));
-  const ready = today.filter(c => readiness(c).level === 'in-practice').length;
-  const risks = today.filter(c => readiness(c).level === 'at-risk').length;
-
-  return (
-    <Card className="p-4 relative overflow-hidden">
-      <span className="absolute -right-16 -top-20 w-48 h-48 rounded-full bg-go-brand/10 blur-2xl pointer-events-none" />
-      {/* One-line header */}
-      <div className="relative flex items-center gap-2">
-        <CalendarClock className="w-[18px] h-[18px] text-go-brand" />
-        <p className="text-[15px] font-semibold text-go-ink">Today</p>
-        <span className="h-5 min-w-[20px] px-1.5 rounded-full bg-go-raised border border-go-line text-[11px] font-bold text-go-ink2 flex items-center justify-center">{today.length}</span>
-        <span className="flex-1" />
-        {risks > 0 ? <Pill tone="bad" dot>{risks} at risk</Pill> : today.length ? <Pill tone="ok" dot>All set</Pill> : null}
-      </div>
-
-      {/* Day readiness — one segment per appointment, coloured by status */}
-      {!!today.length && (
-        <div className="relative mt-3">
-          <div className="flex gap-1">
-            {today.map(c => <span key={c.id} className={cx('h-1.5 flex-1 rounded-full', READINESS_DOT[readiness(c).level])} />)}
-          </div>
-          <p className="text-[11px] text-go-muted mt-1.5"><span className="font-semibold text-go-ink">{ready} of {today.length}</span> in practice and ready</p>
-        </div>
-      )}
-
-      <div className="relative mt-1 -mx-1">
-        {(more ? today : today.slice(0, COLLAPSED)).map(c => <ApptRow key={c.id} c={c} dim={readiness(c).level === 'in-practice'} />)}
-        {!today.length && <p className="text-[13px] text-go-muted px-1 pt-2">Nothing booked today.</p>}
-      </div>
-      <ShowMore total={today.length} open={more} onToggle={() => setMore(m => !m)} />
-    </Card>
-  );
-}
-
-// ─── Status actions ─────────────────────────────────────────────────────────
-// The four statuses the client wants up top. Each opens Lab work filtered to it.
-
-const STATUS_STYLE: Record<Attention, { short: string; icon: React.ComponentType<{ className?: string }>; color: string }> = {
-  ready: { short: 'To dispatch', icon: FilledTruck, color: 'text-go-warn' },
-  arriving: { short: 'Arriving', icon: FilledPackage, color: 'text-go-brand' },
-  questions: { short: 'Questions', icon: FilledChatBubble, color: 'text-go-pink' },
-  overdue: { short: 'Overdue', icon: FilledClock, color: 'text-go-bad' },
-};
-
-function StatusActions({ cases }: { cases: LabCase[] }) {
-  const navigate = useNavigate();
+function StatusBoard({ cases }: { cases: LabCase[] }) {
+  // null = all four statuses together; tapping a status filters to it (tap again for all)
+  const [selId, setSel] = useState<Attention | null>(null);
+  // The card is capped at 60% of the phone screen; its list scrolls inside so the
+  // sections below stay in view.
+  const cardRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [listMax, setListMax] = useState<number>();
+  useLayoutEffect(() => {
+    const screen = cardRef.current?.closest('.go-scroll') as HTMLElement | null;
+    if (!screen) return;
+    const fit = () => setListMax(Math.round(screen.clientHeight * 0.6 - (tabsRef.current?.offsetHeight ?? 0)));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(screen);
+    return () => ro.disconnect();
+  }, [cases.length]);
   // Only statuses with something in them; the rest share the width evenly.
-  const live = ATTENTION.map(a => ({ a, n: cases.filter(c => matchesAttention(c, a.id)).length })).filter(x => x.n > 0);
-  if (!live.length) return null;
-  return (
-    // One quiet card: icon + count on one line, short label under
-    <Card className="grid divide-x divide-go-line py-3" style={{ gridTemplateColumns: `repeat(${live.length}, minmax(0, 1fr))` }}>
-      {live.map(({ a, n }) => {
-        const s = STATUS_STYLE[a.id];
-        const Icon = s.icon;
-        return (
-          <button key={a.id} onClick={() => navigate(`/go/work?f=${a.id}`)} aria-label={`${a.label}: ${n}`}
-            className="flex flex-col items-center gap-1 px-1 active:scale-95 transition">
-            <span className="flex items-center gap-1.5">
-              <Icon className={cx('w-[18px] h-[18px]', s.color)} />
-              <span className="text-[20px] font-bold tabular-nums leading-none text-go-ink">{n}</span>
-            </span>
-            <span className="text-[11px] font-medium text-go-muted whitespace-nowrap">{s.short}</span>
-          </button>
-        );
-      })}
-    </Card>
-  );
-}
+  const live = ATTENTION.filter(a => a.home)
+    .map(a => ({ a, list: cases.filter(c => matchesAttention(c, a.id)) }))
+    .filter(x => x.list.length > 0);
+  if (!live.length) {
+    return (
+      <Card className="p-5 text-center">
+        <p className="text-[14px] font-semibold text-go-ink">All clear</p>
+        <p className="text-[12.5px] text-go-muted mt-0.5">Nothing overdue, to dispatch, on hold or in draft.</p>
+      </Card>
+    );
+  }
+  const sel = live.find(x => x.a.id === selId) ?? null;
 
-// ─── Next 7 days: strip + that day's agenda ─────────────────────────────────
-
-function WeekAgenda({ cases }: { cases: LabCase[] }) {
-  const days = Array.from({ length: 7 }, (_, i) => i + 1).map(off => ({
-    off, d: new Date(Date.now() + off * 864e5),
-    items: cases.filter(c => c.appointment && dayOffset(c.appointment.at) === off)
-      .sort((a, b) => a.appointment!.at.localeCompare(b.appointment!.at)),
-  }));
-  const [sel, setSel] = useState(() => days.find(d => d.items.length)?.off ?? 1);
-  const [more, setMore] = useState(false);
-  const day = days.find(d => d.off === sel)!;
+  // Each case once, under its first status in the client's order
+  const rows: { c: LabCase; status: Attention }[] = [];
+  for (const { a, list } of sel ? [sel] : live) for (const c of list) if (!rows.some(r => r.c.id === c.id)) rows.push({ c, status: a.id });
+  // Group by delivery date, earliest first
+  rows.sort((x, y) => (x.c.returnBy || '9').localeCompare(y.c.returnBy || '9'));
+  const groups: { key: string; iso: string; items: typeof rows }[] = [];
+  for (const r of rows) {
+    const key = r.c.returnBy ? new Date(r.c.returnBy).toDateString() : 'none';
+    const g = groups.find(x => x.key === key);
+    if (g) g.items.push(r); else groups.push({ key, iso: r.c.returnBy, items: [r] });
+  }
 
   return (
-    <Card className="p-3">
-      <div className="grid grid-cols-7 gap-1">
-        {days.map(({ off, d, items }) => {
-          const on = sel === off;
-          const risk = items.some(c => readiness(c).level === 'at-risk');
+    <div ref={cardRef}><Card className="overflow-hidden">
+      {/* Status filters: icon + count, short label */}
+      <div ref={tabsRef} role="tablist" className="grid divide-x divide-go-line border-b border-go-line" style={{ gridTemplateColumns: `repeat(${live.length}, minmax(0, 1fr))` }}>
+        {live.map(({ a, list }) => {
+          const st = STATUS_STYLE[a.id];
+          const Icon = st.icon;
+          const on = sel?.a.id === a.id;
           return (
-            <button key={off} onClick={() => { setSel(off); setMore(false); }} aria-pressed={on}
-              className={cx('rounded-2xl py-2 flex flex-col items-center transition',
-                on ? 'go-grad text-white go-glow' : risk ? 'bg-go-bad-soft' : 'hover:bg-go-raised')}>
-              <span className={cx('text-[10px] font-semibold uppercase', on ? 'text-white/80' : 'text-go-muted')}>{d.toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 2)}</span>
-              <span className={cx('text-[15px] font-bold tabular-nums mt-0.5', on ? 'text-white' : items.length ? 'text-go-ink' : 'text-go-faint')}>{d.getDate()}</span>
-              <span className="flex gap-0.5 h-1.5 mt-1">
-                {items.slice(0, 3).map(c => <span key={c.id} className={cx('w-1.5 h-1.5 rounded-full', on ? 'bg-white' : READINESS_DOT[readiness(c).level])} />)}
+            <button key={a.id} role="tab" aria-selected={on} aria-label={`${a.label}: ${list.length}`}
+              onClick={() => setSel(on ? null : a.id)}
+              className={cx('relative flex flex-col items-center gap-1 px-1 pt-3 pb-2.5 transition', on ? 'bg-go-raised' : 'active:scale-95', sel && !on && 'opacity-55')}>
+              <span className="flex items-center gap-1.5">
+                <Icon className={cx('w-[18px] h-[18px]', st.color)} />
+                <span className="text-[20px] font-bold tabular-nums leading-none text-go-ink">{list.length}</span>
               </span>
+              <span className={cx('text-[11px] whitespace-nowrap', on ? 'font-semibold text-go-ink' : 'font-medium text-go-muted')}>{st.short}</span>
+              {on && <span className={cx('absolute bottom-0 inset-x-3 h-0.5 rounded-full', st.bar)} />}
             </button>
           );
         })}
       </div>
-      <div className="mt-2 border-t border-go-line pt-1 -mx-1">
-        {(more ? day.items : day.items.slice(0, COLLAPSED)).map(c => <ApptRow key={c.id} c={c} />)}
-        {!day.items.length && <p className="text-[12.5px] text-go-muted text-center py-4">Nothing booked.</p>}
+
+      {/* Breakdown by delivery date */}
+      <div className="go-scroll overflow-y-auto overscroll-contain px-3 pb-2.5" style={{ maxHeight: listMax }}>
+        {groups.map(g => {
+          const past = !!g.iso && dayOffset(g.iso) < 0;
+          return (
+            <div key={g.key}>
+              {/* Date header sticks while its cases scroll under it */}
+              <p className="sticky top-0 z-[1] bg-go-surface pt-2.5 pb-0.5 flex items-center gap-2 px-1 text-[11px] font-bold uppercase tracking-[0.1em] text-go-muted">
+                <span>{g.iso ? fmtDate(g.iso) : 'No delivery date'}</span>
+                {g.iso && <span className={cx('normal-case tracking-normal font-semibold', past ? 'text-go-bad' : 'text-go-faint')}>{dayTag(g.iso, past)}</span>}
+              </p>
+              <div className="-mx-1">{g.items.map(r => <CaseRow key={r.c.id} c={r.c} status={r.status} />)}</div>
+            </div>
+          );
+        })}
       </div>
-      <ShowMore total={day.items.length} open={more} onToggle={() => setMore(m => !m)} />
-    </Card>
+    </Card></div>
   );
 }
 
-// Lab-stage groups — used by the Lab work board.
-export const PIPELINE: { id: string; label: string; match: (c: LabCase) => boolean; cls: string }[] = [
-  { id: 'ready', label: 'To send', match: c => c.stage === 'ready', cls: 'bg-go-warn' },
-  { id: 'transit', label: 'To lab', match: c => c.stage === 'dispatched', cls: 'bg-go-teal' },
-  { id: 'lab', label: 'At lab', match: c => c.stage === 'at-lab' || c.stage === 'production', cls: 'bg-go-violet' },
-  { id: 'back', label: 'Coming back', match: c => c.stage === 'shipped', cls: 'bg-go-brand' },
-  { id: 'in', label: 'In practice', match: c => c.stage === 'received', cls: 'bg-go-ok' },
-];
 
 // ─── Screen ─────────────────────────────────────────────────────────────────
 
@@ -225,7 +288,6 @@ export default function HomeScreen() {
   const unread = notices.filter(n => !n.read).length;
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const label = (t: string) => <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted px-1 mb-2">{t}</h2>;
 
   return (
     <Screen tabs>
@@ -247,12 +309,10 @@ export default function HomeScreen() {
         </div>
       </div>
 
-      <div className="px-4 mt-4"><StatusActions cases={cases} /></div>
-      <div className="px-4 mt-4"><TodayRail cases={cases} /></div>
-      <div className="px-4 mt-5">
-        {label('Next 7 days')}
-        <WeekAgenda cases={cases} />
-      </div>
+      <div className="px-4 mt-4"><StatusBoard cases={cases} /></div>
+      <div className="px-4 mt-5">{subhead('Also needs a look')}<MoreStatuses cases={cases} /></div>
+      <div className="px-4 mt-5">{subhead('Finance')}<FinanceStrip /></div>
+      <div className="px-4 mt-5 mb-2">{subhead('Latest comments')}<LatestComments cases={cases} /></div>
     </Screen>
   );
 }

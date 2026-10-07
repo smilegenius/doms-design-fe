@@ -3,18 +3,18 @@
 // default view is a schedule grouped by appointment day with one dense row
 // per case. "Board" is the lab-stage view for when you want the pipeline.
 import { useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   CalendarClock, CheckCircle2, ClipboardCheck, Clock, FileText, FlaskConical, Image as ImageIcon, Inbox, MessageSquare, PackageCheck,
-  Paperclip, Search, Send, Truck, X, Hammer, Building, Filter,
+  Paperclip, Pause, Search, Send, Truck, X, Hammer, Building, Filter,
 } from '../icons';
 import { ME, useGo, useScoped } from '../store';
+import { ReceiveSheet } from './Logistics';
 import {
-  ATTENTION, CLINICIANS, LABS, LabCase, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
+  ATTENTION, Attention, CLINICIANS, labStatusOf, LABS, LabCase, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
   patientById, practiceName, readiness, relDay, shortName, stageIndex,
 } from '../data';
 import { Btn, Card, Chips, EmptyState, IconTile, Pill, PickerField, READINESS_DOT, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, cx } from '../ui';
-import { PIPELINE } from './Home';
 
 // ─── Rows ───────────────────────────────────────────────────────────────────
 
@@ -25,7 +25,7 @@ function ScheduleRow({ c }: { c: LabCase }) {
   const a = c.appointment;
   const d = a ? new Date(a.at) : null;
   return (
-    <button onClick={() => navigate(`/go/work/${c.id}`)} className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-go-raised transition">
+    <button onClick={() => navigate(c.stage === 'draft' ? `/go/new/manual?draft=${c.id}` : `/go/work/${c.id}`)} className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-go-raised transition">
       <span className="w-11 flex-shrink-0 text-center">
         {d ? (
           <>
@@ -37,7 +37,7 @@ function ScheduleRow({ c }: { c: LabCase }) {
       <span className={cx('w-1 h-9 rounded-full flex-shrink-0', READINESS_DOT[r.level])} />
       <span className="flex-1 min-w-0">
         <span className="block text-[14px] font-semibold text-go-ink truncate">
-          {shortName(p.name)} <span className="font-normal text-go-muted">· {a ? a.kind : 'No appt'}</span>
+          {shortName(p.name)} <span className="font-normal text-go-muted">· {a ? a.kind : 'No appointment'}</span>
         </span>
         <span className="block text-[12px] text-go-muted truncate">{caseTitle(c)} · {labName(c.lab).replace(/ (Dental )?(Lab|Laboratory|Works)$/, '')}</span>
       </span>
@@ -49,24 +49,6 @@ function ScheduleRow({ c }: { c: LabCase }) {
   );
 }
 
-function BoardCard({ c }: { c: LabCase }) {
-  const navigate = useNavigate();
-  const r = readiness(c);
-  return (
-    <button onClick={() => navigate(`/go/work/${c.id}`)} className="w-full text-left p-3 rounded-2xl bg-go-surface border border-go-line go-card-shadow active:scale-[.99] transition">
-      <div className="flex items-center gap-2">
-        <span className={cx('w-2 h-2 rounded-full flex-shrink-0', READINESS_DOT[r.level])} />
-        <span className="flex-1 text-[13.5px] font-semibold text-go-ink truncate">{shortName(patientById(c.patientId).name)}</span>
-        <span className="text-[10.5px] font-mono text-go-faint">{c.id}</span>
-      </div>
-      <p className="text-[12px] text-go-ink2 mt-1 truncate">{caseTitle(c)}</p>
-      <div className="flex items-center justify-between mt-2 text-[11px]">
-        <span className="text-go-muted truncate">{labName(c.lab)}</span>
-        {c.appointment && <span className={cx('font-semibold flex-shrink-0 ml-2', r.level === 'at-risk' ? 'text-go-bad' : 'text-go-ink2')}>{c.appointment.kind} {fmtDate(c.appointment.at).replace(/^\w+ /, '')}</span>}
-      </div>
-    </button>
-  );
-}
 
 // ─── List ───────────────────────────────────────────────────────────────────
 
@@ -81,6 +63,7 @@ const R_FILTERS: { id: RFilter; label: string }[] = [
 ];
 
 const bucket = (c: LabCase) => {
+  if (c.stage === 'draft') return 'Drafts';
   if (!c.appointment) return c.stage === 'received' ? 'Done' : 'No appointment yet';
   const o = dayOffset(c.appointment.at);
   if (o < 0) return 'Done';
@@ -89,12 +72,11 @@ const bucket = (c: LabCase) => {
   if (o <= 7) return 'Next 7 days';
   return 'Later';
 };
-const BUCKETS = ['Today', 'Tomorrow', 'Next 7 days', 'Later', 'No appointment yet', 'Done'];
+const BUCKETS = ['Drafts', 'Today', 'Tomorrow', 'Next 7 days', 'Later', 'No appointment yet', 'Done'];
 
 export function LabWorkScreen() {
   const { cases } = useScoped();
   const [params, setParams] = useSearchParams();
-  const view = params.get('view') === 'board' ? 'board' : 'schedule';
   const day = params.get('day') ? Number(params.get('day')) : null;
   // Status filter from the Home tiles: ready | arriving | questions | overdue
   const status = ATTENTION.find(a => a.id === params.get('f'))?.id ?? null;
@@ -114,6 +96,11 @@ export function LabWorkScreen() {
       && (!status || matchesAttention(c, status))
       && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF);
   }), [cases, q, day, status, dentist, labF]);
+  const baseNoStatus = useMemo(() => cases.filter(c => {
+    const hay = `${c.id} ${patientById(c.patientId).name} ${labName(c.lab)} ${allItems(c).map(it => `${it.service} ${it.teeth.join(' ')}`).join(' ')}`.toLowerCase();
+    return hay.includes(q.toLowerCase()) && (day === null || (c.appointment && dayOffset(c.appointment.at) === day))
+      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF);
+  }), [cases, q, day, dentist, labF]);
   const shown = base.filter(c => rf === 'all' || readiness(c).level === rf);
   const setParam = (k: string, v: string | null) => {
     const n = new URLSearchParams(params);
@@ -138,12 +125,9 @@ export function LabWorkScreen() {
           </button>
           </div>
         </div>
-        {searching && <SearchBox value={q} onChange={setQ} placeholder="Patient, order ID, lab or tooth" />}
-        <Segmented value={view} onChange={v => setParam('view', v === 'board' ? 'board' : null)}
-          options={[{ value: 'schedule', label: 'Schedule' }, { value: 'board', label: 'Board' }]} />
+        {searching && <SearchBox value={q} onChange={setQ} placeholder="Patient, case ID, lab or tooth" />}
       </div>
     }>
-      {view === 'schedule' ? (
         <>
           <div className="flex gap-2 overflow-x-auto go-scroll px-4 pb-1">
             {dentist && (
@@ -156,25 +140,19 @@ export function LabWorkScreen() {
                 {labName(labF)}<X className="w-3.5 h-3.5" />
               </button>
             )}
-            {status && (
-              <button onClick={() => setParam('f', null)} className="h-8 pl-3 pr-2 rounded-full text-[12.5px] font-semibold bg-go-brand text-white inline-flex items-center gap-1 flex-shrink-0">
-                {ATTENTION.find(a => a.id === status)!.label.replace(' lab work', '')}<X className="w-3.5 h-3.5" />
-              </button>
-            )}
             {day !== null && (
               <button onClick={() => setParam('day', null)} className="h-8 pl-3 pr-2 rounded-full text-[12.5px] font-semibold bg-go-brand text-white inline-flex items-center gap-1 flex-shrink-0">
                 {fmtDate(new Date(Date.now() + day * 864e5).toISOString())}<X className="w-3.5 h-3.5" />
               </button>
             )}
-            {R_FILTERS.map(f => {
-              const n = f.id === 'all' ? base.length : base.filter(c => readiness(c).level === f.id).length;
-              if (f.id !== 'all' && !n) return null;
-              const on = rf === f.id;
+            {/* Status chips — same four statuses as the Home tiles */}
+            {[{ id: null as Attention | null, label: 'All' }, ...ATTENTION.filter(x => x.home || x.id === status).map(x => ({ id: x.id as Attention | null, label: x.short }))].map(f => {
+              const n = f.id ? baseNoStatus.filter(c => matchesAttention(c, f.id!)).length : baseNoStatus.length;
+              const on = status === f.id;
               return (
-                <button key={f.id} onClick={() => setParam('r', f.id === 'all' ? null : f.id)}
-                  className={cx('h-8 pl-2.5 pr-2 rounded-full text-[12.5px] font-medium border whitespace-nowrap flex-shrink-0 inline-flex items-center gap-1.5 transition',
+                <button key={f.id ?? 'all'} onClick={() => setParam('f', f.id)}
+                  className={cx('h-8 pl-3 pr-2 rounded-full text-[12.5px] font-medium border whitespace-nowrap flex-shrink-0 inline-flex items-center gap-1.5 transition',
                     on ? 'bg-go-ink text-go-bg border-go-ink' : 'bg-go-surface text-go-ink2 border-go-line')}>
-                  {f.id !== 'all' && <span className={cx('w-2 h-2 rounded-full', READINESS_DOT[f.id])} />}
                   {f.label}<span className={cx('text-[11px] tabular-nums', on ? 'opacity-70' : 'text-go-faint')}>{n}</span>
                 </button>
               );
@@ -192,32 +170,11 @@ export function LabWorkScreen() {
                 </section>
               );
             })}
-            {!shown.length && <EmptyState icon={<Search className="w-7 h-7" />} title="No matching lab work" body="Try a patient surname, an order ID like SG-28491, or a tooth like UR6." />}
+            {!shown.length && <EmptyState icon={<Search className="w-7 h-7" />} title="No matching lab work" body="Try a patient surname, a case ID like SG-28491, or a tooth like UR6." />}
           </div>
         </>
-      ) : (
-        <div className="flex gap-3 overflow-x-auto go-scroll snap-x snap-mandatory px-4 pb-2">
-          {PIPELINE.map(g => {
-            const items = base.filter(g.match).sort((a, b) =>
-              READINESS_ORDER.indexOf(readiness(a).level) - READINESS_ORDER.indexOf(readiness(b).level));
-            return (
-              <section key={g.id} className="snap-start flex-shrink-0 w-[78%] rounded-[22px] bg-go-raised/70 border border-go-line p-2.5">
-                <div className="flex items-center gap-2 px-1.5 pb-2.5 pt-0.5">
-                  <span className={cx('w-2 h-2 rounded-full', g.cls)} />
-                  <span className="text-[13px] font-semibold text-go-ink flex-1">{g.label}</span>
-                  <span className="text-[12px] font-semibold text-go-muted tabular-nums">{items.length}</span>
-                </div>
-                <div className="space-y-2">
-                  {items.map(c => <BoardCard key={c.id} c={c} />)}
-                  {!items.length && <p className="text-[12px] text-go-faint text-center py-6">Empty</p>}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      )}
 
-      <Sheet open={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filter lab work"
+      <Sheet open={filtersOpen} onClose={() => setFiltersOpen(false)} label="Lab work filters" title={<span className="inline-flex items-center gap-2"><Filter className="w-5 h-5 text-go-brand" />Lab work</span>}
         footer={
           <div className="flex gap-2">
             <Btn variant="secondary" onClick={() => { setParam('dentist', null); setParam('lab', null); }} disabled={!nFilters}>Clear</Btn>
@@ -226,11 +183,11 @@ export function LabWorkScreen() {
         }>
         <div className="space-y-4 pb-2">
           <PickerField label="Dentist" searchable value={dentist ?? 'all'} onChange={v => setParam('dentist', v === 'all' ? null : v)}
-            options={[{ value: 'all', label: 'All dentists', sub: `${cases.length} lab work` },
-              ...CLINICIANS.map(c => ({ value: c.id, label: c.name, sub: `${cases.filter(x => x.clinician === c.id).length} lab work` }))]} />
+            options={[{ value: 'all', label: 'All dentists', sub: `${cases.length} case${cases.length === 1 ? '' : 's'}` },
+              ...CLINICIANS.map(c => ({ value: c.id, label: c.name, sub: `${cases.filter(x => x.clinician === c.id).length} cases` }))]} />
           <PickerField label="Lab" searchable value={labF ?? 'all'} onChange={v => setParam('lab', v === 'all' ? null : v)}
-            options={[{ value: 'all', label: 'All labs', sub: `${cases.length} lab work` },
-              ...LABS.map(l => ({ value: l.id, label: l.name, sub: `${l.town} · ${cases.filter(x => x.lab === l.id).length} lab work` }))]} />
+            options={[{ value: 'all', label: 'All labs', sub: `${cases.length} case${cases.length === 1 ? '' : 's'}` },
+              ...LABS.map(l => ({ value: l.id, label: l.name, sub: `${l.town} · ${cases.filter(x => x.lab === l.id).length} cases` }))]} />
         </div>
       </Sheet>
     </Screen>
@@ -240,6 +197,7 @@ export function LabWorkScreen() {
 // ─── Detail ─────────────────────────────────────────────────────────────────
 
 const STEP_ICON: Record<Stage, React.ReactNode> = {
+  draft: <ClipboardCheck className="w-4 h-4" />,
   ready: <ClipboardCheck className="w-4 h-4" />,
   dispatched: <Truck className="w-4 h-4" />,
   'at-lab': <Building className="w-4 h-4" />,
@@ -278,7 +236,7 @@ function Messages({ c }: { c: LabCase }) {
       messages: [...x.messages, { from: 'practice', author: ME.name, text, at: nowIso() }],
       events: [...x.events, { stage: 'note', at: nowIso(), by: ME.name, text: 'Replied to the lab' }],
     }));
-    toast(`Reply sent to ${labName(c.lab)}`);
+    toast(`Comment sent to ${labName(c.lab)}`);
     setText('');
   };
   return (
@@ -312,7 +270,7 @@ function ChaseSheet({ c, open, onClose }: { c: LabCase; open: boolean; onClose: 
   const p = patientById(c.patientId);
   const appt = c.appointment ? ` The patient is booked for a ${c.appointment.kind.toLowerCase()} on ${fmtDate(c.appointment.at)}.` : '';
   const [text, setText] = useState(
-    `Hi ${labName(c.lab)}, ${c.id} (${shortName(p.name)}, ${c.service.toLowerCase()} ${c.teeth.join(', ')}) was due back ${fmtDate(c.returnBy)}.${appt} Can you confirm when it will ship?`,
+    `Hi ${labName(c.lab)}, ${c.id} (${shortName(p.name)}, ${c.service.toLowerCase()} ${c.teeth.join(', ')}) was due for delivery on ${fmtDate(c.returnBy)}.${appt} Please could you let us know when it will be sent?`,
   );
   const send = () => {
     updateCase(c.id, x => ({
@@ -320,12 +278,12 @@ function ChaseSheet({ c, open, onClose }: { c: LabCase; open: boolean; onClose: 
       messages: [...x.messages, { from: 'practice', author: ME.name, text, at: nowIso() }],
       events: [...x.events, { stage: 'note', at: nowIso(), by: ME.name, text: 'Chased the lab' }],
     }));
-    toast(`Chase sent to ${labName(c.lab)}`);
+    toast(`Chaser sent to ${labName(c.lab)}`);
     onClose();
   };
   return (
-    <Sheet open={open} onClose={onClose} title="Chase the lab" sub="Sent through Smile Genius. The lab replies in the case comments."
-      footer={<Btn block disabled={!text.trim()} onClick={send} icon={<Send className="w-[18px] h-[18px]" />}>Send chase</Btn>}>
+    <Sheet open={open} onClose={onClose} title="Chase the lab" sub="Sent via Smile Genius. The lab will reply in the case comments."
+      footer={<Btn block disabled={!text.trim()} onClick={send} icon={<Send className="w-[18px] h-[18px]" />}>Send chaser</Btn>}>
       <TextArea rows={6} value={text} onChange={e => setText(e.target.value)} />
     </Sheet>
   );
@@ -337,14 +295,16 @@ export function CaseDetailScreen() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const { cases } = useGo();
+  const { cases, updateCase, toast } = useGo();
   const c = cases.find(x => x.id === id);
   const tab = (params.get('tab') as Tab) || 'details';
   const setTab = (t: Tab) => setParams(t === 'details' ? {} : { tab: t }, { replace: true });
   const [chase, setChase] = useState(false);
+  const [receiveOpen, setReceiveOpen] = useState(params.get('receive') === '1');
   if (!c) {
-    return <Screen header={<TopBar back fallback="/go/work" title="Lab work" />}><EmptyState icon={<Search className="w-7 h-7" />} title="Not found" body="This lab work doesn’t exist in the demo." /></Screen>;
+    return <Screen header={<TopBar back fallback="/go/work" title="Lab work" />}><EmptyState icon={<Search className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case in the demo data." /></Screen>;
   }
+  if (c.stage === 'draft') return <Navigate to={`/go/new/manual?draft=${c.id}`} replace />;
   const p = patientById(c.patientId);
   const r = readiness(c);
   const a = nextAction(c);
@@ -352,30 +312,36 @@ export function CaseDetailScreen() {
 
   // One-line next step with its action — reads like a to-do, not a card.
   const step: { icon: React.ReactNode; tone: Tone; title: string; body: string; cta?: { label: string; run: () => void } } = {
-    dispatch: { icon: <Truck className="w-5 h-5" />, tone: 'warn' as Tone, title: 'Send it to the lab', body: 'Pack scans or impressions, bite and signed Rx.', cta: { label: 'Dispatch', run: () => navigate(`/go/work/${c.id}/dispatch`) } },
-    reply: { icon: <MessageSquare className="w-5 h-5" />, tone: 'pink' as Tone, title: `${labName(c.lab)} is waiting on you`, body: 'The case is paused until you reply.', cta: { label: 'Reply', run: () => setTab('messages') } },
-    'check-in': { icon: <PackageCheck className="w-5 h-5" />, tone: 'brand' as Tone, title: 'Check it in when it lands', body: shipped ? `Shipped ${fmtDateTime(shipped.at)}${shipped.text ? ` · ${shipped.text}` : ''}` : 'On its way back.', cta: { label: 'Check in', run: () => navigate(`/go/work/${c.id}/receive`) } },
-    chase: { icon: <Clock className="w-5 h-5" />, tone: 'bad' as Tone, title: 'Chase the lab', body: c.appointment ? 'Or move the patient’s appointment.' : `Was due ${fmtDate(c.returnBy)}.`, cta: { label: 'Chase', run: () => setChase(true) } },
-    wait: { icon: <FlaskConical className="w-5 h-5" />, tone: 'violet' as Tone, title: c.chasedAt ? `Chased ${relDay(c.chasedAt).toLowerCase()}` : 'Nothing to do', body: c.chasedAt ? 'You’ll be notified when the lab replies.' : `Due ${fmtDate(c.returnBy)}.` },
-    done: { icon: <CheckCircle2 className="w-5 h-5" />, tone: 'ok' as Tone, title: c.problem ? 'Problem reported' : 'Ready for the patient', body: c.problem ?? (c.receipt ? `Stored in ${c.receipt.storedIn}.` : 'Checked in.') },
+    finish: { icon: <ClipboardCheck className="w-5 h-5" />, tone: 'neutral' as Tone, title: 'Draft not submitted', body: 'Finish the details and create the case.', cta: { label: 'Finish case', run: () => navigate(`/go/new/manual?draft=${c.id}`) } },
+    // Only the lab can put a case on or off hold. The practice answers in Comments when the lab is waiting on it.
+    'on-hold': c.onHold?.side === 'Practice'
+      ? { icon: <Pause className="w-5 h-5" />, tone: 'warn' as Tone, title: 'On hold · lab is waiting on you', body: c.onHold.reason, cta: { label: 'Reply', run: () => setTab('messages') } }
+      : { icon: <Pause className="w-5 h-5" />, tone: 'warn' as Tone, title: 'On hold by the lab', body: `${c.onHold?.reason ?? ''} · Only the lab can change this.` },
+    dispatch: { icon: <Truck className="w-5 h-5" />, tone: 'warn' as Tone, title: 'Send it to the lab', body: 'Include impressions, bite and the signed lab form.', cta: { label: 'Dispatch', run: () => navigate(`/go/work/${c.id}/dispatch`) } },
+    reply: { icon: <MessageSquare className="w-5 h-5" />, tone: 'pink' as Tone, title: `${labName(c.lab)} needs more information`, body: 'The case is paused until you reply.', cta: { label: 'Reply', run: () => setTab('messages') } },
+    'check-in': { icon: <PackageCheck className="w-5 h-5" />, tone: 'brand' as Tone, title: 'Arriving from the lab', body: shipped ? `Shipped ${fmtDate(shipped.at)}${shipped.text ? ` · ${shipped.text}` : ''}` : 'On its way back.', cta: { label: 'Mark as received', run: () => setReceiveOpen(true) } },
+    chase: { icon: <Clock className="w-5 h-5" />, tone: 'bad' as Tone, title: 'Chase the lab', body: c.appointment ? 'Or move the patient’s appointment.' : `Delivery date was ${fmtDate(c.returnBy)}.`, cta: { label: 'Chase', run: () => setChase(true) } },
+    wait: { icon: <FlaskConical className="w-5 h-5" />, tone: 'violet' as Tone, title: c.chasedAt ? `Chased ${relDay(c.chasedAt).toLowerCase()}` : 'Nothing to do', body: c.chasedAt ? 'We’ll let you know when the lab replies.' : `Delivery date ${fmtDate(c.returnBy)}.` },
+    done: { icon: <CheckCircle2 className="w-5 h-5" />, tone: 'ok' as Tone, title: c.problem ? 'Problem reported' : 'Ready for the patient', body: c.problem ?? (c.receipt && c.receipt.storedIn !== 'Not recorded' ? `Stored in ${c.receipt.storedIn}.` : 'Received at the practice.') },
   }[a];
 
   const facts: [string, React.ReactNode][] = [
-    ['Laboratory', labName(c.lab)],
-    ['Clinician', clinicianName(c.clinician)],
+    ['Lab', labName(c.lab)],
+    ['Lab status', labStatusOf(c) ?? 'Not received yet'],
+    ['Dentist', clinicianName(c.clinician)],
     ['Material', c.material],
     ['Shade', [c.shade, c.stumpShade && `stump ${c.stumpShade}`].filter(Boolean).join(' · ') || '—'],
     ['Delivery date', fmtDate(c.returnBy)],
-    ['Funding', c.funding],
+    ['Order type', c.funding],
     ['Practice', practiceName(c.practice)],
-    ['Created by', c.source === 'photo' ? `${c.createdBy} · photo` : c.createdBy],
+    ['Created by', c.source === 'photo' ? `${c.createdBy} · from photo` : c.createdBy],
   ];
 
   return (
     <Screen header={<TopBar back fallback="/go/work" title={p.name} sub={`${c.id} · DOB ${p.dob}`} />}
-      // Sticky next-step bar: Dispatch / Reply / Check in / Chase stay in thumb reach.
+      // Sticky next-step bar: Dispatch / Reply / Mark as received / Chase stay in thumb reach.
       // Hidden on the Comments tab while replying — the composer there is the action.
-      footer={step.cta && !(a === 'reply' && tab === 'messages') ? (
+      footer={step.cta && !((a === 'reply' || a === 'on-hold') && tab === 'messages') ? (
         <div className="flex items-center gap-3">
           <IconTile icon={step.icon} tone={step.tone} size="sm" />
           <div className="flex-1 min-w-0">
@@ -429,7 +395,7 @@ export function CaseDetailScreen() {
       {/* Tabs */}
       <div className="px-4 mt-4">
         <Segmented value={tab} onChange={setTab} options={[
-          { value: 'details', label: 'Rx' },
+          { value: 'details', label: 'Details' },
           { value: 'activity', label: 'Activity' },
           { value: 'messages', label: 'Comments', count: c.messages.length || undefined },
           { value: 'files', label: 'Files', count: c.attachments.length },
@@ -466,9 +432,9 @@ export function CaseDetailScreen() {
             </div>
             {(c.dispatch || c.receipt) && (
               <div className="rounded-2xl bg-go-surface border border-go-line px-3 py-2.5 mt-2">
-                <p className="text-[10.5px] uppercase tracking-wider font-semibold text-go-faint">Logistics</p>
-                {c.dispatch && <p className="text-[13px] text-go-ink mt-0.5">Out: {c.dispatch.courier}{c.dispatch.tracking ? ` · ${c.dispatch.tracking}` : ''} · {c.dispatch.bags} bag{c.dispatch.bags > 1 ? 's' : ''}</p>}
-                {c.receipt && <p className="text-[13px] text-go-ink mt-0.5">In: stored in {c.receipt.storedIn}{c.receipt.comment ? ` · ${c.receipt.comment}` : ''}</p>}
+                <p className="text-[10.5px] uppercase tracking-wider font-semibold text-go-faint">Courier and storage</p>
+                {c.dispatch && <p className="text-[13px] text-go-ink mt-0.5">Sent: {c.dispatch.courier}{c.dispatch.tracking ? ` · ${c.dispatch.tracking}` : ''} · {c.dispatch.bags} bag{c.dispatch.bags > 1 ? 's' : ''}</p>}
+                {c.receipt && <p className="text-[13px] text-go-ink mt-0.5">Received: stored in {c.receipt.storedIn}{c.receipt.comment ? ` · ${c.receipt.comment}` : ''}</p>}
               </div>
             )}
           </>
@@ -511,6 +477,7 @@ export function CaseDetailScreen() {
       </div>
 
       <ChaseSheet c={c} open={chase} onClose={() => setChase(false)} />
+      <ReceiveSheet c={c} open={receiveOpen} onClose={() => setReceiveOpen(false)} />
     </Screen>
   );
 }

@@ -36,12 +36,11 @@ function ThemeCard({ v, label, icon }: { v: ThemePref; label: string; icon: Reac
 export function AccountScreen() {
   const navigate = useNavigate();
   const { signOut, cases } = useGo();
-  const [prefs, setPrefs] = useState({ questions: true, arrivals: true, invoices: true, overdue: true });
+  const [prefs, setPrefs] = useState({ questions: true, arrivals: true, overdue: true });
   const rows: { k: keyof typeof prefs; label: string; sub: string }[] = [
-    { k: 'questions', label: 'Lab questions', sub: 'When a lab needs your reply' },
-    { k: 'arrivals', label: 'Arrivals', sub: 'When work ships back to the practice' },
-    { k: 'overdue', label: 'Overdue work', sub: 'Daily at 8:00 if anything is late' },
-    { k: 'invoices', label: 'Approvals', sub: 'New invoices and statements' },
+    { k: 'questions', label: 'Additional information required', sub: 'When a lab needs more details before it can carry on' },
+    { k: 'arrivals', label: 'Cases on their way back', sub: 'When a lab sends a case back to your practice' },
+    { k: 'overdue', label: 'Overdue cases', sub: 'A morning reminder if a case has missed its delivery date' },
   ];
   return (
     <Screen tabs header={<TopBar large title="Account" />}>
@@ -74,7 +73,7 @@ export function AccountScreen() {
               <IconTile icon={<Building2 className="w-5 h-5" />} tone="brand" size="sm" />
               <div className="flex-1 min-w-0">
                 <p className="text-[14px] font-semibold text-go-ink">{p.name}</p>
-                <p className="text-[12px] text-go-muted">{p.area} · {cases.filter(c => c.practice === p.id).length} lab work</p>
+                <p className="text-[12px] text-go-muted">{p.area} · {cases.filter(c => c.practice === p.id).length} cases</p>
               </div>
             </div>
           ))}
@@ -89,13 +88,6 @@ export function AccountScreen() {
               <Toggle on={prefs[r.k]} onChange={v => setPrefs(s => ({ ...s, [r.k]: v }))} label={r.label} />
             </div>
           ))}
-        </Card>
-      </Section>
-
-      <Section title="Account security">
-        <Card className="p-4 flex items-center gap-3">
-          <IconTile icon={<ShieldCheck className="w-5 h-5" />} tone="ok" size="sm" />
-          <div className="flex-1"><p className="text-[14px] font-semibold text-go-ink">Managed by Smile Genius</p><p className="text-[12px] text-go-muted">Password, two-step sign-in and devices are managed on the web.</p></div>
         </Card>
       </Section>
 

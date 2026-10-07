@@ -1,31 +1,45 @@
 // ─── Create manually ─────────────────────────────────────────────────────────
-// Mirrors the web Quick create-case form, laid out for a phone:
+// Mirrors the web create-case form, laid out for a phone:
 //   1 Patient & lab — search existing or create on the spot (patient, offline lab)
-//   2 Services      — one or more items, each with teeth / material / shade /
-//                     category extra (same catalogue + extras as the web form)
+//   2 Services      — one or more items. Each service asks exactly what the web
+//                     form asks for its category (material/shade incl. per-tooth,
+//                     implant system, retainer/aligner/occlusion, denture stage,
+//                     appliance option, custom service name)
 //   3 Delivery & notes — order type, delivery date, appointment, source, notes, files
 //   4 Review
+// A case can be saved as a draft at any point and reopened filled in.
 import { useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { ReadFlag, ReadHint, ReadMode, ReadSource, SourceCard } from './ReadSource';
 import {
-  Check, CheckCircle2, ChevronRight, ImagePlus, Paperclip, PlusCircle, Search, Star, Trash, Truck, UserPlus, X,
+  Check, CheckCircle2, ChevronRight, Eye, ImagePlus, Paperclip, PlusCircle, Search, Star, Trash, Truck, UserPlus, X,
 } from '../icons';
 import { ME, useGo } from '../store';
 import {
-  CASE_SOURCES, CLINICIANS, LABS, LabCase, MATERIALS, PATIENTS, PRACTICES, PracticeId, RxItem, SERVICE_CATEGORIES, SERVICE_EXTRAS, SHADES,
-  addLab, addPatient, allItems, clinicianName, fmtDate, labName, needsMaterial, nowIso, patientById, practiceName,
+  CASE_SOURCES, CLINICIANS, DetailField, IMPLANT_BRAND_CATALOG, LABS, LabCase, MATERIALS, OCCLUSION_SIDES, OTHER_SPECIFY, PATIENTS,
+  PRACTICES, PracticeId, RxItem, SERVICE_CATEGORIES, SHADES, addLab, addPatient, allItems, clinicianName, detailFields, fmtDate,
+  freeTextMaterial, labName, needsMaterial, nowIso, patientById, practiceName, serviceLabel,
 } from '../data';
-import { Btn, Card, Chips, GoMark, Input, KV, Label, Pill, PickerField, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, cx } from '../ui';
+import { Btn, Card, Chips, GoMark, Input, KV, Label, Pill, PickerField, Screen, SearchBox, Segmented, Sheet, TextArea, Toggle, TopBar, cx } from '../ui';
 
 // ─── Shared form model (also used by photo / audio capture) ─────────────────
 
-export interface FormItem { uid: string; service: string; teeth: string[]; material: string | null; shade: string | null; extra: string[] }
+export interface FormItem {
+  uid: string;
+  itemId: string;                 // web catalogue id, e.g. 'su-crown', 'br-pontic'
+  teeth: string[];
+  sameForAll: boolean;            // web: "Same material & shade for all teeth"
+  material: string | null;
+  shade: string | null;
+  perTooth: Record<string, { material?: string | null; shade?: string | null }>;
+  details: Record<string, string | string[]>;
+}
 export interface CaseForm {
   practice: PracticeId | null;
   clinician: string | null;
   patientId: string | null;
   lab: string | null;
-  funding: 'NHS' | 'Private';
+  funding: 'NHS' | 'Private' | null;   // null = not set yet (e.g. not heard in a voice note)
   returnBy: string;           // Delivery date (date only)
   apptDate: string;           // Patient appointment (date only, optional)
   apptKind: 'Fit' | 'Try-in' | 'Issue';
@@ -37,33 +51,84 @@ export interface CaseForm {
 
 const plusDays = (n: number) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
 let uidSeq = 0;
-export const newItem = (service: string, patch: Partial<FormItem> = {}): FormItem =>
-  ({ uid: `it-${++uidSeq}`, service, teeth: [], material: null, shade: null, extra: [], ...patch });
+export const newItem = (itemId: string, patch: Partial<FormItem> = {}): FormItem =>
+  ({ uid: `it-${Date.now().toString(36)}-${++uidSeq}`, itemId, teeth: [], sameForAll: true, material: null, shade: null, perTooth: {}, details: {}, ...patch });
 
 export const emptyForm = (): CaseForm => ({
   practice: 'cds', clinician: 'reed', patientId: null, lab: null, funding: 'NHS', returnBy: plusDays(14),
   apptDate: '', apptKind: 'Fit', caseSource: null, instructions: '', attachments: [], items: [],
 });
 
-export const itemComplete = (it: FormItem) =>
-  !!it.teeth.length && (!needsMaterial(it.service) || (!!it.material && !!it.shade)) && (!SERVICE_EXTRAS[it.service] || !!it.extra.length);
-const extraText = (it: FormItem) => (it.extra.length && SERVICE_EXTRAS[it.service] ? `${SERVICE_EXTRAS[it.service].label}: ${it.extra.join(', ')}` : undefined);
-export const itemLine = (it: { material?: string | null; shade?: string | null; extra?: string }) =>
-  [it.material, it.shade && `shade ${it.shade}`, it.extra].filter(Boolean).join(' · ');
+const filled = (v: unknown) => (Array.isArray(v) ? v.length > 0 : typeof v === 'string' ? v.trim().length > 0 : v != null);
+/** What's still needed for this service — same completeness rules as the web form. */
+export function itemMissing(it: FormItem): string[] {
+  const miss: string[] = [];
+  if (!it.teeth.length) miss.push('teeth');
+  if (needsMaterial(it.itemId)) {
+    if (it.sameForAll) {
+      if (!filled(it.material)) miss.push('material');
+      if (!filled(it.shade)) miss.push('shade');
+    } else if (it.teeth.some(t => !filled(it.perTooth[t]?.material ?? it.material) || !filled(it.perTooth[t]?.shade ?? it.shade))) {
+      miss.push('material and shade for each tooth');
+    }
+  }
+  for (const f of detailFields(it.itemId)) if (f.required && !filled(it.details[f.key])) miss.push(f.label.toLowerCase());
+  return miss;
+}
+export const itemComplete = (it: FormItem) => itemMissing(it).length === 0;
+/** Display name; "Other" uses the typed service name. */
+export const itemName = (it: FormItem) =>
+  (it.itemId === 'ot-other' && typeof it.details.customServiceName === 'string' && it.details.customServiceName.trim()) || serviceLabel(it.itemId);
+/** Short summary like the web chip: shade · material · extras. */
+export function itemSummary(it: FormItem): string {
+  const parts: string[] = [];
+  if (needsMaterial(it.itemId)) {
+    if (it.sameForAll) { if (it.shade) parts.push(it.shade); if (it.material) parts.push(it.material); }
+    else parts.push('Per-tooth material and shade');
+  }
+  for (const f of detailFields(it.itemId)) {
+    const v = it.details[f.key];
+    if (f.kind === 'textarea' || f.key === 'customServiceName' || !filled(v)) continue;
+    parts.push(Array.isArray(v) ? v.join(', ') : f.kind === 'occlusion' ? `${f.label} ${v}` : String(v));
+  }
+  return parts.join(' · ');
+}
 
 export function buildCase(f: CaseForm, source: LabCase['source']): LabCase {
-  const ret = new Date(f.returnBy); ret.setHours(12, 0, 0, 0);
-  const toRx = (it: FormItem): RxItem => ({ service: it.service, teeth: it.teeth, material: it.material ?? '', shade: it.shade ?? undefined, extra: extraText(it) });
-  const [first, ...rest] = f.items.map(toRx);
+  const ret = f.returnBy ? new Date(`${f.returnBy}T12:00`).toISOString() : '';
+  const toRx = (it: FormItem): RxItem => ({
+    service: itemName(it), teeth: it.teeth,
+    material: needsMaterial(it.itemId) ? (it.sameForAll ? it.material ?? '' : 'Per tooth') : '',
+    shade: needsMaterial(it.itemId) && it.sameForAll ? it.shade ?? undefined : undefined,
+    extra: detailFields(it.itemId).filter(d => d.kind !== 'textarea' && d.key !== 'customServiceName' && filled(it.details[d.key]))
+      .map(d => `${d.label}: ${([] as string[]).concat(it.details[d.key] as string | string[]).join(', ')}`).join(' · ') || undefined,
+  });
+  // Services are optional — a case can go with just patient, dentist and lab
+  const [first = { service: 'Lab work', teeth: [], material: '' } as RxItem, ...rest] = f.items.map(toRx);
   return {
     id: `SG-${28510 + Math.floor(Math.random() * 400)}`,
     patientId: f.patientId!, practice: f.practice!, lab: f.lab!, clinician: f.clinician!, createdBy: ME.name,
     service: first.service, teeth: first.teeth, material: first.material, shade: first.shade, extra: first.extra,
     items: rest.length ? rest : undefined,
-    funding: f.funding, instructions: f.instructions || 'No extra instructions.', returnBy: ret.toISOString(), stage: 'ready',
+    funding: f.funding ?? 'NHS', instructions: f.instructions || 'No extra instructions.', returnBy: ret, stage: 'ready',
     attachments: f.attachments, source, caseSource: f.caseSource ?? undefined,
     events: [{ stage: 'authorised', at: nowIso(), by: clinicianName(f.clinician!) }], messages: [],
     appointment: f.apptDate ? { at: new Date(`${f.apptDate}T09:00`).toISOString(), kind: f.apptKind, room: 'Surgery 1' } : undefined,
+  };
+}
+
+/** A saved-but-not-submitted case: summary fields for the list + the full form to reopen. */
+export function buildDraft(f: CaseForm, id?: string): LabCase {
+  const first = f.items[0];
+  return {
+    id: id ?? `SG-D${1100 + Math.floor(Math.random() * 800)}`,
+    patientId: f.patientId!, practice: f.practice ?? 'cds', lab: f.lab ?? '', clinician: f.clinician ?? '', createdBy: ME.name,
+    service: first ? itemName(first) : 'New case', teeth: first?.teeth ?? [], material: first?.material ?? '',
+    items: f.items.slice(1).map(it => ({ service: itemName(it), teeth: it.teeth, material: it.material ?? '' })),
+    funding: f.funding ?? 'NHS', instructions: f.instructions, returnBy: f.returnBy ? new Date(`${f.returnBy}T12:00`).toISOString() : '',
+    stage: 'draft', attachments: f.attachments, events: [], messages: [], source: 'manual',
+    appointment: f.apptDate ? { at: new Date(`${f.apptDate}T09:00`).toISOString(), kind: f.apptKind, room: 'Surgery 1' } : undefined,
+    draftForm: f,
   };
 }
 
@@ -135,19 +200,37 @@ export function PatientPicker({ value, onChange, invalid }: { value: string | nu
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [creating, setCreating] = useState(false);
-  const [np, setNp] = useState({ name: '', id: '', dob: '', phone: '', email: '', gender: '' });
+  // Editing the details of a patient added on the spot (web: "+ Add additional details")
+  const [editId, setEditId] = useState<string | null>(null);
+  const [viewing, setViewing] = useState(false);
+  const blank = { name: '', id: '', dob: '', phone: '', email: '', gender: '' };
+  const [np, setNp] = useState(blank);
   const [, force] = useState(0);
   const p = value ? patientById(value) : null;
   // Same as the web: match on name or patient ID
   const hits = PATIENTS.filter(x => `${x.name} ${x.id}`.toLowerCase().includes(q.trim().toLowerCase()));
   const exact = PATIENTS.some(x => x.name.toLowerCase() === q.trim().toLowerCase());
-  const close = () => { setOpen(false); setCreating(false); setQ(''); };
-  const startCreate = () => { setNp({ name: q.trim(), id: '', dob: '', phone: '', email: '', gender: '' }); setCreating(true); };
-  const create = () => {
-    const dob = np.dob ? new Date(np.dob).toLocaleDateString('en-GB') : '—';
-    const id = addPatient({ name: np.name.trim(), id: np.id.trim() || undefined, dob, phone: np.phone || undefined, email: np.email || undefined, gender: np.gender || undefined });
+  const close = () => { setOpen(false); setCreating(false); setEditId(null); setQ(''); };
+  const startCreate = () => { setNp({ ...blank, name: q.trim() }); setCreating(true); };
+  const ukDate = (iso: string) => (iso ? new Date(iso).toLocaleDateString('en-GB') : '—');
+  const isoDate = (uk: string) => { const [d, m, y] = uk.split('/'); return y ? `${y}-${m}-${d}` : ''; };
+  const editDetails = () => {
+    if (!p) return;
+    setNp({ name: p.name, id: p.id, dob: isoDate(p.dob), phone: (p.phone ?? '').replace(/^\+44\s*/, ''), email: p.email ?? '', gender: p.gender ?? '' });
+    setEditId(p.id); setCreating(true); setOpen(true);
+  };
+  const save = () => {
+    const details = { name: np.name.trim(), dob: ukDate(np.dob), phone: np.phone ? `+44 ${np.phone.replace(/^\+44\s*/, '')}` : undefined, email: np.email || undefined, gender: np.gender || undefined };
+    if (editId) {
+      const rec = PATIENTS.find(x => x.id === editId);
+      if (rec) Object.assign(rec, details);
+      force(n => n + 1); close(); return;
+    }
+    const id = addPatient({ ...details, id: np.id.trim() || undefined });
     onChange(id); force(n => n + 1); close();
   };
+  const set = (k: keyof typeof np) => (e: React.ChangeEvent<HTMLInputElement>) => setNp(s => ({ ...s, [k]: e.target.value }));
+  const extras = p?.isNew ? [p.dob !== '—' && `DOB ${p.dob}`, p.gender, p.phone, p.email].filter(Boolean) as string[] : [];
 
   return (
     <div>
@@ -160,7 +243,7 @@ export function PatientPicker({ value, onChange, invalid }: { value: string | nu
             <span className="w-9 h-9 rounded-full go-grad text-white text-[12px] font-bold flex items-center justify-center flex-shrink-0">{p.name.split(' ').map(s => s[0]).slice(0, 2).join('')}</span>
             <span className="flex-1 min-w-0">
               <span className="flex items-center gap-1.5"><span className="text-[15px] font-semibold text-go-ink truncate">{p.name}</span>{p.isNew && <Pill tone="brand" className="!h-5 !px-2">New</Pill>}</span>
-              <span className="block text-[12px] text-go-muted">{p.id} · DOB {p.dob}</span>
+              <span className="block text-[12px] text-go-muted truncate">{p.isNew ? (extras.length ? extras.join(' · ') : 'Created when you submit the case') : `${p.id} · DOB ${p.dob}`}</span>
             </span>
           </>
         ) : (
@@ -171,25 +254,54 @@ export function PatientPicker({ value, onChange, invalid }: { value: string | nu
         )}
         <ChevronRight className="w-[18px] h-[18px] text-go-muted" />
       </button>
+      {/* New patient: details are optional — add them any time before submitting */}
+      {p?.isNew && (
+        <button type="button" onClick={editDetails} className="mt-2 px-1 inline-flex items-center gap-1.5 text-[13px] font-semibold text-go-brand">
+          <PlusCircle className="w-4 h-4" />{extras.length ? 'Edit patient details' : 'Add patient details'}
+        </button>
+      )}
+      {/* Existing patient: read-only details */}
+      {p && !p.isNew && (
+        <button type="button" onClick={() => setViewing(true)} className="mt-2 px-1 inline-flex items-center gap-1.5 text-[13px] font-semibold text-go-brand">
+          <Eye className="w-4 h-4" />View patient details
+        </button>
+      )}
+      {p && (
+        <Sheet open={viewing} onClose={() => setViewing(false)} title={p.name} sub={`Patient ID ${p.id}`}
+          footer={<Btn block variant="secondary" onClick={() => setViewing(false)}>Done</Btn>}>
+          <Card className="px-4 py-1">
+            <KV rows={[
+              ['Patient ID', p.id],
+              ['Date of birth', p.dob || '—'],
+              ['Gender', p.gender ?? '—'],
+              ['Phone', p.phone ?? '—'],
+              ['Email', p.email ?? '—'],
+            ]} />
+          </Card>
+          <button type="button" onClick={() => { setViewing(false); setOpen(true); }} className="mt-4 w-full text-center text-[13px] font-semibold text-go-brand">Choose a different patient</button>
+        </Sheet>
+      )}
 
-      <Sheet open={open} onClose={close} tall title={creating ? 'New patient' : 'Patient'}
-        sub={creating ? 'Only the name is required. Add what you have.' : 'Search existing, or type a new name to create them.'}
+      <Sheet open={open} onClose={close} tall title={creating ? (editId ? 'Patient details' : 'New patient') : 'Patient'}
+        sub={creating ? 'Only the name is required. Add any other details now, or later.' : 'Search for a patient, or add a new one.'}
         footer={creating ? (
           <div className="flex gap-2">
-            <Btn variant="secondary" onClick={() => setCreating(false)}>Back</Btn>
-            <Btn block disabled={!np.name.trim()} onClick={create} icon={<UserPlus className="w-[18px] h-[18px]" />}>Add patient</Btn>
+            {!editId && <Btn variant="secondary" onClick={() => setCreating(false)}>Back</Btn>}
+            <Btn block disabled={!np.name.trim()} onClick={save} icon={editId ? <Check className="w-[18px] h-[18px]" /> : <UserPlus className="w-[18px] h-[18px]" />}>{editId ? 'Save details' : 'Add patient'}</Btn>
           </div>
         ) : undefined}>
         {!creating ? (
           <>
             <div className="sticky top-0 bg-go-surface pb-3 z-10"><SearchBox value={q} onChange={setQ} placeholder="Name or patient ID" /></div>
-            {q.trim() && !exact && (
-              <button onClick={startCreate} className="w-full flex items-center gap-3 p-3 mb-2 rounded-2xl border border-dashed border-go-brand/50 bg-go-brand-soft text-left">
+            {/* Always offered, like the web's "New patient" — prefilled with whatever was typed */}
+            {!exact && (
+              <button onClick={startCreate} className="w-full flex items-center gap-3 p-3 mb-3 rounded-2xl border border-dashed border-go-brand/50 bg-go-brand-soft text-left">
                 <span className="w-9 h-9 rounded-full go-grad text-white flex items-center justify-center flex-shrink-0"><UserPlus className="w-[18px] h-[18px]" /></span>
                 <span className="flex-1 min-w-0">
-                  <span className="block text-[14px] font-semibold text-go-brand-ink truncate">Add “{q.trim()}” as a new patient</span>
-                  <span className="block text-[12px] text-go-muted">Created with this case</span>
+                  <span className="block text-[14px] font-semibold text-go-brand-ink truncate">{q.trim() ? `Add “${q.trim()}” as a new patient` : 'Add a new patient'}</span>
+                  <span className="block text-[12px] text-go-muted">Name only, or add their details too</span>
                 </span>
+                <ChevronRight className="w-4 h-4 text-go-brand" />
               </button>
             )}
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted px-1 mb-1">Existing patients · {hits.length}</p>
@@ -209,14 +321,22 @@ export function PatientPicker({ value, onChange, invalid }: { value: string | nu
             </div>
           </>
         ) : (
+          // Mobile: name plus every optional detail on one screen, no extra taps
           <div className="space-y-4">
-            <div><Label>Full name</Label><Input value={np.name} onChange={e => setNp(s => ({ ...s, name: e.target.value }))} placeholder="e.g. Grace Mitchell" /></div>
+            <div><Label>Full name</Label><Input autoFocus={!editId} value={np.name} onChange={set('name')} placeholder="e.g. Grace Mitchell" /></div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted px-1 pt-1">Additional details · optional</p>
             <div className="flex gap-3">
-              <div className="flex-1"><Label optional>Patient ID</Label><Input value={np.id} onChange={e => setNp(s => ({ ...s, id: e.target.value }))} placeholder="PAT-2026-0118" /></div>
-              <div className="flex-1"><Label optional>Date of birth</Label><Input type="date" value={np.dob} onChange={e => setNp(s => ({ ...s, dob: e.target.value }))} /></div>
+              <div className="flex-1"><Label optional>Patient ID</Label><Input value={np.id} onChange={set('id')} placeholder="PAT-2026-0118" disabled={!!editId} /></div>
+              <div className="flex-1"><Label optional>Date of birth</Label><Input type="date" value={np.dob} onChange={set('dob')} /></div>
             </div>
-            <div><Label optional>Phone</Label><Input type="tel" value={np.phone} onChange={e => setNp(s => ({ ...s, phone: e.target.value }))} placeholder="+44 7700 900123" /></div>
-            <div><Label optional>Email</Label><Input type="email" value={np.email} onChange={e => setNp(s => ({ ...s, email: e.target.value }))} placeholder="name@example.com" /></div>
+            <div>
+              <Label optional>Phone</Label>
+              <div className="flex gap-2">
+                <span className="h-12 px-3 rounded-2xl bg-go-raised border border-go-line text-[14px] font-medium text-go-ink2 flex items-center gap-1.5 flex-shrink-0">🇬🇧 +44</span>
+                <Input type="tel" value={np.phone} onChange={set('phone')} placeholder="7700 900123" className="flex-1" />
+              </div>
+            </div>
+            <div><Label optional>Email</Label><Input type="email" value={np.email} onChange={set('email')} placeholder="patient@example.com" /></div>
             <div><Label optional>Gender</Label><Chips options={GENDERS} value={np.gender || null} onChange={(v: string) => setNp(s => ({ ...s, gender: v }))} /></div>
           </div>
         )}
@@ -243,7 +363,7 @@ export function LabPicker({ value, onChange, invalid }: { value: string | null; 
 
   return (
     <div>
-      <Label>Dental laboratory</Label>
+      <Label>Lab</Label>
       <button type="button" onClick={() => setOpen(true)}
         className={cx('w-full min-h-[52px] rounded-2xl bg-go-surface border px-3 py-2 flex items-center gap-3 text-left transition',
           invalid ? 'border-go-warn ring-4 ring-go-warn/15' : 'border-go-line')}>
@@ -264,8 +384,8 @@ export function LabPicker({ value, onChange, invalid }: { value: string | null; 
         <ChevronRight className="w-[18px] h-[18px] text-go-muted" />
       </button>
 
-      <Sheet open={open} onClose={close} tall title={creating ? 'Add a lab' : 'Dental laboratory'}
-        sub={creating ? 'Added as an offline lab. They get the case by email.' : 'Search by name or town.'}
+      <Sheet open={open} onClose={close} tall title={creating ? 'Add a lab' : 'Lab'}
+        sub={creating ? 'Added as an offline lab. They’ll get the case by email.' : 'Search by name or town.'}
         footer={creating ? (
           <div className="flex gap-2">
             <Btn variant="secondary" onClick={() => setCreating(false)}>Back</Btn>
@@ -325,19 +445,82 @@ export function LabPicker({ value, onChange, invalid }: { value: string | null; 
 
 // ─── Service editor sheet (pick a service, then its details) ────────────────
 
-export function ServiceSheet({ open, item, onSave, onClose }: { open: boolean; item: FormItem | null; onSave: (it: FormItem) => void; onClose: () => void }) {
+/** Chips with an "Other (specify)" escape hatch, like the web dropdowns. */
+function ChoiceWithOther({ options, value, onChange, placeholder }: { options: string[]; value: string | null; onChange: (v: string | null) => void; placeholder: string }) {
+  const isOther = value !== null && !options.includes(value);
+  return (
+    <div className="space-y-2">
+      <Chips options={[...options, OTHER_SPECIFY]} value={isOther ? OTHER_SPECIFY : value}
+        onChange={(v: string) => onChange(v === OTHER_SPECIFY ? '' : v)} />
+      {isOther && <Input autoFocus value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder} />}
+    </div>
+  );
+}
+
+/** Implant system: Brand → System → Platform, as on the web form. */
+function BrandField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [brand = '', system = '', platform = ''] = value ? value.split(' · ') : [];
+  const node = IMPLANT_BRAND_CATALOG.find(b => b.brand === brand);
+  const sys = node?.systems.find(s => s.name === system);
+  const join = (b: string, s = '', p = '') => [b, s, p].filter(Boolean).join(' · ');
+  return (
+    <div className="space-y-3">
+      <PickerField label="Brand" searchable value={brand || null} onChange={b => onChange(join(b))}
+        options={IMPLANT_BRAND_CATALOG.map(b => ({ value: b.brand, label: b.brand }))} />
+      {brand === 'Other' ? (
+        <div><Label>Brand and system</Label><Input value={system} onChange={e => onChange(join('Other', e.target.value))} placeholder="e.g. Osstem TSIII, regular" /></div>
+      ) : node && (
+        <PickerField label="System" value={system || null} onChange={s => onChange(join(brand, s))}
+          options={node.systems.map(s => ({ value: s.name, label: s.name }))} />
+      )}
+      {sys && <div><Label>Platform</Label><Chips options={sys.platforms} value={platform || null} onChange={(p: string) => onChange(join(brand, system, p))} /></div>}
+    </div>
+  );
+}
+
+function DetailInput({ field, value, onChange, hint }: { field: DetailField; value: string | string[] | undefined; onChange: (v: string | string[]) => void; hint?: React.ReactNode }) {
+  const v = value ?? (field.kind === 'multi' ? [] : '');
+  return (
+    <div>
+      <Label optional={!field.required}>{field.label}</Label>
+      {field.kind === 'chips' && <Chips options={field.options ?? []} value={(v as string) || null} onChange={(x: string) => onChange(x)} />}
+      {field.kind === 'multi' && <Chips options={field.options ?? []} value={v as string[]} onChange={(x: string[]) => onChange(x)} multi />}
+      {field.kind === 'text' && <Input value={v as string} onChange={e => onChange(e.target.value)} placeholder={`Enter ${field.label.toLowerCase()}`} />}
+      {field.kind === 'textarea' && <TextArea rows={3} value={v as string} onChange={e => onChange(e.target.value)} />}
+      {field.kind === 'brand' && <BrandField value={v as string} onChange={onChange} />}
+      {field.kind === 'occlusion' && (() => {
+        const [cls = '', side = ''] = (v as string) ? (v as string).split(' · ') : [];
+        return (
+          <div className="space-y-2">
+            <Chips options={field.options ?? []} value={cls || null} onChange={(c: string) => onChange([c, side].filter(Boolean).join(' · '))} />
+            {cls && <Chips options={OCCLUSION_SIDES} value={side || null} onChange={(s: string) => onChange([cls, s].join(' · '))} />}
+          </div>
+        );
+      })()}
+      {hint}
+    </div>
+  );
+}
+
+/** hints: per-field "please check" lines from an audio / photo read (keys: material, shade, or a detail key). */
+export function ServiceSheet({ open, item, onSave, onClose, hints }: { open: boolean; item: FormItem | null; onSave: (it: FormItem) => void; onClose: () => void; hints?: Record<string, React.ReactNode> }) {
   const [draft, setDraft] = useState<FormItem | null>(item);
   const [lastOpen, setLastOpen] = useState(false);
   if (open !== lastOpen) { setLastOpen(open); if (open) setDraft(item); } // reset on open
   const set = (patch: Partial<FormItem>) => setDraft(d => (d ? { ...d, ...patch } : d));
-  const extra = draft ? SERVICE_EXTRAS[draft.service] : undefined;
+  const setDetail = (k: string, v: string | string[]) => setDraft(d => (d ? { ...d, details: { ...d.details, [k]: v } } : d));
+  const setTooth = (t: string, patch: { material?: string | null; shade?: string | null }) =>
+    setDraft(d => (d ? { ...d, perTooth: { ...d.perTooth, [t]: { ...d.perTooth[t], ...patch } } } : d));
+  const missing = draft ? itemMissing(draft) : [];
+  const free = draft ? freeTextMaterial(draft.itemId) : false;
 
   return (
-    <Sheet open={open} onClose={onClose} tall title={draft ? draft.service : 'Add a service'} sub={draft ? 'Teeth, material and shade for this item.' : 'Pick from the catalogue.'}
+    <Sheet open={open} onClose={onClose} tall title={draft ? serviceLabel(draft.itemId) : 'Add a service'}
+      sub={draft ? (missing.length ? `Optional · not set: ${missing.join(', ')}` : 'All details added') : 'Choose what the lab is making.'}
       footer={draft ? (
         <div className="flex gap-2">
           {!item && <Btn variant="secondary" onClick={() => setDraft(null)}>Change</Btn>}
-          <Btn block disabled={!itemComplete(draft)} onClick={() => onSave(draft)}>{itemComplete(draft) ? 'Save service' : 'Add the missing details'}</Btn>
+          <Btn block onClick={() => onSave(draft)}>Save service</Btn>
         </div>
       ) : undefined}>
       {!draft ? (
@@ -347,8 +530,8 @@ export function ServiceSheet({ open, item, onSave, onClose }: { open: boolean; i
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted mb-2">{cat.label}</p>
               <div className="flex flex-wrap gap-2">
                 {cat.items.map(s => (
-                  <button key={s} onClick={() => setDraft(newItem(s))}
-                    className="h-10 px-3.5 rounded-full text-[13.5px] font-medium border border-go-line bg-go-surface text-go-ink hover:border-go-brand/50 transition">{s}</button>
+                  <button key={s.id} onClick={() => setDraft(newItem(s.id))}
+                    className="h-10 px-3.5 rounded-full text-[13.5px] font-medium border border-go-line bg-go-surface text-go-ink hover:border-go-brand/50 transition">{s.label}</button>
                 ))}
               </div>
             </div>
@@ -356,21 +539,58 @@ export function ServiceSheet({ open, item, onSave, onClose }: { open: boolean; i
         </div>
       ) : (
         <div className="space-y-5">
+          {/* "Other" asks for the service name first */}
+          {detailFields(draft.itemId).filter(f => f.key === 'customServiceName').map(f => (
+            <DetailInput key={f.key} field={f} value={draft.details[f.key]} onChange={v => setDetail(f.key, v)} hint={hints?.[f.key]} />
+          ))}
           <div><Label>Teeth or arch</Label><ToothPicker value={draft.teeth} onChange={v => set({ teeth: v })} /></div>
-          {needsMaterial(draft.service) && (
+
+          {needsMaterial(draft.itemId) && (
             <>
-              <div><Label>Material</Label><Chips options={MATERIALS} value={draft.material} onChange={(v: string) => set({ material: v })} /></div>
-              <div><Label>Shade (VITA classical)</Label><Chips options={SHADES} value={draft.shade} onChange={(v: string) => set({ shade: v })} /></div>
+              {draft.teeth.length > 1 && !free && (
+                <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-go-raised">
+                  <span className="flex-1 text-[13.5px] text-go-ink">Same material and shade for all teeth</span>
+                  <Toggle on={draft.sameForAll} onChange={v => set({ sameForAll: v })} label="Same material and shade for all teeth" />
+                </div>
+              )}
+              {draft.sameForAll || free ? (
+                <>
+                  <div>
+                    <Label>Material</Label>
+                    {free ? <Input value={draft.material ?? ''} onChange={e => set({ material: e.target.value })} placeholder="Enter material" />
+                      : <ChoiceWithOther options={MATERIALS} value={draft.material} onChange={v => set({ material: v })} placeholder="Type the material" />}
+                    {hints?.material}
+                  </div>
+                  <div>
+                    <Label>Tooth shade</Label>
+                    {free ? <Input value={draft.shade ?? ''} onChange={e => set({ shade: e.target.value })} placeholder="Enter shade" />
+                      : <ChoiceWithOther options={SHADES} value={draft.shade} onChange={v => set({ shade: v })} placeholder="Type the shade" />}
+                    {hints?.shade}
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <Label>Material and shade per tooth</Label>
+                  {draft.teeth.map(t => (
+                    <div key={t} className="rounded-2xl border border-go-line bg-go-surface p-3">
+                      <p className="text-[13px] font-bold text-go-ink mb-2">{t}</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <PickerField label="Material" value={draft.perTooth[t]?.material ?? null} onChange={v => setTooth(t, { material: v })}
+                          options={MATERIALS.map(m => ({ value: m, label: m }))} />
+                        <PickerField label="Shade" value={draft.perTooth[t]?.shade ?? null} onChange={v => setTooth(t, { shade: v })}
+                          options={SHADES.map(s => ({ value: s, label: s }))} />
+                      </div>
+                    </div>
+                  ))}
+                  {!draft.teeth.length && <p className="text-[12.5px] text-go-muted">Pick teeth first.</p>}
+                </div>
+              )}
             </>
           )}
-          {extra && (
-            <div>
-              <Label>{extra.label}</Label>
-              {extra.multi
-                ? <Chips options={extra.options} value={draft.extra} onChange={(v: string[]) => set({ extra: v })} multi />
-                : <Chips options={extra.options} value={draft.extra[0] ?? null} onChange={(v: string) => set({ extra: [v] })} />}
-            </div>
-          )}
+
+          {detailFields(draft.itemId).filter(f => f.key !== 'customServiceName').map(f => (
+            <DetailInput key={f.key} field={f} value={draft.details[f.key]} onChange={v => setDetail(f.key, v)} hint={hints?.[f.key]} />
+          ))}
         </div>
       )}
     </Sheet>
@@ -386,10 +606,10 @@ export function CaseCreated({ c }: { c: LabCase }) {
       <div className="relative flex flex-col items-center text-center px-6 pt-16">
         <div className="absolute top-0 w-80 h-80 rounded-full bg-go-brand/20 blur-3xl" />
         <div className="relative go-rise"><GoMark size={84} /></div>
-        <span className="relative mt-6 inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-go-ok-soft text-go-ok text-[12px] font-semibold"><CheckCircle2 className="w-4 h-4" />Prescription authorised</span>
-        <h1 className="relative text-[26px] font-bold text-go-ink tracking-tight mt-3">Lab work created</h1>
+        <span className="relative mt-6 inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-go-ok-soft text-go-ok text-[12px] font-semibold"><CheckCircle2 className="w-4 h-4" />Case created</span>
+        <h1 className="relative text-[26px] font-bold text-go-ink tracking-tight mt-3">Ready to dispatch</h1>
         <p className="relative text-[14px] text-go-muted mt-1.5 leading-relaxed">
-          <span className="font-mono font-semibold text-go-ink">{c.id}</span> is ready to dispatch to {labName(c.lab)}.
+          <span className="font-mono font-semibold text-go-ink">{c.id}</span> is ready to send to {labName(c.lab)}.
         </p>
       </div>
       <div className="px-4 mt-8">
@@ -402,11 +622,11 @@ export function CaseCreated({ c }: { c: LabCase }) {
         </Card>
       </div>
       <div className="px-4 mt-6 space-y-2.5">
-        <Btn block icon={<Truck className="w-5 h-5" />} onClick={() => navigate(`/go/work/${c.id}/dispatch`, { replace: true })}>Print label & dispatch</Btn>
-        <Btn block variant="secondary" onClick={() => navigate(`/go/work/${c.id}`, { replace: true })}>View lab work</Btn>
+        <Btn block icon={<Truck className="w-5 h-5" />} onClick={() => navigate(`/go/work/${c.id}/dispatch`, { replace: true })}>Print label and dispatch</Btn>
+        <Btn block variant="secondary" onClick={() => navigate(`/go/work/${c.id}`, { replace: true })}>View case</Btn>
         <Btn block variant="ghost" size="md" onClick={() => navigate('/go/home', { replace: true })}>Back to home</Btn>
       </div>
-      <p className="text-center text-[12px] text-go-faint mt-4">Demo only. Nothing is sent to a laboratory.</p>
+      <p className="text-center text-[12px] text-go-faint mt-4">Demo only. Nothing is sent to the lab.</p>
     </Screen>
   );
 }
@@ -416,22 +636,33 @@ export function CaseCreated({ c }: { c: LabCase }) {
 const STEPS = ['Patient & lab', 'Services', 'Delivery & notes', 'Review'];
 
 export default function ManualCaseScreen() {
-  const { addCase } = useGo();
+  const { addCase, updateCase, cases, toast } = useGo();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  // ?draft=SG-D1004 reopens a saved draft with everything filled in
+  const draftId = params.get('draft');
+  const draftCase = draftId ? cases.find(c => c.id === draftId && c.stage === 'draft') : undefined;
   const [step, setStep] = useState(0);
-  const [f, setF] = useState<CaseForm>(emptyForm);
+  // By audio / by photo arrive here with the read as a prefill, plus flags for what it wasn't sure about
+  const incoming = useLocation().state as { prefill?: CaseForm; read?: ReadSource } | null;
+  const [read, setRead] = useState<ReadSource | null>(() => (draftCase ? null : incoming?.read ?? null));
+  const [f, setF] = useState<CaseForm>(() => (draftCase?.draftForm ? { ...emptyForm(), ...(draftCase.draftForm as CaseForm) }
+    : incoming?.prefill ? { ...emptyForm(), ...incoming.prefill } : emptyForm()));
+  const flags = read?.flags ?? [];
+  const flagFor = (field: string) => flags.find(x => x.field === field);
+  const itemFlags = (uid: string) => flags.filter(x => x.field.startsWith(`${uid}.`));
+  const dropFlags = (pred: (field: string) => boolean) => setRead(r => (r ? { ...r, flags: r.flags.filter(x => !pred(x.field)) } : r));
+  const hint = (field: string) => <ReadHint flag={flagFor(field)} mode={read?.mode} />;
   const [tried, setTried] = useState(false);
   const [created, setCreated] = useState<LabCase | null>(null);
   const [svcOpen, setSvcOpen] = useState(false);
   const [editing, setEditing] = useState<FormItem | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const set = <K extends keyof CaseForm>(k: K, v: CaseForm[K]) => setF(s => ({ ...s, [k]: v }));
+  const set = <K extends keyof CaseForm>(k: K, v: CaseForm[K]) => { setF(s => ({ ...s, [k]: v })); dropFlags(x => x === k); };
 
-  const okByStep = useMemo(() => [
-    !!(f.practice && f.clinician && f.patientId && f.lab),
-    f.items.length > 0 && f.items.every(itemComplete),
-    !!f.returnBy,
-    true,
-  ], [f]);
+  // Compulsory: patient, dentist, lab and at least one service. A service's own fields are optional.
+  // Unclear audio / photo reads stay highlighted, but don't block.
+  const okByStep = useMemo(() => [!!(f.clinician && f.patientId && f.lab), f.items.length > 0, true, true], [f]);
   const ok = okByStep[step];
   const bad = (v: unknown) => tried && !v;
 
@@ -439,14 +670,25 @@ export default function ManualCaseScreen() {
     if (!ok) { setTried(true); return; }
     setTried(false);
     if (step < 3) { setStep(step + 1); return; }
-    const c = buildCase(f, 'manual');
-    addCase(c);
+    const built = buildCase(f, read?.mode === 'photo' ? 'photo' : 'manual');
+    // A finished draft keeps its id and becomes a live case
+    const c = draftCase ? { ...built, id: draftCase.id.replace('SG-D', 'SG-2') } : built;
+    if (draftCase) updateCase(draftCase.id, { ...c, draftForm: undefined }); else addCase(c);
     setCreated(c);
+  };
+  const saveDraft = () => {
+    if (!f.patientId) { setStep(0); setTried(true); toast('Add a patient to save a draft', 'info'); return; }
+    const d = buildDraft(f, draftCase?.id);
+    if (draftCase) updateCase(draftCase.id, d); else addCase(d);
+    toast('Draft saved. Find it under Draft in Lab work');
+    navigate('/go/work?f=draft', { replace: true });
   };
   const saveItem = (it: FormItem) => {
     setF(s => ({ ...s, items: s.items.some(x => x.uid === it.uid) ? s.items.map(x => (x.uid === it.uid ? it : x)) : [...s.items, it] }));
     setSvcOpen(false);
+    dropFlags(x => x.startsWith(`${it.uid}.`)); // checked by you
   };
+  const flagsOnStep = (s: number) => flags.filter(x => (s === 1 ? x.field.includes('.') : s === 2 ? !x.field.includes('.') : false)).length;
 
   if (created) return <CaseCreated c={created} />;
   const apptClash = f.apptDate && f.returnBy >= f.apptDate;
@@ -455,7 +697,8 @@ export default function ManualCaseScreen() {
     <Screen
       header={
         <div>
-          <TopBar back fallback="/go/home" title="Create a case" sub={`Step ${step + 1} of ${STEPS.length} · ${STEPS[step]}`} />
+          <TopBar back fallback="/go/home" title={draftCase ? 'Finish draft' : read ? `Create case by ${read.mode}` : 'Create case manually'} sub={`Step ${step + 1} of ${STEPS.length} · ${STEPS[step]}`}
+            right={<button onClick={saveDraft} className="text-[13px] font-semibold text-go-brand pr-1">Save draft</button>} />
           <div className="flex gap-1.5 px-4 pb-3 bg-go-bg/85 backdrop-blur-xl">
             {STEPS.map((s, i) => <span key={s} className={cx('h-1 flex-1 rounded-full transition', i <= step ? 'go-grad' : 'bg-go-line')} />)}
           </div>
@@ -465,14 +708,20 @@ export default function ManualCaseScreen() {
         <div className="flex gap-2.5">
           {step > 0 && <Btn variant="secondary" onClick={() => { setStep(step - 1); setTried(false); }}>Back</Btn>}
           <Btn block onClick={next} icon={step === 3 ? <Check className="w-5 h-5" /> : undefined}>
-            {step === 3 ? 'Authorise & create' : step === 1 && !f.items.length ? 'Add a service to continue' : 'Continue'}
+            {step === 3 ? 'Create case' : step === 1 && !f.items.length ? 'Add a service to continue' : read ? 'Confirm' : 'Continue'}
           </Btn>
         </div>
       }>
       {tried && !ok && <p className="px-5 pt-1 pb-2 text-[13px] text-go-warn font-medium">Complete the highlighted details to continue.</p>}
+      {!tried && step > 0 && flagsOnStep(step) > 0 && (
+        <p className="mx-4 mt-1 mb-1 px-3 py-2.5 rounded-2xl bg-go-warn-soft text-[13px] text-go-warn font-medium">
+          {flagsOnStep(step)} detail{flagsOnStep(step) > 1 ? 's' : ''} on this step {read?.mode === 'audio' ? 'weren’t clear in your voice note' : 'weren’t clear on the form'}. Please check.
+        </p>
+      )}
 
       {step === 0 && (
         <div className="px-4 pt-2 space-y-5">
+          {read && <SourceCard src={read} toCheck={flags.length} />}
           <PatientPicker value={f.patientId} onChange={v => set('patientId', v)} invalid={bad(f.patientId)} />
           <LabPicker value={f.lab} onChange={v => set('lab', v)} invalid={bad(f.lab)} />
           <PickerField label="Dentist" value={f.clinician} onChange={v => set('clinician', v)} placeholder="Pick a dentist" invalid={bad(f.clinician)}
@@ -487,15 +736,19 @@ export default function ManualCaseScreen() {
           <div className="space-y-2.5">
             {f.items.map((it, i) => {
               const done = itemComplete(it);
+              const unsure = itemFlags(it.uid);
               return (
-                <Card key={it.uid} className={cx('p-3.5', tried && !done && 'border-go-warn ring-4 ring-go-warn/15')}>
+                <Card key={it.uid} className={cx('p-3.5', unsure.length > 0 && 'border-go-warn ring-4 ring-go-warn/15')}>
                   <div className="flex items-start gap-3">
                     <span className="w-7 h-7 rounded-lg go-grad text-white text-[12px] font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
                     <button onClick={() => { setEditing(it); setSvcOpen(true); }} className="flex-1 min-w-0 text-left">
-                      <p className="text-[15px] font-semibold text-go-ink">{it.service} <span className="text-go-muted font-medium">{it.teeth.join(', ')}</span></p>
-                      <p className={cx('text-[12px] mt-0.5', done ? 'text-go-muted' : 'text-go-warn')}>{done ? itemLine({ ...it, extra: extraText(it) }) || 'Ready' : 'Details missing. Tap to finish'}</p>
+                      <p className="text-[15px] font-semibold text-go-ink">{itemName(it)} <span className="text-go-muted font-medium">{it.teeth.join(', ')}</span></p>
+                      <p className="text-[12px] mt-0.5 text-go-muted">{[itemSummary(it), !done && `Not set: ${itemMissing(it).join(', ')}`].filter(Boolean).join(' · ') || 'Ready'}</p>
+                      {unsure.map(u => (
+                        <p key={u.field} className="text-[11.5px] text-go-warn mt-0.5">{u.label}: {read?.mode === 'audio' ? 'you said' : 'form says'} “{u.heard}”</p>
+                      ))}
                     </button>
-                    <button onClick={() => set('items', f.items.filter(x => x.uid !== it.uid))} aria-label={`Remove ${it.service}`}
+                    <button onClick={() => set('items', f.items.filter(x => x.uid !== it.uid))} aria-label={`Remove ${itemName(it)}`}
                       className="w-8 h-8 rounded-full flex items-center justify-center text-go-muted hover:text-go-bad hover:bg-go-bad-soft"><Trash className="w-4 h-4" /></button>
                   </div>
                 </Card>
@@ -507,16 +760,24 @@ export default function ManualCaseScreen() {
               bad(f.items.length) ? 'border-go-warn text-go-warn' : 'border-go-line text-go-brand hover:border-go-brand/60')}>
             <PlusCircle className="w-5 h-5" />{f.items.length ? 'Add another service' : 'Add a service'}
           </button>
-          {f.items.length > 1 && <p className="text-[12px] text-go-muted text-center mt-3">{f.items.length} services on one prescription · one delivery date</p>}
+          {f.items.length > 1 && <p className="text-[12px] text-go-muted text-center mt-3">{f.items.length} services on one case · one delivery date</p>}
         </div>
       )}
 
       {step === 2 && (
         <div className="px-4 pt-2 space-y-5">
-          <div><Label>Order type</Label><Segmented value={f.funding} onChange={v => set('funding', v)} options={[{ value: 'NHS', label: 'NHS' }, { value: 'Private', label: 'Private' }]} /></div>
           <div>
-            <Label>Delivery date</Label>
-            <Input type="date" value={f.returnBy} min={plusDays(1)} onChange={e => set('returnBy', e.target.value)} />
+            <Label optional>Order type</Label>
+            <div className={cx('rounded-2xl', (flagFor('funding') || bad(f.funding)) && 'ring-2 ring-go-warn/60')}>
+              <Segmented value={(f.funding ?? '') as 'NHS'} onChange={v => set('funding', v)} options={[{ value: 'NHS', label: 'NHS' }, { value: 'Private', label: 'Private' }]} />
+            </div>
+            {hint('funding')}
+          </div>
+          <div>
+            <Label optional>Delivery date</Label>
+            <Input type="date" value={f.returnBy} min={plusDays(1)} onChange={e => set('returnBy', e.target.value)}
+              className={cx((flagFor('returnBy') || bad(f.returnBy)) && '!border-go-warn ring-4 ring-go-warn/15')} />
+            {hint('returnBy')}
             <div className="flex gap-2 mt-2">
               {[7, 10, 14, 21].map(n => (
                 <button key={n} onClick={() => set('returnBy', plusDays(n))}
@@ -533,7 +794,7 @@ export default function ManualCaseScreen() {
               {f.apptDate && <button onClick={() => set('apptDate', '')} aria-label="Clear appointment" className="w-10 h-10 rounded-full bg-go-raised text-go-muted flex items-center justify-center"><X className="w-4 h-4" /></button>}
             </div>
             {f.apptDate && <div className="mt-2"><Chips options={['Fit', 'Try-in', 'Issue'] as const} value={f.apptKind} onChange={v => set('apptKind', v)} /></div>}
-            {apptClash && <p className="text-[12px] text-go-bad mt-2 px-1">Delivery is on or after the appointment. Pick an earlier delivery date.</p>}
+            {apptClash && <p className="text-[12px] text-go-bad mt-2 px-1">The delivery date is on or after the appointment. Pick an earlier date.</p>}
           </div>
           <div><Label optional>Case source</Label><Chips options={CASE_SOURCES} value={f.caseSource} onChange={(v: string) => set('caseSource', v)} /></div>
           <div><Label optional>Case instructions</Label><TextArea rows={4} value={f.instructions} onChange={e => set('instructions', e.target.value)} placeholder="Any specific instructions for the lab…" /></div>
@@ -544,7 +805,7 @@ export default function ManualCaseScreen() {
             <button onClick={() => fileRef.current?.click()}
               className="w-full h-20 rounded-[22px] border-2 border-dashed border-go-line hover:border-go-brand/60 text-go-muted flex flex-col items-center justify-center gap-1 transition">
               <ImagePlus className="w-6 h-6 text-go-brand" />
-              <span className="text-[13px] font-semibold text-go-ink">Upload photos, x-rays or references</span>
+              <span className="text-[13px] font-semibold text-go-ink">Add photos, X-rays or other files</span>
             </button>
             {!!f.attachments.length && (
               <div className="mt-3 space-y-2">
@@ -573,13 +834,13 @@ export default function ManualCaseScreen() {
           </Card>
           <Card className="px-4 py-1">
             <div className="flex items-center justify-between pt-3"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Services · {f.items.length}</p><button onClick={() => setStep(1)} className="text-[12.5px] font-semibold text-go-brand">Edit</button></div>
-            <KV rows={f.items.map((it, i) => [`${i + 1}. ${it.service}`, <span key={it.uid}>{it.teeth.join(', ')}<span className="block text-[12px] text-go-muted font-normal">{itemLine({ ...it, extra: extraText(it) })}</span></span>] as [string, React.ReactNode])} />
+            <KV rows={f.items.map((it, i) => [`${i + 1}. ${itemName(it)}`, <span key={it.uid}>{it.teeth.join(', ')}<span className="block text-[12px] text-go-muted font-normal">{itemSummary(it)}</span></span>] as [string, React.ReactNode])} />
           </Card>
           <Card className="px-4 py-1">
             <div className="flex items-center justify-between pt-3"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Delivery & notes</p><button onClick={() => setStep(2)} className="text-[12.5px] font-semibold text-go-brand">Edit</button></div>
             <KV rows={[
-              ['Order type', f.funding],
-              ['Delivery date', fmtDate(new Date(f.returnBy).toISOString())],
+              ['Order type', f.funding ?? '—'],
+              ['Delivery date', f.returnBy ? fmtDate(new Date(f.returnBy).toISOString()) : 'Not set'],
               ['Appointment', f.apptDate ? `${f.apptKind} · ${fmtDate(new Date(f.apptDate).toISOString())}` : 'Not booked'],
               ['Case source', f.caseSource ?? '—'],
               ['Attachments', f.attachments.length ? `${f.attachments.length} file${f.attachments.length > 1 ? 's' : ''}` : 'None'],
@@ -592,7 +853,8 @@ export default function ManualCaseScreen() {
         </div>
       )}
 
-      <ServiceSheet open={svcOpen} item={editing} onSave={saveItem} onClose={() => setSvcOpen(false)} />
+      <ServiceSheet open={svcOpen} item={editing} onSave={saveItem} onClose={() => setSvcOpen(false)}
+        hints={editing ? Object.fromEntries(itemFlags(editing.uid).map(x => [x.field.slice(editing.uid.length + 1), hint(x.field)])) : undefined} />
     </Screen>
   );
 }

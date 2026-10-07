@@ -1,6 +1,12 @@
 // ─── Smile Genius Go — demo data ─────────────────────────────────────────────
 // Seed data for the clinician mobile prototype. Dates are relative to "now"
 // so the Needs-attention counts (overdue, arriving today…) always make sense.
+import {
+  SERVICE_CATEGORIES as WEB_SERVICE_CATEGORIES, CASE_SOURCES as WEB_CASE_SOURCES, MATERIAL_TYPES, TOOTH_SHADES, IMPLANT_BRAND_CATALOG,
+  IMPLANT_ABUTMENT_MATERIALS, RETAINER_TYPES, OCCLUSION_CLASSES, OCCLUSION_SIDES, YES_NO, ALIGNER_DURATIONS, ALIGNER_INCISAL_EDGE,
+  ALIGNER_CROWDING, ALIGNER_SPACING, ALIGNER_OVERJET, ALIGNER_OVERBITE, ALIGNER_OPENBITE, ALIGNER_CROSSBITE, ALIGNER_MIDLINE,
+  ALIGNER_BIOTYPE, MILLERS_CLASS, DENTURE_STAGES, getApplianceConfig, getCategoryForItem,
+} from '../pages/CreateCasePage';
 
 export type PracticeId = 'cds' | 'isc';
 export const PRACTICES: { id: PracticeId; name: string; area: string }[] = [
@@ -34,16 +40,16 @@ export const clinicianName = (id: string) => CLINICIANS.find(c => c.id === id)?.
 export interface Patient { id: string; name: string; dob: string; email?: string; phone?: string; gender?: string; isNew?: boolean }
 // Mutable so a patient created on the spot is found everywhere.
 export const PATIENTS: Patient[] = [
-  { id: 'P-10231', name: 'Amelia Taylor', dob: '14/03/1988' },
-  { id: 'P-10188', name: 'James Williams', dob: '02/11/1951' },
-  { id: 'P-10342', name: 'Maya Patel', dob: '21/07/1994' },
-  { id: 'P-10077', name: 'Daniel Morgan', dob: '09/01/1969' },
-  { id: 'P-10415', name: 'Sara Khan', dob: '30/05/1990' },
-  { id: 'P-10290', name: 'Rhys Evans', dob: '17/09/1976' },
-  { id: 'P-10356', name: 'Lucy Chen', dob: '05/12/2006' },
-  { id: 'P-10119', name: 'Petra Novak', dob: '28/02/1982' },
-  { id: 'P-10402', name: 'Ella Brooks', dob: '11/04/1958' },
-  { id: 'P-10450', name: 'Tom Hughes', dob: '03/08/1985' },
+  { id: 'P-10231', name: 'Amelia Taylor', dob: '14/03/1988', gender: 'Female', phone: '+44 7700 900231', email: 'amelia.taylor@example.com' },
+  { id: 'P-10188', name: 'James Williams', dob: '02/11/1951', gender: 'Male', phone: '+44 7700 900188', email: 'james.williams@example.com' },
+  { id: 'P-10342', name: 'Maya Patel', dob: '21/07/1994', gender: 'Female', phone: '+44 7700 900342', email: 'maya.patel@example.com' },
+  { id: 'P-10077', name: 'Daniel Morgan', dob: '09/01/1969', gender: 'Male', phone: '+44 7700 900077', email: 'daniel.morgan@example.com' },
+  { id: 'P-10415', name: 'Sara Khan', dob: '30/05/1990', gender: 'Female', phone: '+44 7700 900415', email: 'sara.khan@example.com' },
+  { id: 'P-10290', name: 'Rhys Evans', dob: '17/09/1976', gender: 'Male', phone: '+44 7700 900290', email: 'rhys.evans@example.com' },
+  { id: 'P-10356', name: 'Lucy Chen', dob: '05/12/2006', gender: 'Female', phone: '+44 7700 900356', email: 'lucy.chen@example.com' },
+  { id: 'P-10119', name: 'Petra Novak', dob: '28/02/1982', gender: 'Female', phone: '+44 7700 900119', email: 'petra.novak@example.com' },
+  { id: 'P-10402', name: 'Ella Brooks', dob: '11/04/1958', gender: 'Female', phone: '+44 7700 900402', email: 'ella.brooks@example.com' },
+  { id: 'P-10450', name: 'Tom Hughes', dob: '03/08/1985', gender: 'Male', phone: '+44 7700 900450', email: 'tom.hughes@example.com' },
 ];
 export const patientById = (id: string) => PATIENTS.find(p => p.id === id)!;
 export function addPatient(p: Omit<Patient, 'id' | 'isNew'> & { id?: string }): string {
@@ -59,48 +65,99 @@ export const shortName = (name: string) => {
   return `${parts[0][0]}. ${parts.slice(1).join(' ')}`;
 };
 
-// Service catalogue — same categories as the web create-case form.
-export const SERVICE_CATEGORIES: { id: string; label: string; items: string[] }[] = [
-  { id: 'single', label: 'Single unit', items: ['Crown', 'Veneer', 'Inlay / onlay', 'Post and core crown', 'Screw retained crown', 'Implant abutment'] },
-  { id: 'bridge', label: 'Bridge', items: ['Bridge', 'Implant bridge', 'Pontic'] },
-  { id: 'ortho', label: 'Orthodontics', items: ['Retainer', 'Clear aligners'] },
-  { id: 'denture', label: 'Denture', items: ['Full denture', 'Partial denture', 'Immediate denture'] },
-  { id: 'appliance', label: 'Appliances', items: ['Night guard', 'Whitening trays', 'Splint'] },
-  { id: 'other', label: 'Other', items: ['Other'] },
-];
-export const SERVICES = SERVICE_CATEGORIES.flatMap(c => c.items);
-export const categoryOf = (service: string) => SERVICE_CATEGORIES.find(c => c.items.includes(service))?.id ?? 'other';
-/** Orthodontics and appliances don't take material + shade (as on the web form). */
-export const needsMaterial = (service: string) => !['ortho', 'appliance'].includes(categoryOf(service));
-/** Category-specific extra — same options as the web form. */
-export const SERVICE_EXTRAS: Record<string, { label: string; options: string[]; multi?: boolean }> = {
-  'Night guard': { label: 'Type', options: ['Hard', 'Soft', 'Dual-laminate'] },
-  'Whitening trays': { label: 'Reservoirs', options: ['Yes', 'No'] },
-  Splint: { label: 'Type', options: ['Michigan', 'Tanner', 'Other'] },
-  Retainer: { label: 'Retainer type', options: ['Essix', 'Bonded', 'Hawley'] },
-  'Clear aligners': { label: 'Days per aligner', options: ['7', '10', '14', '21'] },
-  'Full denture': { label: 'Stage', options: ['Special tray', 'Bite registration', 'Try-in', 'Finish'], multi: true },
-  'Partial denture': { label: 'Stage', options: ['Special tray', 'Bite registration', 'Try-in', 'Finish'], multi: true },
-  'Immediate denture': { label: 'Stage', options: ['Special tray', 'Bite registration', 'Try-in', 'Finish'], multi: true },
-  Bridge: { label: 'Abutment material', options: ['Chrome cobalt', 'Titanium', 'Zirconia', 'Zirconia with Ti-base'] },
-  'Implant bridge': { label: 'Abutment material', options: ['Chrome cobalt', 'Titanium', 'Zirconia', 'Zirconia with Ti-base'] },
+// ─── Service catalogue + per-service fields — straight from the web portal ──
+// Everything below is imported from the clinic/lab create-case form
+// (pages/CreateCasePage.tsx) so the app always asks for exactly what the
+// portal asks for: same services, materials, shades, implant systems,
+// orthodontic / aligner / denture / appliance options.
+export const SERVICE_CATEGORIES = WEB_SERVICE_CATEGORIES;
+export { IMPLANT_BRAND_CATALOG };
+export const MATERIALS = MATERIAL_TYPES;
+export const SHADES = TOOTH_SHADES;
+export const OTHER_SPECIFY = 'Other (specify)';
+
+const findItem = (itemId: string) => WEB_SERVICE_CATEGORIES.flatMap(c => c.items).find(i => i.id === itemId);
+/** Display name — bridge items read better with their category ("Bridge · Pontic"). */
+export const serviceLabel = (itemId: string) => {
+  const it = findItem(itemId);
+  if (!it) return itemId;
+  return getCategoryForItem(itemId) === 'bridge' ? `Bridge · ${it.label}` : it.label;
 };
-export const CASE_SOURCES = ['Via scanner', 'Impressions (by post)', 'Photo of Rx', 'Voice note', 'Email', 'Other'];
-export const MATERIALS = ['Layered zirconia', 'Monolithic zirconia', 'Lithium disilicate (e.max)', 'Porcelain fused to metal', 'Full gold', 'Acrylic', 'Cobalt chrome', 'Flexible nylon', 'PMMA temporary'];
-export const SHADES = ['A1', 'A2', 'A3', 'A3.5', 'A4', 'B1', 'B2', 'B3', 'B4', 'C1', 'C2', 'C3', 'C4', 'D2', 'D3', 'D4', 'BL1', 'BL2', 'BL3', 'BL4'];
+export const categoryLabel = (itemId: string) => WEB_SERVICE_CATEGORIES.find(c => c.id === getCategoryForItem(itemId))?.label ?? 'Others';
+/** Map a free-form service name (e.g. read from a photo) onto a catalogue item. */
+export const itemIdForLabel = (label: string) => {
+  const l = label.toLowerCase();
+  const all = WEB_SERVICE_CATEGORIES.flatMap(c => c.items);
+  return all.find(i => i.label.toLowerCase() === l)?.id
+    ?? all.find(i => l.includes(i.label.toLowerCase()) || i.label.toLowerCase().includes(l))?.id
+    ?? 'ot-other';
+};
+/** Orthodontics and appliances don't take material + shade (as on the web form). */
+export const needsMaterial = (itemId: string) => !['orthodontics', 'appliances'].includes(getCategoryForItem(itemId) ?? '');
+/** "Others" takes material + shade as free text, like the web form. */
+export const freeTextMaterial = (itemId: string) => getCategoryForItem(itemId) === 'others';
+
+export interface DetailField {
+  key: string;
+  label: string;
+  kind: 'chips' | 'multi' | 'text' | 'textarea' | 'brand' | 'occlusion';
+  options?: string[];
+  required?: boolean;
+}
+const occlusion = (key: string, label: string): DetailField => ({ key, label, kind: 'occlusion', options: OCCLUSION_CLASSES });
+/** The category-specific fields for one service — same set and required rules as the web form. */
+export function detailFields(itemId: string): DetailField[] {
+  const cat = getCategoryForItem(itemId);
+  if (cat === 'bridge') return [
+    { key: 'brand', label: 'Implant system', kind: 'brand', required: true },
+    { key: 'abutmentMaterial', label: 'Implant abutment material', kind: 'chips', options: IMPLANT_ABUTMENT_MATERIALS, required: true },
+  ];
+  if (itemId === 'or-retainers') return [
+    { key: 'retainerType', label: 'Retainer type', kind: 'chips', options: RETAINER_TYPES, required: true },
+    occlusion('anglesClass', 'Angle’s class'), occlusion('skeletalClass', 'Skeletal'), occlusion('dentalClass', 'Dental'),
+  ];
+  if (itemId === 'or-clear-aligners') return [
+    { key: 'alignerDuration', label: 'Aligner duration', kind: 'chips', options: ALIGNER_DURATIONS },
+    { key: 'phasing', label: 'Phasing', kind: 'chips', options: YES_NO },
+    { key: 'ipr', label: 'IPR', kind: 'chips', options: YES_NO },
+    { key: 'attachment', label: 'Attachments', kind: 'chips', options: YES_NO },
+    { key: 'incisalEdge', label: 'Incisal edge alignment', kind: 'chips', options: ALIGNER_INCISAL_EDGE },
+    { key: 'crowding', label: 'Crowding', kind: 'chips', options: ALIGNER_CROWDING },
+    { key: 'spacing', label: 'Spacing', kind: 'chips', options: ALIGNER_SPACING },
+    { key: 'overjet', label: 'Overjet', kind: 'chips', options: ALIGNER_OVERJET },
+    { key: 'overbite', label: 'Overbite', kind: 'chips', options: ALIGNER_OVERBITE },
+    { key: 'openbite', label: 'Openbite', kind: 'chips', options: ALIGNER_OPENBITE },
+    { key: 'crossbite', label: 'Crossbite', kind: 'chips', options: ALIGNER_CROSSBITE },
+    { key: 'midline', label: 'Midline', kind: 'chips', options: ALIGNER_MIDLINE },
+    { key: 'biotype', label: 'Biotype', kind: 'chips', options: ALIGNER_BIOTYPE },
+    { key: 'millersClass', label: 'Miller’s class', kind: 'chips', options: MILLERS_CLASS },
+    occlusion('anglesClass', 'Angle’s class'), occlusion('skeletalClass', 'Skeletal'), occlusion('dentalClass', 'Dental'),
+    { key: 'alignerItems', label: 'Additional items', kind: 'textarea' },
+  ];
+  if (cat === 'denture') return [{ key: 'stages', label: 'Stage', kind: 'multi', options: DENTURE_STAGES, required: true }];
+  if (cat === 'appliances') {
+    const cfg = getApplianceConfig(itemId);
+    return cfg ? [{ key: 'applianceOption', label: cfg.label, kind: 'chips', options: cfg.options, required: true }] : [];
+  }
+  if (cat === 'others') return [{ key: 'customServiceName', label: 'Service name', kind: 'text', required: true }];
+  return [];
+}
+export { OCCLUSION_SIDES };
+export const CASE_SOURCES = [...WEB_CASE_SOURCES.filter(s => s !== 'Other'), 'Photo of lab form', 'Voice note', 'Other'];
 export const COURIERS = ["Lab's own courier", 'Royal Mail Special Delivery', 'DPD', 'DHL Express', 'Hand delivered', 'Other'];
 export const STORAGE = ['Lab work drawer', 'Surgery 1', 'Surgery 2', 'Reception'];
 export const RECEIVE_CHECKS = [
-  { id: 'complete', label: 'Work undamaged and complete', required: true },
+  { id: 'complete', label: 'Work undamaged and complete', required: false },
   { id: 'models', label: 'Models, impressions or bite blocks returned', required: false },
-  { id: 'som', label: 'Statement of manufacture / delivery note included', required: true },
+  { id: 'som', label: 'Statement of manufacture or delivery note included', required: false },
 ];
-export const PROBLEMS = ['Damaged in transit', 'Wrong shade', 'Missing items', 'Doesn’t match prescription', 'Wrong patient / case', 'Other'];
+export const PROBLEMS = ['Damaged in transit', 'Wrong shade', 'Missing items', 'Doesn’t match the case', 'Wrong patient or case', 'Other'];
 
 // ─── Lab work ───────────────────────────────────────────────────────────────
 
 /** Where the work physically is. Questions and lateness are flags on top. */
-export type Stage = 'ready' | 'dispatched' | 'at-lab' | 'production' | 'shipped' | 'received';
+/** 'draft' = saved but not submitted yet (not part of the lab progress rail). */
+export type Stage = 'draft' | 'ready' | 'dispatched' | 'at-lab' | 'production' | 'shipped' | 'received';
 export const STAGES: { id: Stage; label: string; short: string }[] = [
   { id: 'ready', label: 'Ready to dispatch', short: 'Ready' },
   { id: 'dispatched', label: 'Dispatched to lab', short: 'Dispatched' },
@@ -110,6 +167,18 @@ export const STAGES: { id: Stage; label: string; short: string }[] = [
   { id: 'received', label: 'Received at practice', short: 'Received' },
 ];
 export const stageIndex = (s: Stage) => STAGES.findIndex(x => x.id === s);
+export const stageLabel = (s: Stage) => (s === 'draft' ? 'Draft' : STAGES[stageIndex(s)].label);
+
+/** The lab's own status list (lab portal). Only the lab can change it — the
+ *  practice sees it read-only and talks to the lab through Comments. */
+export type LabStatus = 'Received' | 'Under Review' | 'On Hold (Lab)' | 'On Hold (Practice)' | 'Accepted' | 'In Queue'
+  | 'In Production' | 'Quality Control' | 'Shipped' | 'Delivered' | 'Not Approved' | 'Cancelled';
+/** Lab status as the practice sees it. null = the lab hasn't received the case yet. */
+export function labStatusOf(c: LabCase): LabStatus | null {
+  if (c.onHold) return c.onHold.side === 'Lab' ? 'On Hold (Lab)' : 'On Hold (Practice)';
+  if (c.labStatus) return c.labStatus;
+  return ({ 'at-lab': 'Accepted', production: 'In Production', shipped: 'Shipped', received: 'Delivered' } as Partial<Record<Stage, LabStatus>>)[c.stage] ?? null;
+}
 
 export interface CaseEvent { stage: Stage | 'authorised' | 'note'; at: string; by: string; text?: string }
 export interface Message { from: 'lab' | 'practice'; author: string; text: string; at: string }
@@ -147,6 +216,15 @@ export interface LabCase {
   /** Category extra for the first item, e.g. 'Type: Hard'. */
   extra?: string;
   caseSource?: string;
+  /** The lab moved the delivery date — the practice should review it (portal: "Delivery date changed"). */
+  deliveryChanged?: { from: string; reason?: string };
+  /** Set by the lab (lab portal status). Overrides the default derived from the stage. */
+  labStatus?: LabStatus;
+  /** Put on hold by the lab — only the lab can set or lift it.
+   *  side 'Lab' = On Hold (Lab), the lab's own reason; 'Practice' = On Hold (Practice), waiting on the practice. */
+  onHold?: { side: 'Lab' | 'Practice'; reason: string; by: string; since: string };
+  /** Saved form for a draft case (CaseForm from ManualCase) so it reopens filled in. */
+  draftForm?: unknown;
 }
 
 export interface RxItem { service: string; teeth: string[]; material: string; shade?: string; extra?: string }
@@ -220,17 +298,20 @@ export const SEED_CASES: LabCase[] = [
     messages: [],
   },
   {
+    onHold: { side: 'Practice', reason: 'Waiting for the practice to confirm the shade', by: 'Northstar Dental Lab', since: at(0, 9, 0) },
     id: 'SG-28472', appointment: { at: at(9, 11, 0), kind: 'Try-in', room: 'Surgery 1' }, patientId: 'P-10415', practice: 'cds', lab: 'northstar', clinician: 'reed', createdBy: 'Dr Olivia Reed',
     service: 'Veneer', teeth: ['UR1', 'UL1'], material: 'Lithium disilicate (e.max)', shade: 'BL2', funding: 'Private',
     items: [{ service: 'Whitening trays', teeth: ['Both arches'], material: 'Flexible nylon' }],
     instructions: 'Match to digital smile design. Minimal prep. Feldspathic look.',
-    returnBy: at(8), stage: 'dispatched', attachments: ['Prescription photo', 'DSD mock-up.pdf'], source: 'photo',
+    returnBy: at(8), stage: 'at-lab', attachments: ['Prescription photo', 'DSD mock-up.pdf'], source: 'photo',
     dispatch: { courier: 'DHL Express', tracking: 'JD014600006281', bags: 1 },
     events: [
       { stage: 'authorised', at: at(-1, 10, 2), by: 'Dr Olivia Reed' },
       { stage: 'dispatched', at: at(-1, 15, 30), by: 'Dr Olivia Reed', text: 'DHL Express · JD014600006281' },
+      { stage: 'at-lab', at: at(0, 8, 40), by: 'Northstar Dental Lab' },
+      { stage: 'note', at: at(0, 9, 0), by: 'Northstar Dental Lab', text: 'Status changed to On Hold (Practice)' },
     ],
-    messages: [],
+    messages: [{ from: 'lab', author: 'Northstar Dental Lab', text: 'We’ve put this case on hold. The mock-up shows BL2 but the lab form says BL3. Which shade should we use?', at: at(0, 9, 0) }],
   },
   {
     id: 'SG-28466', appointment: { at: at(0, 11, 40), kind: 'Fit', room: 'Surgery 1' }, patientId: 'P-10290', practice: 'cds', lab: 'precision', clinician: 'reed', createdBy: 'Dr Olivia Reed',
@@ -279,6 +360,7 @@ export const SEED_CASES: LabCase[] = [
     messages: [],
   },
   {
+    labStatus: 'Quality Control',
     id: 'SG-28503', appointment: { at: at(1, 11, 30), kind: 'Fit', room: 'Surgery 1' }, patientId: 'P-10450', practice: 'cds', lab: 'northstar', clinician: 'reed', createdBy: 'Dr Olivia Reed',
     service: 'Crown', teeth: ['UL6'], material: 'Monolithic zirconia', shade: 'A2', funding: 'Private',
     instructions: 'Tight contacts, flat fossae for bruxist.',
@@ -305,14 +387,69 @@ export const SEED_CASES: LabCase[] = [
     ],
     messages: [],
   },
+  {
+    labStatus: 'Not Approved',
+    id: 'SG-28511', appointment: { at: at(11, 10, 0), kind: 'Fit', room: 'Surgery 1' }, patientId: 'P-10231', practice: 'cds', lab: 'brightarch', clinician: 'reed', createdBy: 'Dr Olivia Reed',
+    service: 'Onlay', teeth: ['LL6'], material: 'Lithium disilicate (e.max)', shade: 'A3', funding: 'Private',
+    instructions: 'Onlay covering MB and DB cusps.',
+    returnBy: at(9), stage: 'at-lab', attachments: ['Prescription.pdf', 'Intraoral scan link'], source: 'manual',
+    events: [
+      { stage: 'authorised', at: at(-3, 9, 0), by: 'Dr Olivia Reed' },
+      { stage: 'dispatched', at: at(-3, 15, 0), by: 'Reception' },
+      { stage: 'at-lab', at: at(-1, 9, 0), by: 'Bright Arch Laboratory' },
+      { stage: 'note', at: at(-1, 11, 0), by: 'Bright Arch Laboratory', text: 'Status changed to Not Approved' },
+    ],
+    messages: [{ from: 'lab', author: 'Bright Arch Laboratory', text: 'We can’t approve this one: the scan margins on LL6 aren’t clear. Please send a new scan.', at: at(-1, 11, 0) }],
+  },
+  {
+    deliveryChanged: { from: at(3), reason: 'Waiting for the framework to come back from milling' },
+    id: 'SG-28514', patientId: 'P-10342', practice: 'isc', lab: 'precision', clinician: 'okafor', createdBy: 'Dr Samuel Okafor',
+    service: 'Bridge', teeth: ['UR4', 'UR5', 'UR6'], material: 'Porcelain fused to metal', shade: 'A2', funding: 'NHS',
+    instructions: 'Three-unit bridge, UR5 pontic.',
+    returnBy: at(6), stage: 'production', attachments: ['Prescription.pdf'], source: 'manual',
+    events: [
+      { stage: 'authorised', at: at(-6, 9, 0), by: 'Dr Samuel Okafor' },
+      { stage: 'dispatched', at: at(-6, 15, 0), by: 'Reception' },
+      { stage: 'at-lab', at: at(-5, 9, 0), by: 'Precision Dental Works' },
+      { stage: 'production', at: at(-4, 9, 0), by: 'Precision Dental Works' },
+      { stage: 'note', at: at(0, 10, 0), by: 'Precision Dental Works', text: 'Delivery date changed' },
+    ],
+    messages: [],
+  },
+  {
+    id: 'SG-D1004', patientId: 'P-10119', practice: 'isc', lab: 'northstar', clinician: 'okafor', createdBy: 'John Carter',
+    service: 'Crown', teeth: ['UR1'], material: 'Zirconia', funding: 'Private', instructions: '', returnBy: '', stage: 'draft',
+    attachments: [], events: [], messages: [], source: 'manual',
+    draftForm: {
+      practice: 'isc', clinician: 'okafor', patientId: 'P-10119', lab: 'northstar', funding: 'Private', returnBy: '', apptDate: '', apptKind: 'Fit',
+      caseSource: null, instructions: 'Match UL1 incisal translucency.', attachments: [],
+      items: [{ uid: 'd1-1', itemId: 'su-crown', teeth: ['UR1'], sameForAll: true, material: 'Zirconia', shade: null, perTooth: {}, details: {} }],
+    },
+  },
+  {
+    id: 'SG-D1007', patientId: 'P-10402', practice: 'isc', lab: 'precision', clinician: 'okafor', createdBy: 'John Carter',
+    service: 'Full Denture', teeth: ['Upper arch'], material: 'Acrylic', funding: 'NHS', instructions: '', returnBy: '', stage: 'draft',
+    attachments: [], events: [], messages: [], source: 'manual',
+    items: [{ service: 'Night Guard', teeth: ['Lower arch'], material: '' }],
+    draftForm: {
+      practice: 'isc', clinician: 'okafor', patientId: 'P-10402', lab: 'precision', funding: 'NHS', returnBy: '', apptDate: '', apptKind: 'Fit',
+      caseSource: 'Impressions (By Post)', instructions: '', attachments: [],
+      items: [
+        { uid: 'd2-1', itemId: 'de-full-denture', teeth: ['Upper arch'], sameForAll: true, material: 'Acrylic', shade: 'A3', perTooth: {}, details: {} },
+        { uid: 'd2-2', itemId: 'ap-night-guard', teeth: ['Lower arch'], sameForAll: true, material: null, shade: null, perTooth: {}, details: { applianceOption: 'Hard' } },
+      ],
+    },
+  },
 ];
 
 export const isOverdue = (c: LabCase) =>
-  c.stage !== 'received' && c.stage !== 'shipped' && dayOffset(c.returnBy) < 0;
+  c.stage !== 'received' && c.stage !== 'shipped' && c.stage !== 'draft' && !c.onHold && !!c.returnBy && dayOffset(c.returnBy) < 0;
 
 /** The one thing the practice should do next — drives the case's CTA. */
-export type NextAction = 'dispatch' | 'reply' | 'chase' | 'check-in' | 'wait' | 'done';
+export type NextAction = 'finish' | 'on-hold' | 'dispatch' | 'reply' | 'chase' | 'check-in' | 'wait' | 'done';
 export function nextAction(c: LabCase): NextAction {
+  if (c.stage === 'draft') return 'finish';
+  if (c.onHold) return 'on-hold';
   if (c.stage === 'ready') return 'dispatch';
   if (c.questionOpen) return 'reply';
   if (c.stage === 'shipped') return 'check-in';
@@ -326,7 +463,13 @@ export function nextAction(c: LabCase): NextAction {
 export type ReadinessLevel = 'in-practice' | 'arriving' | 'on-track' | 'attention' | 'at-risk';
 export interface Readiness { level: ReadinessLevel; label: string; detail: string }
 export function readiness(c: LabCase): Readiness {
-  if (c.stage === 'received') return { level: 'in-practice', label: 'In practice', detail: c.receipt ? `In ${c.receipt.storedIn.toLowerCase()}` : 'Checked in' };
+  if (c.stage === 'draft') return { level: 'attention', label: 'Draft', detail: 'Not submitted yet. Finish and create the case' };
+  if (c.onHold) return { level: 'attention', label: 'On hold', detail: c.onHold.side === 'Practice' ? 'Lab is waiting on the practice' : 'Paused by the lab' };
+  if (c.labStatus === 'Not Approved') return { level: 'at-risk', label: 'Not approved', detail: 'Rejected by lab · see comments' };
+  if (c.stage === 'received') return { level: 'in-practice', label: 'In practice', detail: c.receipt ? `In ${c.receipt.storedIn.toLowerCase()}` : 'Received' };
+  if (!c.returnBy) return c.stage === 'ready'
+    ? { level: 'attention', label: 'Ready to dispatch', detail: 'Not sent to the lab yet · no delivery date' }
+    : { level: 'on-track', label: 'No date', detail: 'No delivery date set' };
   // Dates only — no times are captured for due dates or appointments.
   const ad = c.appointment ? dayOffset(c.appointment.at) : null;
   const dd = dayOffset(c.returnBy);
@@ -334,11 +477,11 @@ export function readiness(c: LabCase): Readiness {
     const n = Math.max(1, -dayOffset(c.returnBy));
     return { level: 'at-risk', label: 'Late', detail: `Lab is ${n} day${n > 1 ? 's' : ''} late${c.chasedAt ? ' · chased' : ''}` };
   }
-  if (ad !== null && dd > ad) return { level: 'at-risk', label: 'At risk', detail: `Due ${relDay(c.returnBy).toLowerCase()}, after the ${c.appointment!.kind.toLowerCase()}` };
-  if (ad !== null && dd === ad && c.stage !== 'shipped') return { level: 'at-risk', label: 'At risk', detail: `Due the same day as the ${c.appointment!.kind.toLowerCase()}` };
-  if (c.questionOpen) return { level: 'attention', label: 'Lab waiting', detail: 'Lab has a question for you' };
-  if (c.stage === 'ready') return { level: 'attention', label: 'Ready to dispatch', detail: 'Still at the practice, not sent to the lab yet' };
-  if (c.stage === 'shipped') return { level: 'arriving', label: 'Arriving', detail: `Due ${relDay(c.returnBy).toLowerCase()}` };
+  if (ad !== null && dd > ad) return { level: 'at-risk', label: 'At risk', detail: `Back ${relDay(c.returnBy).toLowerCase()}, after the ${c.appointment!.kind.toLowerCase()}` };
+  if (ad !== null && dd === ad && c.stage !== 'shipped') return { level: 'at-risk', label: 'At risk', detail: `Back the same day as the ${c.appointment!.kind.toLowerCase()}` };
+  if (c.questionOpen) return { level: 'attention', label: 'Info required', detail: 'Lab needs more information' };
+  if (c.stage === 'ready') return { level: 'attention', label: 'Ready to dispatch', detail: 'Not sent to the lab yet' };
+  if (c.stage === 'shipped') return { level: 'arriving', label: 'Arriving', detail: `Expected ${relDay(c.returnBy).toLowerCase()}` };
   return { level: 'on-track', label: 'On track', detail: `Back ${relDay(c.returnBy).toLowerCase()}` };
 }
 export const READINESS_ORDER: ReadinessLevel[] = ['at-risk', 'attention', 'arriving', 'on-track', 'in-practice'];
@@ -349,17 +492,26 @@ export function dayOffset(iso: string) {
   return Math.round((s(new Date(iso)) - s(new Date())) / DAY);
 }
 
-export type Attention = 'ready' | 'arriving' | 'questions' | 'overdue';
-export const ATTENTION: { id: Attention; label: string; hint: string }[] = [
-  { id: 'ready', label: 'Ready to dispatch', hint: 'Print label and book courier' },
-  { id: 'arriving', label: 'Arriving from lab', hint: 'Check in on arrival' },
-  { id: 'questions', label: 'Lab questions', hint: 'Reply to the lab' },
-  { id: 'overdue', label: 'Overdue lab work', hint: 'Chase the lab' },
+/** Status shortcuts. The first four (home: true) are the Home tiles and the Lab work status chips, in this order. */
+export type Attention = 'overdue' | 'ready' | 'on-hold' | 'draft' | 'arriving' | 'questions' | 'not-approved' | 'date-changed';
+export const ATTENTION: { id: Attention; label: string; short: string; hint: string; home?: boolean }[] = [
+  { id: 'overdue', label: 'Overdue', short: 'Overdue', hint: 'Chase the lab', home: true },
+  { id: 'ready', label: 'Ready to dispatch', short: 'To dispatch', hint: 'Print the label and book a courier', home: true },
+  { id: 'on-hold', label: 'On hold', short: 'On hold', hint: 'Paused by the lab', home: true },
+  { id: 'draft', label: 'Draft', short: 'Draft', hint: 'Finish and create the case', home: true },
+  { id: 'arriving', label: 'Arriving from lab', short: 'Arriving', hint: 'Mark as received when it arrives' },
+  { id: 'questions', label: 'Additional information required', short: 'Info required', hint: 'Reply to the lab' },
+  { id: 'not-approved', label: 'Lab work not approved', short: 'Not approved', hint: 'Rejected by lab' },
+  { id: 'date-changed', label: 'Delivery date changed', short: 'Date changed', hint: 'Needs review' },
 ];
 export const matchesAttention = (c: LabCase, a: Attention) =>
-  a === 'ready' ? c.stage === 'ready'
+  a === 'draft' ? c.stage === 'draft'
+  : a === 'on-hold' ? !!c.onHold
+  : a === 'ready' ? c.stage === 'ready' && !c.onHold
   : a === 'arriving' ? c.stage === 'shipped'
   : a === 'questions' ? !!c.questionOpen
+  : a === 'not-approved' ? labStatusOf(c) === 'Not Approved'
+  : a === 'date-changed' ? !!c.deliveryChanged
   : isOverdue(c);
 
 // ─── Finance ────────────────────────────────────────────────────────────────
@@ -388,13 +540,13 @@ export const SEED_INVOICES: Invoice[] = [
     received: at(-1, 11, 41), due: at(13), source: 'Received via supplier upload', caseId: 'SG-28488',
     lines: [
       { label: 'Full denture · J. Williams', qty: 1, unit: 1290 },
-      { label: 'Remake — upper denture', qty: 1, unit: 650 },
+      { label: 'Remake, upper denture', qty: 1, unit: 650 },
     ],
     checks: [
       { label: 'Lab order match', detail: 'Matches SG-28488', state: 'pass' },
       { label: 'Duplicate check', detail: 'No matching invoice found', state: 'pass' },
       { label: 'Supplier VAT number', detail: 'GB 419 2210 55 verified', state: 'pass' },
-      { label: 'Amount vs usual', detail: '38% above usual for full dentures — remake line not on lab order', state: 'warn' },
+      { label: 'Amount vs usual', detail: '38% above usual for full dentures. Remake line not on lab order', state: 'warn' },
     ],
     activity: [{ text: 'Received via supplier upload', at: at(-1, 11, 41) }, { text: 'Amount anomaly flagged', at: at(-1, 11, 42) }],
   },
@@ -481,13 +633,13 @@ export const SEED_STATEMENTS: Statement[] = [
   },
 ];
 
-export const INVOICE_REASONS = ['Price differs from quote', 'Not on lab order / PO', 'Possible duplicate', 'Work not received', 'Wrong practice or entity', 'VAT incorrect'];
-export const EXCEPTION_RESOLUTIONS = ['Requested copy invoice from supplier', 'Invoice found and linked', 'Not ours — queried with supplier', 'Credit note requested for difference', 'Accept supplier amount'];
+export const INVOICE_REASONS = ['Price differs from quote', 'Not on lab order or PO', 'Possible duplicate', 'Work not received', 'Wrong practice or entity', 'VAT incorrect'];
+export const EXCEPTION_RESOLUTIONS = ['Requested copy invoice from supplier', 'Invoice found and linked', 'Not ours, queried with supplier', 'Credit note requested for difference', 'Accept supplier amount'];
 
 // ─── Formatting ─────────────────────────────────────────────────────────────
 
 export const gbp = (n: number) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(n);
-export const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+export const fmtDate = (iso: string) => (iso ? new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : 'Not set');
 /** 12-hour clock: "9:15 am". */
 export const fmtTime = (iso: string) => {
   const d = new Date(iso);
@@ -501,6 +653,7 @@ export const fmtDateTime = (iso: string) => `${new Date(iso).toLocaleDateString(
 /** "Today", "Tomorrow", "in 6 days", "2 days late". */
 export function relDay(iso: string) {
   const start = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
+  if (!iso) return 'No date';
   const diff = Math.round((start(new Date(iso)) - start(new Date())) / DAY);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
