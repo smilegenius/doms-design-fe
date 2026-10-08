@@ -46,8 +46,8 @@ import { AiReviewTag } from '../components/AiReviewNotice';
 import { SCANNER_SYNC_COPY, scannerSyncUnsupported, caseCreatedBy, needsReview, statusReach, type CreatedSide, type StatusReach, type ViewerPortal } from '../data/caseProvenance';
 import { useScannerConnections } from '../data/scannerConnections';
 import { getCreatedCases, useCreatedCases } from '../data/createdCases';
-import { isDentureService, nextStageRow, stageRowsFor, useStageAppends, type StageRow } from '../data/dentureStages';
-import { StageStatusCell } from '../components/DentureStages';
+import { isDentureService, nextStageRow, stageRowsFor, stageOrderSummaries, useStageAppends, type StageOrderSummary } from '../data/dentureStages';
+import { DoneEarlierTag, StageStatusPill } from '../components/DentureStages';
 import { hasEmailReply, hasWhatsAppReply, useCaseCommunications } from '../data/caseCommunications';
 import {
   RescanLink, originalIdOf, relatedIdsOf, relationshipOf, rescanIdsOf, useRescanLinks,
@@ -507,16 +507,16 @@ export const dentureDemoCases: Case[] = [
         id: 'so-1',
         stages: ['Special Tray', 'Bite Registration', 'Try In'],
         status: 'in-production',
-        deliveryDate: '05-May-2026',
-        createdAt: '28-Apr-2026',
-        stageDates: { 'Special Tray': '05-May-2026', 'Bite Registration': '12-May-2026', 'Try In': '22-May-2026' },
+        deliveryDate: '01-Jul-2026',
+        createdAt: '29-Jun-2026',
+        stageDates: { 'Special Tray': '01-Jul-2026', 'Bite Registration': '06-Jul-2026', 'Try In': '13-Jul-2026' },
         stageStatuses: { 'Special Tray': 'completed', 'Bite Registration': 'completed', 'Try In': 'in-production' },
       }],
     }],
     status: 'in-production',
-    createdAt: '28-Apr-2026',
-    updatedAt: '16-May-2026',
-    requestedDelivery: '22-May-2026',
+    createdAt: '29-Jun-2026',
+    updatedAt: '30-Jun-2026',
+    requestedDelivery: '13-Jul-2026',
     hasAlert: false,
     scanner: 'iTero',
     source: 'scanner',
@@ -538,22 +538,22 @@ export const dentureDemoCases: Case[] = [
           id: 'so-1',
           stages: ['Special Tray', 'Bite Registration'],
           status: 'in-production',
-          deliveryDate: '15-May-2026',
-          createdAt: '07-May-2026',
-          stageDates: { 'Special Tray': '15-May-2026', 'Bite Registration': '26-May-2026' },
+          deliveryDate: '03-Jul-2026',
+          createdAt: '30-Jun-2026',
+          stageDates: { 'Special Tray': '03-Jul-2026', 'Bite Registration': '10-Jul-2026' },
           stageStatuses: { 'Special Tray': 'completed', 'Bite Registration': 'in-production' },
         }],
       },
       {
-        id: 'dn3002-s2', name: 'Crown', status: 'new', deliveryDate: '28-May-2026',
+        id: 'dn3002-s2', name: 'Crown', status: 'new', deliveryDate: '17-Jul-2026',
         fdi: [11], material: 'E.max', shade: 'A3', orderType: 'Private',
         scanFileCount: 2, attachmentCount: 0,
       },
     ],
     status: 'in-production',
-    createdAt: '07-May-2026',
-    updatedAt: '15-May-2026',
-    requestedDelivery: '26-May-2026',
+    createdAt: '30-Jun-2026',
+    updatedAt: '03-Jul-2026',
+    requestedDelivery: '10-Jul-2026',
     hasAlert: false,
     scanner: '3Shape',
     source: 'scanner',
@@ -795,12 +795,12 @@ export const draftCases: Case[] = [
       instructions: 'Try-in approved — please proceed to finish.',
       scanFileCount: 0, attachmentCount: 1,
       stages: ['Finish'],
-      stageDates: { Finish: '02-Jun-2026' },
+      stageDates: { Finish: '24-Jul-2026' },
     }],
     status: 'draft',
-    createdAt: '19-May-2026',
-    updatedAt: '19-May-2026',
-    requestedDelivery: '02-Jun-2026',
+    createdAt: '30-Jun-2026',
+    updatedAt: '30-Jun-2026',
+    requestedDelivery: '24-Jul-2026',
     hasAlert: false,
     scanner: 'iTero',
     source: 'email',
@@ -832,8 +832,8 @@ export const draftCases: Case[] = [
       stageDates: { 'Special Tray': '20-Mar-2026', 'Bite Registration': '10-Apr-2026', Finish: '05-Jun-2026' },
     }],
     status: 'draft',
-    createdAt: '19-May-2026',
-    updatedAt: '19-May-2026',
+    createdAt: '30-Jun-2026',
+    updatedAt: '30-Jun-2026',
     requestedDelivery: '05-Jun-2026',
     hasAlert: false,
     scanner: 'iTero',
@@ -1762,66 +1762,78 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   // the stage rows whenever one lands.
   useStageAppends();
   // Denture services list their stages under the service, each with its own
-  // requested delivery date. Expanded per service: key "<caseId>::<serviceId>".
+  // requested delivery date. One accordion per case (in the Status column)
+  // opens everything underneath: service rows, and the stages of every denture.
   const stageKey = (caseId: string, serviceId: string) => `${caseId}::${serviceId}`;
-  const stageToggle = (c: Case, si: ServiceItem, rows: StageRow[]) => {
-    const open = expandedRows.has(stageKey(c.id, si.id));
-    return (
-      <button
-        onClick={(e) => { e.stopPropagation(); toggleRow(stageKey(c.id, si.id)); }}
-        title={open ? 'Hide stages' : 'Show stages and their delivery dates'}
-        className="mt-1 inline-flex items-center gap-1 px-2 py-px rounded-full text-[10px] font-semibold border bg-[#F5F3FF] text-[#5B21B6] border-[#DDD6FE] hover:bg-[#EDE9FE] transition-colors whitespace-nowrap"
-      >
-        <Layers className="w-2.5 h-2.5" />
-        {rows.length} {rows.length === 1 ? 'stage' : 'stages'}
-        {open ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
-      </button>
-    );
-  };
-  // One row per stage, laid on the list's own columns: status under Status,
-  // the stage name under Case ID, its requested date under Delivery Date.
-  function renderStageRows(c: Case, rows: StageRow[]) {
-    return rows.map(r => (
+  const orderCount = (orders: StageOrderSummary[]) => (
+    <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-[#5B21B6] whitespace-nowrap">
+      <Layers className="w-2.5 h-2.5" />
+      {orders.length} stage {orders.length === 1 ? 'order' : 'orders'}
+    </span>
+  );
+  // Chevron toggle shared by the denture accordions (case row + service row).
+  const accChevron = (open: boolean) => (
+    <span className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${
+      open ? 'bg-[#F5F3FF] border-[#DDD6FE] text-[#5B21B6]' : 'bg-white border-[#E0E0E6] text-[#717182] group-hover/acc:border-[#DDD6FE] group-hover/acc:text-[#5B21B6]'
+    }`}>
+      {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+    </span>
+  );
+  // One row per stage ORDER, as the case page's tabs read: "Initial" with the
+  // stages it bundles (each with its own requested date), then "Order 2"…
+  // Status = where the order is now; Delivery = its next open stage's date.
+  function renderStageOrderRows(c: Case, orders: StageOrderSummary[], nested = false) {
+    return orders.map(o => (
       <tr
-        key={`${c.id}-stage-${r.stage}`}
+        key={`${c.id}-order-${o.id}`}
         onClick={() => openCase(c)}
         className="bg-[#FAF8FF] hover:bg-[#F5F3FF] transition-colors cursor-pointer [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]"
       >
-        <td className="pl-4 pr-1 py-1.5" />
-        <td className="pl-3 pr-2 py-1.5">
-          <div className="w-0.5 h-4 bg-[#C4B5FD] rounded-full mx-auto" />
+        <td className="pl-4 pr-1 py-2" />
+        <td className="pl-3 pr-2 py-2">
+          <div className={`w-0.5 h-5 bg-[#C4B5FD] rounded-full ${nested ? 'ml-auto mr-0' : 'mx-auto'}`} />
         </td>
         {visibleCols.status && (
-          <td className="px-4 py-1.5 whitespace-nowrap"><StageStatusCell row={r} size="xs" /></td>
+          <td className={`${nested ? 'pl-8' : 'pl-4'} pr-4 py-2 whitespace-nowrap`}>
+            {o.doneEarlier ? <DoneEarlierTag size="xs" /> : <StageStatusPill status={o.status} size="xs" />}
+          </td>
         )}
-        {visibleCols.score && <td className="px-4 py-1.5" />}
-        {csEnabled && visibleCols.carestack && <td className="px-4 py-1.5" />}
+        {visibleCols.score && <td className="px-4 py-2" />}
+        {csEnabled && visibleCols.carestack && <td className="px-4 py-2" />}
         {visibleCols.caseId && (
-          <td className="px-4 py-1.5 whitespace-nowrap">
-            <span className="text-[11px] font-semibold text-[#5B21B6]">{r.stage}</span>
-            {r.followUp && (
-              <span className="ml-1.5 inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">Follow-up Rx</span>
-            )}
+          <td className={`${nested ? 'pl-8' : 'pl-4'} pr-4 py-2`}>
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="text-[11px] font-bold text-[#5B21B6]">{o.label}</span>
+              {o.followUp && (
+                <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">Follow-up Rx</span>
+              )}
+            </div>
+            <div className="text-[10px] text-[#717182] mt-0.5 whitespace-nowrap">
+              {o.rows.map(r => r.stage).join(', ')}
+            </div>
           </td>
         )}
-        {visibleCols.scannerDate && <td className="px-4 py-1.5" />}
-        {visibleCols.createdAt   && <td className="px-4 py-1.5" />}
-        {visibleCols.updatedAt   && <td className="px-4 py-1.5" />}
+        {visibleCols.scannerDate && <td className="px-4 py-2" />}
+        {visibleCols.createdAt   && <td className="px-4 py-2" />}
+        {visibleCols.updatedAt   && <td className="px-4 py-2" />}
         {visibleCols.deliveryDate && (
-          <td className="px-4 py-1.5 whitespace-nowrap text-[11px]">
-            {r.date
-              ? <span className={r.doneEarlier ? 'text-[#717182]' : 'text-[#030213]'}>{r.date}</span>
-              : <span className="text-[#D97706]">No date</span>}
+          <td className="px-4 py-2 whitespace-nowrap text-[11px]">
+            {o.next
+              ? <>
+                  {o.next.date ? <span className="text-[#030213]">{o.next.date}</span> : <span className="text-[#D97706]">No date</span>}
+                  <div className="text-[10px] text-[#717182] mt-0.5">{o.next.stage}</div>
+                </>
+              : <span className="text-[#A0A0B0]">{o.rows[o.rows.length - 1]?.date ?? '—'}</span>}
           </td>
         )}
-        {visibleCols.patient  && <td className="px-4 py-1.5" />}
+        {visibleCols.patient  && <td className="px-4 py-2" />}
         {visibleCols.service  && (
-          <td className="px-4 py-1.5 whitespace-nowrap"><span className="text-[10px] text-[#A0A0B0]">Stage</span></td>
+          <td className="px-4 py-2 whitespace-nowrap"><span className="text-[10px] text-[#A0A0B0]">Stage order</span></td>
         )}
-        {visibleCols.practice && <td className="px-4 py-1.5" />}
-        {visibleCols.dentist  && <td className="px-4 py-1.5" />}
-        {visibleCols.lab      && <td className="px-4 py-1.5" />}
-        <td className="px-4 py-1.5" />
+        {visibleCols.practice && <td className="px-4 py-2" />}
+        {visibleCols.dentist  && <td className="px-4 py-2" />}
+        {visibleCols.lab      && <td className="px-4 py-2" />}
+        <td className="px-4 py-2" />
       </tr>
     ));
   }
@@ -2520,6 +2532,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                   const soloDenture = c.serviceItems.length === 1 && isDentureService(c.serviceItems[0].name) && c.status !== 'draft'
                     ? c.serviceItems[0] : null;
                   const soloStageRows = soloDenture ? stageRowsFor(c.id, c.createdAt, soloDenture) : [];
+                  const soloOrders = soloDenture ? stageOrderSummaries(c.id, c.createdAt, soloDenture) : [];
                   const soloNext = soloDenture ? nextStageRow(soloStageRows) : null;
                   const effectiveDelivery = dueDateChange?.next ?? (soloNext ? soloNext.date : c.requestedDelivery);
                   const overdue = isOverdue(effectiveDelivery);
@@ -2617,12 +2630,23 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                                 ? <ChevronUp   className="w-3 h-3" />
                                 : <ChevronDown className="w-3 h-3" />}
                             </button>
+                          ) : null}
+                          {!locked && !isMulti && (soloDenture && soloStageRows.length > 0 ? (
+                            /* Denture — the status opens an accordion of its stages */
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleRow(c.id); }}
+                              title={isExpanded ? 'Hide stage orders' : 'Show stage orders and their delivery dates'}
+                              className="group/acc inline-flex flex-col items-start text-left"
+                            >
+                              <span className="inline-flex items-center gap-1">
+                                <StatusBadge status={c.status} />
+                                {accChevron(isExpanded)}
+                              </span>
+                              {orderCount(soloOrders)}
+                            </button>
                           ) : (
                             <StatusBadge status={c.status} />
-                          )}
-                          {!locked && soloDenture && soloStageRows.length > 0 && (
-                            <div>{stageToggle(c, soloDenture, soloStageRows)}</div>
-                          )}
+                          ))}
                           {!locked && c.statusOverride && (
                             <div className="mt-1"><OverrideTag override={c.statusOverride} /></div>
                           )}
@@ -2781,11 +2805,13 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                     </tr>
 
                     {/* ── Stage rows of a single-service denture ── */}
-                    {soloDenture && expandedRows.has(stageKey(c.id, soloDenture.id)) && renderStageRows(c, soloStageRows)}
+                    {soloDenture && isExpanded && renderStageOrderRows(c, soloOrders)}
 
                     {/* ── Child service rows — visible when expanded ── */}
-                    {isExpanded && c.serviceItems.map((si, idx) => {
+                    {isExpanded && isMulti && c.serviceItems.map((si, idx) => {
                       const dentureRows = isDentureService(si.name) ? stageRowsFor(c.id, c.createdAt, si) : [];
+                      const dentureOrders = isDentureService(si.name) ? stageOrderSummaries(c.id, c.createdAt, si) : [];
+                      const ordersOpen = expandedRows.has(stageKey(c.id, si.id));
                       const dentureNext = dentureRows.length ? nextStageRow(dentureRows) : null;
                       const siDelivery = dentureNext ? dentureNext.date : si.deliveryDate;
                       return (
@@ -2811,8 +2837,23 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                         {/* Status — service-level badge */}
                         {visibleCols.status && (
                           <td className="px-4 py-2 whitespace-nowrap">
-                            <StatusBadge status={si.status} />
-                            {dentureRows.length > 0 && <div>{stageToggle(c, si, dentureRows)}</div>}
+                            {dentureOrders.length > 0 ? (
+                              /* Denture inside a multi-service case — its own
+                                 accordion (3rd level) for the stage orders. */
+                              <button
+                                onClick={(e) => { e.stopPropagation(); toggleRow(stageKey(c.id, si.id)); }}
+                                title={ordersOpen ? 'Hide stage orders' : 'Show stage orders and their delivery dates'}
+                                className="group/acc inline-flex flex-col items-start text-left"
+                              >
+                                <span className="inline-flex items-center gap-1">
+                                  <StatusBadge status={si.status} />
+                                  {accChevron(ordersOpen)}
+                                </span>
+                                {orderCount(dentureOrders)}
+                              </button>
+                            ) : (
+                              <StatusBadge status={si.status} />
+                            )}
                           </td>
                         )}
                         {visibleCols.score && (
@@ -2853,7 +2894,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                         {visibleCols.lab       && <td className="px-4 py-2" />}
                         <td className="px-4 py-2" />
                       </tr>
-                      {dentureRows.length > 0 && expandedRows.has(stageKey(c.id, si.id)) && renderStageRows(c, dentureRows)}
+                      {dentureOrders.length > 0 && ordersOpen && renderStageOrderRows(c, dentureOrders, true)}
                       </React.Fragment>
                       );
                     })}

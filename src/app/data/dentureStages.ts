@@ -269,3 +269,34 @@ export function nextStageRow(rows: StageRow[]): StageRow | null {
   const closed: CaseStatus[] = ['completed', 'delivered'];
   return rows.find(r => !r.doneEarlier && !closed.includes(r.status)) ?? rows[rows.length - 1] ?? null;
 }
+
+/** One stage order as the case list shows it: "Initial · Special Tray, Bite Registration". */
+export interface StageOrderSummary {
+  id: string;
+  /** "Initial" for the first order, then "Order 2", "Order 3"… — as the case page tabs read. */
+  label: string;
+  rows: StageRow[];
+  /** The stage the order is heading to next (null when every stage is done). */
+  next: StageRow | null;
+  status: CaseStatus;
+  /** Every stage of the order predates the case — it happened outside DOMS. */
+  doneEarlier: boolean;
+  followUp: boolean;
+}
+
+export function stageOrderSummaries(caseId: string, createdAt: string, service: StagedServiceLike): StageOrderSummary[] {
+  const closed: CaseStatus[] = ['completed', 'delivered'];
+  return stageOrdersFor(caseId, createdAt, service).map((o, i) => {
+    const rows = stageRowsFromOrders([o], createdAt);
+    const open = rows.find(r => !r.doneEarlier && !closed.includes(r.status)) ?? null;
+    return {
+      id: o.id,
+      label: i === 0 ? 'Initial' : `Order ${i + 1}`,
+      rows,
+      next: open,
+      status: open?.status ?? rows[rows.length - 1]?.status ?? o.status,
+      doneEarlier: rows.length > 0 && rows.every(r => r.doneEarlier),
+      followUp: !!o.followUpFrom,
+    };
+  });
+}
