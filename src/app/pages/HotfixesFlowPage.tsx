@@ -3,7 +3,7 @@ import {
   ArrowLeft, ArrowRight, Wrench, Stethoscope, FlaskConical, Building2, Cpu, Sparkles, Mail,
   FilePen, Info, UserCircle2, List, RefreshCw, Unlink,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import { connectionStatus, reconnectScanner, simulateStage, useScannerConnections } from '../data/scannerConnections';
 import { SCANNER_SYNC_COPY } from '../data/caseProvenance';
@@ -166,15 +166,17 @@ const STAGES: Stage[] = [
 
 export default function HotfixesFlowPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, login } = useAuth();
   const isAuthed = !!user;
   const connections = useScannerConnections();
   const trios = connections.find(c => c.id === 'scanner-trios');
   const triosExpired = !!trios && connectionStatus(trios).health === 'expired';
 
   const open = (step: Step) => {
-    if (isAuthed) navigate(step.path);
-    else navigate(`/login?portal=${step.portal}&next=${encodeURIComponent(step.path)}`);
+    // Walkthroughs never stop at the login page: sign in with the demo
+    // account behind the scenes and land on the step's screen.
+    if (!isAuthed) login(DEMO_ACCOUNT_EMAIL, 'demo');
+    navigate(step.path);
   };
 
   let n = 0;
@@ -217,7 +219,6 @@ export default function HotfixesFlowPage() {
               <span className={`w-2 h-2 rounded-full flex-shrink-0 ${triosExpired ? 'bg-[#C62828]' : 'bg-[#2E7D32] animate-pulse'}`} />
               <p className="text-xs text-[#5A5568] min-w-0">
                 3Shape TRIOS connection is <span className="font-semibold text-[#030213]">{triosExpired ? 'expired' : 'live'}</span>
-                {!isAuthed && <span className="text-[#A0A0B0]"> · you’ll be asked to sign in first (any email / password)</span>}
               </p>
             </div>
             {trios && (

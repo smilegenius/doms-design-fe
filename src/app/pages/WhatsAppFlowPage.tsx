@@ -4,7 +4,7 @@ import {
   Link2, Unlink, ToggleRight, FileText, PenLine, Play, AlertTriangle, ShieldAlert, ScrollText,
   Sparkles, Smartphone, Send, UserCog,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import { removeWhatsAppCommunications } from '../data/caseCommunications';
@@ -216,7 +216,7 @@ const STAGES: Stage[] = [
 
 export default function WhatsAppFlowPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, login } = useAuth();
   const { toast } = useToast();
   const settings = useWhatsAppComms();
   const isAuthed = !!user;
@@ -224,8 +224,10 @@ export default function WhatsAppFlowPage() {
   const blocked = whatsappBlockReason(settings);
 
   const open = (step: Step) => {
-    if (isAuthed) navigate(step.path);
-    else navigate(`/login?portal=lab&next=${encodeURIComponent(step.path)}`);
+    // Walkthroughs never stop at the login page: sign in with the demo
+    // account behind the scenes and land on the step's screen.
+    if (!isAuthed) login(DEMO_ACCOUNT_EMAIL, 'demo');
+    navigate(step.path);
   };
 
   const reset = () => {
@@ -274,7 +276,6 @@ export default function WhatsAppFlowPage() {
               <p className="text-xs text-[#5A5568] min-w-0">
                 WhatsApp is <span className="font-semibold text-[#030213]">{settings.enabled ? 'on' : 'off'}</span> for the lab ·{' '}
                 <span className="font-semibold text-[#030213]">{connected ? settings.connection.number : 'no account connected'}</span>
-                {!isAuthed && <span className="text-[#A0A0B0]"> · you’ll be asked to sign in first (any email / password)</span>}
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -301,15 +302,6 @@ export default function WhatsAppFlowPage() {
                 <RotateCcw className="w-3.5 h-3.5" />
                 Reset demo data
               </button>
-              {!isAuthed && (
-                <button
-                  onClick={() => navigate('/login?portal=lab&next=%2Fflows%2Fwhatsapp')}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  Sign in
-                </button>
-              )}
             </div>
           </div>
 

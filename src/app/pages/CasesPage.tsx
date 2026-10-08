@@ -1563,6 +1563,51 @@ function UpgradeModal({ onUpgrade, onBack }: { onUpgrade: () => void; onBack: ()
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+// ─── Tree guide for nested list rows ─────────────────────────────────────────
+// Drawn in the source-icon column of a child row: a line that drops from the
+// centre of the parent's icon and turns into the row with a rounded elbow.
+// Depth 2 (a denture's stage orders under its service row) keeps the depth-1
+// line running when more services follow, and turns in one step further.
+// Positions are measured from the cell's left edge: the icon cell is pl-3
+// (12px) and the icon 32px wide, so its centre is at 28px.
+const TREE_X1 = 28;          // under the parent case's icon
+const TREE_X2 = 44;          // where the depth-1 elbow ends (under a service row)
+const TREE_STUB = 14;
+const TREE_COLOR = '#C8D8FC';
+export function TreeGuide({ depth, first, last, parentLast = true }: {
+  depth: 1 | 2;
+  /** First child of its parent — the line reaches up to the parent instead of the row above. */
+  first: boolean;
+  /** Last child — the line stops at the elbow. */
+  last: boolean;
+  /** Depth 2 only: whether the parent service is the last one (no depth-1 line passes by). */
+  parentLast?: boolean;
+}) {
+  const x = depth === 1 ? TREE_X1 : TREE_X2;
+  // Rows sit 4px apart (border-spacing-y-1). The first child reaches back to
+  // the parent: to the icon's bottom edge (depth 1) or the service row's
+  // elbow (depth 2); later children only bridge the gap from the row above.
+  const top = first ? (depth === 1 ? -16 : -26) : -4;
+  return (
+    <span aria-hidden className="pointer-events-none">
+      {depth === 2 && !parentLast && (
+        <span className="absolute" style={{ left: TREE_X1, top: -4, bottom: -4, width: 1, background: TREE_COLOR }} />
+      )}
+      <span
+        className="absolute"
+        style={{
+          left: x, top, height: `calc(50% - ${top}px)`, width: TREE_STUB,
+          borderLeft: `1px solid ${TREE_COLOR}`, borderBottom: `1px solid ${TREE_COLOR}`,
+          borderBottomLeftRadius: 6,
+        }}
+      />
+      {!last && (
+        <span className="absolute" style={{ left: x, top: '50%', bottom: -4, width: 1, background: TREE_COLOR }} />
+      )}
+    </span>
+  );
+}
+
 export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase, onOpenDraft, onConfigureScoring, caseViewLimit, showOfflineLabNotice, showConnectEmailNotice, showScannerExpiryNotice, showStatusReachNotice, onCaseSelected }: {
   // The portal showing the list. The Clinic portal follows the live clinic
   // portal: the page is "Lab Work" and the default columns are Status · Case ID
@@ -1765,36 +1810,39 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   // requested delivery date. One accordion per case (in the Status column)
   // opens everything underneath: service rows, and the stages of every denture.
   const stageKey = (caseId: string, serviceId: string) => `${caseId}::${serviceId}`;
-  const orderCount = (orders: StageOrderSummary[]) => (
-    <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-[#5B21B6] whitespace-nowrap">
-      <Layers className="w-2.5 h-2.5" />
-      {orders.length} stage {orders.length === 1 ? 'order' : 'orders'}
-    </span>
+  // ONE expand control for every level (case → services, case or service →
+  // stage orders): an arrow before the status that turns when open. Rows with
+  // nothing nested get the same-width spacer so every status pill lines up.
+  const expandArrow = (open: boolean, onToggle: () => void, title: string) => (
+    <button
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      title={title}
+      aria-expanded={open}
+      className="w-6 h-6 -m-0.5 flex-shrink-0 rounded-md flex items-center justify-center text-[#717182] hover:bg-[#EEF4FF] hover:text-[#4D8EF7] transition-colors"
+    >
+      <ChevronRight
+        className={`w-3.5 h-3.5 transition-transform ${open ? 'text-[#4D8EF7]' : ''}`}
+        style={{ transform: open ? 'rotate(90deg)' : 'none' }}
+      />
+    </button>
   );
-  // Chevron toggle shared by the denture accordions (case row + service row).
-  const accChevron = (open: boolean) => (
-    <span className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${
-      open ? 'bg-[#F5F3FF] border-[#DDD6FE] text-[#5B21B6]' : 'bg-white border-[#E0E0E6] text-[#717182] group-hover/acc:border-[#DDD6FE] group-hover/acc:text-[#5B21B6]'
-    }`}>
-      {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-    </span>
-  );
+  const arrowSpacer = <span className="w-5 h-5 flex-shrink-0" aria-hidden />;
   // One row per stage ORDER, as the case page's tabs read: "Initial" with the
   // stages it bundles (each with its own requested date), then "Order 2"…
   // Status = where the order is now; Delivery = its next open stage's date.
-  function renderStageOrderRows(c: Case, orders: StageOrderSummary[], nested = false) {
-    return orders.map(o => (
+  function renderStageOrderRows(c: Case, orders: StageOrderSummary[], nested = false, parentLast = true) {
+    return orders.map((o, i) => (
       <tr
         key={`${c.id}-order-${o.id}`}
         onClick={() => openCase(c)}
         className="bg-[#FAF8FF] hover:bg-[#F5F3FF] transition-colors cursor-pointer [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]"
       >
         <td className="pl-4 pr-1 py-2" />
-        <td className="pl-3 pr-2 py-2">
-          <div className={`w-0.5 h-5 bg-[#C4B5FD] rounded-full ${nested ? 'ml-auto mr-0' : 'mx-auto'}`} />
+        <td className="pl-3 pr-2 py-2 relative">
+          <TreeGuide depth={nested ? 2 : 1} first={i === 0} last={i === orders.length - 1} parentLast={parentLast} />
         </td>
         {visibleCols.status && (
-          <td className={`${nested ? 'pl-8' : 'pl-4'} pr-4 py-2 whitespace-nowrap`}>
+          <td className="pr-4 py-2 whitespace-nowrap" style={{ paddingLeft: nested ? 68 : 42 }}>
             {o.doneEarlier ? <DoneEarlierTag size="xs" /> : <StageStatusPill status={o.status} size="xs" />}
           </td>
         )}
@@ -2610,7 +2658,27 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                         </span>
                       </td>
                       {visibleCols.status && (
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td
+                          className={`px-4 py-3 whitespace-nowrap ${!locked && (isMulti || soloOrders.length > 0) ? 'cursor-pointer' : ''}`}
+                          onClick={(e) => {
+                            if (locked || !(isMulti || soloOrders.length > 0)) return;
+                            e.stopPropagation();
+                            toggleRow(c.id);
+                          }}
+                        >
+                          <div className="flex items-start gap-1.5">
+                          <div className="pt-px">
+                            {!locked && (isMulti || soloOrders.length > 0)
+                              ? expandArrow(
+                                  isExpanded,
+                                  () => toggleRow(c.id),
+                                  isMulti
+                                    ? (isExpanded ? 'Hide services' : 'Show services')
+                                    : (isExpanded ? 'Hide stage orders' : 'Show stage orders'),
+                                )
+                              : arrowSpacer}
+                          </div>
+                          <div className="min-w-0">
                           {locked ? (
                             <button
                               onClick={(e) => { e.stopPropagation(); openCase(c); }}
@@ -2619,34 +2687,13 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                               <Sparkles className="w-3 h-3" /> Upgrade plan
                             </button>
                           ) : isMulti ? (
-                            /* Count chip — replaces status badge; click to expand/collapse */
-                            <button
-                              onClick={(e) => { e.stopPropagation(); toggleRow(c.id); }}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap border bg-[#EEF4FF] text-[#1565C0] border-[#C8D8FC] hover:bg-[#DBEAFE] transition-colors"
-                            >
+                            /* Count pill — replaces the status badge; the arrow expands */
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap border bg-[#EEF4FF] text-[#1565C0] border-[#C8D8FC]">
                               <Package className="w-3 h-3" />
                               {c.serviceItems.length} Services
-                              {isExpanded
-                                ? <ChevronUp   className="w-3 h-3" />
-                                : <ChevronDown className="w-3 h-3" />}
-                            </button>
+                            </span>
                           ) : null}
-                          {!locked && !isMulti && (soloDenture && soloStageRows.length > 0 ? (
-                            /* Denture — the status opens an accordion of its stages */
-                            <button
-                              onClick={(e) => { e.stopPropagation(); toggleRow(c.id); }}
-                              title={isExpanded ? 'Hide stage orders' : 'Show stage orders and their delivery dates'}
-                              className="group/acc inline-flex flex-col items-start text-left"
-                            >
-                              <span className="inline-flex items-center gap-1">
-                                <StatusBadge status={c.status} />
-                                {accChevron(isExpanded)}
-                              </span>
-                              {orderCount(soloOrders)}
-                            </button>
-                          ) : (
-                            <StatusBadge status={c.status} />
-                          ))}
+                          {!locked && !isMulti && <StatusBadge status={c.status} />}
                           {!locked && c.statusOverride && (
                             <div className="mt-1"><OverrideTag override={c.statusOverride} /></div>
                           )}
@@ -2656,6 +2703,8 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                           {!locked && !visibleCols.caseId && (
                             <div className="text-[11px] font-semibold text-[#030213] mt-1">{c.id}</div>
                           )}
+                          </div>
+                          </div>
                         </td>
                       )}
                       {visibleCols.score && (
@@ -2830,30 +2879,30 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                             />
                           )}
                         </td>
-                        {/* Left indent — subtle blue left border */}
-                        <td className="pl-3 pr-2 py-2">
-                          <div className="w-0.5 h-5 bg-gradient-to-b from-[#4D8EF7] to-[#A59DFF] rounded-full mx-auto opacity-50" />
+                        {/* Tree guide down from the case's icon */}
+                        <td className="pl-3 pr-2 py-2 relative">
+                          <TreeGuide
+                            depth={1}
+                            first={idx === 0}
+                            last={idx === c.serviceItems.length - 1}
+                          />
                         </td>
                         {/* Status — service-level badge */}
                         {visibleCols.status && (
-                          <td className="px-4 py-2 whitespace-nowrap">
-                            {dentureOrders.length > 0 ? (
-                              /* Denture inside a multi-service case — its own
-                                 accordion (3rd level) for the stage orders. */
-                              <button
-                                onClick={(e) => { e.stopPropagation(); toggleRow(stageKey(c.id, si.id)); }}
-                                title={ordersOpen ? 'Hide stage orders' : 'Show stage orders and their delivery dates'}
-                                className="group/acc inline-flex flex-col items-start text-left"
-                              >
-                                <span className="inline-flex items-center gap-1">
-                                  <StatusBadge status={si.status} />
-                                  {accChevron(ordersOpen)}
-                                </span>
-                                {orderCount(dentureOrders)}
-                              </button>
-                            ) : (
+                          <td
+                            className={`px-4 py-2 whitespace-nowrap ${dentureOrders.length > 0 ? 'cursor-pointer' : ''}`}
+                            onClick={(e) => {
+                              if (dentureOrders.length === 0) return;
+                              e.stopPropagation();
+                              toggleRow(stageKey(c.id, si.id));
+                            }}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              {dentureOrders.length > 0
+                                ? expandArrow(ordersOpen, () => toggleRow(stageKey(c.id, si.id)), ordersOpen ? 'Hide stage orders' : 'Show stage orders')
+                                : arrowSpacer}
                               <StatusBadge status={si.status} />
-                            )}
+                            </div>
                           </td>
                         )}
                         {visibleCols.score && (
@@ -2894,7 +2943,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                         {visibleCols.lab       && <td className="px-4 py-2" />}
                         <td className="px-4 py-2" />
                       </tr>
-                      {dentureOrders.length > 0 && ordersOpen && renderStageOrderRows(c, dentureOrders, true)}
+                      {dentureOrders.length > 0 && ordersOpen && renderStageOrderRows(c, dentureOrders, true, idx === c.serviceItems.length - 1)}
                       </React.Fragment>
                       );
                     })}

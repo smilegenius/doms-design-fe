@@ -1,7 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Mail, Eye, EyeOff, Check, X as XIcon, Lock } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import PageLoader from '../components/PageLoader';
 
 const SmileGeniusLogo = () => (
@@ -234,7 +234,7 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setEmail('sajid@smilegenius.co.uk');
+                      setEmail(DEMO_ACCOUNT_EMAIL);
                       setPassword('demo');
                     }}
                     className="text-[#4D8EF7] hover:underline font-medium"

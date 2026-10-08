@@ -3,7 +3,7 @@ import {
   ArrowLeft, ArrowRight, Layers, Stethoscope, FlaskConical, Cpu, CalendarDays, CopyCheck,
   GitMerge, History, List, FilePen, ClipboardList, RotateCcw, Plus,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import { resetStageAppends, useStageAppends, DENTURE_STAGES } from '../data/dentureStages';
@@ -219,7 +219,7 @@ const STAGES: Stage[] = [
 
 export default function DentureStagesFlowPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, login } = useAuth();
   const { toast } = useToast();
   const isAuthed = !!user;
   const appends = useStageAppends();
@@ -228,8 +228,10 @@ export default function DentureStagesFlowPage() {
   const dirty = appends.length > 0 || demoCreated.length > 0;
 
   const open = (step: Step) => {
-    if (isAuthed) navigate(step.path);
-    else navigate(`/login?portal=${step.portal}&next=${encodeURIComponent(step.path)}`);
+    // Walkthroughs never stop at the login page: sign in with the demo
+    // account behind the scenes and land on the step's screen.
+    if (!isAuthed) login(DEMO_ACCOUNT_EMAIL, 'demo');
+    navigate(step.path);
   };
 
   const resetDemo = () => {
@@ -280,7 +282,6 @@ export default function DentureStagesFlowPage() {
                 {dirty
                   ? <>Demo data changed: <span className="font-semibold text-[#030213]">{appends.length}</span> follow-up stage order{appends.length === 1 ? '' : 's'}, <span className="font-semibold text-[#030213]">{demoCreated.length}</span> new denture case{demoCreated.length === 1 ? '' : 's'}</>
                   : <>Demo data is fresh: CASE-DN-3001 has three stages and Margaret Lee has no case yet</>}
-                {!isAuthed && <span className="text-[#A0A0B0]"> · you’ll be asked to sign in first (any email / password)</span>}
               </p>
             </div>
             <button

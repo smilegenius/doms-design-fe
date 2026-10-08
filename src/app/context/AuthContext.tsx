@@ -14,6 +14,9 @@ interface AuthContextValue {
 
 const SESSION_KEY = 'smilegenius_user';
 
+/** The prototype's demo sign-in — same account as the login page's "Use demo account". */
+export const DEMO_ACCOUNT_EMAIL = 'sajid@smilegenius.co.uk';
+
 function loadSession(): User | null {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);

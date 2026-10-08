@@ -4,7 +4,7 @@ import {
   UserCheck, CalendarCheck2, CalendarPlus, CalendarX2, Link2, Truck, PackageCheck, CalendarClock,
   Mail, ScrollText, ListChecks, Search, Building2,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import { resetCareStackDemo, setCareStackEnabled, useCareStackSettings } from '../data/carestack';
@@ -244,7 +244,7 @@ const STAGES: Stage[] = [
 
 export default function CareStackFlowPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, login } = useAuth();
   const { toast } = useToast();
   const settings = useCareStackSettings();
   const isAuthed = !!user;
@@ -252,8 +252,10 @@ export default function CareStackFlowPage() {
   const open = (step: Step) => {
     // Every screen in this flow assumes the group has CareStack on.
     setCareStackEnabled(true);
-    if (isAuthed) navigate(step.path);
-    else navigate(`/login?portal=${step.portal}&next=${encodeURIComponent(step.path)}`);
+    // Walkthroughs never stop at the login page: sign in with the demo
+    // account behind the scenes and land on the step's screen.
+    if (!isAuthed) login(DEMO_ACCOUNT_EMAIL, 'demo');
+    navigate(step.path);
   };
 
   const reset = () => {
@@ -301,7 +303,6 @@ export default function CareStackFlowPage() {
               <span className={`w-2 h-2 rounded-full flex-shrink-0 ${settings.enabled ? 'bg-[#2E7D32] animate-pulse' : 'bg-[#A0A0B0]'}`} />
               <p className="text-xs text-[#5A5568] min-w-0">
                 CareStack is <span className="font-semibold text-[#030213]">{settings.enabled ? 'enabled' : 'disabled'}</span> for Smile Genius Group
-                {!isAuthed && <span className="text-[#A0A0B0]"> · you’ll be asked to sign in first (any email / password)</span>}
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -320,15 +321,6 @@ export default function CareStackFlowPage() {
                 <RotateCcw className="w-3.5 h-3.5" />
                 Reset demo data
               </button>
-              {!isAuthed && (
-                <button
-                  onClick={() => navigate('/login?portal=clinic&next=%2Fflows%2Fcarestack')}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  Sign in
-                </button>
-              )}
             </div>
           </div>
 
