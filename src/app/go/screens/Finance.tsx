@@ -1,23 +1,46 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, ChevronRight, FileText, Inbox, Link2, MessageSquare, Receipt, ThumbsUp, XCircle } from '../icons';
+import {
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Filter, Inbox, Info, Layers, Link2, MessageSquare, Receipt, Send, ThumbsUp, X, XCircle, Zap,
+} from '../icons';
 import { ME, useGo, useScoped } from '../store';
 import {
-  CheckState, EXCEPTION_RESOLUTIONS, INVOICE_REASONS, Invoice, InvoiceStatus, LineState, fmtDate, fmtDateTime, gbp, practiceName, relDay,
+  CheckState, EXCEPTION_RESOLUTIONS, INVOICE_REASONS, INVOICE_STATUSES, Invoice, InvoiceStatus, LineState, fmtDate, fmtDateTime, gbp,
+  invoiceInfo, invoiceIssues, invoiceNeedsAction, practiceName, relDay,
 } from '../data';
-import { Btn, Card, Chips, EmptyState, KV, Label, Pill, Screen, Section, Segmented, Sheet, TextArea, TopBar, Tone, cx } from '../ui';
+import { Btn, Card, Chips, EmptyState, KV, Label, Pill, Screen, SearchBox, Section, Segmented, Sheet, TextArea, TopBar, Tone, cx } from '../ui';
 
-const INV_STATUS: Record<InvoiceStatus, { tone: Tone; label: string }> = {
-  'to-approve': { tone: 'brand', label: 'Ready for approval' },
-  'needs-review': { tone: 'warn', label: 'Needs review' },
-  queried: { tone: 'violet', label: 'Queried with supplier' },
+/** Status pill — same names as the portal. */
+export const INV_STATUS: Record<InvoiceStatus, { tone: Tone; label: string }> = {
+  qc: { tone: 'bad', label: 'QC' },
+  duplicate: { tone: 'violet', label: 'Duplicate' },
+  awaiting: { tone: 'warn', label: 'Awaiting approval' },
   approved: { tone: 'ok', label: 'Approved' },
+  xero: { tone: 'brand', label: 'Sent to Xero' },
+  paid: { tone: 'teal', label: 'Payment processed' },
+  disputed: { tone: 'bad', label: 'Disputed' },
   rejected: { tone: 'bad', label: 'Rejected' },
+  'xero-failed': { tone: 'bad', label: 'Sent to Xero failed' },
+  exported: { tone: 'neutral', label: 'Exported for payment' },
+  archived: { tone: 'neutral', label: 'Archived' },
+  'not-invoice': { tone: 'neutral', label: 'Not an invoice' },
+  'zero-value': { tone: 'neutral', label: 'Zero value' },
+};
+/** Summary tile icon + colour per main status (portal's stat cards). */
+const TILE: Partial<Record<InvoiceStatus | 'all', { icon: React.ComponentType<{ className?: string }>; color: string; bar: string; short: string }>> = {
+  all: { icon: FileText, color: 'text-go-brand', bar: 'bg-go-brand', short: 'All' },
+  qc: { icon: AlertTriangle, color: 'text-go-bad', bar: 'bg-go-bad', short: 'QC' },
+  duplicate: { icon: Layers, color: 'text-go-violet', bar: 'bg-go-violet', short: 'Duplicates' },
+  awaiting: { icon: Clock, color: 'text-go-warn', bar: 'bg-go-warn', short: 'Awaiting' },
+  approved: { icon: CheckCircle2, color: 'text-go-ok', bar: 'bg-go-ok', short: 'Approved' },
+  xero: { icon: Send, color: 'text-go-brand', bar: 'bg-go-brand', short: 'In Xero' },
+  paid: { icon: ThumbsUp, color: 'text-go-teal', bar: 'bg-go-teal', short: 'Paid' },
 };
 const CHECK_ICON: Record<CheckState, React.ReactNode> = {
   pass: <CheckCircle2 className="w-5 h-5 text-go-ok" />,
   warn: <AlertTriangle className="w-5 h-5 text-go-warn" />,
   fail: <XCircle className="w-5 h-5 text-go-bad" />,
+  info: <Info className="w-5 h-5 text-go-brand" />,
 };
 const LINE_STATE: Record<LineState, { tone: Tone; label: string }> = {
   matched: { tone: 'ok', label: 'Matched' },
@@ -26,99 +49,208 @@ const LINE_STATE: Record<LineState, { tone: Tone; label: string }> = {
   resolved: { tone: 'teal', label: 'Resolved' },
 };
 const gross = (i: Invoice) => i.net + i.vat;
+// Fades the right edge of a sideways-scrolling row so it reads as scrollable
+const EDGE_FADE = 'linear-gradient(90deg, #000 calc(100% - 36px), transparent 100%)';
 
-type InvFilter = 'open' | 'queried' | 'done';
+type Sort = 'recent' | 'oldest' | 'high' | 'low';
+const SORTS: { id: Sort; label: string }[] = [
+  { id: 'recent', label: 'Most recent' },
+  { id: 'oldest', label: 'Oldest' },
+  { id: 'high', label: 'Amount: high to low' },
+  { id: 'low', label: 'Amount: low to high' },
+];
+
+/** AI read confidence — lightning + bar, orange under 90%, green from 90%. */
+function Confidence({ v }: { v: number }) {
+  const good = v >= 90;
+  return (
+    <span className="flex items-center gap-1.5">
+      <Zap className={cx('w-3.5 h-3.5', good ? 'text-go-ok' : 'text-go-warn')} />
+      <span className="w-12 h-1.5 rounded-full bg-go-line overflow-hidden"><span className={cx('block h-full rounded-full', good ? 'bg-go-ok' : 'bg-go-warn')} style={{ width: `${v}%` }} /></span>
+      <span className={cx('text-[11px] font-semibold tabular-nums', good ? 'text-go-ok' : 'text-go-warn')}>{v}%</span>
+    </span>
+  );
+}
+
+/** "QC · 5 issues" / "Approved · System · 3 info" */
+export function InvoiceStatusLine({ i }: { i: Invoice }) {
+  const s = INV_STATUS[i.status];
+  const issues = invoiceIssues(i);
+  const info = invoiceInfo(i);
+  return (
+    <span className="flex items-center gap-2 min-w-0">
+      <Pill tone={s.tone} className="!h-[22px] !px-2 !text-[11px] flex-shrink-0">
+        {i.status === 'qc' && <AlertTriangle className="w-3 h-3" />}
+        {i.status === 'approved' && <CheckCircle2 className="w-3 h-3" />}
+        {s.label}{i.status === 'approved' && i.approvedBy === 'System' ? ' · System' : ''}
+      </Pill>
+      {issues > 0 && invoiceNeedsAction(i.status)
+        ? <span className="inline-flex items-center gap-1 text-[11.5px] font-medium text-go-bad whitespace-nowrap"><AlertTriangle className="w-3 h-3" />{issues} issue{issues > 1 ? 's' : ''}</span>
+        : info > 0 && <span className="inline-flex items-center gap-1 text-[11.5px] font-medium text-go-brand whitespace-nowrap"><Info className="w-3 h-3" />{info} info</span>}
+    </span>
+  );
+}
+
+function InvoiceRow({ i }: { i: Invoice }) {
+  const navigate = useNavigate();
+  return (
+    <button onClick={() => navigate(`/go/invoices/invoice/${i.id}`)} className="w-full text-left px-3.5 py-3 flex flex-col gap-1.5 hover:bg-go-raised transition">
+      {/* Invoice number + amount */}
+      <span className="flex items-baseline justify-between gap-3">
+        <span className="text-[14.5px] font-bold text-go-ink truncate">{i.number}</span>
+        <span className="text-[14.5px] font-bold text-go-ink tabular-nums flex-shrink-0">{gbp(gross(i))}</span>
+      </span>
+      {/* Supplier · date · type */}
+      <span className="flex items-center gap-2 text-[12px] text-go-muted min-w-0">
+        <span className="truncate">{i.supplier}</span>
+        <span className="flex-shrink-0">· {new Date(i.issued).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+        <span className={cx('flex-shrink-0 h-[18px] px-1.5 rounded-md text-[9.5px] font-bold uppercase tracking-wider flex items-center',
+          i.docType === 'Credit note' ? 'bg-go-violet-soft text-go-violet' : 'bg-go-brand-soft text-go-brand-ink')}>{i.docType}</span>
+      </span>
+      {/* Bill to */}
+      <span className="flex items-center gap-1.5 text-[12px] min-w-0">
+        <span className="text-go-faint flex-shrink-0">Bill to</span>
+        <span className="text-go-ink2 font-medium truncate">{i.billTo.name}{i.billTo.registered ? ` (${practiceName(i.practice).split(' ')[0]})` : ''}</span>
+        {!i.billTo.registered && <span className="flex-shrink-0 h-[18px] px-1.5 rounded-full border border-go-warn/50 bg-go-warn-soft text-go-warn text-[10px] font-semibold flex items-center gap-0.5">Not registered<Info className="w-2.5 h-2.5" /></span>}
+      </span>
+      {/* Status + read confidence */}
+      <span className="flex items-center justify-between gap-2 mt-0.5">
+        <InvoiceStatusLine i={i} />
+        <Confidence v={i.confidence} />
+      </span>
+    </button>
+  );
+}
 
 export function FinanceScreen() {
   const navigate = useNavigate();
   const { invoices, statements } = useScoped();
-  const { setInvoiceStatus, toast } = useGo();
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') === 'statements' ? 'statements' : 'invoices';
   const setTab = (t: 'invoices' | 'statements') => setParams(t === 'statements' ? { tab: t } : {}, { replace: true });
-  const [filter, setFilter] = useState<InvFilter>('open');
-  const open = invoices.filter(i => i.status === 'to-approve' || i.status === 'needs-review');
+  const status = (INVOICE_STATUSES.find(s => s.id === params.get('s'))?.id ?? 'all') as InvoiceStatus | 'all';
+  const setStatus = (s: InvoiceStatus | 'all') => setParams(s === 'all' ? {} : { s }, { replace: true });
+  const [q, setQ] = useState('');
+  const [sort, setSort] = useState<Sort>('recent');
+  const [sortOpen, setSortOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const toReview = statements.filter(s => s.status === 'to-review');
-  const shown = invoices.filter(i =>
-    filter === 'open' ? open.includes(i) : filter === 'queried' ? i.status === 'queried' : i.status === 'approved' || i.status === 'rejected');
+  const count = (s: InvoiceStatus) => invoices.filter(i => i.status === s).length;
 
-  const clean = open.filter(i => i.status === 'to-approve' && i.checks.every(c => c.state === 'pass'));
-  const approveClean = () => {
-    clean.forEach(i => setInvoiceStatus(i.id, 'approved', `Approved by ${ME.name}`));
-    toast(`${clean.length} invoice${clean.length === 1 ? '' : 's'} approved for the next payment run`);
-  };
+  const shown = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return invoices
+      .filter(i => status === 'all' || i.status === status)
+      .filter(i => !t || `${i.supplier} ${i.number} ${practiceName(i.practice)} ${i.billTo.name}`.toLowerCase().includes(t))
+      .sort((a, b) => sort === 'recent' ? b.issued.localeCompare(a.issued) : sort === 'oldest' ? a.issued.localeCompare(b.issued)
+        : sort === 'high' ? gross(b) - gross(a) : gross(a) - gross(b));
+  }, [invoices, status, q, sort]);
+  const moreStatus = INVOICE_STATUSES.find(s => s.id === status && s.group === 'more');
+  const tiles: { id: InvoiceStatus | 'all'; label: string; short: string; n: number }[] = [
+    { id: 'all', label: 'All invoices', short: 'All', n: invoices.length },
+    ...INVOICE_STATUSES.filter(s => s.group === 'main').map(s => ({ id: s.id, label: s.label, short: TILE[s.id]!.short, n: count(s.id) }))
+      .filter(t => t.n > 0 || t.id === status),
+  ];
 
   return (
     <Screen tabs header={
       <div className="bg-go-bg/85 backdrop-blur-xl px-4 pt-3 pb-3 space-y-3">
-        <h1 className="text-[24px] font-bold text-go-ink tracking-tight">Finance</h1>
+        <h1 className="text-[24px] font-bold text-go-ink tracking-tight">Invoices</h1>
         <Segmented value={tab} onChange={setTab} options={[
-          { value: 'invoices', label: 'Invoices', count: open.length },
+          { value: 'invoices', label: 'Invoices', count: invoices.filter(i => invoiceNeedsAction(i.status)).length },
           { value: 'statements', label: 'Statements', count: toReview.length },
         ]} />
       </div>
     }>
       {tab === 'invoices' && (
         <>
+          {/* Status row — same as Home: one card, icon + count on one line, short label under.
+              Zero counts are hidden; scrolls sideways inside the card when it doesn't fit. */}
           <div className="px-4">
-            <Card className="p-4 relative overflow-hidden">
-              <span className="absolute -right-12 -top-16 w-44 h-44 rounded-full bg-go-brand/10 blur-2xl pointer-events-none" />
-              <div className="relative flex items-end justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Waiting for you</p>
-                  <p className="text-[26px] font-bold text-go-ink tracking-tight tabular-nums leading-tight mt-0.5">{gbp(open.reduce((s, i) => s + gross(i), 0))}</p>
-                </div>
-                <div className="text-right text-[12px] leading-relaxed">
-                  <p className="text-go-ok font-semibold">{clean.length} ready</p>
-                  <p className="text-go-warn font-semibold">{open.length - clean.length} to check</p>
-                </div>
-              </div>
-              {!!clean.length && (
-                <Btn block size="md" className="mt-3 relative" onClick={approveClean} icon={<ThumbsUp className="w-4 h-4" />}>
-                  Approve {clean.length} ready · {gbp(clean.reduce((s, i) => s + gross(i), 0))}
-                </Btn>
-              )}
-            </Card>
-          </div>
-          <div className="px-4 mt-3">
-            <Chips options={['To approve', 'Queried', 'Done'] as const}
-              value={filter === 'open' ? 'To approve' : filter === 'queried' ? 'Queried' : 'Done'}
-              onChange={(v: string) => setFilter(v === 'To approve' ? 'open' : v === 'Queried' ? 'queried' : 'done')} />
-          </div>
-          <div className="px-4 mt-3">
-            {!!shown.length && (
-              <Card className="divide-y divide-go-line overflow-hidden">
-                {shown.map(i => {
-                  const flag = i.checks.find(c => c.state !== 'pass');
-                  const passed = i.checks.filter(c => c.state === 'pass').length;
-                  const s = INV_STATUS[i.status];
-                  const isClean = clean.includes(i);
+            <Card className="overflow-hidden">
+              <div role="tablist" className="flex overflow-x-auto go-scroll divide-x divide-go-line"
+                style={tiles.length > 4 ? { maskImage: EDGE_FADE, WebkitMaskImage: EDGE_FADE } : undefined}>
+                {tiles.map(t => {
+                  const st = TILE[t.id]!;
+                  const Icon = st.icon;
+                  const on = status === t.id;
                   return (
-                    <div key={i.id} className="flex items-center gap-3 px-3.5 py-3">
-                      <button onClick={() => navigate(`/go/finance/invoice/${i.id}`)} className="flex-1 min-w-0 text-left">
-                        <span className="flex items-baseline justify-between gap-2">
-                          <span className="text-[14px] font-semibold text-go-ink truncate">{i.supplier}</span>
-                          <span className="text-[14px] font-bold text-go-ink tabular-nums flex-shrink-0">{gbp(gross(i))}</span>
-                        </span>
-                        <span className="flex items-center gap-1.5 mt-0.5 text-[11.5px]">
-                          {i.status === 'to-approve' || i.status === 'needs-review'
-                            ? (flag
-                              ? <><AlertTriangle className={cx('w-3.5 h-3.5 flex-shrink-0', flag.state === 'fail' ? 'text-go-bad' : 'text-go-warn')} /><span className={cx('truncate', flag.state === 'fail' ? 'text-go-bad' : 'text-go-warn')}>{flag.detail}</span></>
-                              : <><CheckCircle2 className="w-3.5 h-3.5 text-go-ok flex-shrink-0" /><span className="text-go-muted truncate">{passed}/{i.checks.length} checks passed · due {relDay(i.due).toLowerCase()}</span></>)
-                            : <><Pill tone={s.tone} className="!h-5 !px-2 !text-[10.5px]">{s.label}</Pill><span className="text-go-muted truncate">{practiceName(i.practice)}</span></>}
-                        </span>
-                      </button>
-                      {isClean
-                        ? <button onClick={() => { setInvoiceStatus(i.id, 'approved', `Approved by ${ME.name}`); toast(`${i.id} approved`); }}
-                            className="h-8 px-3 rounded-full bg-go-ok-soft text-go-ok text-[12px] font-semibold flex-shrink-0 active:scale-95 transition">Approve</button>
-                        : <ChevronRight className="w-5 h-5 text-go-faint flex-shrink-0" />}
-                    </div>
+                    <button key={t.id} role="tab" aria-selected={on} aria-label={`${t.label}: ${t.n}`} onClick={() => setStatus(t.id)}
+                      className={cx('relative flex-1 min-w-[82px] flex flex-col items-center gap-1 px-2 pt-3 pb-2.5 transition', on ? 'bg-go-raised' : 'active:scale-95')}>
+                      <span className="flex items-center gap-1.5">
+                        <Icon className={cx('w-[18px] h-[18px]', st.color)} />
+                        <span className="text-[20px] font-bold tabular-nums leading-none text-go-ink">{t.n}</span>
+                      </span>
+                      <span className={cx('text-[11px] whitespace-nowrap', on ? 'font-semibold text-go-ink' : 'font-medium text-go-muted')}>{t.short}</span>
+                      {on && <span className={cx('absolute bottom-0 inset-x-3 h-0.5 rounded-full', st.bar)} />}
+                    </button>
                   );
                 })}
-              </Card>
-            )}
-            {!shown.length && <EmptyState icon={<Inbox className="w-7 h-7" />} title="Nothing here" body="You’re all caught up." />}
+              </div>
+            </Card>
           </div>
+
+          {/* Search · sort · more filters */}
+          <div className="px-4 mt-3 flex gap-2">
+            <div className="flex-1 min-w-0"><SearchBox value={q} onChange={setQ} placeholder="Supplier, invoice no. or practice" /></div>
+            <button onClick={() => setMoreOpen(true)} aria-label="More statuses"
+              className={cx('relative w-12 h-12 rounded-2xl border flex items-center justify-center flex-shrink-0',
+                moreStatus ? 'go-grad text-white border-transparent' : 'bg-go-surface border-go-line text-go-ink2')}>
+              <Filter className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="px-4 mt-2.5 flex items-center justify-between gap-2">
+            <p className="text-[12px] text-go-muted">{shown.length} invoice{shown.length === 1 ? '' : 's'}</p>
+            <button onClick={() => setSortOpen(true)} className="inline-flex items-center gap-1 text-[12.5px] text-go-muted">
+              Sort <span className="font-semibold text-go-brand">{SORTS.find(s => s.id === sort)!.label}</span><ChevronDown className="w-4 h-4 text-go-brand" />
+            </button>
+          </div>
+          {moreStatus && (
+            <div className="px-4 mt-2">
+              <button onClick={() => setStatus('all')} className="inline-flex items-center gap-1.5 h-8 pl-3 pr-2 rounded-full bg-go-brand-soft text-go-brand-ink text-[12.5px] font-semibold">
+                {moreStatus.label}<X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          <div className="px-4 mt-2.5">
+            {shown.length ? (
+              <Card className="divide-y divide-go-line overflow-hidden">{shown.map(i => <InvoiceRow key={i.id} i={i} />)}</Card>
+            ) : (
+              <EmptyState icon={<FileText className="w-7 h-7" />} title="No invoices found" body="Try another status or search." />
+            )}
+          </div>
+
+          {/* Sort */}
+          <Sheet open={sortOpen} onClose={() => setSortOpen(false)} title="Sort invoices">
+            <div className="space-y-1">
+              {SORTS.map(s => (
+                <button key={s.id} onClick={() => { setSort(s.id); setSortOpen(false); }}
+                  className={cx('w-full h-12 px-3 rounded-2xl flex items-center justify-between text-[14.5px] text-left', sort === s.id ? 'bg-go-brand-soft text-go-brand-ink font-semibold' : 'text-go-ink hover:bg-go-raised')}>
+                  {s.label}{sort === s.id && <CheckCircle2 className="w-5 h-5 text-go-brand" />}
+                </button>
+              ))}
+            </div>
+          </Sheet>
+
+          {/* Secondary statuses (portal's bottom filters) */}
+          <Sheet open={moreOpen} onClose={() => setMoreOpen(false)} title={<span className="inline-flex items-center gap-2"><Filter className="w-5 h-5 text-go-brand" />More statuses</span>} label="More statuses">
+            <div className="space-y-1">
+              {INVOICE_STATUSES.filter(s => s.group === 'more').map(s => {
+                const n = count(s.id);
+                const on = status === s.id;
+                const bad = s.id === 'disputed' || s.id === 'rejected' || s.id === 'xero-failed';
+                return (
+                  <button key={s.id} onClick={() => { setStatus(on ? 'all' : s.id); setMoreOpen(false); }}
+                    className={cx('w-full h-12 px-3 rounded-2xl flex items-center gap-3 text-left transition', on ? 'bg-go-brand-soft' : 'hover:bg-go-raised')}>
+                    <span className={cx('flex-1 text-[14.5px]', on ? 'font-semibold text-go-brand-ink' : bad && n ? 'text-go-bad font-medium' : 'text-go-ink')}>{s.label}</span>
+                    <span className={cx('min-w-[26px] h-6 px-2 rounded-full text-[12px] font-bold flex items-center justify-center tabular-nums',
+                      n ? (bad ? 'bg-go-bad-soft text-go-bad' : 'bg-go-raised text-go-ink2') : 'text-go-faint')}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </Sheet>
         </>
       )}
 
@@ -127,7 +259,7 @@ export function FinanceScreen() {
           {statements.map(s => {
             const ex = s.lines.filter(l => l.state === 'difference' || l.state === 'missing').length;
             return (
-              <Card key={s.id} onClick={() => navigate(`/go/finance/statement/${s.id}`)} className="p-4">
+              <Card key={s.id} onClick={() => navigate(`/go/invoices/statement/${s.id}`)} className="p-4">
                 <div className="flex items-start gap-3">
                   <span className="w-11 h-11 rounded-2xl bg-go-raised border border-go-line flex items-center justify-center text-go-ink2 flex-shrink-0"><FileText className="w-5 h-5" /></span>
                   <div className="flex-1 min-w-0">
@@ -151,6 +283,7 @@ export function FinanceScreen() {
   );
 }
 
+
 // ─── Invoice ────────────────────────────────────────────────────────────────
 
 export function InvoiceScreen() {
@@ -163,18 +296,18 @@ export function InvoiceScreen() {
   const [reason, setReason] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [reviewed, setReviewed] = useState(false);
-  if (!inv) return <Screen header={<TopBar back fallback="/go/finance" />}><EmptyState icon={<Receipt className="w-7 h-7" />} title="Invoice not found" /></Screen>;
+  if (!inv) return <Screen header={<TopBar back fallback="/go/invoices" />}><EmptyState icon={<Receipt className="w-7 h-7" />} title="Invoice not found" /></Screen>;
   const s = INV_STATUS[inv.status];
   const flagged = inv.checks.filter(c => c.state !== 'pass');
-  const actionable = inv.status === 'to-approve' || inv.status === 'needs-review' || inv.status === 'queried';
+  const actionable = invoiceNeedsAction(inv.status);
   const close = () => { setSheet(null); setReasons([]); setReason(null); setMsg(''); setReviewed(false); };
 
   const approve = () => { setInvoiceStatus(inv.id, 'approved', `Approved by ${ME.name}`); toast('Invoice approved for the next payment run'); close(); };
-  const query = () => { setInvoiceStatus(inv.id, 'queried', `Queried by ${ME.name}: ${reasons.join(', ')}`); toast(`Query sent to ${inv.supplier}`, 'info'); close(); };
+  const query = () => { setInvoiceStatus(inv.id, 'disputed', `Queried by ${ME.name}: ${reasons.join(', ')}`); toast(`Query sent to ${inv.supplier}`, 'info'); close(); };
   const reject = () => { setInvoiceStatus(inv.id, 'rejected', `Rejected by ${ME.name}: ${reason}`); toast('Invoice rejected. Supplier notified.', 'bad'); close(); };
 
   return (
-    <Screen header={<TopBar back fallback="/go/finance" title={inv.supplier} sub={inv.id} />}
+    <Screen header={<TopBar back fallback="/go/invoices" title={inv.supplier} sub={inv.id} />}
       footer={actionable ? (
         <div className="flex gap-2">
           <Btn variant="secondary" className="!text-go-bad !px-4" onClick={() => setSheet('reject')}>Reject</Btn>
@@ -293,7 +426,7 @@ export function StatementScreen() {
   const [line, setLine] = useState<number | null>(null);
   const [res, setRes] = useState<string | null>(null);
   const [note, setNote] = useState('');
-  if (!st) return <Screen header={<TopBar back fallback="/go/finance" />}><EmptyState icon={<FileText className="w-7 h-7" />} title="Statement not found" /></Screen>;
+  if (!st) return <Screen header={<TopBar back fallback="/go/invoices" />}><EmptyState icon={<FileText className="w-7 h-7" />} title="Statement not found" /></Screen>;
   const exceptions = st.lines.filter(l => l.state === 'difference' || l.state === 'missing');
   const matched = st.lines.filter(l => l.state !== 'difference' && l.state !== 'missing').length;
   const current = line !== null ? st.lines[line] : null;
@@ -309,7 +442,7 @@ export function StatementScreen() {
   };
 
   return (
-    <Screen header={<TopBar back fallback="/go/finance" title={st.supplier} sub={`Statement · ${st.period}`} />}
+    <Screen header={<TopBar back fallback="/go/invoices" title={st.supplier} sub={`Statement · ${st.period}`} />}
       footer={st.status === 'to-review' ? (
         <Btn block disabled={!!exceptions.length} onClick={approve}>{exceptions.length ? `Resolve ${exceptions.length} line${exceptions.length > 1 ? 's' : ''} to approve` : 'Approve statement'}</Btn>
       ) : undefined}>

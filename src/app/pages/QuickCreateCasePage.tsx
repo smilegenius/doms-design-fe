@@ -4,7 +4,7 @@ import {
   Plus, X, Check, ChevronDown, ChevronRight,
   Pencil, Zap, Star, Upload, UploadCloud, Box, Image as ImageIcon,
   AlertCircle, Mail, Paperclip, ArrowLeft, PanelLeftClose, PanelLeftOpen, Copy, ExternalLink, Building2,
-  CloudOff, Loader2,
+  CloudOff, Loader2, CalendarDays, GitMerge, Info,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useCaseScoring } from '../context/CaseScoringContext';
@@ -25,7 +25,7 @@ import AddStaffModal from '../components/AddStaffModal';
 import { mockSuppliers } from '../data/suppliersData';
 import { mockStaffMembers, mockClinics } from '../data/clinicsData';
 import RescanDecisionModal from '../components/RescanDecisionModal';
-import { addCreatedCase, getCreatedCases, nextCaseId } from '../data/createdCases';
+import { addCreatedCase, getCreatedCases, nextCaseId, useCreatedCases } from '../data/createdCases';
 import {
   DEMO_TODAY, RescanMatch, RescanSubject, detectRescanMatches, formatCaseDate, markAsRescan,
 } from '../data/rescanDetection';
@@ -108,6 +108,11 @@ import {
   getApplianceConfig,
   findServiceItem,
 } from './CreateCasePage';
+import {
+  isDentureItem, isPastISO, caseDateToISO, findFollowUpMatch, addStageAppend, sortStages, TODAY_ISO as TODAY_ISO_FOR_DATES,
+  type FollowUpMatch,
+} from '../data/dentureStages';
+import { StageDatePicker, StageDateList, StageStatusCell } from '../components/DentureStages';
 import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
 import { useCustomServices } from '../data/customServices';
 
@@ -152,7 +157,10 @@ function isSelectionComplete(sel: ServiceSelection): boolean {
     return !!sel.retainerType;
   }
   if (cat === 'denture') {
-    return baseOk && (sel.stages?.length ?? 0) > 0;
+    // Every selected stage needs its own delivery date — a denture has no
+    // service-level date to fall back to.
+    const stages = sel.stages ?? [];
+    return baseOk && stages.length > 0 && stages.every(s => !!sel.stageDates?.[s]);
   }
   if (cat === 'appliances') {
     return !!sel.applianceOption;
@@ -1191,6 +1199,12 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         const teeth = (si.fdi ?? [])
           .map(fdiNumberToCode)
           .filter(Boolean);
+        // Dates arrive per service — or per stage for a denture.
+        const isDenture = isDentureItem(itemId);
+        const serviceDate = si.deliveryDate ?? prefillDraft.requestedDelivery;
+        const stageDates = isDenture && si.stageDates
+          ? Object.fromEntries(Object.entries(si.stageDates).filter(([, d]) => !!d).map(([s, d]) => [s, caseDateToISO(d!)]))
+          : undefined;
         return {
           itemId,
           orderType: si.orderType,
@@ -1198,6 +1212,9 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           material: si.material,
           shade: si.shade,
           sameForAllTeeth: true,
+          ...(isDenture
+            ? { stages: si.stages, stageDates }
+            : { requestedDelivery: serviceDate ? caseDateToISO(serviceDate) : undefined }),
         } as ServiceSelection;
       })
       .filter((s): s is ServiceSelection => s !== null);
@@ -1441,6 +1458,40 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
     setStaffEditId(null);
   }
   const selectedDentist = dentists.find(d => d.id === dentistId) ?? null;
+
+  // ── Service-level dates ────────────────────────────────────────────────────
+  // There is no case-level delivery date any more: every non-denture service
+  // carries its own, every denture stage carries its own. The case's headline
+  // date (list column, CareStack, scoring) is the earliest upcoming one.
+  const earliestRequestedISO = useMemo(() => {
+    const all = selections.flatMap(sel => isDentureItem(sel.itemId)
+      ? (sel.stages ?? []).map(s => sel.stageDates?.[s])
+      : [sel.requestedDelivery]
+    ).filter((d): d is string => !!d).sort();
+    return all.find(d => d >= TODAY_ISO_FOR_DATES) ?? all[all.length - 1] ?? '';
+  }, [selections]);
+
+  // ── Denture follow-up prescriptions ────────────────────────────────────────
+  // A denture-only prescription for a patient who already has that denture
+  // case (same practice + dentist) is a follow-up: its stages are appended to
+  // the existing case as a new stage order instead of creating a new case.
+  // The incoming prescription's own practice/dentist win when it came from a
+  // draft — that's what the prescription says, whatever the pickers show.
+  const createdCases = useCreatedCases();
+  const followUp: FollowUpMatch | null = useMemo(() => {
+    if (selections.length !== 1 || !isDentureItem(selections[0].itemId)) return null;
+    const sel = selections[0];
+    return findFollowUpMatch(
+      {
+        patientName,
+        practice: prefillDraft?.practice ?? (isLab ? (selectedLab?.name ?? CLINIC_PORTAL_PRACTICE) : CLINIC_PORTAL_PRACTICE),
+        dentist: prefillDraft?.dentist ?? selectedDentist?.name ?? '',
+        serviceName: CATALOG_ID_TO_SERVICE_NAME[sel.itemId] ?? getServiceDisplayName(sel),
+      },
+      sel.stages ?? [],
+      [...createdCases, ...mockCases],
+    );
+  }, [selections, patientName, prefillDraft, isLab, selectedLab, selectedDentist, createdCases]);
   const activeDetailsService = activeDetailsId
     ? selections.find(s => s.itemId === activeDetailsId) ?? null
     : null;
@@ -1455,7 +1506,9 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   }, [patientExtras]);
 
   // Validation gate
-  const canSubmit = patientName.trim().length > 0 && !!labId && selections.length > 0;
+  // A denture follow-up joins a case that already has its lab, so only the
+  // patient and the service are needed.
+  const canSubmit = patientName.trim().length > 0 && (!!labId || !!followUp) && selections.length > 0;
 
   // Teeth tapped on the aggregated chart before any service exists. They're
   // applied to the first service the user adds (teeth-first flow), so the
@@ -1487,7 +1540,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
     // Teeth-first flow: teeth tapped on the chart before any service existed
     // attach to the first service added.
     const seedTeeth = selections.length === 0 && pendingTeeth.length > 0 ? pendingTeeth : undefined;
-    setSelections(prev => [...prev, { itemId, expanded: false, ...(seedTeeth ? { teeth: seedTeeth } : {}) }]);
+    // Delivery is per service now: a new service starts from the default date
+    // (dentures date each stage instead).
+    const seedDate = isDentureItem(itemId) ? {} : { requestedDelivery: deliveryDate };
+    setSelections(prev => [...prev, { itemId, expanded: false, ...seedDate, ...(seedTeeth ? { teeth: seedTeeth } : {}) }]);
     if (seedTeeth) {
       setPendingTeeth([]);
       toast.success(`${seedTeeth.length} pre-selected ${seedTeeth.length === 1 ? 'tooth' : 'teeth'} applied to the service`);
@@ -1527,6 +1583,8 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
     }
     if (ex.deliveryISO && !deliveryTouchedRef.current) {
       setDeliveryDate(ex.deliveryISO.value);
+      // The date lands on every non-denture service (dentures date per stage).
+      setSelections(prev => prev.map(s => isDentureItem(s.itemId) ? s : { ...s, requestedDelivery: ex.deliveryISO!.value }));
       marks.delivery = ex.deliveryISO.confidence;
       filled++;
     }
@@ -1612,11 +1670,16 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // freshly created case sits inside the lookback window with the mock data.
   function buildCaseRecord(id: string): Case {
     const created = formatCaseDate(DEMO_TODAY);
+    // Dates are per service; a denture has none of its own — each stage
+    // carries one instead.
     const serviceItems = selections.map((sel, i) => ({
       id: `${id}-s${i + 1}`,
       name: CATALOG_ID_TO_SERVICE_NAME[sel.itemId] ?? getServiceDisplayName(sel),
       status: 'new' as const,
-      deliveryDate: deliveryDate ? isoToCaseDate(deliveryDate) : null,
+      deliveryDate: !isDentureItem(sel.itemId) && sel.requestedDelivery ? isoToCaseDate(sel.requestedDelivery) : null,
+      stageDates: isDentureItem(sel.itemId)
+        ? Object.fromEntries((sel.stages ?? []).map(s => [s, sel.stageDates?.[s] ? isoToCaseDate(sel.stageDates[s]) : null]))
+        : undefined,
       fdi: (sel.teeth ?? []).map(codeToFdiNumber).filter((n): n is number => n !== null),
       material: sel.material,
       shade: sel.shade,
@@ -1637,7 +1700,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       status: 'new',
       createdAt: created,
       updatedAt: created,
-      requestedDelivery: deliveryDate ? isoToCaseDate(deliveryDate) : null,
+      requestedDelivery: earliestRequestedISO ? isoToCaseDate(earliestRequestedISO) : null,
       hasAlert: false,
       scanner: (caseSourceScanner || 'iTero') as Case['scanner'],
       source: caseSource === 'Via Scanner' ? 'scanner'
@@ -1671,6 +1734,31 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   function handleSubmit() {
     if (!canSubmit) {
       toast.error(`Add a patient name, pick a ${cpNoun}, and at least one service.`);
+      return;
+    }
+    // Denture follow-up — add the new stages to the existing case. Stages it
+    // already has are never ordered twice; nothing new means nothing to do.
+    if (followUp) {
+      if (followUp.toAdd.length === 0) {
+        toast.info(`${followUp.case.id} already has ${followUp.duplicates.join(', ')} — no duplicate stage order created.`);
+        return;
+      }
+      const sel = selections[0];
+      addStageAppend({
+        caseId: followUp.case.id,
+        serviceName: followUp.serviceName,
+        stages: followUp.toAdd,
+        stageDates: Object.fromEntries(followUp.toAdd.map(s => [s, sel.stageDates?.[s] ? isoToCaseDate(sel.stageDates[s]) : null])),
+        createdAt: formatCaseDate(DEMO_TODAY),
+        fromId: prefillDraft?.id ?? 'Quick Create',
+        by: CURRENT_USER,
+      });
+      clearDraft();
+      toast.success(`${followUp.toAdd.join(', ')} added to ${followUp.case.id} as a new stage order — no new case created.`);
+      if (followUp.duplicates.length) {
+        toast.info(`${followUp.duplicates.join(', ')} ${followUp.duplicates.length === 1 ? 'was' : 'were'} already on the case and ${followUp.duplicates.length === 1 ? 'was' : 'were'} skipped.`);
+      }
+      onSubmitted();
       return;
     }
     // Every new case is checked against recent cases before it's completed.
@@ -1879,7 +1967,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       attachmentCount: caseInstructionsFiles.length + caseSourceExtraFiles.length,
       stages: sel.stages,
     })),
-    requestedDelivery: deliveryDate,
+    requestedDelivery: earliestRequestedISO,
   } as any);
 
   // Missing requirements with their click targets. Case-level inputs (scans,
@@ -2425,7 +2513,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             </div>
             {/* Row 2 — case-level metadata (Case Source moved to the header
                 action bar at the top of the page). */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-[#F0EFF6]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-[#F0EFF6]">
               <Mini label="Dentist" accessory={aiPrefilled && dentistId ? <AiSparkle label /> : undefined}>
                 <DentistSearchSelect
                   trailing={csEnabled && csRec && dentistId ? <MappingIcon mapping={csRec.dentist} entity="Dentist" /> : undefined}
@@ -2471,18 +2559,9 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                   </div>
                 </Mini>
               </div>
-              <div ref={el => { scoreFieldRefs.current.delivery = el; }} className={`transition-all ${flashCls('delivery')}`}>
-                <Mini label="Delivery" accessory={
-                  aiFields.delivery != null ? <AiSparkle label confidence={aiFields.delivery} /> : undefined
-                }>
-                  <input
-                    type="date"
-                    value={deliveryDate}
-                    onChange={(e) => { setDeliveryDate(e.target.value); deliveryTouchedRef.current = true; clearAiMark('delivery'); }}
-                    className="w-full px-2.5 py-1.5 text-xs text-[#030213] border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7]"
-                  />
-                </Mini>
-              </div>
+              {/* No case-level Delivery here any more — the requested
+                  delivery date sits on each service (and on each stage of a
+                  denture), in the Services card below. */}
             </div>
           </div>
 
@@ -2537,7 +2616,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 lab: isLab ? 'Smile Genius Lab' : (selectedLab?.name ?? ''),
                 services: selections.map(sel => CATALOG_ID_TO_SERVICE_NAME[sel.itemId] ?? getServiceDisplayName(sel)),
                 createdAt: prefillDraft?.createdAt ?? '',
-                requestedDelivery: deliveryDate || null,
+                requestedDelivery: earliestRequestedISO || null,
                 status: 'draft',
                 source: prefillDraft?.source,
                 scanner: prefillDraft?.scanner,
@@ -2548,7 +2627,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
           {/* ── Services — multi-select with cards. Card background uses the
               same soft pink→teal wash as the sidebar so the SERVICES surface
               feels like the focal panel of the form. ── */}
-          <div className="bg-gradient-to-br from-[#F7E2F8]/40 to-[#AEE3E6]/40 border border-[#E0E0E6] rounded-2xl p-4 order-3">
+          <div
+            ref={el => { scoreFieldRefs.current.delivery = el; }}
+            className={`bg-gradient-to-br from-[#F7E2F8]/40 to-[#AEE3E6]/40 border border-[#E0E0E6] rounded-2xl p-4 order-3 transition-all ${flashCls('delivery')}`}
+          >
             <div className="flex items-center justify-between gap-2 mb-2.5">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="w-5 h-5 rounded-md bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white flex items-center justify-center">
@@ -2599,6 +2681,9 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                     <span><span className="font-semibold text-[#030213]">Tap any service card</span> below to add material, shade, and teeth.</span>
                   </div>
                 )}
+                {/* Denture follow-up — the prescription matches a case already
+                    on the platform, so its stages join that case. */}
+                {followUp && <FollowUpBanner match={followUp} />}
                 {/* Service cards — full-width rows so each service's details
                     read at a glance. Complete = green tint + summary chips;
                     incomplete = amber tint + "Add details" call-out. */}
@@ -2674,6 +2759,48 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                             <X className="w-3.5 h-3.5" strokeWidth={2.5} />
                           </button>
                         </div>
+                        {/* Requested delivery — per service. A denture has no
+                            service date: its stages are dated one by one. */}
+                        <div className="flex items-center gap-2 flex-wrap pl-[18px] pr-3 py-1.5 border-t border-[#F0EFF6] bg-[#FCFCFE]">
+                          <CalendarDays className="w-3 h-3 text-[#A0A0B0] flex-shrink-0" />
+                          {isDentureItem(sel.itemId) ? (
+                            <>
+                              <span className="text-[10px] font-semibold text-[#5A5568] uppercase tracking-wider">Stage dates</span>
+                              {(sel.stages ?? []).length === 0 ? (
+                                <span className="text-[10px] text-[#D97706]">No stages picked yet</span>
+                              ) : sortStages(sel.stages ?? []).map(st => (
+                                <span
+                                  key={st}
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-semibold ${
+                                    sel.stageDates?.[st] ? 'bg-white border-[#E0E0E6] text-[#030213]' : 'bg-[#FFFBEB] border-[#FCD34D] text-[#92400E]'
+                                  }`}
+                                >
+                                  <span className="font-normal text-[#5A5568]">{st}</span>
+                                  {sel.stageDates?.[st] ? isoToCaseDate(sel.stageDates[st]) : 'no date'}
+                                  {isPastISO(sel.stageDates?.[st]) && <span className="font-normal text-[#717182]">· done earlier</span>}
+                                </span>
+                              ))}
+                              <button
+                                onClick={() => setActiveDetailsId(sel.itemId)}
+                                className="ml-auto text-[10px] font-semibold text-[#4D8EF7] hover:text-[#1565C0]"
+                              >
+                                Set stage dates
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-[10px] font-semibold text-[#5A5568] uppercase tracking-wider">Requested delivery</span>
+                              <input
+                                type="date"
+                                value={sel.requestedDelivery ?? ''}
+                                aria-label={`${displayName} requested delivery date`}
+                                onChange={(e) => { updateService(sel.itemId, { requestedDelivery: e.target.value }); deliveryTouchedRef.current = true; clearAiMark('delivery'); }}
+                                className={`px-2 py-1 text-[11px] text-[#030213] border rounded-md bg-white outline-none focus:border-[#4D8EF7] ${sel.requestedDelivery ? 'border-[#E0E0E6]' : 'border-[#FCD34D]'}`}
+                              />
+                              {aiFields.delivery != null && <AiSparkle label confidence={aiFields.delivery} />}
+                            </>
+                          )}
+                        </div>
                         {/* Detail strip — small chips showing the spec at a
                             glance. Renders whenever the user has filled at
                             least one field (even partial selections), so
@@ -2708,7 +2835,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                               {(sel.stages?.length ?? 0) > 0 && (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#F0FDF4] border border-[#BBF7D0] text-[10px] font-semibold text-[#1A5C2A]">
                                   <span className="text-[#5A5568] font-normal">Stage:</span>
-                                  {sel.stages!.join(', ')}
+                                  {sortStages(sel.stages!).join(', ')}
                                 </span>
                               )}
                             </>
@@ -2985,11 +3112,11 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
             <button
               onClick={handleSubmit}
               disabled={!canSubmit}
-              title={canSubmit ? 'Submit this case' : 'Fill patient, lab, and at least one service to submit'}
+              title={followUp ? `Add the new stages to ${followUp.case.id}` : canSubmit ? 'Submit this case' : 'Fill patient, lab, and at least one service to submit'}
               className="inline-flex items-center gap-2 px-7 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 shadow-[0_4px_12px_rgba(77,142,247,0.35)] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
             >
-              <Check className="w-4 h-4" strokeWidth={3} />
-              Create case
+              {followUp ? <GitMerge className="w-4 h-4" /> : <Check className="w-4 h-4" strokeWidth={3} />}
+              {followUp ? `Add to ${followUp.case.id}` : 'Create case'}
             </button>
           </div>
         </div>
@@ -3037,6 +3164,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       {(pickerOpen || activeDetailsId) && (
         <ServicePickerWithDetails
           selections={selections}
+          followUp={followUp}
           initialActiveId={activeDetailsId}
           caseInstructions={caseInstructions}
           onCaseInstructionsChange={setCaseInstructions}
@@ -3345,9 +3473,10 @@ function PatientExtrasDrawer({ value, onChange, onClose }: {
 function ServicePickerWithDetails({
   selections, initialActiveId,
   caseInstructions, onCaseInstructionsChange,
-  onToggle, onUpdate, onRemove, onClose,
+  onToggle, onUpdate, onRemove, onClose, followUp,
 }: {
   selections: ServiceSelection[];
+  followUp?: FollowUpMatch | null;
   initialActiveId: string | null;
   /** Shared case-level instructions — same text across every service. */
   caseInstructions: string;
@@ -3513,6 +3642,7 @@ function ServicePickerWithDetails({
             {activeSel ? (
               <ServiceDetailsBody
                 selection={activeSel}
+                followUp={followUp}
                 caseInstructions={caseInstructions}
                 onCaseInstructionsChange={onCaseInstructionsChange}
                 onUpdate={(patch) => onUpdate(activeSel.itemId, patch)}
@@ -3841,8 +3971,10 @@ function AlignerSpecifics({ selection, onUpdate }: {
 // The set of form fields that render for a single service selection. Used by
 // the standalone ServiceDetailsDrawer + the right pane of
 // ServicePickerWithDetails.
-function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, onCaseInstructionsChange }: {
+function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, onCaseInstructionsChange, followUp }: {
   selection: ServiceSelection;
+  /** Denture follow-up match — its ordered stages show locked in the picker. */
+  followUp?: FollowUpMatch | null;
   onUpdate: (patch: Partial<ServiceSelection>) => void;
   onRemove?: () => void;
   /** Shared case-level instructions — same value across all services. */
@@ -3965,6 +4097,19 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
             </div>
           )}
         </div>
+        {/* ── Requested delivery — per service. Dentures date each stage
+            in "Denture specifics" below instead. ── */}
+        {!isDenture && (
+          <Mini label="Requested delivery date">
+            <input
+              type="date"
+              value={selection.requestedDelivery ?? ''}
+              onChange={(e) => onUpdate({ requestedDelivery: e.target.value })}
+              className="w-full sm:w-[200px] px-3 py-2 text-sm text-[#030213] border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7]"
+            />
+          </Mini>
+        )}
+
         {/* ── Others — custom service name (required) ── */}
         {isOther && (
           <Mini label="Service Name">
@@ -4021,35 +4166,13 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
         {/* Denture specifics */}
         {isDenture && (
           <CategoryBlock label="Denture specifics" tint="amber" icon={<Stethoscope className="w-3 h-3" />}>
-            <Mini label="Stage">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {DENTURE_STAGES.map(stage => {
-                  const isActive = (selection.stages ?? []).includes(stage);
-                  return (
-                    <button
-                      key={stage}
-                      type="button"
-                      onClick={() => {
-                        const current = selection.stages ?? [];
-                        const next = isActive ? current.filter(s => s !== stage) : [...current, stage];
-                        onUpdate({ stages: next });
-                      }}
-                      className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-sm text-left transition-colors ${
-                        isActive
-                          ? 'border-[#4D8EF7] bg-[#EEF4FF] text-[#1565C0] font-semibold'
-                          : 'border-[#E0E0E6] bg-white text-[#5A5568] hover:border-[#BFDBFE] hover:bg-[#F5F8FF]'
-                      }`}
-                    >
-                      <span className="truncate">{stage}</span>
-                      <span className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${
-                        isActive ? 'border-[#4D8EF7] bg-[#4D8EF7]' : 'border-[#D1D5DB] bg-white'
-                      }`}>
-                        {isActive && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+            <Mini label="Stages & delivery dates">
+              <StageDatePicker
+                stages={selection.stages ?? []}
+                dates={selection.stageDates ?? {}}
+                existing={followUp?.existing}
+                onChange={(stages, stageDates) => onUpdate({ stages, stageDates })}
+              />
             </Mini>
           </CategoryBlock>
         )}
@@ -6266,7 +6389,7 @@ function OrderFormPreview({ onClose, ...data }: OrderFormData & { onClose: () =>
 function OrderFormSheet({
   patientName, patientExtras,
   lab, partyLabel = 'Lab', dentist,
-  orderType, deliveryDate,
+  orderType,
   caseSource, caseSourceFiles, caseSourceExtraFiles, caseSourceScanner, caseSourceCourier,
   selections, notes,
   compact = false,
@@ -6298,7 +6421,6 @@ function OrderFormSheet({
                 sub={partyLabel === 'Lab' && lab ? LAB_POSTAL_ADDRESSES[lab.name] : undefined}
               />
               <FormField label="Dentist" value={dentist?.name || '—'} />
-              <FormField label="Requested Delivery" value={deliveryDate || '—'} />
               <FormField
                 label="Case Source"
                 value={
@@ -6355,8 +6477,17 @@ function OrderFormSheet({
                           {sel.abutmentMaterial && <span><span className="text-[#A0A0B0]">Abutment:</span> {sel.abutmentMaterial}</span>}
                           {sel.retainerType && <span><span className="text-[#A0A0B0]">Retainer:</span> {sel.retainerType}</span>}
                           {sel.applianceOption && <span><span className="text-[#A0A0B0]">Type:</span> {sel.applianceOption}</span>}
-                          {(sel.stages?.length ?? 0) > 0 && <span><span className="text-[#A0A0B0]">Stage:</span> {sel.stages!.join(', ')}</span>}
+                          {!isDentureItem(sel.itemId) && (
+                            <span><span className="text-[#A0A0B0]">Delivery:</span> {sel.requestedDelivery ? isoToCaseDate(sel.requestedDelivery) : '—'}</span>
+                          )}
                         </div>
+                        {/* Denture — no service-level date; one requested date per stage. */}
+                        {isDentureItem(sel.itemId) && (sel.stages?.length ?? 0) > 0 && (
+                          <div className="mt-1.5 pt-1.5 border-t border-[#E8EAF6]">
+                            <p className="text-[9px] text-[#A0A0B0] uppercase tracking-wider font-semibold mb-0.5">Stages · requested delivery</p>
+                            <StageDateList stages={sel.stages!} dates={sel.stageDates ?? {}} format={isoToCaseDate} />
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -6390,3 +6521,47 @@ function FormField({ label, value, sub }: { label: string; value: string; sub?: 
 // detailed flow's drawer header palette in case scans get added here later.
 void ImageIcon;
 void Calendar;
+
+// ─── Denture follow-up banner ────────────────────────────────────────────────
+// Shown when the prescription is a follow-up for a denture case already on the
+// platform: what's on the case, what this prescription adds and anything that
+// is skipped because it was ordered before. Submitting appends a stage order to
+// that case — no new case is created.
+function FollowUpBanner({ match }: { match: FollowUpMatch }) {
+  return (
+    <div className="mb-3 rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] overflow-hidden">
+      <div className="flex items-start gap-2.5 px-3 py-2.5">
+        <span className="w-7 h-7 rounded-lg bg-white border border-[#BBF7D0] text-[#15803D] flex items-center justify-center flex-shrink-0">
+          <GitMerge className="w-3.5 h-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold text-[#14532D]">Matching case found — {match.case.id}</p>
+          <p className="text-[11px] text-[#166534] mt-0.5 leading-relaxed">
+            Same patient, practice, dentist and {match.serviceName}.{' '}
+            {match.toAdd.length > 0
+              ? <>This prescription adds <span className="font-semibold">{match.toAdd.join(', ')}</span> to that case as a new stage order. No new case is created.</>
+              : <>Every stage on this prescription is already on that case, so nothing new will be ordered.</>}
+          </p>
+        </div>
+      </div>
+      <div className="bg-white/70 border-t border-[#DCFCE7] px-3 py-2">
+        <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-1">Already ordered on {match.case.id}</p>
+        <div className="space-y-1">
+          {match.existing.map(r => (
+            <div key={r.stage} className="flex items-center gap-2 text-[11px]">
+              <span className="flex-1 min-w-0 truncate font-medium text-[#030213]">{r.stage}</span>
+              <span className="text-[#717182] whitespace-nowrap">{r.date ?? '—'}</span>
+              <StageStatusCell row={r} size="xs" />
+            </div>
+          ))}
+        </div>
+        {match.duplicates.length > 0 && (
+          <p className="mt-1.5 flex items-start gap-1 text-[11px] text-[#92400E]">
+            <Info className="w-3 h-3 flex-shrink-0 mt-0.5" />
+            {match.duplicates.join(', ')} {match.duplicates.length === 1 ? 'is' : 'are'} already on the case — skipped, no duplicate stage order.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}

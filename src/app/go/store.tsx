@@ -74,9 +74,9 @@ export function GoStoreProvider({ children }: { children: React.ReactNode }) {
   const [notices, setNotices] = useState<Notice[]>(() => [
     { id: 'n1', kind: 'question', title: 'Additional information required', body: 'Northstar Dental Lab · SG-28485 · M. Patel. Bite registration looks distorted.', at: SEED_CASES[3].messages[0].at, to: '/go/work/SG-28485', read: false },
     { id: 'n2', kind: 'shipped', title: 'Shipped by Precision Dental Works', body: 'SG-28488 · J. Williams. Arriving today.', at: SEED_CASES[2].events[4].at, to: '/go/work/SG-28488', read: false },
-    { id: 'n3', kind: 'invoice', title: 'Invoice needs review', body: 'PDW-7731 · 38% above usual for full dentures.', at: SEED_INVOICES[0].received, to: '/go/finance/invoice/PDW-7731', read: false },
+    { id: 'n3', kind: 'invoice', title: 'Invoice needs review', body: 'PDW-7731 · 38% above usual for full dentures.', at: SEED_INVOICES[0].received, to: '/go/invoices/invoice/PDW-7731', read: false },
     { id: 'n4', kind: 'overdue', title: 'Lab work overdue', body: 'SG-28479 · D. Morgan. Delivery date was 2 days ago.', at: new Date(Date.now() - 2 * 864e5).toISOString(), to: '/go/work/SG-28479', read: true },
-    { id: 'n5', kind: 'statement', title: 'Statement received', body: 'Dental Supplies UK · 2 lines to resolve.', at: new Date(Date.now() - 3 * 864e5).toISOString(), to: '/go/finance/statement/ST-DSU-0926', read: true },
+    { id: 'n5', kind: 'statement', title: 'Statement received', body: 'Dental Supplies UK · 2 lines to resolve.', at: new Date(Date.now() - 3 * 864e5).toISOString(), to: '/go/invoices/statement/ST-DSU-0926', read: true },
   ]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [sheetRoot, setSheetRoot] = useState<HTMLElement | null>(null);

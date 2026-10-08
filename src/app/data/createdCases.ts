@@ -63,3 +63,8 @@ function subscribe(listener: () => void) {
 export function useCreatedCases(): Case[] {
   return useSyncExternalStore(subscribe, getCreatedCases);
 }
+
+/** Walkthrough "Reset demo data" — drop created cases that match. */
+export function removeCreatedCases(match: (c: Case) => boolean) {
+  commit(created.filter(c => !match(c)));
+}

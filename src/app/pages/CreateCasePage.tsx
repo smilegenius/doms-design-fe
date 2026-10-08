@@ -10,6 +10,8 @@ import ModalPortal from '../components/ModalPortal';
 import { mockSuppliers } from '../data/suppliersData';
 import { mockStaffMembers } from '../data/clinicsData';
 import { findCustomService, isCustomServiceId } from '../data/customServices';
+import { isDentureItem, isoToCaseDate } from '../data/dentureStages';
+import { StageDatePicker, StageDateList } from '../components/DentureStages';
 
 // ─── Create Case — 3-step wizard ─────────────────────────────────────────────
 // Mirrors the production flow the clinic team is already using:
@@ -261,13 +263,9 @@ export const MILLERS_CLASS = ['Class I', 'Class II', 'Class III', 'Class IV', 'N
 
 // ── Denture ─────────────────────────────────────────────────────────────────
 // Stage of fabrication this case sits at. Multi-select because a single case
-// often covers more than one stage (e.g. impression + try-in).
-export const DENTURE_STAGES = [
-  'Special Tray',
-  'Bite Registration',
-  'Try In',
-  'Finish',
-];
+// often covers more than one stage (e.g. impression + try-in). Each picked stage
+// carries its own requested delivery date — a denture has no service-level date.
+export { DENTURE_STAGES } from '../data/dentureStages';
 
 // ── Appliances ──────────────────────────────────────────────────────────────
 // Per-item choice — different appliances ask for different things, but each
@@ -353,7 +351,8 @@ export interface ServiceSelection {
   millersClass?: string;       // Miller's recession Class I–IV / N/A
   alignerItems?: string;       // Additional Items — free text
   // Denture-specific
-  stages?: string[];           // multi-select: Special Tray, Bite Reg., Try In, Finish
+  stages?: string[];           // multi-select: Special Tray, Bite Reg., Try In, Retry, Finish
+  stageDates?: Record<string, string>;  // per-stage requested delivery (ISO) — replaces requestedDelivery for dentures
   // Appliances — per item:
   //   Whitening Tray → Reservoirs (Yes/No)
   //   Night Guard    → Type (Hard/Soft/Dual-Laminate)
@@ -1228,8 +1227,9 @@ function ServiceDetailsStep({
   return (
     <div className="space-y-4">
       {/* ── Case Order Details ── case-level fields applied to every service.
-          Dentist on Record + Order Type + Requested Delivery Date all live
-          here so the user doesn't repeat them per service. ── */}
+          Dentist on Record + Order Type live here so the user doesn't repeat
+          them per service. The requested delivery date is NOT case-level: it
+          sits on each service (and on each stage of a denture) below. ── */}
       <div className="bg-white border border-[#E0E0E6] rounded-2xl p-4 sm:p-5">
         <div className="flex items-center gap-2 mb-3">
           <span className="w-7 h-7 rounded-full bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white flex items-center justify-center">
@@ -1238,7 +1238,7 @@ function ServiceDetailsStep({
           <h3 className="text-sm font-semibold text-[#030213]">Case Order Details</h3>
           <span className="text-[10px] text-[#A0A0B0] italic">— applied to all services</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Mini label="Dentist on Record" required>
             <div className="relative">
               <select
@@ -1266,14 +1266,6 @@ function ServiceDetailsStep({
               </select>
               <ChevronDown className="w-4 h-4 text-[#A0A0B0] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
-          </Mini>
-          <Mini label="Requested Delivery Date">
-            <input
-              type="date"
-              value={caseDeliveryDate}
-              onChange={(e) => onCaseDeliveryDateChange(e.target.value)}
-              className="w-full px-3 py-2 text-sm text-[#030213] border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7] transition-colors"
-            />
           </Mini>
         </div>
         {selectedDentist && (
@@ -1328,9 +1320,31 @@ function ServiceDetailsStep({
               </button>
             </div>
 
-            {/* Per-service fields — material, shade, notes, teeth.
-                Order Type + Delivery Date are case-level (see Case Order
-                Details card at the top), so they're not asked here. */}
+            {/* Per-service fields — delivery, material, shade, notes, teeth.
+                Order Type is case-level (Case Order Details card at the top).
+                Delivery is per service; a denture dates each stage instead. */}
+            {isDentureItem(activeService.itemId) ? (
+              <div className="mb-4">
+                <Mini label="Stages & delivery dates" required>
+                  <StageDatePicker
+                    stages={activeService.stages ?? []}
+                    dates={activeService.stageDates ?? {}}
+                    onChange={(stages, stageDates) => onUpdateSelection(activeService.itemId, { stages, stageDates })}
+                  />
+                </Mini>
+              </div>
+            ) : (
+              <div className="mb-4">
+                <Mini label="Requested Delivery Date">
+                  <input
+                    type="date"
+                    value={activeService.requestedDelivery || ''}
+                    onChange={(e) => onUpdateSelection(activeService.itemId, { requestedDelivery: e.target.value })}
+                    className="w-full sm:w-[220px] px-3 py-2 text-sm text-[#030213] border border-[#E0E0E6] rounded-lg bg-white outline-none focus:border-[#4D8EF7] transition-colors"
+                  />
+                </Mini>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Mini label="Material">
                 <div className="relative">
@@ -1767,6 +1781,20 @@ function CaseSummaryCard({
                           <Plus className="w-2.5 h-2.5" strokeWidth={3} />
                           Add details
                         </span>
+                      )}
+                      {/* Requested delivery — per service, or per stage for a denture. */}
+                      {isDentureItem(sel.itemId) ? (
+                        (sel.stages?.length ?? 0) > 0 ? (
+                          <div className="mt-1 pt-1 border-t border-black/5">
+                            <StageDateList stages={sel.stages!} dates={sel.stageDates ?? {}} format={isoToCaseDate} />
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-[#D97706] mt-0.5">Pick stages and their dates</p>
+                        )
+                      ) : (
+                        <p className={`text-[10px] mt-0.5 ${sel.requestedDelivery ? 'text-[#5A5568]' : 'text-[#D97706]'}`}>
+                          Delivery · {sel.requestedDelivery ? isoToCaseDate(sel.requestedDelivery) : 'no date'}
+                        </p>
                       )}
                     </div>
                     {isActive ? (

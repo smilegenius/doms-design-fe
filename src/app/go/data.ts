@@ -516,15 +516,47 @@ export const matchesAttention = (c: LabCase, a: Attention) =>
 
 // ─── Finance ────────────────────────────────────────────────────────────────
 
-export type InvoiceStatus = 'to-approve' | 'needs-review' | 'queried' | 'approved' | 'rejected';
-export type CheckState = 'pass' | 'warn' | 'fail';
+/** Same statuses as the portal's Invoices page. 'main' ones are the summary
+ *  tiles at the top; 'more' ones are the secondary filters at the bottom. */
+export type InvoiceStatus = 'qc' | 'duplicate' | 'awaiting' | 'approved' | 'xero' | 'paid'
+  | 'disputed' | 'rejected' | 'xero-failed' | 'exported' | 'archived' | 'not-invoice' | 'zero-value';
+export const INVOICE_STATUSES: { id: InvoiceStatus; label: string; group: 'main' | 'more' }[] = [
+  { id: 'qc', label: 'QC · Needs review', group: 'main' },
+  { id: 'duplicate', label: 'Duplicates', group: 'main' },
+  { id: 'awaiting', label: 'Awaiting approval', group: 'main' },
+  { id: 'approved', label: 'Approved', group: 'main' },
+  { id: 'xero', label: 'Sent to Xero', group: 'main' },
+  { id: 'paid', label: 'Payment processed', group: 'main' },
+  { id: 'disputed', label: 'Disputed', group: 'more' },
+  { id: 'rejected', label: 'Rejected', group: 'more' },
+  { id: 'xero-failed', label: 'Sent to Xero failed', group: 'more' },
+  { id: 'exported', label: 'Exported for payment', group: 'more' },
+  { id: 'archived', label: 'Archived', group: 'more' },
+  { id: 'not-invoice', label: 'Not an invoice', group: 'more' },
+  { id: 'zero-value', label: 'Zero value', group: 'more' },
+];
+/** Still needs someone at the practice. */
+export const invoiceNeedsAction = (s: InvoiceStatus) => s === 'qc' || s === 'duplicate' || s === 'awaiting' || s === 'disputed' || s === 'xero-failed';
+
+/** pass/warn/fail are QC checks; info is a note that doesn't block (portal: "3 info"). */
+export type CheckState = 'pass' | 'warn' | 'fail' | 'info';
 export interface Invoice {
   id: string;
+  /** Supplier's invoice number, as printed. */
+  number: string;
+  docType: 'Invoice' | 'Credit note';
   supplier: string;
   practice: PracticeId;
+  /** Who it's billed to. registered: false = name on the invoice isn't a user here ("Not registered"). */
+  billTo: { name: string; registered: boolean };
   net: number;
   vat: number;
   status: InvoiceStatus;
+  /** "Approved · System" when auto-approved after passing every check. */
+  approvedBy?: string;
+  /** How sure the read was, 0–100. */
+  confidence: number;
+  issued: string;
   received: string;
   due: string;
   source: string;
@@ -533,72 +565,162 @@ export interface Invoice {
   checks: { label: string; detail: string; state: CheckState }[];
   activity: { text: string; at: string }[];
 }
+export const invoiceIssues = (i: Invoice) => i.checks.filter(c => c.state === 'warn' || c.state === 'fail').length;
+export const invoiceInfo = (i: Invoice) => i.checks.filter(c => c.state === 'info').length;
+
+const chk = (label: string, detail: string, state: CheckState = 'pass') => ({ label, detail, state });
+const PASS_BASICS = [chk('Duplicate check', 'No matching invoice found'), chk('Supplier VAT number', 'Verified')];
 
 export const SEED_INVOICES: Invoice[] = [
   {
-    id: 'PDW-7731', supplier: 'Precision Dental Works', practice: 'isc', net: 1940, vat: 388, status: 'needs-review',
-    received: at(-1, 11, 41), due: at(13), source: 'Received via supplier upload', caseId: 'SG-28488',
+    id: 'PDW-7731', number: 'PDW-7731', docType: 'Invoice', supplier: 'Precision Dental Works', practice: 'isc',
+    billTo: { name: 'Dr Samuel Okafor', registered: true }, net: 1940, vat: 388, status: 'qc', confidence: 85,
+    issued: at(-2), received: at(-1, 11, 41), due: at(13), source: 'Received via supplier upload', caseId: 'SG-28488',
     lines: [
       { label: 'Full denture · J. Williams', qty: 1, unit: 1290 },
       { label: 'Remake, upper denture', qty: 1, unit: 650 },
     ],
     checks: [
-      { label: 'Lab order match', detail: 'Matches SG-28488', state: 'pass' },
-      { label: 'Duplicate check', detail: 'No matching invoice found', state: 'pass' },
-      { label: 'Supplier VAT number', detail: 'GB 419 2210 55 verified', state: 'pass' },
-      { label: 'Amount vs usual', detail: '38% above usual for full dentures. Remake line not on lab order', state: 'warn' },
+      chk('Lab order match', 'Matches SG-28488'),
+      ...PASS_BASICS,
+      chk('Amount vs usual', '38% above usual for full dentures', 'warn'),
+      chk('Line not on lab order', 'Remake, upper denture isn’t on SG-28488', 'warn'),
     ],
-    activity: [{ text: 'Received via supplier upload', at: at(-1, 11, 41) }, { text: 'Amount anomaly flagged', at: at(-1, 11, 42) }],
+    activity: [{ text: 'Received via supplier upload', at: at(-1, 11, 41) }, { text: 'Sent to QC: 2 issues', at: at(-1, 11, 42) }],
   },
   {
-    id: 'NDL-10482', supplier: 'Northstar Dental Lab', practice: 'cds', net: 1070, vat: 214, status: 'to-approve',
-    received: at(-2, 9, 13), due: at(12), source: 'Received via email and read automatically', caseId: 'SG-28452',
+    id: 'OVR-07DC99', number: '#07dc99', docType: 'Invoice', supplier: 'Oakview Restorations', practice: 'cds',
+    billTo: { name: 'Dr Olivia Reed', registered: true }, net: 109.58, vat: 21.92, status: 'qc', confidence: 85,
+    issued: at(-6), received: at(-5, 9, 10), due: at(24), source: 'Received via email and read automatically',
+    lines: [{ label: 'Crown · A. Taylor', qty: 1, unit: 109.58 }],
+    checks: [
+      chk('Lab order match', 'No lab order found for this patient', 'fail'),
+      chk('Patient name', 'Spelling differs from patient record', 'warn'),
+      chk('Due date', 'Missing on the invoice', 'warn'),
+      chk('Invoice number', 'Unusual format', 'warn'),
+      chk('Line total', 'Rounding difference of £0.02', 'warn'),
+      ...PASS_BASICS,
+    ],
+    activity: [{ text: 'Received via email and read automatically', at: at(-5, 9, 10) }, { text: 'Sent to QC: 5 issues', at: at(-5, 9, 11) }],
+  },
+  {
+    id: 'DNH-136484', number: 'INV136484', docType: 'Invoice', supplier: 'DNH Lab Ltd', practice: 'cds',
+    billTo: { name: 'Dr Olivia Reed', registered: true }, net: 38.13, vat: 7.62, status: 'qc', confidence: 82,
+    issued: at(-4), received: at(-3, 15, 0), due: at(26), source: 'Received via email and read automatically',
+    lines: [{ label: 'Night guard repair · R. Evans', qty: 1, unit: 38.13 }],
+    checks: [
+      chk('Lab order match', 'No lab order found', 'fail'),
+      chk('Supplier', 'Not in your supplier list yet', 'warn'),
+      ...PASS_BASICS,
+    ],
+    activity: [{ text: 'Received via email and read automatically', at: at(-3, 15, 0) }],
+  },
+  {
+    id: 'OVR-DL1409', number: 'INV-DL1409-W-1', docType: 'Invoice', supplier: 'Oakview Restorations', practice: 'cds',
+    billTo: { name: 'Dr Sami Hassan', registered: false }, net: 109.58, vat: 21.92, status: 'qc', confidence: 82,
+    issued: at(-9), received: at(-8, 10, 0), due: at(21), source: 'Received via email and read automatically',
+    lines: [{ label: 'Veneer · S. Khan', qty: 1, unit: 109.58 }],
+    checks: [
+      chk('Bill to', 'Dr Sami Hassan isn’t registered at this practice', 'fail'),
+      chk('Lab order match', 'No lab order found', 'warn'),
+      chk('Due date', 'Missing on the invoice', 'warn'),
+      chk('VAT', 'VAT rate not shown', 'warn'),
+    ],
+    activity: [{ text: 'Received via email and read automatically', at: at(-8, 10, 0) }],
+  },
+  {
+    id: 'DE-2026-118', number: 'DE-2026-118', docType: 'Invoice', supplier: 'Dentaurum GmbH', practice: 'isc',
+    billTo: { name: 'Dr Hannah Lee', registered: true }, net: 1320, vat: 0, status: 'duplicate', confidence: 93,
+    issued: at(-6), received: at(-5, 16, 45), due: at(9), source: 'Received via email',
+    lines: [{ label: 'Orthodontic wire assortment', qty: 4, unit: 330 }],
+    checks: [
+      chk('Duplicate check', 'Same number and amount as DE-2026-112', 'fail'),
+      chk('Reverse charge VAT', 'Zero-rated EU supply noted', 'info'),
+    ],
+    activity: [{ text: 'Received via email', at: at(-5, 16, 45) }, { text: 'Flagged as possible duplicate', at: at(-5, 16, 46) }],
+  },
+  {
+    id: 'NDL-10482', number: 'NDL-10482', docType: 'Invoice', supplier: 'Northstar Dental Lab', practice: 'cds',
+    billTo: { name: 'Dr Olivia Reed', registered: true }, net: 1070, vat: 214, status: 'awaiting', confidence: 94,
+    issued: at(-3), received: at(-2, 9, 13), due: at(12), source: 'Received via email and read automatically', caseId: 'SG-28452',
     lines: [
       { label: 'Gold onlay · P. Novak', qty: 1, unit: 820 },
       { label: 'Implant components · D. Morgan', qty: 1, unit: 250 },
     ],
-    checks: [
-      { label: 'Lab order match', detail: 'Matches SG-28452, received at practice', state: 'pass' },
-      { label: 'Duplicate check', detail: 'No matching invoice found', state: 'pass' },
-      { label: 'Supplier VAT number', detail: 'GB 284 1192 07 verified', state: 'pass' },
-      { label: 'Amount vs usual', detail: 'Within normal range', state: 'pass' },
-    ],
+    checks: [chk('Lab order match', 'Matches SG-28452, received at practice'), ...PASS_BASICS, chk('Amount vs usual', 'Within normal range')],
     activity: [{ text: 'Received via email and read automatically', at: at(-2, 9, 13) }, { text: 'All checks passed', at: at(-2, 9, 14) }],
   },
   {
-    id: 'HSD-55120', supplier: 'Henry Schein Dental', practice: 'cds', net: 642.5, vat: 128.5, status: 'to-approve',
-    received: at(-3, 14, 2), due: at(20), source: 'Received via email and read automatically',
+    id: 'HSD-55120', number: 'HSD-55120', docType: 'Invoice', supplier: 'Henry Schein Dental', practice: 'cds',
+    billTo: { name: 'Camden Dental Studio', registered: true }, net: 642.5, vat: 128.5, status: 'awaiting', confidence: 96,
+    issued: at(-4), received: at(-3, 14, 2), due: at(20), source: 'Received via email and read automatically',
     lines: [
       { label: 'Nitrile gloves (M) × 20 boxes', qty: 20, unit: 8.75 },
       { label: 'Composite A2 syringes', qty: 10, unit: 46.75 },
     ],
-    checks: [
-      { label: 'Purchase order match', detail: 'PO-4471 · all lines delivered', state: 'pass' },
-      { label: 'Duplicate check', detail: 'No matching invoice found', state: 'pass' },
-      { label: 'Supplier VAT number', detail: 'GB 652 8810 13 verified', state: 'pass' },
-      { label: 'Amount vs usual', detail: 'Within normal range', state: 'pass' },
-    ],
+    checks: [chk('Purchase order match', 'PO-4471 · all lines delivered'), ...PASS_BASICS],
     activity: [{ text: 'Received via email and read automatically', at: at(-3, 14, 2) }],
   },
   {
-    id: 'DE-2026-118', supplier: 'Dentaurum GmbH', practice: 'isc', net: 1320, vat: 0, status: 'queried',
-    received: at(-5, 16, 45), due: at(9), source: 'Received via email',
-    lines: [{ label: 'Orthodontic wire assortment', qty: 4, unit: 330 }],
+    id: 'SDC-2601-0037', number: '2601/0037', docType: 'Invoice', supplier: 'Scarborough Denture Centre', practice: 'isc',
+    billTo: { name: 'Dr Hannah Lee', registered: true }, net: 118.75, vat: 23.75, status: 'approved', approvedBy: 'System', confidence: 90,
+    issued: at(-8), received: at(-7, 9, 0), due: at(22), source: 'Received via email and read automatically', caseId: 'SG-28460',
+    lines: [{ label: 'Partial denture · E. Brooks', qty: 1, unit: 118.75 }],
     checks: [
-      { label: 'Duplicate check', detail: 'Possible duplicate of DE-2026-112 (same amount)', state: 'fail' },
-      { label: 'Reverse charge VAT', detail: 'Zero-rated EU supply noted', state: 'pass' },
+      chk('Lab order match', 'Matches SG-28460'), ...PASS_BASICS,
+      chk('Price list', 'Matches the agreed price', 'info'),
+      chk('Delivery', 'Work received at practice', 'info'),
+      chk('Payment terms', '30 days', 'info'),
     ],
-    activity: [{ text: 'Received via email', at: at(-5, 16, 45) }, { text: 'Queried by Emily Morris: possible duplicate', at: at(-4, 10, 5) }],
+    activity: [{ text: 'Received via email and read automatically', at: at(-7, 9, 0) }, { text: 'Approved automatically: all checks passed', at: at(-7, 9, 1) }],
   },
   {
-    id: 'BAL-2209', supplier: 'Bright Arch Laboratory', practice: 'isc', net: 480, vat: 96, status: 'approved',
-    received: at(-8, 10, 0), due: at(6), source: 'Received via supplier upload', caseId: 'SG-28460',
+    id: 'S4S-116434', number: '116434', docType: 'Invoice', supplier: 'S4S London Ltd', practice: 'isc',
+    billTo: { name: 'Dr Samuel Okafor', registered: true }, net: 30.42, vat: 6.08, status: 'approved', approvedBy: 'System', confidence: 91,
+    issued: at(-5), received: at(-5, 12, 0), due: at(25), source: 'Received via email and read automatically',
+    lines: [{ label: 'Study models · L. Chen', qty: 1, unit: 30.42 }],
+    checks: [...PASS_BASICS, chk('Price list', 'Matches the agreed price', 'info'), chk('Payment terms', '30 days', 'info')],
+    activity: [{ text: 'Approved automatically: all checks passed', at: at(-5, 12, 1) }],
+  },
+  {
+    id: 'BAL-2209', number: 'BAL-2209', docType: 'Invoice', supplier: 'Bright Arch Laboratory', practice: 'isc',
+    billTo: { name: 'Dr Hannah Lee', registered: true }, net: 480, vat: 96, status: 'xero', approvedBy: 'Dr Olivia Reed', confidence: 97,
+    issued: at(-9), received: at(-8, 10, 0), due: at(6), source: 'Received via supplier upload', caseId: 'SG-28460',
     lines: [{ label: 'Retainers (pair) · L. Chen', qty: 1, unit: 480 }],
-    checks: [
-      { label: 'Lab order match', detail: 'Matches SG-28460', state: 'pass' },
-      { label: 'Duplicate check', detail: 'No matching invoice found', state: 'pass' },
-    ],
-    activity: [{ text: 'Received via supplier upload', at: at(-8, 10, 0) }, { text: 'Approved by Dr Olivia Reed', at: at(-7, 9, 30) }],
+    checks: [chk('Lab order match', 'Matches SG-28460'), ...PASS_BASICS],
+    activity: [{ text: 'Approved by Dr Olivia Reed', at: at(-7, 9, 30) }, { text: 'Sent to Xero', at: at(-7, 9, 31) }],
+  },
+  {
+    id: '32CO-20228', number: 'INV-20228', docType: 'Invoice', supplier: '32Co', practice: 'cds',
+    billTo: { name: 'Dr Olivia Reed', registered: true }, net: 1020.83, vat: 204.17, status: 'paid', approvedBy: 'John Carter', confidence: 90,
+    issued: at(-30), received: at(-29, 9, 0), due: at(-1), source: 'Received via supplier upload',
+    lines: [{ label: 'Clear aligners · M. Patel', qty: 1, unit: 1020.83 }],
+    checks: [...PASS_BASICS],
+    activity: [{ text: 'Approved by John Carter', at: at(-27, 10, 0) }, { text: 'Payment processed', at: at(-2, 8, 0) }],
+  },
+  {
+    id: 'NDL-10391', number: 'NDL-10391', docType: 'Invoice', supplier: 'Northstar Dental Lab', practice: 'cds',
+    billTo: { name: 'Dr Olivia Reed', registered: true }, net: 410, vat: 82, status: 'disputed', confidence: 92,
+    issued: at(-12), received: at(-11, 9, 0), due: at(18), source: 'Received via email and read automatically',
+    lines: [{ label: 'Bridge · R. Evans', qty: 1, unit: 410 }],
+    checks: [chk('Price', '£60 above the quote', 'fail'), ...PASS_BASICS],
+    activity: [{ text: 'Disputed by John Carter: price differs from quote', at: at(-10, 11, 0) }],
+  },
+  {
+    id: 'PDW-7650', number: 'PDW-7650', docType: 'Invoice', supplier: 'Precision Dental Works', practice: 'isc',
+    billTo: { name: 'Dr Samuel Okafor', registered: true }, net: 320, vat: 64, status: 'xero-failed', approvedBy: 'System', confidence: 95,
+    issued: at(-6), received: at(-6, 9, 0), due: at(24), source: 'Received via supplier upload',
+    lines: [{ label: 'Night guard · R. Evans', qty: 1, unit: 320 }],
+    checks: [...PASS_BASICS, chk('Xero', 'Supplier contact not found in Xero', 'fail')],
+    activity: [{ text: 'Approved automatically', at: at(-6, 9, 1) }, { text: 'Sending to Xero failed', at: at(-6, 9, 2) }],
+  },
+  {
+    id: 'OVR-CN0042', number: 'CN-0042', docType: 'Credit note', supplier: 'Oakview Restorations', practice: 'cds',
+    billTo: { name: 'Dr Olivia Reed', registered: true }, net: 0, vat: 0, status: 'zero-value', confidence: 88,
+    issued: at(-10), received: at(-10, 9, 0), due: at(-10), source: 'Received via email and read automatically',
+    lines: [{ label: 'Remake at no charge · A. Taylor', qty: 1, unit: 0 }],
+    checks: [chk('Zero value', 'Nothing to pay', 'info')],
+    activity: [{ text: 'Received via email and read automatically', at: at(-10, 9, 0) }],
   },
 ];
 

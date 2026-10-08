@@ -5,10 +5,10 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronDown, Check, Search, X, Home, Layers, Plus, Wallet, User, CheckCircle2, AlertTriangle, Info, Camera, PenLine, Mic,
+  ChevronLeft, ChevronDown, Check, Search, X, Home, Layers, Plus, Receipt, Wallet, User, CheckCircle2, AlertTriangle, Info, Camera, PenLine, Mic,
 } from './icons';
 import { useGo, useScoped } from './store';
-import { LabCase, ReadinessLevel, STAGES, Stage, isOverdue, readiness, stageIndex, stageLabel } from './data';
+import { LabCase, ReadinessLevel, STAGES, Stage, invoiceNeedsAction, isOverdue, readiness, stageIndex, stageLabel } from './data';
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
@@ -92,12 +92,12 @@ export function TabBar() {
   const { pathname } = useLocation();
   const { invoices } = useScoped();
   const [newOpen, setNewOpen] = useState(false);
-  const finCount = invoices.filter(i => i.status === 'to-approve' || i.status === 'needs-review').length;
+  const finCount = invoices.filter(i => invoiceNeedsAction(i.status)).length;
   const tabs = [
     { to: '/go/home', label: 'Home', icon: Home },
     { to: '/go/work', label: 'Lab work', icon: Layers },
     null,
-    { to: '/go/finance', label: 'Finance', icon: Wallet, badge: finCount },
+    { to: '/go/invoices', label: 'Invoices', icon: Receipt, badge: finCount },
     { to: '/go/account', label: 'Account', icon: User },
   ];
   return (

@@ -31,6 +31,7 @@ import {
   GitBranch,
   MessageCircle,
   Info,
+  Layers,
 } from 'lucide-react';
 import Button from '../components/Button';
 import ModalPortal from '../components/ModalPortal';
@@ -45,6 +46,8 @@ import { AiReviewTag } from '../components/AiReviewNotice';
 import { SCANNER_SYNC_COPY, scannerSyncUnsupported, caseCreatedBy, needsReview, statusReach, type CreatedSide, type StatusReach, type ViewerPortal } from '../data/caseProvenance';
 import { useScannerConnections } from '../data/scannerConnections';
 import { getCreatedCases, useCreatedCases } from '../data/createdCases';
+import { isDentureService, nextStageRow, stageRowsFor, useStageAppends, type StageRow } from '../data/dentureStages';
+import { StageStatusCell } from '../components/DentureStages';
 import { hasEmailReply, hasWhatsAppReply, useCaseCommunications } from '../data/caseCommunications';
 import {
   RescanLink, originalIdOf, relatedIdsOf, relationshipOf, rescanIdsOf, useRescanLinks,
@@ -479,7 +482,85 @@ export const rescanDemoCases: Case[] = [
   },
 ];
 
-export const mockCases: Case[] = [...rescanDemoCases, ...generatedCases];
+// ── Denture stage demo cases (Oct-2026 round) ───────────────────────────────
+// A denture has no service-level delivery date: each stage is dated on its own
+// and listed under the service. DN-3001 is the case the follow-up draft
+// CASE-DRAFT-DN1 (same patient / practice / dentist / Partial Denture) is
+// appended to; DN-3002 is the multi-service example (denture + crown, the
+// crown keeping its own service-level date). Practice + dentist come from the
+// creation pickers' values so Quick Create can match them.
+export const dentureDemoCases: Case[] = [
+  {
+    id: 'CASE-DN-3001',
+    patientName: 'John Smith',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Partial Denture'],
+    serviceItems: [{
+      id: 'dn3001-s1', name: 'Partial Denture', status: 'in-production', deliveryDate: null,
+      fdi: [14, 15, 16, 24, 25, 26], material: 'Acrylic', shade: 'A2', orderType: 'Private',
+      instructions: 'Upper partial denture, acrylic base. Clasp on UR7 and UL7.',
+      scanFileCount: 2, attachmentCount: 1,
+      stages: ['Special Tray', 'Bite Registration', 'Try In'],
+      stageOrders: [{
+        id: 'so-1',
+        stages: ['Special Tray', 'Bite Registration', 'Try In'],
+        status: 'in-production',
+        deliveryDate: '05-May-2026',
+        createdAt: '28-Apr-2026',
+        stageDates: { 'Special Tray': '05-May-2026', 'Bite Registration': '12-May-2026', 'Try In': '22-May-2026' },
+        stageStatuses: { 'Special Tray': 'completed', 'Bite Registration': 'completed', 'Try In': 'in-production' },
+      }],
+    }],
+    status: 'in-production',
+    createdAt: '28-Apr-2026',
+    updatedAt: '16-May-2026',
+    requestedDelivery: '22-May-2026',
+    hasAlert: false,
+    scanner: 'iTero',
+    source: 'scanner',
+  },
+  {
+    id: 'CASE-DN-3002',
+    patientName: 'Amira Khan',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Partial Denture', 'Crown'],
+    serviceItems: [
+      {
+        id: 'dn3002-s1', name: 'Partial Denture', status: 'in-production', deliveryDate: null,
+        fdi: [34, 35, 36, 44, 45, 46], material: 'Chrome Cobalt', shade: 'A3', orderType: 'Private',
+        scanFileCount: 1, attachmentCount: 0,
+        stages: ['Special Tray', 'Bite Registration'],
+        stageOrders: [{
+          id: 'so-1',
+          stages: ['Special Tray', 'Bite Registration'],
+          status: 'in-production',
+          deliveryDate: '15-May-2026',
+          createdAt: '07-May-2026',
+          stageDates: { 'Special Tray': '15-May-2026', 'Bite Registration': '26-May-2026' },
+          stageStatuses: { 'Special Tray': 'completed', 'Bite Registration': 'in-production' },
+        }],
+      },
+      {
+        id: 'dn3002-s2', name: 'Crown', status: 'new', deliveryDate: '28-May-2026',
+        fdi: [11], material: 'E.max', shade: 'A3', orderType: 'Private',
+        scanFileCount: 2, attachmentCount: 0,
+      },
+    ],
+    status: 'in-production',
+    createdAt: '07-May-2026',
+    updatedAt: '15-May-2026',
+    requestedDelivery: '26-May-2026',
+    hasAlert: false,
+    scanner: '3Shape',
+    source: 'scanner',
+  },
+];
+
+export const mockCases: Case[] = [...dentureDemoCases, ...rescanDemoCases, ...generatedCases];
 
 // ── Upgrade-paywall demo case (lab only) ────────────────────────────────────
 // A freshly received case that always triggers the plan-limit upgrade popup
@@ -696,6 +777,74 @@ export const draftCases: Case[] = [
       receivedAt: '40 min ago',
       attachmentName: 'Mitchell_G_iTero_Export.zip',
       bodyPreview: 'Hi team, exporting straight from iTero — upper, lower and bite scans attached for Grace Mitchell. E.max crown on LL6, shade A1.',
+    },
+  },
+  // ── Denture follow-up prescriptions (Oct-2026 round) ──────────────────────
+  // DN1: the Finish stage for John Smith — matches CASE-DN-3001, so Quick
+  // Create appends it to that case instead of creating a new one.
+  {
+    id: 'CASE-DRAFT-DN1',
+    patientName: 'John Smith',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Partial Denture'],
+    serviceItems: [{
+      id: 'ddn1-s1', name: 'Partial Denture', status: 'new', deliveryDate: null,
+      fdi: [14, 15, 16, 24, 25, 26], material: 'Acrylic', shade: 'A2', orderType: 'Private',
+      instructions: 'Try-in approved — please proceed to finish.',
+      scanFileCount: 0, attachmentCount: 1,
+      stages: ['Finish'],
+      stageDates: { Finish: '02-Jun-2026' },
+    }],
+    status: 'draft',
+    createdAt: '19-May-2026',
+    updatedAt: '19-May-2026',
+    requestedDelivery: '02-Jun-2026',
+    hasAlert: false,
+    scanner: 'iTero',
+    source: 'email',
+    emailPrescription: {
+      fromName: 'Dr. Webb',
+      fromEmail: 'dr.webb@smilegenius.co.uk',
+      subject: 'Follow-up Rx — John Smith — Partial Denture, Finish',
+      receivedAt: '25 min ago',
+      attachmentName: 'Smith_J_Finish_Rx.pdf',
+      bodyPreview: 'Hi team, the try-in went well. Please go ahead and finish the upper partial denture for John Smith — same arch, material and shade.',
+    },
+  },
+  // DN2: a Full Denture for Margaret Lee, never on the platform before. The
+  // prescription lists the earlier stages with their (past) dates plus Finish —
+  // a new case is created and the past stages show as "Done earlier".
+  {
+    id: 'CASE-DRAFT-DN2',
+    patientName: 'Margaret Lee',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Full Denture'],
+    serviceItems: [{
+      id: 'ddn2-s1', name: 'Full Denture', status: 'new', deliveryDate: null,
+      fdi: [11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25, 26, 27], material: 'Acrylic', shade: 'A1', orderType: 'Private',
+      instructions: 'Special tray and bite were done at our previous lab. Please finish from the records attached.',
+      scanFileCount: 0, attachmentCount: 2,
+      stages: ['Special Tray', 'Bite Registration', 'Finish'],
+      stageDates: { 'Special Tray': '20-Mar-2026', 'Bite Registration': '10-Apr-2026', Finish: '05-Jun-2026' },
+    }],
+    status: 'draft',
+    createdAt: '19-May-2026',
+    updatedAt: '19-May-2026',
+    requestedDelivery: '05-Jun-2026',
+    hasAlert: false,
+    scanner: 'iTero',
+    source: 'email',
+    emailPrescription: {
+      fromName: 'Dr. Webb',
+      fromEmail: 'dr.webb@smilegenius.co.uk',
+      subject: 'New Rx — Margaret Lee — Full Denture, Finish',
+      receivedAt: '1 hr ago',
+      attachmentName: 'Lee_M_FullDenture_Records.pdf',
+      bodyPreview: 'Hi team, Margaret moved to us mid-treatment. Special tray (20 Mar) and bite (10 Apr) were done elsewhere, records attached. Please finish the upper full denture.',
     },
   },
 ];
@@ -1609,6 +1758,73 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   const [viewedCaseIds, setViewedCaseIds] = useState<Set<string>>(() => new Set());
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  // Follow-up prescriptions append denture stages to existing cases — re-read
+  // the stage rows whenever one lands.
+  useStageAppends();
+  // Denture services list their stages under the service, each with its own
+  // requested delivery date. Expanded per service: key "<caseId>::<serviceId>".
+  const stageKey = (caseId: string, serviceId: string) => `${caseId}::${serviceId}`;
+  const stageToggle = (c: Case, si: ServiceItem, rows: StageRow[]) => {
+    const open = expandedRows.has(stageKey(c.id, si.id));
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); toggleRow(stageKey(c.id, si.id)); }}
+        title={open ? 'Hide stages' : 'Show stages and their delivery dates'}
+        className="mt-1 inline-flex items-center gap-1 px-2 py-px rounded-full text-[10px] font-semibold border bg-[#F5F3FF] text-[#5B21B6] border-[#DDD6FE] hover:bg-[#EDE9FE] transition-colors whitespace-nowrap"
+      >
+        <Layers className="w-2.5 h-2.5" />
+        {rows.length} {rows.length === 1 ? 'stage' : 'stages'}
+        {open ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
+      </button>
+    );
+  };
+  // One row per stage, laid on the list's own columns: status under Status,
+  // the stage name under Case ID, its requested date under Delivery Date.
+  function renderStageRows(c: Case, rows: StageRow[]) {
+    return rows.map(r => (
+      <tr
+        key={`${c.id}-stage-${r.stage}`}
+        onClick={() => openCase(c)}
+        className="bg-[#FAF8FF] hover:bg-[#F5F3FF] transition-colors cursor-pointer [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]"
+      >
+        <td className="pl-4 pr-1 py-1.5" />
+        <td className="pl-3 pr-2 py-1.5">
+          <div className="w-0.5 h-4 bg-[#C4B5FD] rounded-full mx-auto" />
+        </td>
+        {visibleCols.status && (
+          <td className="px-4 py-1.5 whitespace-nowrap"><StageStatusCell row={r} size="xs" /></td>
+        )}
+        {visibleCols.score && <td className="px-4 py-1.5" />}
+        {csEnabled && visibleCols.carestack && <td className="px-4 py-1.5" />}
+        {visibleCols.caseId && (
+          <td className="px-4 py-1.5 whitespace-nowrap">
+            <span className="text-[11px] font-semibold text-[#5B21B6]">{r.stage}</span>
+            {r.followUp && (
+              <span className="ml-1.5 inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">Follow-up Rx</span>
+            )}
+          </td>
+        )}
+        {visibleCols.scannerDate && <td className="px-4 py-1.5" />}
+        {visibleCols.createdAt   && <td className="px-4 py-1.5" />}
+        {visibleCols.updatedAt   && <td className="px-4 py-1.5" />}
+        {visibleCols.deliveryDate && (
+          <td className="px-4 py-1.5 whitespace-nowrap text-[11px]">
+            {r.date
+              ? <span className={r.doneEarlier ? 'text-[#717182]' : 'text-[#030213]'}>{r.date}</span>
+              : <span className="text-[#D97706]">No date</span>}
+          </td>
+        )}
+        {visibleCols.patient  && <td className="px-4 py-1.5" />}
+        {visibleCols.service  && (
+          <td className="px-4 py-1.5 whitespace-nowrap"><span className="text-[10px] text-[#A0A0B0]">Stage</span></td>
+        )}
+        {visibleCols.practice && <td className="px-4 py-1.5" />}
+        {visibleCols.dentist  && <td className="px-4 py-1.5" />}
+        {visibleCols.lab      && <td className="px-4 py-1.5" />}
+        <td className="px-4 py-1.5" />
+      </tr>
+    ));
+  }
   function toggleRow(id: string) {
     setExpandedRows(prev => {
       const next = new Set(prev);
@@ -2299,7 +2515,13 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                   // The lab's latest due-date change is the date the case is
                   // working to — it wins over the original requested date.
                   const dueDateChange = latestDueDateChange(c.id, dueDateChanges);
-                  const effectiveDelivery = dueDateChange?.next ?? c.requestedDelivery;
+                  // A single-service denture has no service date — the row shows
+                  // the next open stage's date instead.
+                  const soloDenture = c.serviceItems.length === 1 && isDentureService(c.serviceItems[0].name) && c.status !== 'draft'
+                    ? c.serviceItems[0] : null;
+                  const soloStageRows = soloDenture ? stageRowsFor(c.id, c.createdAt, soloDenture) : [];
+                  const soloNext = soloDenture ? nextStageRow(soloStageRows) : null;
+                  const effectiveDelivery = dueDateChange?.next ?? (soloNext ? soloNext.date : c.requestedDelivery);
                   const overdue = isOverdue(effectiveDelivery);
                   const isExpanded = expandedRows.has(c.id);
                   const isMulti = c.serviceItems.length > 1;
@@ -2398,6 +2620,9 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                           ) : (
                             <StatusBadge status={c.status} />
                           )}
+                          {!locked && soloDenture && soloStageRows.length > 0 && (
+                            <div>{stageToggle(c, soloDenture, soloStageRows)}</div>
+                          )}
                           {!locked && c.statusOverride && (
                             <div className="mt-1"><OverrideTag override={c.statusOverride} /></div>
                           )}
@@ -2460,6 +2685,9 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                               ? <span className="font-semibold text-[#D4183D]">{effectiveDelivery}</span>
                               : <span className="text-[#030213]">{effectiveDelivery}</span>
                           ) : <span className="text-[#B0B0C0]">—</span>}
+                          {soloNext && !dueDateChange && (
+                            <div className="text-[10px] text-[#717182] mt-0.5">{soloNext.stage}</div>
+                          )}
                           {dueDateChange && <DueDateChangedTag change={dueDateChange} />}
                         </td>
                       )}
@@ -2552,10 +2780,17 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                       </td>
                     </tr>
 
+                    {/* ── Stage rows of a single-service denture ── */}
+                    {soloDenture && expandedRows.has(stageKey(c.id, soloDenture.id)) && renderStageRows(c, soloStageRows)}
+
                     {/* ── Child service rows — visible when expanded ── */}
-                    {isExpanded && c.serviceItems.map((si, idx) => (
+                    {isExpanded && c.serviceItems.map((si, idx) => {
+                      const dentureRows = isDentureService(si.name) ? stageRowsFor(c.id, c.createdAt, si) : [];
+                      const dentureNext = dentureRows.length ? nextStageRow(dentureRows) : null;
+                      const siDelivery = dentureNext ? dentureNext.date : si.deliveryDate;
+                      return (
+                      <React.Fragment key={`${c.id}-${si.id}`}>
                       <tr
-                        key={`${c.id}-${si.id}`}
                         onClick={() => openCase(c)}
                         className="bg-[#F5F8FF] hover:bg-[#EEF4FF] transition-colors cursor-pointer [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]"
                       >
@@ -2577,6 +2812,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                         {visibleCols.status && (
                           <td className="px-4 py-2 whitespace-nowrap">
                             <StatusBadge status={si.status} />
+                            {dentureRows.length > 0 && <div>{stageToggle(c, si, dentureRows)}</div>}
                           </td>
                         )}
                         {visibleCols.score && (
@@ -2597,11 +2833,12 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                         {/* Delivery date — service-level */}
                         {visibleCols.deliveryDate && (
                           <td className="px-4 py-2 whitespace-nowrap text-xs">
-                            {si.deliveryDate
-                              ? isOverdue(si.deliveryDate)
-                                ? <span className="font-semibold text-[#D4183D]">{si.deliveryDate}</span>
-                                : <span className="text-[#030213]">{si.deliveryDate}</span>
+                            {siDelivery
+                              ? isOverdue(siDelivery)
+                                ? <span className="font-semibold text-[#D4183D]">{siDelivery}</span>
+                                : <span className="text-[#030213]">{siDelivery}</span>
                               : <span className="text-[#B0B0C0]">—</span>}
+                            {dentureNext && <div className="text-[10px] text-[#717182] mt-0.5">{dentureNext.stage}</div>}
                           </td>
                         )}
                         {visibleCols.patient   && <td className="px-4 py-2" />}
@@ -2616,7 +2853,10 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                         {visibleCols.lab       && <td className="px-4 py-2" />}
                         <td className="px-4 py-2" />
                       </tr>
-                    ))}
+                      {dentureRows.length > 0 && expandedRows.has(stageKey(c.id, si.id)) && renderStageRows(c, dentureRows)}
+                      </React.Fragment>
+                      );
+                    })}
                     </React.Fragment>
                   );
                 })}

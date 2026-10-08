@@ -13,6 +13,7 @@ import FlowsPage from './pages/FlowsPage';
 import CareStackFlowPage from './pages/CareStackFlowPage';
 import WhatsAppFlowPage from './pages/WhatsAppFlowPage';
 import HotfixesFlowPage from './pages/HotfixesFlowPage';
+import DentureStagesFlowPage from './pages/DentureStagesFlowPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
 import LabApp from './LabApp';
@@ -429,6 +430,7 @@ export default function App() {
       <Route path="/flows/carestack" element={<CareStackFlowPage />} />
       <Route path="/flows/whatsapp" element={<WhatsAppFlowPage />} />
       <Route path="/flows/hotfixes-30-sep" element={<HotfixesFlowPage />} />
+      <Route path="/flows/denture-stages" element={<DentureStagesFlowPage />} />
       {/* Smile Genius Go — clinician / dentist mobile app. Has its own demo
           sign-in, so it sits outside ProtectedRoute. */}
       <Route path="/go/*" element={<GoApp />} />

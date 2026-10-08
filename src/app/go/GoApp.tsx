@@ -82,18 +82,15 @@ const JUMPS: Jump[] = [
     { label: 'Finish a draft · single service', to: '/go/new/manual?draft=SG-D1004' },
     { label: 'Finish a draft · multi-service', to: '/go/new/manual?draft=SG-D1007' },
   ] },
-  { group: 'Finance', label: 'Invoices & statements', to: '/go/finance', scenarios: [
-    { label: 'Invoices', to: '/go/finance' },
-    { label: 'Statements', to: '/go/finance?tab=statements' },
+{ group: 'Invoices', label: 'All invoices', to: '/go/invoices', scenarios: [    { label: 'All invoices', to: '/go/invoices' },    { label: 'QC · needs review', to: '/go/invoices?s=qc' },    { label: 'Duplicates', to: '/go/invoices?s=duplicate' },    { label: 'Awaiting approval', to: '/go/invoices?s=awaiting' },    { label: 'Approved', to: '/go/invoices?s=approved' },    { label: 'Disputed', to: '/go/invoices?s=disputed' },    { label: 'Sent to Xero failed', to: '/go/invoices?s=xero-failed' },    { label: 'Statements', to: '/go/invoices?tab=statements' },  ] },
+  { group: 'Invoices', label: 'Invoice review', to: '/go/invoices/invoice/PDW-7731', scenarios: [
+    { label: 'Amount flagged', to: '/go/invoices/invoice/PDW-7731' },
+    { label: 'All checks passed', to: '/go/invoices/invoice/NDL-10482' },
+    { label: 'Possible duplicate', to: '/go/invoices/invoice/DE-2026-118' },
   ] },
-  { group: 'Finance', label: 'Invoice review', to: '/go/finance/invoice/PDW-7731', scenarios: [
-    { label: 'Amount flagged', to: '/go/finance/invoice/PDW-7731' },
-    { label: 'All checks passed', to: '/go/finance/invoice/NDL-10482' },
-    { label: 'Possible duplicate (queried)', to: '/go/finance/invoice/DE-2026-118' },
-  ] },
-  { group: 'Finance', label: 'Statement review', to: '/go/finance/statement/ST-DSU-0926', scenarios: [
-    { label: 'Two lines to resolve', to: '/go/finance/statement/ST-DSU-0926' },
-    { label: 'All lines matched', to: '/go/finance/statement/ST-NDL-0926' },
+  { group: 'Invoices', label: 'Statement review', to: '/go/invoices/statement/ST-DSU-0926', scenarios: [
+    { label: 'Two lines to resolve', to: '/go/invoices/statement/ST-DSU-0926' },
+    { label: 'All lines matched', to: '/go/invoices/statement/ST-NDL-0926' },
   ] },
   { group: 'Account', label: 'Account & appearance', to: '/go/account' },
 ];
@@ -259,9 +256,10 @@ function GoRoutes() {
           <Route path="new/audio" element={<CaptureScreen key="audio" mode="audio" />} />
           <Route path="new/capture" element={<CaptureScreen key="photo" mode="photo" />} />
           <Route path="new/manual" element={<ManualCaseScreen />} />
-          <Route path="finance" element={<FinanceScreen />} />
-          <Route path="finance/invoice/:id" element={<InvoiceScreen />} />
-          <Route path="finance/statement/:id" element={<StatementScreen />} />
+          <Route path="invoices" element={<FinanceScreen />} />
+          <Route path="finance/*" element={<Navigate to="/go/invoices" replace />} />
+          <Route path="invoices/invoice/:id" element={<InvoiceScreen />} />
+          <Route path="invoices/statement/:id" element={<StatementScreen />} />
           <Route path="account" element={<AccountScreen />} />
         </Route>
         <Route path="*" element={<Navigate to={signedIn ? '/go/home' : '/go/signin'} replace />} />

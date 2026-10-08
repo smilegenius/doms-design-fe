@@ -8,7 +8,7 @@ import { Bell, Building2, CalendarClock, Check, ChevronDown, ChevronRight, Messa
 import { FilledChatBubble, FilledClock, FilledPackage, FilledTruck } from '../../components/icons/FilledNavIcons';
 import { ME, useGo, useScoped } from '../store';
 import {
-  ATTENTION, Attention, LabCase, PRACTICES, dayOffset, fmtDate, gbp, labName, matchesAttention, patientById, shortName,
+  ATTENTION, Attention, LabCase, PRACTICES, dayOffset, fmtDate, gbp, invoiceNeedsAction, labName, matchesAttention, patientById, shortName,
 } from '../data';
 import { Card, IconTile, Screen, Sheet, cx } from '../ui';
 
@@ -112,14 +112,14 @@ function MoreStatuses({ cases }: { cases: LabCase[] }) {
 function FinanceStrip() {
   const navigate = useNavigate();
   const { invoices } = useScoped();
-  const open = invoices.filter(i => i.status !== 'approved' && i.status !== 'rejected');
+  const open = invoices.filter(i => invoiceNeedsAction(i.status));
   const total = (xs: typeof invoices) => xs.reduce((s, i) => s + i.net + i.vat, 0);
-  const approved = invoices.filter(i => i.status === 'approved');
+  const approved = invoices.filter(i => i.status === 'approved' || i.status === 'xero');
   return (
-    <Card onClick={() => navigate('/go/finance')} className="p-3.5 flex items-center gap-3">
+    <Card onClick={() => navigate('/go/invoices')} className="p-3.5 flex items-center gap-3">
       <IconTile icon={<Receipt className="w-5 h-5" />} tone="brand" size="sm" />
       <span className="flex-1 min-w-0">
-        <span className="block text-[13.5px] font-semibold text-go-ink"><span className="tabular-nums">{open.length}</span> open invoice{open.length === 1 ? '' : 's'}</span>
+        <span className="block text-[13.5px] font-semibold text-go-ink"><span className="tabular-nums">{open.length}</span> invoice{open.length === 1 ? "" : "s"} to review</span>
         <span className="block text-[11.5px] text-go-muted truncate">{gbp(total(open))} to settle · {gbp(total(approved))} approved</span>
       </span>
       <ChevronRight className="w-4 h-4 text-go-faint flex-shrink-0" />
@@ -311,7 +311,7 @@ export default function HomeScreen() {
 
       <div className="px-4 mt-4"><StatusBoard cases={cases} /></div>
       <div className="px-4 mt-5">{subhead('Also needs a look')}<MoreStatuses cases={cases} /></div>
-      <div className="px-4 mt-5">{subhead('Finance')}<FinanceStrip /></div>
+      <div className="px-4 mt-5">{subhead('Invoices')}<FinanceStrip /></div>
       <div className="px-4 mt-5 mb-2">{subhead('Latest comments')}<LatestComments cases={cases} /></div>
     </Screen>
   );

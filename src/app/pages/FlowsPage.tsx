@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers } from 'lucide-react';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 
 // ─── Flows ───────────────────────────────────────────────────────────────────
@@ -21,9 +21,24 @@ export interface FlowEntry {
   path: string;
   /** When it shipped — shown as a chip so the newest round is easy to spot. */
   date?: string;
+  /** Timeline group, as 'YYYY-MM'. The page lists months newest first. */
+  month: string;
 }
 
 export const FLOWS: FlowEntry[] = [
+  {
+    // Five developer tasks across the clinic + lab creation and case screens.
+    title: 'Denture stages & service-level dates',
+    description: 'Delivery dates move from the case to each service, every denture stage gets its own date (with copy-to-selected), follow-up prescriptions join the existing case, and stages done before a case reached DOMS show as done earlier.',
+    detail: 'Clinic · Lab · 5 tasks',
+    icon: <Layers className="w-5 h-5 text-[#B45309]" />,
+    badge: 'Walkthrough',
+    accent: '#B45309',
+    accentSoft: '#FFF8E1',
+    path: '/flows/denture-stages',
+    date: '8 Oct 2026',
+    month: '2026-10',
+  },
   {
     // A round of small cross-portal fixes, walked through like an epic.
     title: 'Hotfixes — review, status reach & Lab Work',
@@ -35,6 +50,7 @@ export const FLOWS: FlowEntry[] = [
     accentSoft: '#F5F3FF',
     path: '/flows/hotfixes-30-sep',
     date: '30 Sep 2026',
+    month: '2026-09',
   },
   {
     // CareStack integration epic. The walkthrough deep-links into the exact
@@ -47,6 +63,7 @@ export const FLOWS: FlowEntry[] = [
     accent: '#0F766E',
     accentSoft: '#ECFEFF',
     path: '/flows/carestack',
+    month: '2026-09',
   },
   {
     // WhatsApp communication epic — lab settings + the case Conversation hub.
@@ -58,6 +75,7 @@ export const FLOWS: FlowEntry[] = [
     accent: '#15803D',
     accentSoft: '#F0FDF4',
     path: '/flows/whatsapp',
+    month: '2026-09',
   },
   {
     title: 'Downtime page',
@@ -68,8 +86,19 @@ export const FLOWS: FlowEntry[] = [
     accent: '#E65100',
     accentSoft: '#FFF3E0',
     path: '/downtime',
+    month: '2026-09',
   },
 ];
+
+/** FLOWS grouped by month, newest month first; order within a month is kept. */
+function flowsByMonth(flows: FlowEntry[]) {
+  const months = [...new Set(flows.map(f => f.month))].sort().reverse();
+  return months.map(month => {
+    const [y, m] = month.split('-').map(Number);
+    const label = new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    return { month, label, flows: flows.filter(f => f.month === month) };
+  });
+}
 
 export function FlowCard({ flow, onOpen }: { flow: FlowEntry; onOpen: () => void }) {
   return (
@@ -148,10 +177,27 @@ export default function FlowsPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
-            {FLOWS.map(f => (
-              <FlowCard key={f.title} flow={f} onOpen={() => navigate(f.path)} />
-            ))}
+          {/* Timeline — one section per month, newest on top. */}
+          <div className="relative">
+            <div className="absolute left-[5px] top-2 bottom-2 w-px bg-[#E0E0E6]" aria-hidden />
+            <div className="space-y-10">
+              {flowsByMonth(FLOWS).map(group => (
+                <section key={group.month} className="relative pl-7">
+                  <span className="absolute left-0 top-1 w-[11px] h-[11px] rounded-full bg-white border-2 border-[#A59DFF]" aria-hidden />
+                  <div className="flex items-baseline gap-2 mb-4">
+                    <h2 className="text-sm font-bold text-[#030213]">{group.label}</h2>
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[#8B8B9E]">
+                      {group.flows.length} {group.flows.length === 1 ? 'flow' : 'flows'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
+                    {group.flows.map(f => (
+                      <FlowCard key={f.title} flow={f} onOpen={() => navigate(f.path)} />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
           </div>
         </div>
       </main>
