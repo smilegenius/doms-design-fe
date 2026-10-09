@@ -32,15 +32,16 @@ Open http://localhost:5173/go. On a desktop it shows inside a phone frame, with 
 | Route | Screen |
 |---|---|
 | `/go/signin`, `/go/forgot` | Sign in, forgot password |
-| `/go/home` | Home: practice switcher, 4 status tiles, needs-a-look, invoices, comments |
+| `/go/home` | Home: practice switcher and up to 6 status tiles (order set in Account) |
 | `/go/notifications` | Notifications |
 | `/go/work` (`?f=overdue\|ready\|on-hold\|draft\|arriving\|questions`, `?day=`, `?r=`) | Lab work list |
 | `/go/work/:id` (`?tab=messages`, `?receive=1`) | Case detail + Mark as received |
 | `/go/work/:id/dispatch` | Print label and dispatch |
 | `/go/new/audio`, `/go/new/capture` (`?rx=multi\|clean`) | Create by audio / photo |
-| `/go/new/manual` (`?draft=ID`) | 4-step create form (also used after audio and photo) |
-| `/go/invoices`, `/go/invoices/invoice/:id`, `/go/invoices/statement/:id` | Invoices, invoice detail, statement |
-| `/go/account` | Account and settings |
+| `/go/new/manual` (`?draft=ID`) | 4-step create form (also used after audio and photo); delivery dates per service / denture stage / aligner phase |
+| `/go/invoices/invoice/:id`, `/go/invoices/statement/:id` | Invoice and statement detail (only when invoices are switched on) |
+| `/go/account` (`/appearance`, `/practices`, `/notifications`, `/dashboard`) | Account: a settings list, each opening its own page |
+| `/go/invoices` | "Coming soon" while invoices are switched off (`FEATURES.invoices`) |
 
 ## Suggested build order
 

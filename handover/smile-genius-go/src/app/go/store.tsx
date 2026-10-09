@@ -3,12 +3,20 @@
 // work, finance and toasts. Nothing leaves the browser.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
-  ATTENTION, Invoice, InvoiceStatus, LabCase, PracticeId, SEED_CASES, SEED_INVOICES, SEED_STATEMENTS, Statement, matchesAttention, nowIso,
+  ATTENTION, HOME_STATUSES, HomeStatus, Invoice, InvoiceStatus, LabCase, PracticeId, SEED_CASES, SEED_INVOICES, SEED_STATEMENTS, Statement, matchesAttention, nowIso,
 } from './data';
 
 /** Reviewer demo: how many of Home's four statuses have work (1–4), or 0 = a
  *  brand-new practice with no lab work at all. null = the normal seed data. */
 export type DemoFill = 0 | 1 | 2 | 3 | 4 | null;
+
+/** Features that are built but switched off for now. Flip to true to bring them back. */
+export const FEATURES = {
+  /** Invoices tab, invoice/statement screens, Home invoices strip, invoice notifications. Off: the tab says "Coming soon". */
+  invoices: false,
+  /** List / card toggle in Lab work (card view). Off: list only. */
+  labCardView: false,
+};
 
 export type ThemePref = 'light' | 'dark' | 'system';
 export type ToastTone = 'ok' | 'info' | 'bad';
@@ -18,10 +26,24 @@ export interface Notice { id: string; title: string; body: string; at: string; t
 // Signed-in user — the app is used mostly by practice managers and nurses.
 export const ME = { name: 'John Carter', first: 'John', role: 'Practice manager', email: 'john.carter@example.test' };
 
+/** Seed case by id (not by array position, so adding seeds can't break notices). */
+const seedCase = (id: string) => SEED_CASES.find(c => c.id === id)!;
+
 const safeGet = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const safeSet = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 const sessGet = (k: string) => { try { return sessionStorage.getItem(k); } catch { return null; } };
 const sessSet = (k: string, v: string | null) => { try { v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch { /* ignore */ } };
+
+export interface NotifyPrefs { questions: boolean; arrivals: boolean; overdue: boolean }
+
+/** Saved order, made valid: known ids only, any missing ones appended in default order. */
+const readDashOrder = (): HomeStatus[] => {
+  try {
+    const saved = JSON.parse(safeGet('sg-go-dash-order') ?? '[]') as string[];
+    const known = saved.filter((x): x is HomeStatus => (HOME_STATUSES as readonly string[]).includes(x));
+    return [...new Set([...known, ...HOME_STATUSES])];
+  } catch { return [...HOME_STATUSES]; }
+};
 
 interface GoStore {
   themePref: ThemePref;
@@ -36,10 +58,13 @@ interface GoStore {
   soloPractice: PracticeId | null;
   setSoloPractice: (p: PracticeId | null) => void;
   demoFill: DemoFill;
+  /** Order of the status tiles on Home (Account › Dashboard). */
+  dashOrder: HomeStatus[];
+  setDashOrder: (o: HomeStatus[]) => void;
+  /** Account › Notifications switches. */
+  notifyPrefs: NotifyPrefs;
+  setNotifyPref: (k: keyof NotifyPrefs, on: boolean) => void;
   setDemoFill: (f: DemoFill) => void;
-  /** Setup switch (reviewer side panel): show the Invoices section on Home. Off for now. */
-  homeInvoices: boolean;
-  setHomeInvoices: (on: boolean) => void;
   cases: LabCase[];
   updateCase: (id: string, patch: Partial<LabCase> | ((c: LabCase) => Partial<LabCase>)) => void;
   addCase: (c: LabCase) => void;
@@ -78,18 +103,20 @@ export function GoStoreProvider({ children }: { children: React.ReactNode }) {
   const [practice, setPractice] = useState<PracticeId | 'all'>('all');
   const [soloPractice, setSoloPractice] = useState<PracticeId | null>(null);
   const [demoFill, setDemoFill] = useState<DemoFill>(null);
-  const [homeInvoices, setHomeInvoicesState] = useState(() => safeGet('sg-go-home-invoices') === '1');
-  const setHomeInvoices = useCallback((on: boolean) => { setHomeInvoicesState(on); safeSet('sg-go-home-invoices', on ? '1' : '0'); }, []);
+  const [dashOrder, setDashOrderState] = useState<HomeStatus[]>(readDashOrder);
+  const setDashOrder = useCallback((o: HomeStatus[]) => { setDashOrderState(o); safeSet('sg-go-dash-order', JSON.stringify(o)); }, []);
+  const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>({ questions: true, arrivals: true, overdue: true });
+  const setNotifyPref = useCallback((k: keyof NotifyPrefs, on: boolean) => setNotifyPrefs(p => ({ ...p, [k]: on })), []);
   const [cases, setCases] = useState<LabCase[]>(SEED_CASES);
   const [invoices, setInvoices] = useState<Invoice[]>(SEED_INVOICES);
   const [statements, setStatements] = useState<Statement[]>(SEED_STATEMENTS);
-  const [notices, setNotices] = useState<Notice[]>(() => [
-    { id: 'n1', kind: 'question', title: 'Additional information required', body: 'Northstar Dental Lab · SG-28485 · M. Patel. Bite registration looks distorted.', at: SEED_CASES[3].messages[0].at, to: '/go/work/SG-28485', read: false },
-    { id: 'n2', kind: 'shipped', title: 'Shipped by Precision Dental Works', body: 'SG-28488 · J. Williams. Arriving today.', at: SEED_CASES[2].events[4].at, to: '/go/work/SG-28488', read: false },
+  const [notices, setNotices] = useState<Notice[]>(() => ([
+    { id: 'n1', kind: 'question', title: 'Additional information required', body: 'Northstar Dental Lab · SG-28485 · M. Patel. Bite registration looks distorted.', at: seedCase('SG-28485').messages[0].at, to: '/go/work/SG-28485', read: false },
+    { id: 'n2', kind: 'shipped', title: 'Shipped by Precision Dental Works', body: 'SG-28488 · J. Williams. Arriving today.', at: seedCase('SG-28488').events[4].at, to: '/go/work/SG-28488', read: false },
     { id: 'n3', kind: 'invoice', title: 'Invoice needs review', body: 'PDW-7731 · 38% above usual for full dentures.', at: SEED_INVOICES[0].received, to: '/go/invoices/invoice/PDW-7731', read: false },
     { id: 'n4', kind: 'overdue', title: 'Lab work overdue', body: 'SG-28479 · D. Morgan. Delivery date was 2 days ago.', at: new Date(Date.now() - 2 * 864e5).toISOString(), to: '/go/work/SG-28479', read: true },
     { id: 'n5', kind: 'statement', title: 'Statement received', body: 'Dental Supplies UK · 2 lines to resolve.', at: new Date(Date.now() - 3 * 864e5).toISOString(), to: '/go/invoices/statement/ST-DSU-0926', read: true },
-  ]);
+  ] as Notice[]).filter(n => FEATURES.invoices || (n.kind !== 'invoice' && n.kind !== 'statement')));
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [sheetRoot, setSheetRoot] = useState<HTMLElement | null>(null);
 
@@ -100,7 +127,7 @@ export function GoStoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<GoStore>(() => ({
-    themePref, theme, setThemePref, signedIn, signIn, signOut, practice, setPractice, soloPractice, setSoloPractice, demoFill, setDemoFill, homeInvoices, setHomeInvoices,
+    themePref, theme, setThemePref, signedIn, signIn, signOut, practice, setPractice, soloPractice, setSoloPractice, demoFill, setDemoFill, dashOrder, setDashOrder, notifyPrefs, setNotifyPref,
     cases,
     updateCase: (id, patch) => setCases(cs => cs.map(c => (c.id === id ? { ...c, ...(typeof patch === 'function' ? patch(c) : patch) } : c))),
     addCase: c => setCases(cs => [c, ...cs]),
@@ -112,7 +139,7 @@ export function GoStoreProvider({ children }: { children: React.ReactNode }) {
     notices,
     markNoticesRead: () => setNotices(ns => ns.map(n => ({ ...n, read: true }))),
     toasts, toast, sheetRoot, setSheetRoot,
-  }), [themePref, theme, setThemePref, signedIn, signIn, signOut, practice, soloPractice, demoFill, homeInvoices, setHomeInvoices, cases, invoices, statements, notices, toasts, toast, sheetRoot]);
+  }), [themePref, theme, setThemePref, signedIn, signIn, signOut, practice, soloPractice, demoFill, dashOrder, setDashOrder, notifyPrefs, setNotifyPref, cases, invoices, statements, notices, toasts, toast, sheetRoot]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -130,7 +157,8 @@ export function useScoped() {
     const inScope = <T extends { practice: PracticeId }>(xs: T[]) => (practice === 'all' ? xs : xs.filter(x => x.practice === practice));
     if (demoFill === 0) return { cases: [] as LabCase[], invoices: [] as Invoice[], statements: [] as Statement[] };
     // Drop the work behind Home's later statuses so only the first N have counts
-    const off = demoFill === null ? [] : ATTENTION.filter(a => a.home).slice(demoFill).map(a => a.id);
+    // (the demo also hides Not approved / Date changed so "1" really shows one tile)
+    const off = demoFill === null ? [] : [...ATTENTION.filter(a => a.home).slice(demoFill).map(a => a.id), 'not-approved' as const, 'date-changed' as const];
     const shown = off.length ? cases.filter(c => !off.some(a => matchesAttention(c, a))) : cases;
     return { cases: inScope(shown), invoices: inScope(invoices), statements: inScope(statements) };
   }, [cases, invoices, statements, practice, demoFill]);

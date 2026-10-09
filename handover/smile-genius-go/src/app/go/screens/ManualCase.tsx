@@ -5,20 +5,23 @@
 //                     form asks for its category (material/shade incl. per-tooth,
 //                     implant system, retainer/aligner/occlusion, denture stage,
 //                     appliance option, custom service name)
-//   3 Delivery & notes — order type, delivery date, appointment, source, notes, files
+//                     Each service has its own delivery date; a denture has a date per
+//                     stage and clear aligners (Phasing = Yes) a date per phase.
+//   3 Order details — order type, appointment, source, notes, files
 //   4 Review
 // A case can be saved as a draft at any point and reopened filled in.
 import { useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ReadFlag, ReadHint, ReadMode, ReadSource, SourceCard } from './ReadSource';
 import {
-  Check, CheckCircle2, ChevronRight, Eye, ImagePlus, Paperclip, PlusCircle, Search, Star, Trash, Truck, UserPlus, X,
+  CalendarClock, Check, CheckCircle2, ChevronRight, Eye, ImagePlus, Paperclip, PlusCircle, Search, Star, Trash, Truck, UserPlus, X,
 } from '../icons';
 import { ME, useGo } from '../store';
 import {
   CASE_SOURCES, CLINICIANS, DetailField, IMPLANT_BRAND_CATALOG, LABS, LabCase, MATERIALS, OCCLUSION_SIDES, OTHER_SPECIFY, PATIENTS,
   PRACTICES, PracticeId, RxItem, SERVICE_CATEGORIES, SHADES, addLab, addPatient, allItems, clinicianName, detailFields, fmtDate,
   freeTextMaterial, labName, needsMaterial, nowIso, patientById, practiceName, serviceLabel,
+  STAGE_NAMES, StageLine, StagedKind, dueLabel, getCategoryForItem, phaseName, soonestDate,
 } from '../data';
 import { Btn, Card, Chips, GoMark, Input, KV, Label, Pill, PickerField, Screen, SearchBox, Segmented, Sheet, TextArea, Toggle, TopBar, cx } from '../ui';
 
@@ -33,6 +36,12 @@ export interface FormItem {
   shade: string | null;
   perTooth: Record<string, { material?: string | null; shade?: string | null }>;
   details: Record<string, string | string[]>;
+  /** Delivery date for this service (yyyy-mm-dd). Not used by staged services. */
+  returnBy: string;
+  /** Denture: date per selected stage (yyyy-mm-dd), keyed by stage name. */
+  stageDates: Record<string, string>;
+  /** Clear aligners with phasing: one date per phase (Phase 1, Phase 2 …). */
+  phases: string[];
 }
 export interface CaseForm {
   practice: PracticeId | null;
@@ -40,7 +49,8 @@ export interface CaseForm {
   patientId: string | null;
   lab: string | null;
   funding: 'NHS' | 'Private' | null;   // null = not set yet (e.g. not heard in a voice note)
-  returnBy: string;           // Delivery date (date only)
+  /** Legacy case-level date (older drafts). Dates now live on each service. */
+  returnBy: string;
   apptDate: string;           // Patient appointment (date only, optional)
   apptKind: 'Fit' | 'Try-in' | 'Issue';
   caseSource: string | null;
@@ -52,10 +62,48 @@ export interface CaseForm {
 const plusDays = (n: number) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
 let uidSeq = 0;
 export const newItem = (itemId: string, patch: Partial<FormItem> = {}): FormItem =>
-  ({ uid: `it-${Date.now().toString(36)}-${++uidSeq}`, itemId, teeth: [], sameForAll: true, material: null, shade: null, perTooth: {}, details: {}, ...patch });
+  ({ uid: `it-${Date.now().toString(36)}-${++uidSeq}`, itemId, teeth: [], sameForAll: true, material: null, shade: null, perTooth: {}, details: {},
+    returnBy: '', stageDates: {}, phases: [''], ...patch });
+/** Older drafts / reads may lack the per-service date fields; the old case date fills a service's date. */
+const normItem = (it: FormItem, caseDate = ''): FormItem => ({ ...it, stageDates: it.stageDates ?? {}, phases: it.phases ?? [''], returnBy: it.returnBy ?? caseDate });
+export const normForm = (f: CaseForm): CaseForm => ({ ...f, items: f.items.map(it => normItem(it, f.returnBy)) });
+
+// ─── Staged services (denture stages, aligner phases) ───────────────────────
+const isoDay = (d: string) => (d ? new Date(`${d}T12:00`).toISOString() : '');
+const todayDay = () => new Date().toISOString().slice(0, 10);
+export const itemStaged = (it: FormItem): StagedKind | undefined =>
+  getCategoryForItem(it.itemId) === 'denture' ? 'stage' : it.itemId === 'or-clear-aligners' && it.details.phasing === 'Yes' ? 'phase' : undefined;
+const chosenStages = (it: FormItem) => STAGE_NAMES.filter(n => ([] as string[]).concat(it.details.stages ?? []).includes(n));
+/** The service's stages / phases as case data. A stage dated before today was done earlier (outside Smile Genius). */
+export function itemStageLines(it: FormItem): StageLine[] {
+  const kind = itemStaged(it);
+  if (kind === 'stage') return chosenStages(it).map(n => {
+    const d = it.stageDates[n] ?? '';
+    return { name: n, date: isoDay(d), ...(d && d < todayDay() ? { state: 'done-earlier' as const } : {}) };
+  });
+  if (kind === 'phase') return it.phases.map((d, i) => ({ name: phaseName(i + 1), date: isoDay(d) }));
+  return [];
+}
+const shortDay = (d: string) => new Date(`${d}T12:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+/** One line for the service card / review: "Delivery Tue 22 Oct" or "Bite Registration 22 Oct · Try In 29 Oct". */
+export function itemDateSummary(it: FormItem): string {
+  const kind = itemStaged(it);
+  if (kind === 'stage') {
+    const st = chosenStages(it);
+    if (!st.length) return 'Choose the stages';
+    return st.map(n => (it.stageDates[n] ? `${n} ${shortDay(it.stageDates[n])}` : `${n} · no date`)).join(' · ');
+  }
+  if (kind === 'phase') return it.phases.map((d, i) => `${phaseName(i + 1)} ${d ? shortDay(d) : '· no date'}`).join(' · ');
+  return it.returnBy ? `Delivery ${fmtDate(isoDay(it.returnBy))}` : 'No delivery date yet';
+}
+/** Soonest date on the form (any service / stage still to come) — for the appointment check. */
+const formSoonest = (f: CaseForm) => f.items.flatMap(it => {
+  const k = itemStaged(it);
+  return k === 'stage' ? chosenStages(it).map(n => it.stageDates[n]).filter(d => d && d >= todayDay()) : k === 'phase' ? it.phases : [it.returnBy];
+}).filter(Boolean).sort()[0] ?? '';
 
 export const emptyForm = (): CaseForm => ({
-  practice: 'cds', clinician: 'reed', patientId: null, lab: null, funding: 'NHS', returnBy: plusDays(14),
+  practice: 'cds', clinician: 'reed', patientId: null, lab: null, funding: 'NHS', returnBy: '',
   apptDate: '', apptKind: 'Fit', caseSource: null, instructions: '', attachments: [], items: [],
 });
 
@@ -95,8 +143,8 @@ export function itemSummary(it: FormItem): string {
 }
 
 export function buildCase(f: CaseForm, source: LabCase['source']): LabCase {
-  const ret = f.returnBy ? new Date(`${f.returnBy}T12:00`).toISOString() : '';
   const toRx = (it: FormItem): RxItem => ({
+    ...(itemStaged(it) ? { staged: itemStaged(it), stages: itemStageLines(it) } : { returnBy: isoDay(it.returnBy) || undefined }),
     service: itemName(it), teeth: it.teeth,
     material: needsMaterial(it.itemId) ? (it.sameForAll ? it.material ?? '' : 'Per tooth') : '',
     shade: needsMaterial(it.itemId) && it.sameForAll ? it.shade ?? undefined : undefined,
@@ -104,8 +152,11 @@ export function buildCase(f: CaseForm, source: LabCase['source']): LabCase {
       .map(d => `${d.label}: ${([] as string[]).concat(it.details[d.key] as string | string[]).join(', ')}`).join(' · ') || undefined,
   });
   // Services are optional — a case can go with just patient, dentist and lab
-  const [first = { service: 'Lab work', teeth: [], material: '' } as RxItem, ...rest] = f.items.map(toRx);
+  const rx = f.items.map(toRx);
+  const [first = { service: 'Lab work', teeth: [], material: '' } as RxItem, ...rest] = rx;
+  const ret = soonestDate(rx);
   return {
+    firstReturnBy: first.returnBy, firstStaged: first.staged, firstStages: first.stages,
     id: `SG-${28510 + Math.floor(Math.random() * 400)}`,
     patientId: f.patientId!, practice: f.practice!, lab: f.lab!, clinician: f.clinician!, createdBy: ME.name,
     service: first.service, teeth: first.teeth, material: first.material, shade: first.shade, extra: first.extra,
@@ -125,8 +176,8 @@ export function buildDraft(f: CaseForm, id?: string): LabCase {
     patientId: f.patientId!, practice: f.practice ?? 'cds', lab: f.lab ?? '', clinician: f.clinician ?? '', createdBy: ME.name,
     service: first ? itemName(first) : 'New case', teeth: first?.teeth ?? [], material: first?.material ?? '',
     items: f.items.slice(1).map(it => ({ service: itemName(it), teeth: it.teeth, material: it.material ?? '' })),
-    funding: f.funding ?? 'NHS', instructions: f.instructions, returnBy: f.returnBy ? new Date(`${f.returnBy}T12:00`).toISOString() : '',
-    stage: 'draft', attachments: f.attachments, events: [], messages: [], source: 'manual',
+    funding: f.funding ?? 'NHS', instructions: f.instructions, returnBy: formSoonest(f) ? isoDay(formSoonest(f)) : '',
+    stage: 'draft', attachments: f.attachments, events: [], messages: [], source: 'manual', createdAt: new Date().toISOString(),
     appointment: f.apptDate ? { at: new Date(`${f.apptDate}T09:00`).toISOString(), kind: f.apptKind, room: 'Surgery 1' } : undefined,
     draftForm: f,
   };
@@ -243,7 +294,7 @@ export function PatientPicker({ value, onChange, invalid }: { value: string | nu
             <span className="w-9 h-9 rounded-full go-grad text-white text-[12px] font-bold flex items-center justify-center flex-shrink-0">{p.name.split(' ').map(s => s[0]).slice(0, 2).join('')}</span>
             <span className="flex-1 min-w-0">
               <span className="flex items-center gap-1.5"><span className="text-[15px] font-semibold text-go-ink truncate">{p.name}</span>{p.isNew && <Pill tone="brand" className="!h-5 !px-2">New</Pill>}</span>
-              <span className="block text-[12px] text-go-muted truncate">{p.isNew ? (extras.length ? extras.join(' · ') : 'Created when you submit the case') : `${p.id} · DOB ${p.dob}`}</span>
+              <span className="block text-[12px] text-go-muted truncate">{p.isNew ? (extras.length ? extras.join(' · ') : 'Added when you create the case') : `${p.id} · DOB ${p.dob}`}</span>
             </span>
           </>
         ) : (
@@ -317,7 +368,7 @@ export function PatientPicker({ value, onChange, invalid }: { value: string | nu
                   {x.id === value && <Check className="w-5 h-5 text-go-brand" />}
                 </button>
               ))}
-              {!hits.length && <p className="text-center text-[13px] text-go-muted py-6">No patients match. Add them as new above.</p>}
+              {!hits.length && <p className="text-center text-[13px] text-go-muted py-6">No patients found. You can add them as a new patient above.</p>}
             </div>
           </>
         ) : (
@@ -378,14 +429,14 @@ export function LabPicker({ value, onChange, invalid }: { value: string | null; 
         ) : (
           <>
             <Search className="w-[18px] h-[18px] text-go-muted ml-1" />
-            <span className="flex-1 text-[15px] text-go-faint">Search or pick a lab</span>
+            <span className="flex-1 text-[15px] text-go-faint">Search for a lab</span>
           </>
         )}
         <ChevronRight className="w-[18px] h-[18px] text-go-muted" />
       </button>
 
       <Sheet open={open} onClose={close} tall title={creating ? 'Add a lab' : 'Lab'}
-        sub={creating ? 'Added as an offline lab. They’ll get the case by email.' : 'Search by name or town.'}
+        sub={creating ? 'This lab isn’t on Smile Genius yet. They’ll get the case by email.' : 'Search by name or town.'}
         footer={creating ? (
           <div className="flex gap-2">
             <Btn variant="secondary" onClick={() => setCreating(false)}>Back</Btn>
@@ -420,14 +471,14 @@ export function LabPicker({ value, onChange, invalid }: { value: string | null; 
                         <span className="block text-[12px] text-go-muted">{l.town}</span>
                       </span>
                     </button>
-                    <button onClick={() => setFavs(f => (fav ? f.filter(x => x !== l.id) : [...f, l.id]))} aria-label={fav ? 'Remove favourite' : 'Add favourite'}
+                    <button onClick={() => setFavs(f => (fav ? f.filter(x => x !== l.id) : [...f, l.id]))} aria-label={fav ? 'Remove from favourites' : 'Add to favourites'}
                       className={cx('w-9 h-9 rounded-full flex items-center justify-center', fav ? 'text-go-warn' : 'text-go-line')}>
                       <Star className="w-5 h-5" />
                     </button>
                   </div>
                 );
               })}
-              {!hits.length && <p className="text-center text-[13px] text-go-muted py-6">{tab === 'fav' ? 'No favourites yet. Tap the star on a lab.' : 'No labs match. Add it as new above.'}</p>}
+              {!hits.length && <p className="text-center text-[13px] text-go-muted py-6">{tab === 'fav' ? 'No favourites yet. Tap the star on a lab.' : 'No labs found. You can add it as a new lab above.'}</p>}
             </div>
           </>
         ) : (
@@ -502,11 +553,88 @@ function DetailInput({ field, value, onChange, hint }: { field: DetailField; val
   );
 }
 
+/** Delivery for one service: a date, a date per denture stage, or a date per aligner phase. */
+function DeliveryField({ it, set, hint }: { it: FormItem; set: (p: Partial<FormItem>) => void; hint?: React.ReactNode }) {
+  const kind = itemStaged(it);
+  const dateCls = '!w-[156px] !h-11 !px-3 !text-[14px] flex-shrink-0';
+  if (kind === 'stage') {
+    const st = chosenStages(it);
+    const first = st.map(n => it.stageDates[n]).find(Boolean);
+    return (
+      <div>
+        <Label hint="A date for each stage">Delivery dates</Label>
+        {!st.length ? <p className="text-[12.5px] text-go-muted px-1">Please choose the stages above first.</p> : (
+          <div className="rounded-2xl border border-go-line bg-go-surface divide-y divide-go-line">
+            {st.map((n, i) => {
+              const d = it.stageDates[n] ?? '';
+              return (
+                <div key={n} className="flex items-center gap-3 px-3 py-2.5">
+                  <span className="w-6 h-6 rounded-lg bg-go-violet-soft text-go-violet text-[11px] font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[14px] font-semibold text-go-ink truncate">{n}</span>
+                    {d && d < todayDay() && <span className="block text-[11.5px] text-go-muted">Done earlier</span>}
+                  </span>
+                  <Input type="date" aria-label={`${n} delivery date`} value={d} onChange={e => set({ stageDates: { ...it.stageDates, [n]: e.target.value } })} className={dateCls} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {st.length > 1 && first && (
+          <button onClick={() => set({ stageDates: Object.fromEntries(st.map(n => [n, first])) })} className="mt-2 text-[13px] font-semibold text-go-brand px-1">Use the first date for all stages</button>
+        )}
+        <p className="text-[12px] text-go-muted mt-2 px-1">A date in the past means that stage was done earlier. You can order more stages later from the case.</p>
+        {hint}
+      </div>
+    );
+  }
+  if (kind === 'phase') {
+    return (
+      <div>
+        <Label hint="A date for each phase">Delivery dates</Label>
+        <div className="rounded-2xl border border-go-line bg-go-surface divide-y divide-go-line">
+          {it.phases.map((d, i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+              <span className="flex-1 text-[14px] font-semibold text-go-ink">{phaseName(i + 1)}</span>
+              <Input type="date" aria-label={`${phaseName(i + 1)} delivery date`} value={d} min={plusDays(1)}
+                onChange={e => set({ phases: it.phases.map((x, j) => (j === i ? e.target.value : x)) })} className={dateCls} />
+              {it.phases.length > 1 && (
+                <button onClick={() => set({ phases: it.phases.filter((_, j) => j !== i) })} aria-label={`Remove ${phaseName(i + 1)}`}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-go-muted hover:text-go-bad"><X className="w-4 h-4" /></button>
+              )}
+            </div>
+          ))}
+        </div>
+        <button onClick={() => set({ phases: [...it.phases, ''] })} className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-semibold text-go-brand px-1">
+          <PlusCircle className="w-4 h-4" />Add {phaseName(it.phases.length + 1)}
+        </button>
+        <p className="text-[12px] text-go-muted mt-1 px-1">You can also order the next phase later from the case.</p>
+        {hint}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <Label optional>Delivery date</Label>
+      <Input type="date" value={it.returnBy} min={plusDays(1)} onChange={e => set({ returnBy: e.target.value })} />
+      <div className="flex gap-2 mt-2">
+        {[7, 10, 14, 21].map(n => (
+          <button key={n} onClick={() => set({ returnBy: plusDays(n) })}
+            className={cx('flex-1 h-9 rounded-xl text-[12.5px] font-semibold border transition', it.returnBy === plusDays(n) ? 'border-go-brand bg-go-brand-soft text-go-brand-ink' : 'border-go-line text-go-ink2')}>
+            +{n} days
+          </button>
+        ))}
+      </div>
+      {hint}
+    </div>
+  );
+}
+
 /** hints: per-field "please check" lines from an audio / photo read (keys: material, shade, or a detail key). */
 export function ServiceSheet({ open, item, onSave, onClose, hints }: { open: boolean; item: FormItem | null; onSave: (it: FormItem) => void; onClose: () => void; hints?: Record<string, React.ReactNode> }) {
-  const [draft, setDraft] = useState<FormItem | null>(item);
+  const [draft, setDraft] = useState<FormItem | null>(item && normItem(item));
   const [lastOpen, setLastOpen] = useState(false);
-  if (open !== lastOpen) { setLastOpen(open); if (open) setDraft(item); } // reset on open
+  if (open !== lastOpen) { setLastOpen(open); if (open) setDraft(item && normItem(item)); } // reset on open
   const set = (patch: Partial<FormItem>) => setDraft(d => (d ? { ...d, ...patch } : d));
   const setDetail = (k: string, v: string | string[]) => setDraft(d => (d ? { ...d, details: { ...d.details, [k]: v } } : d));
   const setTooth = (t: string, patch: { material?: string | null; shade?: string | null }) =>
@@ -530,7 +658,7 @@ export function ServiceSheet({ open, item, onSave, onClose, hints }: { open: boo
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted mb-2">{cat.label}</p>
               <div className="flex flex-wrap gap-2">
                 {cat.items.map(s => (
-                  <button key={s.id} onClick={() => setDraft(newItem(s.id))}
+                  <button key={s.id} onClick={() => setDraft(newItem(s.id, { returnBy: plusDays(14) }))}
                     className="h-10 px-3.5 rounded-full text-[13.5px] font-medium border border-go-line bg-go-surface text-go-ink hover:border-go-brand/50 transition">{s.label}</button>
                 ))}
               </div>
@@ -582,7 +710,7 @@ export function ServiceSheet({ open, item, onSave, onClose, hints }: { open: boo
                       </div>
                     </div>
                   ))}
-                  {!draft.teeth.length && <p className="text-[12.5px] text-go-muted">Pick teeth first.</p>}
+                  {!draft.teeth.length && <p className="text-[12.5px] text-go-muted">Please choose the teeth first.</p>}
                 </div>
               )}
             </>
@@ -591,6 +719,9 @@ export function ServiceSheet({ open, item, onSave, onClose, hints }: { open: boo
           {detailFields(draft.itemId).filter(f => f.key !== 'customServiceName').map(f => (
             <DetailInput key={f.key} field={f} value={draft.details[f.key]} onChange={v => setDetail(f.key, v)} hint={hints?.[f.key]} />
           ))}
+
+          <div className="pt-1 border-t border-go-line" />
+          <DeliveryField it={draft} set={set} hint={hints?.returnBy} />
         </div>
       )}
     </Sheet>
@@ -617,7 +748,7 @@ export function CaseCreated({ c }: { c: LabCase }) {
           <KV rows={[
             ['Patient', patientById(c.patientId).name],
             ...allItems(c).map((it, i, all) => [all.length > 1 ? `Item ${i + 1}` : 'Service', `${it.service} · ${it.teeth.join(', ')}`] as [string, string]),
-            ['Delivery date', fmtDate(c.returnBy)],
+            ['Next delivery', `${dueLabel(c) ? `${dueLabel(c)} · ` : ''}${fmtDate(c.returnBy)}`],
           ]} />
         </Card>
       </div>
@@ -626,14 +757,14 @@ export function CaseCreated({ c }: { c: LabCase }) {
         <Btn block variant="secondary" onClick={() => navigate(`/go/work/${c.id}`, { replace: true })}>View case</Btn>
         <Btn block variant="ghost" size="md" onClick={() => navigate('/go/home', { replace: true })}>Back to home</Btn>
       </div>
-      <p className="text-center text-[12px] text-go-faint mt-4">Demo only. Nothing is sent to the lab.</p>
+      <p className="text-center text-[12px] text-go-faint mt-4">You can send it now, or later from Lab work.</p>
     </Screen>
   );
 }
 
 // ─── Manual create ──────────────────────────────────────────────────────────
 
-const STEPS = ['Patient & lab', 'Services', 'Delivery & notes', 'Review'];
+const STEPS = ['Patient & lab', 'Services', 'Order details', 'Review'];
 
 export default function ManualCaseScreen() {
   const { addCase, updateCase, cases, toast } = useGo();
@@ -646,7 +777,7 @@ export default function ManualCaseScreen() {
   // By audio / by photo arrive here with the read as a prefill, plus flags for what it wasn't sure about
   const incoming = useLocation().state as { prefill?: CaseForm; read?: ReadSource } | null;
   const [read, setRead] = useState<ReadSource | null>(() => (draftCase ? null : incoming?.read ?? null));
-  const [f, setF] = useState<CaseForm>(() => (draftCase?.draftForm ? { ...emptyForm(), ...(draftCase.draftForm as CaseForm) }
+  const [f, setF] = useState<CaseForm>(() => normForm(draftCase?.draftForm ? { ...emptyForm(), ...(draftCase.draftForm as CaseForm) }
     : incoming?.prefill ? { ...emptyForm(), ...incoming.prefill } : emptyForm()));
   const flags = read?.flags ?? [];
   const flagFor = (field: string) => flags.find(x => x.field === field);
@@ -677,7 +808,7 @@ export default function ManualCaseScreen() {
     setCreated(c);
   };
   const saveDraft = () => {
-    if (!f.patientId) { setStep(0); setTried(true); toast('Add a patient to save a draft', 'info'); return; }
+    if (!f.patientId) { setStep(0); setTried(true); toast('Please add a patient before saving a draft', 'info'); return; }
     const d = buildDraft(f, draftCase?.id);
     if (draftCase) updateCase(draftCase.id, d); else addCase(d);
     toast('Draft saved. Find it under Draft in Lab work');
@@ -691,15 +822,16 @@ export default function ManualCaseScreen() {
   const flagsOnStep = (s: number) => flags.filter(x => (s === 1 ? x.field.includes('.') : s === 2 ? !x.field.includes('.') : false)).length;
 
   if (created) return <CaseCreated c={created} />;
-  const apptClash = f.apptDate && f.returnBy >= f.apptDate;
+  const soonest = formSoonest(f);
+  const apptClash = f.apptDate && soonest && soonest >= f.apptDate;
 
   return (
     <Screen
       header={
         <div>
-          <TopBar back fallback="/go/home" title={draftCase ? 'Finish draft' : read ? `Create case by ${read.mode}` : 'Create case manually'} sub={`Step ${step + 1} of ${STEPS.length} · ${STEPS[step]}`}
+          <TopBar back fallback="/go/home" title={draftCase ? 'Finish draft' : read ? `Create lab work by ${read.mode}` : 'Create lab work manually'} sub={`Step ${step + 1} of ${STEPS.length} · ${STEPS[step]}`}
             right={<button onClick={saveDraft} className="text-[13px] font-semibold text-go-brand pr-1">Save draft</button>} />
-          <div className="flex gap-1.5 px-4 pb-3 bg-go-bg/85 backdrop-blur-xl">
+          <div className="flex gap-1.5 px-4 pb-3 bg-go-bg/80 backdrop-blur-xl">
             {STEPS.map((s, i) => <span key={s} className={cx('h-1 flex-1 rounded-full transition', i <= step ? 'go-grad' : 'bg-go-line')} />)}
           </div>
         </div>
@@ -712,7 +844,7 @@ export default function ManualCaseScreen() {
           </Btn>
         </div>
       }>
-      {tried && !ok && <p className="px-5 pt-1 pb-2 text-[13px] text-go-warn font-medium">Complete the highlighted details to continue.</p>}
+      {tried && !ok && <p className="px-5 pt-1 pb-2 text-[13px] text-go-warn font-medium">Please fill in the highlighted details to continue.</p>}
       {!tried && step > 0 && flagsOnStep(step) > 0 && (
         <p className="mx-4 mt-1 mb-1 px-3 py-2.5 rounded-2xl bg-go-warn-soft text-[13px] text-go-warn font-medium">
           {flagsOnStep(step)} detail{flagsOnStep(step) > 1 ? 's' : ''} on this step {read?.mode === 'audio' ? 'weren’t clear in your voice note' : 'weren’t clear on the form'}. Please check.
@@ -724,7 +856,7 @@ export default function ManualCaseScreen() {
           {read && <SourceCard src={read} toCheck={flags.length} />}
           <PatientPicker value={f.patientId} onChange={v => set('patientId', v)} invalid={bad(f.patientId)} />
           <LabPicker value={f.lab} onChange={v => set('lab', v)} invalid={bad(f.lab)} />
-          <PickerField label="Dentist" value={f.clinician} onChange={v => set('clinician', v)} placeholder="Pick a dentist" invalid={bad(f.clinician)}
+          <PickerField label="Dentist" value={f.clinician} onChange={v => set('clinician', v)} placeholder="Choose a dentist" invalid={bad(f.clinician)}
             options={CLINICIANS.map(c => ({ value: c.id, label: c.name, sub: `GDC ${c.gdc}` }))} />
           <PickerField label="Practice" value={f.practice} onChange={v => set('practice', v as PracticeId)} invalid={bad(f.practice)}
             options={PRACTICES.map(p => ({ value: p.id, label: p.name }))} />
@@ -744,6 +876,7 @@ export default function ManualCaseScreen() {
                     <button onClick={() => { setEditing(it); setSvcOpen(true); }} className="flex-1 min-w-0 text-left">
                       <p className="text-[15px] font-semibold text-go-ink">{itemName(it)} <span className="text-go-muted font-medium">{it.teeth.join(', ')}</span></p>
                       <p className="text-[12px] mt-0.5 text-go-muted">{[itemSummary(it), !done && `Not set: ${itemMissing(it).join(', ')}`].filter(Boolean).join(' · ') || 'Ready'}</p>
+                      <p className="text-[12px] mt-1 text-go-ink2 inline-flex items-start gap-1.5"><CalendarClock className="w-3.5 h-3.5 mt-px text-go-brand flex-shrink-0" />{itemDateSummary(it)}</p>
                       {unsure.map(u => (
                         <p key={u.field} className="text-[11.5px] text-go-warn mt-0.5">{u.label}: {read?.mode === 'audio' ? 'you said' : 'form says'} “{u.heard}”</p>
                       ))}
@@ -760,7 +893,7 @@ export default function ManualCaseScreen() {
               bad(f.items.length) ? 'border-go-warn text-go-warn' : 'border-go-line text-go-brand hover:border-go-brand/60')}>
             <PlusCircle className="w-5 h-5" />{f.items.length ? 'Add another service' : 'Add a service'}
           </button>
-          {f.items.length > 1 && <p className="text-[12px] text-go-muted text-center mt-3">{f.items.length} services on one case · one delivery date</p>}
+          {f.items.length > 1 && <p className="text-[12px] text-go-muted text-center mt-3">{f.items.length} services on one case · each has its own delivery date</p>}
         </div>
       )}
 
@@ -774,27 +907,13 @@ export default function ManualCaseScreen() {
             {hint('funding')}
           </div>
           <div>
-            <Label optional>Delivery date</Label>
-            <Input type="date" value={f.returnBy} min={plusDays(1)} onChange={e => set('returnBy', e.target.value)}
-              className={cx((flagFor('returnBy') || bad(f.returnBy)) && '!border-go-warn ring-4 ring-go-warn/15')} />
-            {hint('returnBy')}
-            <div className="flex gap-2 mt-2">
-              {[7, 10, 14, 21].map(n => (
-                <button key={n} onClick={() => set('returnBy', plusDays(n))}
-                  className={cx('flex-1 h-9 rounded-xl text-[12.5px] font-semibold border transition', f.returnBy === plusDays(n) ? 'border-go-brand bg-go-brand-soft text-go-brand-ink' : 'border-go-line text-go-ink2')}>
-                  +{n} days
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
             <Label optional>Patient appointment</Label>
             <div className="flex gap-2 items-center">
               <Input type="date" value={f.apptDate} onChange={e => set('apptDate', e.target.value)} className="flex-1" />
               {f.apptDate && <button onClick={() => set('apptDate', '')} aria-label="Clear appointment" className="w-10 h-10 rounded-full bg-go-raised text-go-muted flex items-center justify-center"><X className="w-4 h-4" /></button>}
             </div>
             {f.apptDate && <div className="mt-2"><Chips options={['Fit', 'Try-in', 'Issue'] as const} value={f.apptKind} onChange={v => set('apptKind', v)} /></div>}
-            {apptClash && <p className="text-[12px] text-go-bad mt-2 px-1">The delivery date is on or after the appointment. Pick an earlier date.</p>}
+            {apptClash && <p className="text-[12px] text-go-bad mt-2 px-1">The first delivery date is on or after the appointment. Please choose an earlier date on the service.</p>}
           </div>
           <div><Label optional>Case source</Label><Chips options={CASE_SOURCES} value={f.caseSource} onChange={(v: string) => set('caseSource', v)} /></div>
           <div><Label optional>Case instructions</Label><TextArea rows={4} value={f.instructions} onChange={e => set('instructions', e.target.value)} placeholder="Any specific instructions for the lab…" /></div>
@@ -834,13 +953,12 @@ export default function ManualCaseScreen() {
           </Card>
           <Card className="px-4 py-1">
             <div className="flex items-center justify-between pt-3"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Services · {f.items.length}</p><button onClick={() => setStep(1)} className="text-[12.5px] font-semibold text-go-brand">Edit</button></div>
-            <KV rows={f.items.map((it, i) => [`${i + 1}. ${itemName(it)}`, <span key={it.uid}>{it.teeth.join(', ')}<span className="block text-[12px] text-go-muted font-normal">{itemSummary(it)}</span></span>] as [string, React.ReactNode])} />
+            <KV rows={f.items.map((it, i) => [`${i + 1}. ${itemName(it)}`, <span key={it.uid}>{it.teeth.join(', ')}<span className="block text-[12px] text-go-muted font-normal">{itemSummary(it)}</span><span className="block text-[12px] text-go-ink2 font-normal">{itemDateSummary(it)}</span></span>] as [string, React.ReactNode])} />
           </Card>
           <Card className="px-4 py-1">
-            <div className="flex items-center justify-between pt-3"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Delivery & notes</p><button onClick={() => setStep(2)} className="text-[12.5px] font-semibold text-go-brand">Edit</button></div>
+            <div className="flex items-center justify-between pt-3"><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Order details</p><button onClick={() => setStep(2)} className="text-[12.5px] font-semibold text-go-brand">Edit</button></div>
             <KV rows={[
               ['Order type', f.funding ?? '—'],
-              ['Delivery date', f.returnBy ? fmtDate(new Date(f.returnBy).toISOString()) : 'Not set'],
               ['Appointment', f.apptDate ? `${f.apptKind} · ${fmtDate(new Date(f.apptDate).toISOString())}` : 'Not booked'],
               ['Case source', f.caseSource ?? '—'],
               ['Attachments', f.attachments.length ? `${f.attachments.length} file${f.attachments.length > 1 ? 's' : ''}` : 'None'],

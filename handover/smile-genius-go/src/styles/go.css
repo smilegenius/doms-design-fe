@@ -76,6 +76,16 @@
   background-image: linear-gradient(90deg, rgb(var(--go-brand)), rgb(var(--go-lav)));
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
+/* App background — every screen: the base colour with a very light purple /
+   blue glow rising from the bottom centre, around the + button. Themed, so it
+   works in dark too. */
+.go-wash {
+  background-color: rgb(var(--go-bg));
+  background-image:
+    radial-gradient(85% 38% at 50% 100%, rgb(var(--go-lav) / .26), transparent 70%),
+    radial-gradient(60% 26% at 50% 100%, rgb(var(--go-brand) / .12), transparent 70%),
+    linear-gradient(0deg, rgb(var(--go-lav) / .07), transparent 60%);
+}
 .go-card-shadow { box-shadow: 0 1px 2px rgb(var(--go-shadow) / 0.04), 0 8px 24px -12px rgb(var(--go-shadow) / 0.12); }
 .go-glow { box-shadow: 0 10px 30px -8px rgb(var(--go-g1) / 0.55); }
 
@@ -97,6 +107,8 @@
 .go-chip-ready { --c1: 251 191 36; --c2: 234 88 12; }
 .go-chip-hold { --c1: 167 139 250; --c2: 109 40 217; }
 .go-chip-draft { --c1: 96 165 250; --c2: 37 99 235; }
+.go-chip-rejected { --c1: 244 114 182; --c2: 190 24 93; }
+.go-chip-date { --c1: 45 212 191; --c2: 13 148 136; }
 
 @keyframes go-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes go-fade-in { from { opacity: 0; } to { opacity: 1; } }

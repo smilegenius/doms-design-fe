@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Filter, Inbox, Info, Layers, Link2, MessageSquare, Receipt, Send, ThumbsUp, X, XCircle, Zap,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Filter, Inbox, Info, Layers, Link2, MessageSquare, Monitor, Receipt, Send, ThumbsUp, X, XCircle, Zap,
 } from '../icons';
 import { ME, useGo, useScoped } from '../store';
 import {
@@ -122,6 +122,24 @@ function InvoiceRow({ i }: { i: Invoice }) {
   );
 }
 
+/** Shown on the Invoices tab while invoices are switched off (FEATURES.invoices). */
+export function InvoicesComingSoon() {
+  return (
+    <Screen tabs header={<TopBar title="Invoices" large />}>
+      {/* Deliberately quiet: faded icon + muted text, centred in the screen */}
+      <div className="px-6 pt-40 flex flex-col items-center text-center">
+        <span className="w-16 h-16 rounded-full bg-go-raised border border-go-line flex items-center justify-center">
+          <Monitor className="w-7 h-7 text-go-faint opacity-60" />
+        </span>
+        <h2 className="text-[15px] font-medium text-go-muted tracking-wide mt-4">Coming soon to the app</h2>
+        <p className="text-[13px] text-go-faint leading-relaxed mt-1.5 max-w-[250px]">
+          For now, you can view and approve invoices on the Smile Genius web portal.
+        </p>
+      </div>
+    </Screen>
+  );
+}
+
 export function FinanceScreen() {
   const navigate = useNavigate();
   const { invoices, statements } = useScoped();
@@ -154,7 +172,7 @@ export function FinanceScreen() {
 
   return (
     <Screen tabs header={
-      <div className="bg-go-bg/85 backdrop-blur-xl px-4 pt-3 pb-3 space-y-3">
+      <div className="bg-go-bg/80 backdrop-blur-xl px-4 pt-3 pb-3 space-y-3">
         <h1 className="text-[24px] font-bold text-go-ink tracking-tight">Invoices</h1>
         <Segmented value={tab} onChange={setTab} options={[
           { value: 'invoices', label: 'Invoices', count: invoices.filter(i => invoiceNeedsAction(i.status)).length },
@@ -192,7 +210,7 @@ export function FinanceScreen() {
 
           {/* Search · sort · more filters */}
           <div className="px-4 mt-3 flex gap-2">
-            <div className="flex-1 min-w-0"><SearchBox value={q} onChange={setQ} placeholder="Supplier, invoice no. or practice" /></div>
+            <div className="flex-1 min-w-0"><SearchBox value={q} onChange={setQ} placeholder="Supplier, invoice number or practice" /></div>
             <button onClick={() => setMoreOpen(true)} aria-label="More statuses"
               className={cx('relative w-12 h-12 rounded-2xl border flex items-center justify-center flex-shrink-0',
                 moreStatus ? 'go-grad text-white border-transparent' : 'bg-go-surface border-go-line text-go-ink2')}>
@@ -217,7 +235,7 @@ export function FinanceScreen() {
             {shown.length ? (
               <Card className="divide-y divide-go-line overflow-hidden">{shown.map(i => <InvoiceRow key={i.id} i={i} />)}</Card>
             ) : (
-              <EmptyState icon={<FileText className="w-7 h-7" />} title="No invoices found" body="Try another status or search." />
+              <EmptyState icon={<FileText className="w-7 h-7" />} title="No invoices found" body="Please try a different status or search." />
             )}
           </div>
 
@@ -366,7 +384,7 @@ export function InvoiceScreen() {
       <Section title="Document">
         <div className="rounded-[22px] border border-go-line bg-go-raised h-40 flex flex-col items-center justify-center gap-2 text-go-muted">
           <FileText className="w-8 h-8" />
-          <p className="text-[12.5px]">Demo only. The invoice PDF will show here.</p>
+          <p className="text-[12.5px]">The invoice will show here.</p>
         </div>
       </Section>
 

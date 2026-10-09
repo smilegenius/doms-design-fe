@@ -55,11 +55,11 @@ export function SourceCard({ src, toCheck }: { src: ReadSource; toCheck: number 
         <div className="flex-1 min-w-0">
           <p className="text-[14px] font-semibold text-go-ink">{audio ? `Voice note · ${fmtDur(src.secs)}` : 'Lab form photo'}</p>
           <p className={cx('text-[12px]', toCheck ? 'text-go-warn font-medium' : 'text-go-ok font-medium')}>
-            {toCheck ? `${toCheck} detail${toCheck > 1 ? 's' : ''} to check` : 'Everything filled in. Check it over.'}
+            {toCheck ? `${toCheck} detail${toCheck > 1 ? 's' : ''} to check` : 'Everything is filled in. Please check it before sending.'}
           </p>
         </div>
         <button onClick={again} className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-go-brand">
-          <RotateCcw className="w-4 h-4" />{audio ? 'Re-record' : 'Retake'}
+          <RotateCcw className="w-4 h-4" />{audio ? 'Record again' : 'Take again'}
         </button>
       </div>
       {audio && (
@@ -71,7 +71,7 @@ export function SourceCard({ src, toCheck }: { src: ReadSource; toCheck: number 
               : <span key={i}>{s.t}</span>)}”
           </p>
           <span className="mt-1.5 inline-flex items-center gap-1 text-[12px] font-semibold text-go-brand">
-            {open ? 'Show less' : 'Show full transcript'}
+            {open ? 'Show less' : 'Show everything you said'}
             <ChevronDown className={cx('w-3.5 h-3.5 transition-transform', open && 'rotate-180')} />
           </span>
         </button>

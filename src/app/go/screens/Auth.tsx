@@ -32,7 +32,7 @@ export function SignInScreen() {
   );
 
   return (
-    <Screen bg="bg-go-bg">
+    <Screen>
       <div className="relative min-h-full flex flex-col px-6">
         <div className="absolute -top-24 -right-20 w-72 h-72 rounded-full bg-go-lav/25 blur-3xl pointer-events-none" />
         <div className="absolute -top-10 -left-24 w-64 h-64 rounded-full bg-go-brand/20 blur-3xl pointer-events-none" />
@@ -49,7 +49,7 @@ export function SignInScreen() {
           </div>
           <div className="relative">
             <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-go-faint pointer-events-none" />
-            <Input type={show ? 'text' : 'password'} aria-label="Password" placeholder="Password (any, demo)" value={pw} onChange={e => setPw(e.target.value)} autoComplete="current-password" className="pl-11 pr-12" />
+            <Input type={show ? 'text' : 'password'} aria-label="Password" placeholder="Password" value={pw} onChange={e => setPw(e.target.value)} autoComplete="current-password" className="pl-11 pr-12" />
             <button type="button" onClick={() => setShow(s => !s)} aria-label={show ? 'Hide password' : 'Show password'}
               className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-xl text-go-muted flex items-center justify-center">
               {show ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -90,10 +90,10 @@ export function ForgotScreen() {
         {!sent ? (
           <>
             <h1 className="text-[26px] font-bold text-go-ink tracking-tight">Reset your password</h1>
-            <p className="text-[14px] text-go-muted mt-2 leading-relaxed">Enter your work email. We’ll send a secure link to set a new password.</p>
+            <p className="text-[14px] text-go-muted mt-2 leading-relaxed">Enter your work email. We’ll send you a link to set a new password.</p>
             <div className="mt-6"><Label>Work email</Label><Input type="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
             <div className="mt-4 p-3.5 rounded-2xl bg-go-brand-soft text-[12.5px] text-go-brand-ink leading-relaxed">
-              If your practice signs in with Google or Microsoft, reset your password with your IT provider instead.
+              If you sign in with Google or Microsoft, please ask your IT provider to reset your password.
             </div>
             <Btn block className="mt-6" disabled={!email} onClick={() => setSent(true)}>Send reset link</Btn>
           </>
@@ -104,7 +104,7 @@ export function ForgotScreen() {
             <p className="text-[14px] text-go-muted mt-2 leading-relaxed">We sent a reset link to <span className="font-semibold text-go-ink">{email}</span>. It expires in 30 minutes.</p>
             <Btn block className="mt-8" onClick={() => navigate('/go/signin')}>Back to sign in</Btn>
             <button onClick={() => setSent(false)} className="mt-4 text-[13px] font-semibold text-go-brand">Didn’t get it? Send again</button>
-            <p className="text-[12px] text-go-faint mt-6">Demo only. No email is sent.</p>
+            <p className="text-[12px] text-go-faint mt-6">Can’t see it? Please check your junk or spam folder.</p>
           </div>
         )}
       </div>

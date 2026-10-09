@@ -14,7 +14,7 @@ function useCase() {
 }
 
 function Missing() {
-  return <Screen header={<TopBar back fallback="/go/work" />}><EmptyState icon={<Info className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case in the demo data." /></Screen>;
+  return <Screen header={<TopBar back fallback="/go/work" />}><EmptyState icon={<Info className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
 }
 
 /** Deterministic QR-ish pattern from the order ID — demo only. */
@@ -113,7 +113,7 @@ export function DispatchScreen() {
       <Section title="2 · Pack">
         <Card className="p-4 flex gap-3">
           <PackageCheck className="w-5 h-5 text-go-brand flex-shrink-0 mt-0.5" />
-          <p className="text-[13px] text-go-ink2 leading-relaxed">Include impressions, bite registration and the signed lab form.</p>
+          <p className="text-[13px] text-go-ink2 leading-relaxed">Include the impressions, bite registration and signed lab form.</p>
         </Card>
       </Section>
 
@@ -160,7 +160,7 @@ export function ReceiveSheet({ c, open, onClose }: { c: LabCase; open: boolean; 
   };
   return (
     <Sheet open={open} onClose={onClose} title="Mark as received?"
-      sub={<span className="inline-flex items-center gap-1.5"><Building className="w-3.5 h-3.5" />{lab} will be notified, if active.</span>}
+      sub={<span className="inline-flex items-center gap-1.5"><Building className="w-3.5 h-3.5" />We’ll let {lab} know, if they use Smile Genius.</span>}
       footer={
         <div className="flex gap-2">
           <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>

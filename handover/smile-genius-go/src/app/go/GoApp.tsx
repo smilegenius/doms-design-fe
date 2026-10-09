@@ -7,9 +7,9 @@ import { useEffect, useState } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ChevronDown, Monitor, Moon, Search, Sun, X } from './icons';
 import '../../styles/go.css';
-import { DemoFill, GoStoreProvider, ThemePref, useGo } from './store';
+import { DemoFill, FEATURES, GoStoreProvider, ThemePref, useGo } from './store';
 import { PracticeId } from './data';
-import { GoMark, Toaster, Toggle, cx } from './ui';
+import { GoMark, Toaster, cx } from './ui';
 import { KB_HEIGHT, SimKeyboard, useKeyboardTarget } from './Keyboard';
 import { ForgotScreen, SignInScreen } from './screens/Auth';
 import HomeScreen from './screens/Home';
@@ -17,8 +17,8 @@ import { CaseDetailScreen, LabWorkScreen } from './screens/LabWork';
 import { DispatchScreen, ReceiveScreen } from './screens/Logistics';
 import CaptureScreen from './screens/Capture';
 import ManualCaseScreen from './screens/ManualCase';
-import { FinanceScreen, InvoiceScreen, StatementScreen } from './screens/Finance';
-import { AccountScreen, NotificationsScreen } from './screens/Account';
+import { FinanceScreen, InvoiceScreen, InvoicesComingSoon, StatementScreen } from './screens/Finance';
+import { AccountScreen, AppearanceSettings, DashboardSettings, NotificationSettings, NotificationsScreen, PracticesSettings } from './screens/Account';
 
 // Reviewer navigation. Each entry can carry scenarios: variants of the same
 // screen (single vs multi-service Rx, clean vs flagged invoice…) that deep-link
@@ -39,12 +39,11 @@ const JUMPS: Jump[] = [
     { label: 'Filled statuses', to: '/go/home', fill: 4, fills: [
       { label: '1', fill: 1 }, { label: '2', fill: 2 }, { label: '3', fill: 3 }, { label: 'All', fill: 4 },
     ] },
-    { label: 'Empty · no lab work yet', to: '/go/home', fill: 0 },
+    { label: 'Empty dashboard', to: '/go/home', fill: 0 },
   ] },
   { group: 'Start', label: 'Notifications', to: '/go/notifications' },
   { group: 'Lab work', label: 'All lab work', to: '/go/work', scenarios: [
-    { label: 'All cases · list view', to: '/go/work' },
-    { label: 'All cases · card view', to: '/go/work?view=cards' },
+    { label: 'All cases', to: '/go/work' },
     { label: 'Overdue', to: '/go/work?f=overdue' },
     { label: 'Ready to dispatch', to: '/go/work?f=ready' },
     { label: 'On hold', to: '/go/work?f=on-hold' },
@@ -57,6 +56,9 @@ const JUMPS: Jump[] = [
   { group: 'Lab work', label: 'Case detail', to: '/go/work/SG-28491', scenarios: [
     { label: 'Single service · not sent yet', to: '/go/work/SG-28491' },
     { label: 'Multi-service case · on hold', to: '/go/work/SG-28472' },
+    { label: 'Multi-service · 2 dentures in stages + crown', to: '/go/work/SG-28526' },
+    { label: 'Denture in stages · single service', to: '/go/work/SG-28497' },
+    { label: 'Clear aligners in phases + retainer', to: '/go/work/SG-28520' },
     { label: 'Arrives after the fit (at risk)', to: '/go/work/SG-28466' },
     { label: 'In practice, ready for patient', to: '/go/work/SG-28460' },
   ] },
@@ -87,6 +89,7 @@ const JUMPS: Jump[] = [
     { label: 'New case', to: '/go/new/manual' },
     { label: 'Finish a draft · single service', to: '/go/new/manual?draft=SG-D1004' },
     { label: 'Finish a draft · multi-service', to: '/go/new/manual?draft=SG-D1007' },
+    { label: 'Finish a draft · stages + phases + crown', to: '/go/new/manual?draft=SG-D1012' },
   ] },
 { group: 'Invoices', label: 'All invoices', to: '/go/invoices', scenarios: [    { label: 'All invoices', to: '/go/invoices' },    { label: 'QC · needs review', to: '/go/invoices?s=qc' },    { label: 'Duplicates', to: '/go/invoices?s=duplicate' },    { label: 'Awaiting approval', to: '/go/invoices?s=awaiting' },    { label: 'Approved', to: '/go/invoices?s=approved' },    { label: 'Disputed', to: '/go/invoices?s=disputed' },    { label: 'Sent to Xero failed', to: '/go/invoices?s=xero-failed' },    { label: 'Statements', to: '/go/invoices?tab=statements' },  ] },
   { group: 'Invoices', label: 'Invoice review', to: '/go/invoices/invoice/PDW-7731', scenarios: [
@@ -116,27 +119,6 @@ function ThemeSwitch() {
             themePref === o.v ? 'go-grad text-white' : 'text-go-muted hover:text-go-ink')}>
           {o.icon}{o.label}
         </button>
-      ))}
-    </div>
-  );
-}
-
-/** Features that are switched off for now; flip them on to review. */
-function SetupSwitches() {
-  const { homeInvoices, setHomeInvoices } = useGo();
-  const rows = [
-    { label: 'Invoices on Home', sub: 'Dashboard section', on: homeInvoices, set: setHomeInvoices },
-  ];
-  return (
-    <div className="rounded-2xl bg-go-surface border border-go-line divide-y divide-go-line">
-      {rows.map(r => (
-        <div key={r.label} className="flex items-center gap-3 pl-3.5 pr-2.5 py-2.5">
-          <span className="flex-1 min-w-0">
-            <span className="block text-[13px] font-semibold text-go-ink">{r.label}</span>
-            <span className="block text-[11.5px] text-go-muted">{r.sub} · {r.on ? 'On' : 'Off'}</span>
-          </span>
-          <Toggle on={r.on} onChange={r.set} label={r.label} />
-        </div>
       ))}
     </div>
   );
@@ -174,14 +156,16 @@ function SidePanel() {
   // Search matches the item, its group or any of its scenarios; scenario hits auto-expand.
   const term = q.trim().toLowerCase();
   const hit = (t: string) => t.toLowerCase().includes(term);
-  const shown = JUMPS.map(j => {
+  // Hidden features drop out of the reviewer index too
+  const jumps = JUMPS.filter(j => FEATURES.invoices || j.group !== 'Invoices');
+  const shown = jumps.map(j => {
     if (!term) return { j, scen: j.scenarios ?? [] };
     const self = hit(j.label) || hit(j.group);
     const scen = (j.scenarios ?? []).filter(s => self || hit(s.label));
     return self || scen.length ? { j, scen } : null;
   }).filter(Boolean) as { j: Jump; scen: Scenario[] }[];
   const groups = [...new Set(shown.map(x => x.j.group))];
-  const total = JUMPS.reduce((n, j) => n + 1 + (j.scenarios?.length ?? 0), 0);
+  const total = jumps.reduce((n, j) => n + 1 + (j.scenarios?.length ?? 0), 0);
 
   return (
     <aside className="hidden lg:flex flex-col w-[300px] h-[min(844px,calc(100dvh-40px))] relative z-10">
@@ -197,8 +181,6 @@ function SidePanel() {
       </div>
       <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted mt-6 mb-2">Appearance</p>
       <ThemeSwitch />
-      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted mt-6 mb-2">Setup</p>
-      <SetupSwitches />
       <div className="flex items-baseline justify-between mt-6 mb-2">
         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Jump to screen</p>
         <span className="text-[11px] text-go-faint">{total} views</span>
@@ -275,7 +257,7 @@ function StatusBar() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t); }, []);
   return (
-    <div className="hidden sm:flex relative z-[65] h-[50px] flex-shrink-0 items-center justify-between px-8 pt-1 text-go-ink bg-go-bg">
+    <div className="hidden sm:flex relative z-[65] h-[50px] flex-shrink-0 items-center justify-between px-8 pt-1 text-go-ink">
       <span className="text-[15px] font-semibold tabular-nums">{now.getHours() % 12 || 12}:{String(now.getMinutes()).padStart(2, '0')}</span>
       <span className="absolute left-1/2 -translate-x-1/2 top-[11px] w-[118px] h-[33px] rounded-full bg-black" />
       <span className="flex items-center gap-1.5">
@@ -310,11 +292,15 @@ function GoRoutes() {
           <Route path="new/audio" element={<CaptureScreen key="audio" mode="audio" />} />
           <Route path="new/capture" element={<CaptureScreen key="photo" mode="photo" />} />
           <Route path="new/manual" element={<ManualCaseScreen />} />
-          <Route path="invoices" element={<FinanceScreen />} />
+          <Route path="invoices" element={FEATURES.invoices ? <FinanceScreen /> : <InvoicesComingSoon />} />
           <Route path="finance/*" element={<Navigate to="/go/invoices" replace />} />
-          <Route path="invoices/invoice/:id" element={<InvoiceScreen />} />
-          <Route path="invoices/statement/:id" element={<StatementScreen />} />
+          <Route path="invoices/invoice/:id" element={FEATURES.invoices ? <InvoiceScreen /> : <Navigate to="/go/invoices" replace />} />
+          <Route path="invoices/statement/:id" element={FEATURES.invoices ? <StatementScreen /> : <Navigate to="/go/invoices" replace />} />
           <Route path="account" element={<AccountScreen />} />
+          <Route path="account/appearance" element={<AppearanceSettings />} />
+          <Route path="account/practices" element={<PracticesSettings />} />
+          <Route path="account/notifications" element={<NotificationSettings />} />
+          <Route path="account/dashboard" element={<DashboardSettings />} />
         </Route>
         <Route path="*" element={<Navigate to={signedIn ? '/go/home' : '/go/signin'} replace />} />
       </Routes>
@@ -370,7 +356,7 @@ function GoFrame() {
               ? 'sm:bg-[#C9CCD4] sm:shadow-[0_40px_100px_-30px_rgba(16,24,64,.45),inset_0_0_0_1.5px_rgba(255,255,255,.7),inset_0_0_0_3px_rgba(16,24,64,.08)]'
               : 'sm:bg-[#0A0A12] sm:shadow-[0_40px_100px_-30px_rgba(16,24,64,.45),inset_0_0_0_1.5px_rgba(255,255,255,.08)]')}
             style={scale < 1 ? { transform: `scale(${scale})` } : undefined}>
-            <div data-theme={theme} className={cx('go-theme relative h-full w-full overflow-clip bg-go-bg sm:rounded-[48px] sm:[clip-path:inset(0_round_48px)] flex flex-col', kbTarget && 'go-kb-open')} ref={setSheetRoot}
+            <div data-theme={theme} className={cx('go-theme go-wash relative h-full w-full overflow-clip sm:rounded-[48px] sm:[clip-path:inset(0_round_48px)] flex flex-col', kbTarget && 'go-kb-open')} ref={setSheetRoot}
               style={{ '--go-kb': kbTarget ? `${KB_HEIGHT}px` : '0px' } as React.CSSProperties}>
               <StatusBar />
               {/* Shrinks by the keyboard height so content + sticky actions ride up */}

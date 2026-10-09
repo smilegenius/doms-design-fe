@@ -142,7 +142,7 @@ export function detailFields(itemId: string): DetailField[] {
   if (cat === 'others') return [{ key: 'customServiceName', label: 'Service name', kind: 'text', required: true }];
   return [];
 }
-export { OCCLUSION_SIDES };
+export { OCCLUSION_SIDES, getCategoryForItem };
 export const CASE_SOURCES = [...WEB_CASE_SOURCES.filter(s => s !== 'Other'), 'Photo of lab form', 'Voice note', 'Other'];
 export const COURIERS = ["Lab's own courier", 'Royal Mail Special Delivery', 'DPD', 'DHL Express', 'Hand delivered', 'Other'];
 export const STORAGE = ['Lab work drawer', 'Surgery 1', 'Surgery 2', 'Reception'];
@@ -225,12 +225,80 @@ export interface LabCase {
   onHold?: { side: 'Lab' | 'Practice'; reason: string; by: string; since: string };
   /** Saved form for a draft case (CaseForm from ManualCase) so it reopens filled in. */
   draftForm?: unknown;
+  /** When the case was created. Falls back to its first event (see createdOn). */
+  createdAt?: string;
+  /** Per-service delivery for the FIRST service (the others carry theirs on items[]). returnBy above stays the case's soonest open date. */
+  firstReturnBy?: string;
+  firstStaged?: StagedKind;
+  firstStages?: StageLine[];
 }
 
-export interface RxItem { service: string; teeth: string[]; material: string; shade?: string; extra?: string }
+/** Case creation date: createdAt, else the earliest event. Empty if unknown. */
+export const createdOn = (c: LabCase) =>
+  c.createdAt ?? c.events.map(e => e.at).sort()[0] ?? '';
+
+export interface RxItem {
+  service: string; teeth: string[]; material: string; shade?: string; extra?: string;
+  /** Delivery date for this service (dates live on the service, as on the web portal). Staged services use stages instead. */
+  returnBy?: string;
+  /** Denture → 'stage' (Special Tray … Finish); Clear aligners with phasing → 'phase' (Phase 1, 2 …). */
+  staged?: StagedKind;
+  /** The dated stages / phases ordered so far, in order. */
+  stages?: StageLine[];
+}
+
+// ─── Staged services (denture stages, aligner phases) ───────────────────────
+// Mirrors the web portal: a denture is ordered in stages and has no date of its
+// own, only a date per stage; clear aligners (Phasing = Yes) are ordered phase by
+// phase. More stages / phases can be ordered later from inside the case.
+export type StagedKind = 'stage' | 'phase';
+export interface StageLine {
+  name: string;           // 'Try In' or 'Phase 2'
+  date: string;           // ISO; '' = not set
+  /** 'done-earlier' = dated before the case reached Smile Genius; 'received' = back at the practice. Absent = still to come. */
+  state?: 'done-earlier' | 'received';
+  /** Set when ordered later from the case (not part of the first order). */
+  orderedAt?: string;
+}
+/** Which services are staged, by name (case data uses names like 'Partial denture', 'Clear aligners'). */
+export const stagedKindOf = (service: string): StagedKind | undefined =>
+  /denture/i.test(service) ? 'stage' : /aligner/i.test(service) ? 'phase' : undefined;
+export const STAGE_NAMES = DENTURE_STAGES;
+export const phaseName = (n: number) => `Phase ${n}`;
+/** Stages not ordered yet (dentures) — what "Order next stage" can offer. */
+export const remainingStages = (it: RxItem) => STAGE_NAMES.filter(n => !(it.stages ?? []).some(x => x.name === n));
+/** The open dates of a service: stages still to come, or its own delivery date. */
+export const openDates = (it: RxItem): { date: string; label?: string }[] =>
+  it.stages?.length
+    ? it.stages.filter(x => !x.state && x.date).map(x => ({ date: x.date, label: x.name }))
+    : it.returnBy ? [{ date: it.returnBy }] : [];
+/** Soonest open date across services — the case's overall delivery date. */
+export const soonestDate = (items: RxItem[]) => items.flatMap(openDates).map(d => d.date).sort()[0] ?? '';
+/** The stage / phase whose date is the case's delivery date (for "Try In · Tue 13 Oct"). */
+export function dueLabel(c: LabCase): string | undefined {
+  if (!c.returnBy) return undefined;
+  const day = new Date(c.returnBy).toDateString();
+  const items = allItems(c);
+  for (const it of items) for (const d of openDates(it)) {
+    if (d.label && new Date(d.date).toDateString() === day) return items.length > 1 ? `${d.label} · ${it.service}` : d.label;
+  }
+  return undefined;
+}
+/** Patch that replaces one service's stages (index 0 = the case's first service). */
+export function patchItemStages(c: LabCase, index: number, stages: StageLine[]): Partial<LabCase> {
+  const items = allItems(c).map((it, i) => (i === index ? { ...it, stages } : it));
+  const [first, ...rest] = items;
+  // firstReturnBy is pinned too, so a normal first service keeps its own date when the case date moves
+  return { firstStages: first.stages, firstReturnBy: first.returnBy, items: rest.length ? rest : c.items, returnBy: soonestDate(items) || c.returnBy };
+}
 /** "Crown UR6" or "Veneer UR1, UL1 +1" for multi-service cases. */
 export const caseTitle = (c: LabCase) => `${c.service} ${c.teeth.join(', ')}${c.items?.length ? ` +${c.items.length}` : ''}`;
-export const allItems = (c: LabCase): RxItem[] => [{ service: c.service, teeth: c.teeth, material: c.material, shade: c.shade, extra: c.extra }, ...(c.items ?? [])];
+export const allItems = (c: LabCase): RxItem[] => [
+  { service: c.service, teeth: c.teeth, material: c.material, shade: c.shade, extra: c.extra,
+    returnBy: c.firstStages?.length ? undefined : c.firstReturnBy ?? c.returnBy, staged: c.firstStaged, stages: c.firstStages },
+  // Older cases have no per-service date: a service without one shares the case date
+  ...(c.items ?? []).map(it => (it.stages?.length || it.returnBy ? it : { ...it, returnBy: c.returnBy })),
+];
 
 export interface Appointment { at: string; kind: 'Fit' | 'Try-in' | 'Issue'; room: string }
 
@@ -243,9 +311,51 @@ const at = (days: number, h = 9, m = 0) => {
 
 export const SEED_CASES: LabCase[] = [
   {
+    id: 'SG-28526', appointment: { at: at(4, 9, 30), kind: 'Try-in', room: 'Surgery 2' }, patientId: 'P-10119', practice: 'isc', lab: 'precision', clinician: 'okafor', createdBy: 'Dr Samuel Okafor',
+    service: 'Full denture', teeth: ['Upper arch'], material: 'Acrylic', shade: 'A2', funding: 'NHS',
+    instructions: 'Upper full denture and lower partial on the same visit plan. Crown UL3 to match the denture shade.',
+    firstStaged: 'stage', firstStages: [
+      { name: 'Special Tray', date: at(-10), state: 'done-earlier' },
+      { name: 'Bite Registration', date: at(3) },
+    ],
+    items: [
+      { service: 'Partial denture', teeth: ['Lower arch'], material: 'Cobalt chrome', staged: 'stage', stages: [
+        { name: 'Bite Registration', date: at(3) },
+        { name: 'Try In', date: at(10) },
+      ] },
+      { service: 'Crown', teeth: ['UL3'], material: 'Layered zirconia', shade: 'A2', returnBy: at(14) },
+    ],
+    returnBy: at(3), stage: 'at-lab', attachments: ['Prescription.pdf', 'Upper and lower impressions'], source: 'manual',
+    events: [
+      { stage: 'authorised', at: at(-2, 9, 10), by: 'Dr Samuel Okafor' },
+      { stage: 'dispatched', at: at(-2, 15, 0), by: 'Reception' },
+      { stage: 'at-lab', at: at(-1, 9, 0), by: 'Precision Dental Works' },
+    ],
+    messages: [],
+  },
+  {
+    id: 'SG-28520', appointment: { at: at(7, 11, 0), kind: 'Fit', room: 'Surgery 1' }, patientId: 'P-10450', practice: 'cds', lab: 'northstar', clinician: 'lee', createdBy: 'Dr Hannah Lee',
+    service: 'Clear aligners', teeth: ['Both arches'], material: 'Clear thermoplastic', funding: 'Private',
+    instructions: 'Phase 1: upper and lower, 14 days per aligner. Retainers after the final phase.',
+    firstStaged: 'phase', firstStages: [{ name: 'Phase 1', date: at(5) }],
+    items: [{ service: 'Retainer', teeth: ['Both arches'], material: 'Essix', returnBy: at(40) }],
+    returnBy: at(5), stage: 'at-lab', attachments: ['Intraoral scan link', 'Treatment plan.pdf'], source: 'manual',
+    events: [
+      { stage: 'authorised', at: at(-4, 9, 0), by: 'Dr Hannah Lee' },
+      { stage: 'dispatched', at: at(-4, 15, 0), by: 'Reception' },
+      { stage: 'at-lab', at: at(-3, 9, 0), by: 'Northstar Dental Lab' },
+    ],
+    messages: [],
+  },
+  {
     id: 'SG-28497', appointment: { at: at(12, 14, 0), kind: 'Try-in', room: 'Surgery 2' }, patientId: 'P-10402', practice: 'isc', lab: 'precision', clinician: 'okafor', createdBy: 'Dr Samuel Okafor',
     service: 'Partial denture', teeth: ['Upper arch'], material: 'Cobalt chrome', funding: 'NHS',
     instructions: 'Cobalt chrome framework, clasps on UR5 and UL6. Try-in before finish please.',
+    firstStaged: 'stage', firstStages: [
+      { name: 'Special Tray', date: at(-12), state: 'done-earlier' },
+      { name: 'Bite Registration', date: at(10) },
+      { name: 'Try In', date: at(17) },
+    ],
     returnBy: at(10), stage: 'ready', attachments: ['Prescription.pdf', 'Upper impression photo'], source: 'manual',
     events: [{ stage: 'authorised', at: at(0, 8, 31), by: 'Dr Samuel Okafor' }], messages: [],
   },
@@ -260,6 +370,11 @@ export const SEED_CASES: LabCase[] = [
     id: 'SG-28488', appointment: { at: at(0, 15, 30), kind: 'Issue', room: 'Surgery 2' }, patientId: 'P-10188', practice: 'isc', lab: 'precision', clinician: 'okafor', createdBy: 'Dr Samuel Okafor',
     service: 'Full denture', teeth: ['Both arches'], material: 'Acrylic', shade: 'A3', funding: 'NHS',
     instructions: 'Final finish after successful try-in. Patient prefers slightly lighter teeth than try-in.',
+    firstStaged: 'stage', firstStages: [
+      { name: 'Special Tray', date: at(-24), state: 'done-earlier' },
+      { name: 'Bite Registration', date: at(-17), state: 'done-earlier' },
+      { name: 'Try In', date: at(0, 10) },
+    ],
     returnBy: at(0, 10), stage: 'shipped', attachments: ['Prescription.pdf', 'Try-in notes'], source: 'manual',
     events: [
       { stage: 'authorised', at: at(-9, 10, 16), by: 'Dr Samuel Okafor' },
@@ -417,9 +532,28 @@ export const SEED_CASES: LabCase[] = [
     messages: [],
   },
   {
+    id: 'SG-D1012', patientId: 'P-10231', practice: 'cds', lab: 'northstar', clinician: 'lee', createdBy: 'John Carter',
+    service: 'Full Denture', teeth: ['Upper arch'], material: 'Acrylic', funding: 'NHS', instructions: '', returnBy: at(5), stage: 'draft',
+    attachments: [], events: [], messages: [], source: 'manual', createdAt: at(-1, 16, 5),
+    items: [{ service: 'Clear Aligners', teeth: ['Lower arch'], material: '' }, { service: 'Crown', teeth: ['UR6'], material: 'Zirconia' }],
+    draftForm: {
+      practice: 'cds', clinician: 'lee', patientId: 'P-10231', lab: 'northstar', funding: 'NHS', returnBy: '', apptDate: '', apptKind: 'Fit',
+      caseSource: null, instructions: 'Denture stages first; aligners for the lower arch in two phases; crown can follow.', attachments: [],
+      items: [
+        { uid: 'd12-1', itemId: 'de-full-denture', teeth: ['Upper arch'], sameForAll: true, material: 'Acrylic', shade: 'A2', perTooth: {},
+          details: { stages: ['Special Tray', 'Bite Registration', 'Try In'] }, returnBy: '',
+          stageDates: { 'Special Tray': at(-6).slice(0, 10), 'Bite Registration': at(5).slice(0, 10), 'Try In': at(12).slice(0, 10) }, phases: [''] },
+        { uid: 'd12-2', itemId: 'or-clear-aligners', teeth: ['Lower arch'], sameForAll: true, material: null, shade: null, perTooth: {},
+          details: { phasing: 'Yes', alignerDuration: '14 days / aligner' }, returnBy: '', stageDates: {}, phases: [at(9).slice(0, 10), at(40).slice(0, 10)] },
+        { uid: 'd12-3', itemId: 'su-crown', teeth: ['UR6'], sameForAll: true, material: 'Zirconia', shade: 'A2', perTooth: {}, details: {},
+          returnBy: at(14).slice(0, 10), stageDates: {}, phases: [''] },
+      ],
+    },
+  },
+  {
     id: 'SG-D1004', patientId: 'P-10119', practice: 'isc', lab: 'northstar', clinician: 'okafor', createdBy: 'John Carter',
     service: 'Crown', teeth: ['UR1'], material: 'Zirconia', funding: 'Private', instructions: '', returnBy: '', stage: 'draft',
-    attachments: [], events: [], messages: [], source: 'manual',
+    attachments: [], events: [], messages: [], source: 'manual', createdAt: at(-2, 15, 10),
     draftForm: {
       practice: 'isc', clinician: 'okafor', patientId: 'P-10119', lab: 'northstar', funding: 'Private', returnBy: '', apptDate: '', apptKind: 'Fit',
       caseSource: null, instructions: 'Match UL1 incisal translucency.', attachments: [],
@@ -429,7 +563,7 @@ export const SEED_CASES: LabCase[] = [
   {
     id: 'SG-D1007', patientId: 'P-10402', practice: 'isc', lab: 'precision', clinician: 'okafor', createdBy: 'John Carter',
     service: 'Full Denture', teeth: ['Upper arch'], material: 'Acrylic', funding: 'NHS', instructions: '', returnBy: '', stage: 'draft',
-    attachments: [], events: [], messages: [], source: 'manual',
+    attachments: [], events: [], messages: [], source: 'manual', createdAt: at(-10, 11, 40),
     items: [{ service: 'Night Guard', teeth: ['Lower arch'], material: '' }],
     draftForm: {
       practice: 'isc', clinician: 'okafor', patientId: 'P-10402', lab: 'precision', funding: 'NHS', returnBy: '', apptDate: '', apptKind: 'Fit',
@@ -463,9 +597,9 @@ export function nextAction(c: LabCase): NextAction {
 export type ReadinessLevel = 'in-practice' | 'arriving' | 'on-track' | 'attention' | 'at-risk';
 export interface Readiness { level: ReadinessLevel; label: string; detail: string }
 export function readiness(c: LabCase): Readiness {
-  if (c.stage === 'draft') return { level: 'attention', label: 'Draft', detail: 'Not submitted yet. Finish and create the case' };
-  if (c.onHold) return { level: 'attention', label: 'On hold', detail: c.onHold.side === 'Practice' ? 'Lab is waiting on the practice' : 'Paused by the lab' };
-  if (c.labStatus === 'Not Approved') return { level: 'at-risk', label: 'Not approved', detail: 'Rejected by lab · see comments' };
+  if (c.stage === 'draft') return { level: 'attention', label: 'Draft', detail: 'Not sent to the lab yet. Please finish the case' };
+  if (c.onHold) return { level: 'attention', label: 'On hold', detail: c.onHold.side === 'Practice' ? 'The lab is waiting for you' : 'Paused by the lab' };
+  if (c.labStatus === 'Not Approved') return { level: 'at-risk', label: 'Not approved', detail: 'The lab could not accept this · see comments' };
   if (c.stage === 'received') return { level: 'in-practice', label: 'In practice', detail: c.receipt ? `In ${c.receipt.storedIn.toLowerCase()}` : 'Received' };
   if (!c.returnBy) return c.stage === 'ready'
     ? { level: 'attention', label: 'Ready to dispatch', detail: 'Not sent to the lab yet · no delivery date' }
@@ -475,11 +609,11 @@ export function readiness(c: LabCase): Readiness {
   const dd = dayOffset(c.returnBy);
   if (isOverdue(c)) {
     const n = Math.max(1, -dayOffset(c.returnBy));
-    return { level: 'at-risk', label: 'Late', detail: `Lab is ${n} day${n > 1 ? 's' : ''} late${c.chasedAt ? ' · chased' : ''}` };
+    return { level: 'at-risk', label: 'Late', detail: `The lab is ${n} day${n > 1 ? 's' : ''} late${c.chasedAt ? ' · chased' : ''}` };
   }
   if (ad !== null && dd > ad) return { level: 'at-risk', label: 'At risk', detail: `Back ${relDay(c.returnBy).toLowerCase()}, after the ${c.appointment!.kind.toLowerCase()}` };
   if (ad !== null && dd === ad && c.stage !== 'shipped') return { level: 'at-risk', label: 'At risk', detail: `Back the same day as the ${c.appointment!.kind.toLowerCase()}` };
-  if (c.questionOpen) return { level: 'attention', label: 'Info required', detail: 'Lab needs more information' };
+  if (c.questionOpen) return { level: 'attention', label: 'Info required', detail: 'The lab needs more information' };
   if (c.stage === 'ready') return { level: 'attention', label: 'Ready to dispatch', detail: 'Not sent to the lab yet' };
   if (c.stage === 'shipped') return { level: 'arriving', label: 'Arriving', detail: `Expected ${relDay(c.returnBy).toLowerCase()}` };
   return { level: 'on-track', label: 'On track', detail: `Back ${relDay(c.returnBy).toLowerCase()}` };
@@ -494,15 +628,19 @@ export function dayOffset(iso: string) {
 
 /** Status shortcuts. The first four (home: true) are the Home tiles and the Lab work status chips, in this order. */
 export type Attention = 'overdue' | 'ready' | 'on-hold' | 'draft' | 'arriving' | 'questions' | 'not-approved' | 'date-changed';
+/** The statuses Home shows as tiles, in the default order (users can reorder them in Account › Dashboard). */
+export const HOME_STATUSES = ['overdue', 'ready', 'on-hold', 'draft', 'not-approved', 'date-changed'] as const;
+export type HomeStatus = typeof HOME_STATUSES[number];
+
 export const ATTENTION: { id: Attention; label: string; short: string; hint: string; home?: boolean }[] = [
   { id: 'overdue', label: 'Overdue', short: 'Overdue', hint: 'Chase the lab', home: true },
   { id: 'ready', label: 'Ready to dispatch', short: 'To dispatch', hint: 'Print the label and book a courier', home: true },
   { id: 'on-hold', label: 'On hold', short: 'On hold', hint: 'Paused by the lab', home: true },
-  { id: 'draft', label: 'Draft', short: 'Draft', hint: 'Finish and create the case', home: true },
+  { id: 'draft', label: 'Draft', short: 'Draft', hint: 'Finish the case and send it', home: true },
   { id: 'arriving', label: 'Arriving from lab', short: 'Arriving', hint: 'Mark as received when it arrives' },
   { id: 'questions', label: 'Additional information required', short: 'Info required', hint: 'Reply to the lab' },
-  { id: 'not-approved', label: 'Lab work not approved', short: 'Not approved', hint: 'Rejected by lab' },
-  { id: 'date-changed', label: 'Delivery date changed', short: 'Date changed', hint: 'Needs review' },
+  { id: 'not-approved', label: 'Lab work not approved', short: 'Not approved', hint: 'The lab could not accept it' },
+  { id: 'date-changed', label: 'Delivery date changed', short: 'Date changed', hint: 'Please check the new date' },
 ];
 export const matchesAttention = (c: LabCase, a: Attention) =>
   a === 'draft' ? c.stage === 'draft'
@@ -637,7 +775,7 @@ export const SEED_INVOICES: Invoice[] = [
       chk('Duplicate check', 'Same number and amount as DE-2026-112', 'fail'),
       chk('Reverse charge VAT', 'Zero-rated EU supply noted', 'info'),
     ],
-    activity: [{ text: 'Received via email', at: at(-5, 16, 45) }, { text: 'Flagged as possible duplicate', at: at(-5, 16, 46) }],
+    activity: [{ text: 'Received via email', at: at(-5, 16, 45) }, { text: 'Marked as a possible duplicate', at: at(-5, 16, 46) }],
   },
   {
     id: 'NDL-10482', number: 'NDL-10482', docType: 'Invoice', supplier: 'Northstar Dental Lab', practice: 'cds',

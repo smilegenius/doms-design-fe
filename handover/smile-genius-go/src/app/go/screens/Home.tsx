@@ -6,9 +6,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, Building2, CalendarClock, Camera, Check, ChevronDown, ChevronRight, Clock, Mic, Pause, PenLine, Plus, Receipt, Truck, XCircle } from '../icons';
 import { FilledChatBubble, FilledClock, FilledPackage, FilledTruck } from '../../components/icons/FilledNavIcons';
-import { ME, useGo, useScoped } from '../store';
+import { FEATURES, ME, useGo, useScoped } from '../store';
 import {
-  ATTENTION, Attention, LabCase, PRACTICES, dayOffset, fmtDate, gbp, initials, invoiceNeedsAction, matchesAttention, patientById,
+  ATTENTION, Attention, HomeStatus, LabCase, PRACTICES, dayOffset, fmtDate, gbp, initials, invoiceNeedsAction, matchesAttention, patientById,
 } from '../data';
 import { Card, IconTile, NewWorkSheet, Screen, Sheet, cx } from '../ui';
 
@@ -37,7 +37,7 @@ export function PracticeSwitcher({ inline }: { inline?: boolean }) {
           <ChevronDown className="w-4 h-4 text-go-muted flex-shrink-0" />
         </button>
       )}
-      <Sheet open={open} onClose={() => setOpen(false)} title="Practice" sub="Choose which practice’s lab work and invoices to show.">
+      <Sheet open={open} onClose={() => setOpen(false)} title="Practice" sub={FEATURES.invoices ? 'Choose which practice’s lab work and invoices to show.' : 'Choose which practice’s lab work to show.'}>
         <div className="space-y-2">
           {opts.map(p => {
             const n = p.id === 'all' ? cases.length : cases.filter(c => c.practice === p.id).length;
@@ -75,39 +75,9 @@ const STATUS_STYLE: Record<Attention, { short: string; icon: React.ComponentType
   'date-changed': { short: 'Date changed', icon: CalendarClock, color: 'text-go-warn', bar: 'bg-go-warn' },
 };
 
-// ─── Below the card: the portal's other dashboard stats ─────────────────────
-// Always shown (even at 0) so Home is never empty when the four statuses are clear.
-// (Latest comments was removed from Home on 8 Oct; comments live on each case.)
+// Invoices strip (switched off for now). Latest comments was removed on 8 Oct.
 
 const subhead = (t: string) => <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted px-1 mb-2">{t}</h2>;
-
-/** Not approved (rejected by lab) · Delivery date changed (needs review). */
-function MoreStatuses({ cases }: { cases: LabCase[] }) {
-  const navigate = useNavigate();
-  const items = (['not-approved', 'date-changed'] as Attention[]).map(id => ({
-    a: ATTENTION.find(x => x.id === id)!, n: cases.filter(c => matchesAttention(c, id)).length,
-  }));
-  return (
-    <div className="grid grid-cols-2 gap-2">
-      {items.map(({ a, n }) => {
-        const st = STATUS_STYLE[a.id];
-        const Icon = st.icon;
-        return (
-          <button key={a.id} onClick={() => navigate(`/go/work?f=${a.id}`)} aria-label={`${a.label}: ${n}`}
-            className={cx('text-left rounded-[20px] border bg-go-surface p-3.5 active:scale-[0.98] transition',
-              n && a.id === 'not-approved' ? 'border-go-bad/40' : 'border-go-line')}>
-            <span className="flex items-center justify-between">
-              <span className="text-[22px] font-bold tabular-nums leading-none text-go-ink">{n}</span>
-              <Icon className={cx('w-5 h-5', n ? st.color : 'text-go-faint')} />
-            </span>
-            <span className="block text-[12.5px] font-semibold text-go-ink mt-2">{a.short}</span>
-            <span className="block text-[11px] text-go-muted">{a.hint}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 /** Open invoices · total · approved this month (portal: Financial actions). */
 function FinanceStrip() {
@@ -132,37 +102,35 @@ function FinanceStrip() {
 
 // ─── The four status tiles ──────────────────────────────────────────────────
 // Overdue · To dispatch · On hold · Draft as hero tiles: tinted gradient,
-// solid icon chip, big count, one line of context and the patients'
-// initials. No case list on Home; a tile opens Lab work filtered to it.
+// glossy icon chip, big count, label and the patients' initials (no sub-text;
+// lateness shows on each case's pill in Lab work). A tile opens Lab work filtered to it.
 // Only statuses with work show. 1 → one wide tile, 2 → a pair, 3 → the most
 // urgent wide on top + a pair, 4 → 2×2.
 // Full class strings per status so Tailwind picks them up.
 
-type HeroStatus = 'overdue' | 'ready' | 'on-hold' | 'draft';
+type HeroStatus = HomeStatus;
+/** Tile order: the client's four, then not approved (rejected by lab) and delivery date changed. */
+// (order comes from the store: dashOrder, set in Account › Dashboard)
 // Chip = glossy gradient icon (.go-chip-* in go.css); one consistent filled icon set.
 const HERO: Record<HeroStatus, { wash: string; ring: string; chip: string; glow: string; count: string; icon: React.ComponentType<{ className?: string }> }> = {
   overdue: { icon: Clock, wash: 'from-go-bad-soft', ring: 'border-go-bad/25', chip: 'go-chip-overdue', glow: 'bg-go-bad/30', count: 'text-go-bad' },
   ready: { icon: Truck, wash: 'from-go-warn-soft', ring: 'border-go-warn/25', chip: 'go-chip-ready', glow: 'bg-go-warn/30', count: 'text-go-warn' },
   'on-hold': { icon: Pause, wash: 'from-go-violet-soft', ring: 'border-go-violet/25', chip: 'go-chip-hold', glow: 'bg-go-violet/30', count: 'text-go-violet' },
   draft: { icon: PenLine, wash: 'from-go-brand-soft', ring: 'border-go-brand/25', chip: 'go-chip-draft', glow: 'bg-go-brand/30', count: 'text-go-brand' },
+  'not-approved': { icon: XCircle, wash: 'from-go-pink-soft', ring: 'border-go-pink/25', chip: 'go-chip-rejected', glow: 'bg-go-pink/30', count: 'text-go-pink' },
+  'date-changed': { icon: CalendarClock, wash: 'from-go-teal-soft', ring: 'border-go-teal/25', chip: 'go-chip-date', glow: 'bg-go-teal/30', count: 'text-go-teal' },
 };
 
-/** One line of context per status, e.g. "Oldest 2 days late", "1 waiting on you". */
-function heroHint(id: HeroStatus, list: LabCase[]) {
-  if (id === 'overdue') {
-    const n = Math.max(1, ...list.map(c => -dayOffset(c.returnBy)));
-    return `${list.length > 1 ? 'Oldest ' : ''}${n} day${n === 1 ? '' : 's'} late`;
-  }
-  if (id === 'ready') {
-    const next = list.filter(c => c.appointment).sort((x, y) => x.appointment!.at.localeCompare(y.appointment!.at))[0];
-    return next ? `Next ${next.appointment!.kind.toLowerCase()} ${fmtDate(next.appointment!.at)}` : 'Print label, book courier';
-  }
-  if (id === 'on-hold') {
-    const mine = list.filter(c => c.onHold?.side === 'Practice').length;
-    return mine ? `${mine} waiting on you` : 'Paused by the lab';
-  }
-  return 'Finish and create';
+/** The status's glossy icon chip + short label — reused by Account › Dashboard. */
+export function StatusChip({ id, size = 36 }: { id: HomeStatus; size?: number }) {
+  const Icon = HERO[id].icon;
+  return (
+    <span className={cx('go-chip flex items-center justify-center flex-shrink-0', HERO[id].chip)} style={{ width: size, height: size, borderRadius: size * 0.36 }}>
+      <Icon className="w-1/2 h-1/2" />
+    </span>
+  );
 }
+export const statusShort = (id: HomeStatus) => STATUS_STYLE[id].short;
 
 function Faces({ list }: { list: LabCase[] }) {
   const n = list.length;
@@ -196,7 +164,6 @@ function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?
       <ChevronRight className="w-3.5 h-3.5 text-go-faint" />
     </span>
   );
-  const hint = <span className={cx('relative block text-[11.5px] font-medium truncate', h.count)}>{heroHint(id, list)}</span>;
 
   if (wide) {
     return (
@@ -206,7 +173,7 @@ function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?
           <Icon className="w-6 h-6" />
         </span>
         <span className="relative flex-1 min-w-0">
-          {label}{hint}
+          {label}
           <span className="block mt-2"><Faces list={list} /></span>
         </span>
         <span className="relative text-[44px] font-bold tabular-nums leading-none tracking-tight text-go-ink pr-1">{n}</span>
@@ -224,14 +191,14 @@ function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?
       </span>
       <span className="relative block text-[34px] font-bold tabular-nums leading-none tracking-tight mt-3 text-go-ink">{n}</span>
       <span className="block mt-1.5">{label}</span>
-      {hint}
     </button>
   );
 }
 
 function StatusTiles({ cases }: { cases: LabCase[] }) {
-  const live = ATTENTION.filter(a => a.home)
-    .map(a => ({ id: a.id as HeroStatus, list: cases.filter(c => matchesAttention(c, a.id)) }))
+  const { dashOrder } = useGo();
+  const live = dashOrder
+    .map(id => ({ id, list: cases.filter(c => matchesAttention(c, id)) }))
     .filter(x => x.list.length > 0);
   if (!live.length) {
     return (
@@ -239,7 +206,7 @@ function StatusTiles({ cases }: { cases: LabCase[] }) {
         <IconTile icon={<Check className="w-5 h-5" strokeWidth={2.5} />} tone="ok" size="sm" />
         <span className="flex-1 min-w-0">
           <span className="block text-[14px] font-semibold text-go-ink">All clear</span>
-          <span className="block text-[12px] text-go-muted">Nothing overdue, to dispatch, on hold or in draft.</span>
+          <span className="block text-[12px] text-go-muted">Nothing needs your attention right now.</span>
         </span>
       </Card>
     );
@@ -277,12 +244,11 @@ function EmptyHome() {
         <span className="relative w-14 h-14 rounded-[20px] go-grad go-glow text-white flex items-center justify-center">
           <Plus className="w-7 h-7" strokeWidth={2.5} />
         </span>
-        <span className="relative block text-[12.5px] text-go-muted mt-5">No lab work yet</span>
         <span className="relative flex items-center gap-1.5 mt-0.5">
           <span className="text-[22px] font-bold text-go-ink tracking-tight leading-tight">Create your lab work</span>
           <ChevronRight className="w-5 h-5 text-go-brand" />
         </span>
-        <span className="relative block text-[13px] text-go-ink2 mt-1 leading-snug">Talk, snap the paper form or fill it in. Your cases will show here.</span>
+        <span className="relative block text-[13px] text-go-ink2 mt-1 leading-snug">Speak, take a photo of the paper form, or fill it in. Your cases will appear here.</span>
         <span className="relative flex gap-2 mt-4">
           {ways.map(w => (
             <span key={w.label} className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl bg-go-surface/80 border border-go-line text-[12px] font-semibold text-go-ink2">
@@ -301,7 +267,7 @@ function EmptyHome() {
 
 export default function HomeScreen() {
   const navigate = useNavigate();
-  const { notices, homeInvoices } = useGo();
+  const { notices } = useGo();
   const { cases } = useScoped();
   const unread = notices.filter(n => !n.read).length;
   const hour = new Date().getHours();
@@ -310,7 +276,6 @@ export default function HomeScreen() {
   return (
     <Screen tabs>
       <div className="relative">
-        <div className="absolute -top-28 -right-16 w-72 h-72 rounded-full bg-go-lav/20 blur-3xl pointer-events-none" />
         <div className="relative flex items-start justify-between gap-3 px-5 pt-3">
           <div className="min-w-0">
             {/* Small greeting on top; the practice is the headline (and the switcher) */}
@@ -332,9 +297,8 @@ export default function HomeScreen() {
       ) : (
         <>
           <div className="px-4 mt-4"><StatusTiles cases={cases} /></div>
-          <div className="px-4 mt-5">{subhead('Also needs a look')}<MoreStatuses cases={cases} /></div>
-          {/* Switched off for now (Setup in the reviewer side panel) */}
-          {homeInvoices && <div className="px-4 mt-5">{subhead('Invoices')}<FinanceStrip /></div>}
+          {/* Switched off for now (FEATURES.invoices) */}
+          {FEATURES.invoices && <div className="px-4 mt-5">{subhead('Invoices')}<FinanceStrip /></div>}
         </>
       )}
     </Screen>

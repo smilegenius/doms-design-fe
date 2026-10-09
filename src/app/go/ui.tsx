@@ -7,14 +7,15 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ChevronLeft, ChevronDown, Check, Search, X, Home, Layers, Plus, Receipt, Wallet, User, CheckCircle2, AlertTriangle, Info, Camera, PenLine, Mic,
 } from './icons';
-import { useGo, useScoped } from './store';
+import { FEATURES, useGo, useScoped } from './store';
 import { LabCase, ReadinessLevel, STAGES, Stage, invoiceNeedsAction, isOverdue, readiness, stageIndex, stageLabel } from './data';
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
 // ─── Layout ─────────────────────────────────────────────────────────────────
 
-export function Screen({ header, children, footer, tabs, bg = 'bg-go-bg' }: {
+// bg defaults to transparent so the phone's .go-wash gradient shows behind every screen
+export function Screen({ header, children, footer, tabs, bg = 'bg-transparent' }: {
   header?: React.ReactNode; children: React.ReactNode; footer?: React.ReactNode; tabs?: boolean; bg?: string;
 }) {
   return (
@@ -46,7 +47,7 @@ export function TopBar({ title, sub, back, fallback, right, large }: {
 }) {
   const goBack = useBack(fallback);
   return (
-    <div className="relative z-10 bg-go-bg/85 backdrop-blur-xl">
+    <div className="relative z-10 bg-go-bg/80 backdrop-blur-xl">
       <div className="flex items-center gap-2 px-3 h-14">
         {back ? (
           <button onClick={goBack} aria-label="Go back" className="w-10 h-10 -ml-1 rounded-full flex items-center justify-center text-go-ink hover:bg-go-raised active:scale-95 transition">
@@ -92,7 +93,7 @@ export function TabBar() {
   const { pathname } = useLocation();
   const { invoices } = useScoped();
   const [newOpen, setNewOpen] = useState(false);
-  const finCount = invoices.filter(i => invoiceNeedsAction(i.status)).length;
+  const finCount = FEATURES.invoices ? invoices.filter(i => invoiceNeedsAction(i.status)).length : 0;
   const tabs = [
     { to: '/go/home', label: 'Home', icon: Home },
     { to: '/go/work', label: 'Lab work', icon: Layers },
@@ -107,7 +108,7 @@ export function TabBar() {
           {tabs.map((t, i) => {
             if (!t) {
               return (
-                <button key="new" onClick={() => setNewOpen(true)} aria-label="New lab work"
+                <button key="new" onClick={() => setNewOpen(true)} aria-label="Create lab work"
                   className="-mt-7 w-14 h-14 rounded-[20px] go-grad go-glow text-white flex items-center justify-center active:scale-95 transition ring-4 ring-go-bg">
                   <Plus className="w-6 h-6" strokeWidth={2.5} />
                 </button>
@@ -136,11 +137,11 @@ export function NewWorkSheet({ open, onClose }: { open: boolean; onClose: () => 
   const navigate = useNavigate();
   const go = (to: string) => { onClose(); navigate(to); };
   return (
-    <Sheet open={open} onClose={onClose} title="Create lab work" sub="Pick the quickest way for you.">
+    <Sheet open={open} onClose={onClose} title="Create lab work" sub="Choose the way that suits you best.">
       <div className="space-y-3">
-        <ActionTile icon={<Mic className="w-6 h-6" />} tone="pink" title="By audio" body="Just talk. We’ll turn your words into a case." onClick={() => go('/go/new/audio')} />
-        <ActionTile icon={<Camera className="w-6 h-6" />} tone="brand" title="By photo" body="Snap the paper lab form. We’ll read it for you." onClick={() => go('/go/new/capture')} />
-        <ActionTile icon={<PenLine className="w-6 h-6" />} tone="violet" title="Manually" body="Step by step, every detail your way." onClick={() => go('/go/new/manual')} />
+        <ActionTile icon={<Mic className="w-6 h-6" />} tone="pink" title="By audio" body="Say what you need. We’ll turn it into a case." onClick={() => go('/go/new/audio')} />
+        <ActionTile icon={<Camera className="w-6 h-6" />} tone="brand" title="By photo" body="Take a photo of a written prescription. We’ll turn it into a case." onClick={() => go('/go/new/capture')} />
+        <ActionTile icon={<PenLine className="w-6 h-6" />} tone="violet" title="Manually" body="Fill in the form yourself, step by step." onClick={() => go('/go/new/manual')} />
       </div>
     </Sheet>
   );
@@ -486,7 +487,7 @@ export function PickerField({ label, value, options, onChange, placeholder = 'Se
               {o.value === value && <Check className="w-5 h-5 text-go-brand" strokeWidth={2.5} />}
             </button>
           ))}
-          {!shown.length && <p className="text-center text-[13px] text-go-muted py-8">No matches</p>}
+          {!shown.length && <p className="text-center text-[13px] text-go-muted py-8">Nothing found</p>}
         </div>
       </Sheet>
     </div>

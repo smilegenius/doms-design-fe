@@ -45,7 +45,8 @@ function readCase(rx: RxScenario, mode: Mode): { form: CaseForm; flags: ReadFlag
   const flags: ReadFlag[] = [];
   const flag = (field: string, label: string, heardAs: string, missing?: boolean) => flags.push({ field, label, heard: heardAs, missing });
 
-  const crown = newItem('su-crown', { teeth: ['LL5'], material: 'Lithium Disilicate (e.max)', shade: clean ? 'A2' : null });
+  // Delivery dates are per service; the crown's date is what the read heard
+  const crown = newItem('su-crown', { teeth: ['LL5'], material: 'Lithium Disilicate (e.max)', shade: clean ? 'A2' : null, returnBy: clean ? plusDays(9) : '' });
   if (!clean) flag(`${crown.uid}.shade`, 'Shade', heard ? 'A2… maybe A3' : 'A2/3 ?');
   const items = [crown];
   if (rx === 'multi') {
@@ -59,12 +60,12 @@ function readCase(rx: RxScenario, mode: Mode): { form: CaseForm; flags: ReadFlag
   }
   if (!clean) {
     flag('funding', 'Order type', '', true);
-    flag('returnBy', 'Delivery date', heard ? 'Wednesday the ninth' : 'Wed/09');
+    flag(`${crown.uid}.returnBy`, 'Delivery date', heard ? 'Wednesday the ninth' : 'Wed/09');
   }
   const form: CaseForm = {
     ...emptyForm(),
     practice: 'cds', clinician: 'reed', patientId: 'P-10450', lab: 'northstar',
-    funding: clean ? 'Private' : null, returnBy: clean ? plusDays(9) : '',
+    funding: clean ? 'Private' : null,
     caseSource: heard ? 'Voice note' : 'Photo of lab form',
     instructions: INSTRUCTIONS[rx],
     // The photo of the lab form is kept on the case; a voice note only fills the form
@@ -82,8 +83,8 @@ function CameraView({ onShot }: { onShot: () => void }) {
     <div className="absolute inset-0 bg-[#05050B] text-white flex flex-col">
       <div className="flex items-center justify-between px-4 h-14">
         <button onClick={back} aria-label="Close camera" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center"><X className="w-5 h-5" /></button>
-        <span className="text-[15px] font-semibold">Photograph a lab form</span>
-        <button onClick={() => setFlash(f => !f)} aria-label="Toggle flash" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+        <span className="text-[15px] font-semibold">Take a photo of the lab form</span>
+        <button onClick={() => setFlash(f => !f)} aria-label="Turn the flash on or off" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
           {flash ? <Zap className="w-5 h-5 text-[#FBBF24]" /> : <ZapOff className="w-5 h-5" />}
         </button>
       </div>
@@ -96,10 +97,10 @@ function CameraView({ onShot }: { onShot: () => void }) {
         ))}
         <span className="go-scanline absolute left-6 right-6 h-0.5 bg-gradient-to-r from-transparent via-[#7FB0FF] to-transparent shadow-[0_0_16px_2px_rgba(127,176,255,.6)]" />
         <span className="absolute top-4 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-black/50 backdrop-blur text-[12px] font-medium whitespace-nowrap">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] go-pulse" />Form detected
+          <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] go-pulse" />Form found
         </span>
       </div>
-      <p className="text-center text-[12.5px] text-white/70 px-10 leading-relaxed">Lay the whole form flat in good light. Demo only: nothing is uploaded.</p>
+      <p className="text-center text-[12.5px] text-white/70 px-10 leading-relaxed">Lay the whole form flat in good light.</p>
       <div className="flex items-center justify-between px-10 pt-5 pb-[calc(env(safe-area-inset-bottom)+28px)]">
         <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={e => { if (e.target.files?.length) onShot(); e.target.value = ''; }} />
         <button onClick={() => fileRef.current?.click()} className="flex flex-col items-center gap-1 text-[11px] text-white/80">
@@ -136,7 +137,7 @@ function RecordView({ onDone }: { onDone: (secs: number) => void }) {
   const retake = () => { setRec(false); setSecs(0); setBars(Array(28).fill(0.12)); };
 
   return (
-    <Screen header={<TopBar back fallback="/go/home" title="Dictate a case" />}>
+    <Screen header={<TopBar back fallback="/go/home" title="Record a voice note" />}>
       <div className="flex flex-col items-center px-6 pt-6">
         <p className="text-[13px] text-go-muted text-center leading-relaxed max-w-[280px]">
           Say the patient’s name, each item with teeth, material and shade, the lab and the delivery date.
@@ -177,11 +178,11 @@ function RecordView({ onDone }: { onDone: (secs: number) => void }) {
           <div className="w-14 flex flex-col items-center gap-1">
             {started && (
               <>
-                <button onClick={retake} aria-label="Retake recording"
+                <button onClick={retake} aria-label="Start the recording again"
                   className="w-14 h-14 rounded-full bg-white text-[#030213] border border-black/5 shadow-[0_6px_18px_-6px_rgba(16,24,64,.35)] flex items-center justify-center active:scale-95 transition">
                   <RotateCcw className="w-6 h-6" />
                 </button>
-                <span className="text-[11px] font-medium text-go-muted">Retake</span>
+                <span className="text-[11px] font-medium text-go-muted">Start again</span>
               </>
             )}
           </div>
@@ -206,8 +207,8 @@ function RecordView({ onDone }: { onDone: (secs: number) => void }) {
 
 function Reading({ mode, onDone }: { mode: Mode; onDone: () => void }) {
   const steps = mode === 'audio'
-    ? ['Transcribing your voice note', 'Picking out the case details', 'Matching patient, dentist and lab']
-    : ['Finding the form', 'Reading the handwriting', 'Matching patient, dentist and lab'];
+    ? ['Listening to your voice note', 'Picking out the case details', 'Finding the patient, dentist and lab']
+    : ['Finding the form', 'Reading the handwriting', 'Finding the patient, dentist and lab'];
   const [i, setI] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setI(x => x + 1), 650);
