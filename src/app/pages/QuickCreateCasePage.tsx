@@ -109,10 +109,10 @@ import {
   findServiceItem,
 } from './CreateCasePage';
 import {
-  isDentureItem, isPastISO, caseDateToISO, findFollowUpMatch, addStageAppend, sortStages, TODAY_ISO as TODAY_ISO_FOR_DATES,
+  isDentureItem, isPastISO, caseDateToISO, archLabel, archOf, archTeeth, toggleArch, findFollowUpMatch, addStageAppend, TODAY_ISO as TODAY_ISO_FOR_DATES,
   type FollowUpMatch,
 } from '../data/dentureStages';
-import { StageDatePicker, StageDateList, StageStatusCell } from '../components/DentureStages';
+import { ArchPicker, StageDatePicker, StageDateList, StageStatusCell, stagesComplete } from '../components/DentureStages';
 import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
 import { useCustomServices } from '../data/customServices';
 
@@ -158,9 +158,8 @@ function isSelectionComplete(sel: ServiceSelection): boolean {
   }
   if (cat === 'denture') {
     // Every selected stage needs its own delivery date — a denture has no
-    // service-level date to fall back to.
-    const stages = sel.stages ?? [];
-    return baseOk && stages.length > 0 && stages.every(s => !!sel.stageDates?.[s]);
+    // service-level date to fall back to. A stage done elsewhere needs none.
+    return baseOk && stagesComplete(sel.stages ?? [], sel.stageDates, sel.doneElsewhere);
   }
   if (cat === 'appliances') {
     return !!sel.applianceOption;
@@ -1205,15 +1204,21 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         const stageDates = isDenture && si.stageDates
           ? Object.fromEntries(Object.entries(si.stageDates).filter(([, d]) => !!d).map(([s, d]) => [s, caseDateToISO(d!)]))
           : undefined;
+        // Stages the Rx flags as done — or dates in the past — were done
+        // before the case reached Smile Genius.
+        const doneElsewhere = isDenture
+          ? (si.doneElsewhere ?? (si.stages ?? []).filter(s => isPastISO(stageDates?.[s])))
+          : undefined;
         return {
           itemId,
           orderType: si.orderType,
-          teeth,
+          // A denture is picked by arch — widen a partial tooth list to its jaw(s).
+          teeth: isDenture && teeth.length ? archTeeth(archOf(teeth)!) : teeth,
           material: si.material,
           shade: si.shade,
           sameForAllTeeth: true,
           ...(isDenture
-            ? { stages: si.stages, stageDates }
+            ? { stages: si.stages, stageDates, doneElsewhere }
             : { requestedDelivery: serviceDate ? caseDateToISO(serviceDate) : undefined }),
         } as ServiceSelection;
       })
@@ -1465,7 +1470,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // date (list column, CareStack, scoring) is the earliest upcoming one.
   const earliestRequestedISO = useMemo(() => {
     const all = selections.flatMap(sel => isDentureItem(sel.itemId)
-      ? (sel.stages ?? []).map(s => sel.stageDates?.[s])
+      ? (sel.stages ?? []).filter(s => !sel.doneElsewhere?.includes(s)).map(s => sel.stageDates?.[s])
       : [sel.requestedDelivery]
     ).filter((d): d is string => !!d).sort();
     return all.find(d => d >= TODAY_ISO_FOR_DATES) ?? all[all.length - 1] ?? '';
@@ -1680,6 +1685,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       stageDates: isDentureItem(sel.itemId)
         ? Object.fromEntries((sel.stages ?? []).map(s => [s, sel.stageDates?.[s] ? isoToCaseDate(sel.stageDates[s]) : null]))
         : undefined,
+      doneElsewhere: isDentureItem(sel.itemId) ? sel.doneElsewhere : undefined,
       fdi: (sel.teeth ?? []).map(codeToFdiNumber).filter((n): n is number => n !== null),
       material: sel.material,
       shade: sel.shade,
@@ -2706,10 +2712,13 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                         <div className="flex items-stretch">
                           {/* Left colour band — matches the service's swatch in the legend */}
                           <div className="w-1 flex-shrink-0" style={{ background: color }} />
-                          {/* Title block */}
+                          {/* Title block — title, requested delivery (non-denture),
+                              Edit. The date sits outside the title button so the
+                              input isn't nested in a button. */}
+                          <div className="flex-1 flex flex-wrap items-center justify-end gap-x-2 pr-2.5 min-w-0 hover:bg-[#FAFBFF] transition-colors">
                           <button
                             onClick={() => setActiveDetailsId(sel.itemId)}
-                            className="flex-1 flex items-center gap-2 px-2.5 py-2 text-left hover:bg-[#FAFBFF] transition-colors min-w-0"
+                            className="flex-1 basis-[160px] flex items-center gap-2 pl-2.5 py-2 text-left min-w-0"
                             title="Tap to edit material, shade, and teeth"
                           >
                             <span className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${
@@ -2732,11 +2741,11 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                               </div>
                               {hasDetails ? (
                                 <p className="text-[10px] text-[#1A5C2A] font-medium mt-0.5 truncate">
-                                  ✓ Configured · {teethCount} {teethCount === 1 ? 'tooth' : 'teeth'} selected
+                                  ✓ Configured · {isDentureItem(sel.itemId) ? archLabel(sel.teeth ?? []) : `${teethCount} ${teethCount === 1 ? 'tooth' : 'teeth'} selected`}
                                 </p>
                               ) : partiallyFilled ? (
                                 <p className="text-[10px] text-[#5A5568] font-medium mt-0.5 truncate">
-                                  In progress · {teethCount > 0 ? `${teethCount} ${teethCount === 1 ? 'tooth' : 'teeth'} · ` : ''}tap to finish
+                                  In progress · {teethCount > 0 ? `${isDentureItem(sel.itemId) ? archLabel(sel.teeth ?? []) : `${teethCount} ${teethCount === 1 ? 'tooth' : 'teeth'}`} · ` : ''}tap to finish
                                 </p>
                               ) : (
                                 <p className="text-[10px] text-[#717182] mt-0.5">
@@ -2745,10 +2754,29 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                 </p>
                               )}
                             </div>
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-[#BFDBFE] bg-white text-[10px] font-semibold text-[#4D8EF7] group-hover:bg-[#EEF4FF] transition-colors flex-shrink-0">
-                              <Pencil className="w-2.5 h-2.5" /> Edit
-                            </span>
                           </button>
+                          {/* Requested delivery — per service. A denture has no
+                              service date: its stages are dated below. */}
+                          {!isDentureItem(sel.itemId) && (
+                            <label className="flex items-center gap-1.5 flex-shrink-0 py-1">
+                              <span className="text-[10px] font-semibold text-[#5A5568] uppercase tracking-wider whitespace-nowrap">Delivery</span>
+                              {aiFields.delivery != null && <AiSparkle label confidence={aiFields.delivery} />}
+                              <input
+                                type="date"
+                                value={sel.requestedDelivery ?? ''}
+                                aria-label={`${displayName} requested delivery date`}
+                                onChange={(e) => { updateService(sel.itemId, { requestedDelivery: e.target.value }); deliveryTouchedRef.current = true; clearAiMark('delivery'); }}
+                                className={`px-2 py-1 text-[11px] text-[#030213] border rounded-md bg-white outline-none focus:border-[#4D8EF7] ${sel.requestedDelivery ? 'border-[#E0E0E6]' : 'border-[#FCD34D]'}`}
+                              />
+                            </label>
+                          )}
+                          <button
+                            onClick={() => setActiveDetailsId(sel.itemId)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-[#BFDBFE] bg-white text-[10px] font-semibold text-[#4D8EF7] group-hover:bg-[#EEF4FF] transition-colors flex-shrink-0"
+                          >
+                            <Pencil className="w-2.5 h-2.5" /> Edit
+                          </button>
+                          </div>
                           {/* Remove button — its own bordered zone */}
                           <div className="w-px bg-[#E8EAF6]" />
                           <button
@@ -2759,48 +2787,24 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                             <X className="w-3.5 h-3.5" strokeWidth={2.5} />
                           </button>
                         </div>
-                        {/* Requested delivery — per service. A denture has no
-                            service date: its stages are dated one by one. */}
-                        <div className="flex items-center gap-2 flex-wrap pl-[18px] pr-3 py-1.5 border-t border-[#F0EFF6] bg-[#FCFCFE]">
-                          <CalendarDays className="w-3 h-3 text-[#A0A0B0] flex-shrink-0" />
-                          {isDentureItem(sel.itemId) ? (
-                            <>
-                              <span className="text-[10px] font-semibold text-[#5A5568] uppercase tracking-wider">Stage dates</span>
-                              {(sel.stages ?? []).length === 0 ? (
-                                <span className="text-[10px] text-[#D97706]">No stages picked yet</span>
-                              ) : sortStages(sel.stages ?? []).map(st => (
-                                <span
-                                  key={st}
-                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-semibold ${
-                                    sel.stageDates?.[st] ? 'bg-white border-[#E0E0E6] text-[#030213]' : 'bg-[#FFFBEB] border-[#FCD34D] text-[#92400E]'
-                                  }`}
-                                >
-                                  <span className="font-normal text-[#5A5568]">{st}</span>
-                                  {sel.stageDates?.[st] ? isoToCaseDate(sel.stageDates[st]) : 'no date'}
-                                  {isPastISO(sel.stageDates?.[st]) && <span className="font-normal text-[#717182]">· done earlier</span>}
-                                </span>
-                              ))}
-                              <button
-                                onClick={() => setActiveDetailsId(sel.itemId)}
-                                className="ml-auto text-[10px] font-semibold text-[#4D8EF7] hover:text-[#1565C0]"
-                              >
-                                Set stage dates
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <span className="text-[10px] font-semibold text-[#5A5568] uppercase tracking-wider">Requested delivery</span>
-                              <input
-                                type="date"
-                                value={sel.requestedDelivery ?? ''}
-                                aria-label={`${displayName} requested delivery date`}
-                                onChange={(e) => { updateService(sel.itemId, { requestedDelivery: e.target.value }); deliveryTouchedRef.current = true; clearAiMark('delivery'); }}
-                                className={`px-2 py-1 text-[11px] text-[#030213] border rounded-md bg-white outline-none focus:border-[#4D8EF7] ${sel.requestedDelivery ? 'border-[#E0E0E6]' : 'border-[#FCD34D]'}`}
-                              />
-                              {aiFields.delivery != null && <AiSparkle label confidence={aiFields.delivery} />}
-                            </>
-                          )}
-                        </div>
+                        {/* Denture — no service date: its stages are ticked
+                            and dated right here on the card, one per row. */}
+                        {isDentureItem(sel.itemId) && (
+                          <div className="pl-[18px] pr-3 py-2 border-t border-[#F0EFF6] bg-[#FCFCFE]">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <CalendarDays className="w-3 h-3 text-[#A0A0B0] flex-shrink-0" />
+                              <span className="text-[10px] font-semibold text-[#5A5568] uppercase tracking-wider">Stages & delivery dates</span>
+                            </div>
+                            <StageDatePicker
+                              compact
+                              stages={sel.stages ?? []}
+                              dates={sel.stageDates ?? {}}
+                              doneElsewhere={sel.doneElsewhere}
+                              existing={followUp?.existing}
+                              onChange={(stages, stageDates, doneElsewhere) => updateService(sel.itemId, { stages, stageDates, doneElsewhere })}
+                            />
+                          </div>
+                        )}
                         {/* Detail strip — small chips showing the spec at a
                             glance. Renders whenever the user has filled at
                             least one field (even partial selections), so
@@ -2830,12 +2834,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#F0FDF4] border border-[#BBF7D0] text-[10px] font-semibold text-[#1A5C2A]">
                                   <span className="text-[#5A5568] font-normal">Option:</span>
                                   {sel.applianceOption}
-                                </span>
-                              )}
-                              {(sel.stages?.length ?? 0) > 0 && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#F0FDF4] border border-[#BBF7D0] text-[10px] font-semibold text-[#1A5C2A]">
-                                  <span className="text-[#5A5568] font-normal">Stage:</span>
-                                  {sortStages(sel.stages!).join(', ')}
                                 </span>
                               )}
                             </>
@@ -2906,7 +2904,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                             <div className="px-2.5 pb-2 pt-0.5 ml-[8px] space-y-1">
                               <div className="grid grid-cols-[auto_1fr_1fr] gap-x-2 gap-y-1">
                                 {/* Header row — column labels */}
-                                <span className="px-1.5 text-[9px] font-bold text-[#A0A0B0] uppercase tracking-wider">Teeth</span>
+                                <span className="px-1.5 text-[9px] font-bold text-[#A0A0B0] uppercase tracking-wider">{isDentureItem(sel.itemId) ? 'Arch' : 'Teeth'}</span>
                                 <span className="text-[9px] font-bold text-[#A0A0B0] uppercase tracking-wider">Material</span>
                                 <span className="text-[9px] font-bold text-[#A0A0B0] uppercase tracking-wider">Shade</span>
                                 {/* Data row — spans the 3 parent cols with
@@ -2916,7 +2914,15 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                   style={{ background: rowBg, borderColor: rowBorder }}
                                 >
                                   <div className="flex flex-wrap items-center gap-1">
-                                    {sortedTeeth.length > 0 ? sortedTeeth.map(code => (
+                                    {/* A denture reads as its arch, not tooth by tooth. */}
+                                    {isDentureItem(sel.itemId) && sortedTeeth.length > 0 ? (
+                                      <span
+                                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white border whitespace-nowrap"
+                                        style={{ color, borderColor: rowBorder }}
+                                      >
+                                        {archLabel(sortedTeeth)}
+                                      </span>
+                                    ) : sortedTeeth.length > 0 ? sortedTeeth.map(code => (
                                       <span
                                         key={code}
                                         className="inline-flex items-center justify-center px-1 py-0.5 rounded text-[10px] font-mono font-bold bg-white border"
@@ -4019,11 +4025,13 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
       {/* ── Left column — teeth chart, the entry point of every service.
           Stays visible while the user scrolls the form on the right.
           Slightly wider than the form's category blocks so the chart can
-          render at a readable size without crowding the FDI numbers. ── */}
+          render at a readable size without crowding the FDI numbers.
+          A denture covers a whole jaw: the chart switches to arch mode,
+          where a click selects or clears the whole jaw. ── */}
       <div className="hidden md:flex flex-col border-r border-[#F0EFF6] bg-[#FAFBFF] p-3 overflow-y-auto">
         <div className="flex items-center justify-between mb-2">
           <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">
-            1. Teeth ({teeth.length})
+            {isDenture ? `1. Arch${teeth.length ? ` (${archLabel(teeth)})` : ''}` : `1. Teeth (${teeth.length})`}
           </p>
           {teeth.length > 0 && (
             <button
@@ -4048,6 +4056,7 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
           <InteractiveToothChart
             activeService={selection}
             width="min(240px, calc((100vh - 250px) * 0.589))"
+            onArchToggle={isDenture ? (jaw) => onUpdate({ teeth: toggleArch(teeth, jaw) }) : undefined}
             onToothToggle={(code) => {
               const next = teeth.includes(code) ? teeth.filter(c => c !== code) : [...teeth, code];
               onUpdate({ teeth: next });
@@ -4061,8 +4070,29 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
           material / shade / notes they can see at a glance what those
           values apply to. Numbered "2." cue echoes the "1." on the chart. ── */}
       <div className="overflow-y-auto p-5 space-y-5">
+        {/* Denture — stages and their dates come first, then the arch. */}
+        {isDenture && (
+          <>
+            <Mini label="Stages & delivery dates">
+              <StageDatePicker
+                stages={selection.stages ?? []}
+                dates={selection.stageDates ?? {}}
+                doneElsewhere={selection.doneElsewhere}
+                existing={followUp?.existing}
+                onChange={(stages, stageDates, doneElsewhere) => onUpdate({ stages, stageDates, doneElsewhere })}
+              />
+            </Mini>
+            {/* The arch is picked on the chart; phones have no chart column,
+                so they get the same choice as buttons. */}
+            <div className="md:hidden">
+              <Mini label="Arch">
+                <ArchPicker teeth={teeth} onChange={(next) => onUpdate({ teeth: next })} />
+              </Mini>
+            </div>
+          </>
+        )}
         {/* Selected-teeth summary strip — pinned to the top of the form. */}
-        <div className={`rounded-xl px-3 py-2 border ${
+        {!isDenture && <div className={`rounded-xl px-3 py-2 border ${
           teeth.length > 0
             ? 'bg-gradient-to-r from-[#EEF4FF] to-[#F3EEFF] border-[#BFDBFE]'
             : 'bg-[#FAFBFF] border-dashed border-[#E0E0E6]'
@@ -4096,9 +4126,9 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
               ))}
             </div>
           )}
-        </div>
+        </div>}
         {/* ── Requested delivery — per service. Dentures date each stage
-            in "Denture specifics" below instead. ── */}
+            at the top of the form instead. ── */}
         {!isDenture && (
           <Mini label="Requested delivery date">
             <input
@@ -4162,20 +4192,6 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
             </div>
           </CategoryBlock>
         ))}
-
-        {/* Denture specifics */}
-        {isDenture && (
-          <CategoryBlock label="Denture specifics" tint="amber" icon={<Stethoscope className="w-3 h-3" />}>
-            <Mini label="Stages & delivery dates">
-              <StageDatePicker
-                stages={selection.stages ?? []}
-                dates={selection.stageDates ?? {}}
-                existing={followUp?.existing}
-                onChange={(stages, stageDates) => onUpdate({ stages, stageDates })}
-              />
-            </Mini>
-          </CategoryBlock>
-        )}
 
         {/* Appliances specifics */}
         {isAppliance && applianceConfig && (
@@ -5000,7 +5016,9 @@ function MaterialShadeBlock({ selection, onUpdate }: {
   selection: ServiceSelection;
   onUpdate: (patch: Partial<ServiceSelection>) => void;
 }) {
-  const sameForAll = selection.sameForAllTeeth !== false; // default true
+  // A denture is one appliance for the whole arch — never per tooth.
+  const isDenture = isDentureItem(selection.itemId);
+  const sameForAll = isDenture || selection.sameForAllTeeth !== false; // default true
   const teeth = selection.teeth ?? [];
   const perTooth = selection.perTooth ?? {};
   // Custom "Others" services rarely match any catalogued material / shade,
@@ -5020,7 +5038,7 @@ function MaterialShadeBlock({ selection, onUpdate }: {
   return (
     <div className="bg-white border border-[#E8EAF6] rounded-xl p-3">
       {/* Toggle row — "Same for all teeth" + small toggle switch */}
-      <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-[#F0EFF6]">
+      {!isDenture && <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-[#F0EFF6]">
         <div>
           <p className="text-[11px] font-bold text-[#030213]">Same material &amp; shade for all teeth</p>
           <p className="text-[10px] text-[#717182] leading-tight">
@@ -5042,7 +5060,7 @@ function MaterialShadeBlock({ selection, onUpdate }: {
             sameForAll ? 'translate-x-4' : 'translate-x-0.5'
           }`} />
         </button>
-      </div>
+      </div>}
 
       {sameForAll ? (
         /* Single Material + Shade pair — applies to every selected tooth.
@@ -6472,7 +6490,9 @@ function OrderFormSheet({
                         <div className={`${compact ? 'grid grid-cols-2' : 'grid grid-cols-2 sm:grid-cols-3'} gap-1.5 text-[10px] text-[#5A5568]`}>
                           {sel.material && <span><span className="text-[#A0A0B0]">Material:</span> {sel.material}</span>}
                           {sel.shade && <span><span className="text-[#A0A0B0]">Shade:</span> {sel.shade}</span>}
-                          {teethCount > 0 && <span><span className="text-[#A0A0B0]">Teeth:</span> {teethCount}</span>}
+                          {teethCount > 0 && (isDentureItem(sel.itemId)
+                            ? <span><span className="text-[#A0A0B0]">Arch:</span> {archLabel(sel.teeth ?? [])}</span>
+                            : <span><span className="text-[#A0A0B0]">Teeth:</span> {teethCount}</span>)}
                           {sel.brand && <span><span className="text-[#A0A0B0]">Brand:</span> {sel.brand}</span>}
                           {sel.abutmentMaterial && <span><span className="text-[#A0A0B0]">Abutment:</span> {sel.abutmentMaterial}</span>}
                           {sel.retainerType && <span><span className="text-[#A0A0B0]">Retainer:</span> {sel.retainerType}</span>}
@@ -6485,7 +6505,7 @@ function OrderFormSheet({
                         {isDentureItem(sel.itemId) && (sel.stages?.length ?? 0) > 0 && (
                           <div className="mt-1.5 pt-1.5 border-t border-[#E8EAF6]">
                             <p className="text-[9px] text-[#A0A0B0] uppercase tracking-wider font-semibold mb-0.5">Stages · requested delivery</p>
-                            <StageDateList stages={sel.stages!} dates={sel.stageDates ?? {}} format={isoToCaseDate} />
+                            <StageDateList stages={sel.stages!} dates={sel.stageDates ?? {}} doneElsewhere={sel.doneElsewhere} format={isoToCaseDate} />
                           </div>
                         )}
                       </div>

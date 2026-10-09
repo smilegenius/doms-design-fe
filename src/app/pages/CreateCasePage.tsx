@@ -10,7 +10,7 @@ import ModalPortal from '../components/ModalPortal';
 import { mockSuppliers } from '../data/suppliersData';
 import { mockStaffMembers } from '../data/clinicsData';
 import { findCustomService, isCustomServiceId } from '../data/customServices';
-import { isDentureItem, isoToCaseDate } from '../data/dentureStages';
+import { archLabel, isDentureItem, isUpperTooth, isoToCaseDate, toggleArch } from '../data/dentureStages';
 import { StageDatePicker, StageDateList } from '../components/DentureStages';
 
 // ─── Create Case — 3-step wizard ─────────────────────────────────────────────
@@ -353,6 +353,7 @@ export interface ServiceSelection {
   // Denture-specific
   stages?: string[];           // multi-select: Special Tray, Bite Reg., Try In, Retry, Finish
   stageDates?: Record<string, string>;  // per-stage requested delivery (ISO) — replaces requestedDelivery for dentures
+  doneElsewhere?: string[];    // stages done before the case reached Smile Genius (date = done-on, optional)
   // Appliances — per item:
   //   Whitening Tray → Reservoirs (Yes/No)
   //   Night Guard    → Type (Hard/Soft/Dual-Laminate)
@@ -1324,13 +1325,21 @@ function ServiceDetailsStep({
                 Order Type is case-level (Case Order Details card at the top).
                 Delivery is per service; a denture dates each stage instead. */}
             {isDentureItem(activeService.itemId) ? (
-              <div className="mb-4">
+              <div className="mb-4 space-y-4">
                 <Mini label="Stages & delivery dates" required>
                   <StageDatePicker
                     stages={activeService.stages ?? []}
                     dates={activeService.stageDates ?? {}}
-                    onChange={(stages, stageDates) => onUpdateSelection(activeService.itemId, { stages, stageDates })}
+                    doneElsewhere={activeService.doneElsewhere}
+                    onChange={(stages, stageDates, doneElsewhere) => onUpdateSelection(activeService.itemId, { stages, stageDates, doneElsewhere })}
                   />
+                </Mini>
+                {/* A denture covers a whole jaw — the arch is picked on the
+                    chart (right); this just reads it back. */}
+                <Mini label="Arch" required>
+                  <p className={`text-sm ${(activeService.teeth?.length ?? 0) ? 'font-semibold text-[#1565C0]' : 'text-[#A0A0B0] italic'}`}>
+                    {(activeService.teeth?.length ?? 0) ? archLabel(activeService.teeth!) : 'Click an arch on the chart →'}
+                  </p>
                 </Mini>
               </div>
             ) : (
@@ -1380,8 +1389,8 @@ function ServiceDetailsStep({
             </div>
 
             {/* Teeth selection summary — read-only summary; editing happens in
-                the chart on the right. */}
-            <div className="mt-4 pt-3 border-t border-[#F0EFF6]">
+                the chart on the right. A denture's arch is picked above. */}
+            {!isDentureItem(activeService.itemId) && <div className="mt-4 pt-3 border-t border-[#F0EFF6]">
               <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-1.5">
                 Teeth ({activeService.teeth?.length ?? 0})
               </p>
@@ -1396,7 +1405,7 @@ function ServiceDetailsStep({
                   ))}
                 </div>
               )}
-            </div>
+            </div>}
           </div>
 
           {/* ── Tooth chart / scan files for the active service ── */}
@@ -1423,6 +1432,9 @@ function ServiceDetailsStep({
               {chartTab === 'chart' ? (
                 <InteractiveToothChart
                   activeService={activeService}
+                  onArchToggle={isDentureItem(activeService.itemId)
+                    ? (jaw) => onUpdateSelection(activeService.itemId, { teeth: toggleArch(activeService.teeth ?? [], jaw) })
+                    : undefined}
                   onToothToggle={(code) => {
                     const current = activeService.teeth ?? [];
                     const next = current.includes(code) ? current.filter(c => c !== code) : [...current, code];
@@ -1772,7 +1784,7 @@ function CaseSummaryCard({
                       </p>
                       {hasDetails ? (
                         <p className="text-[10px] text-[#5A5568] truncate">
-                          {teethCount} {teethCount === 1 ? 'tooth' : 'teeth'}
+                          {isDentureItem(sel.itemId) ? archLabel(sel.teeth ?? []) : `${teethCount} ${teethCount === 1 ? 'tooth' : 'teeth'}`}
                           {sel.shade && ` · Shade ${sel.shade}`}
                           {sel.material && ` · ${sel.material}`}
                         </p>
@@ -1786,7 +1798,7 @@ function CaseSummaryCard({
                       {isDentureItem(sel.itemId) ? (
                         (sel.stages?.length ?? 0) > 0 ? (
                           <div className="mt-1 pt-1 border-t border-black/5">
-                            <StageDateList stages={sel.stages!} dates={sel.stageDates ?? {}} format={isoToCaseDate} />
+                            <StageDateList stages={sel.stages!} dates={sel.stageDates ?? {}} doneElsewhere={sel.doneElsewhere} format={isoToCaseDate} />
                           </div>
                         ) : (
                           <p className="text-[10px] text-[#D97706] mt-0.5">Pick stages and their dates</p>
@@ -2092,9 +2104,12 @@ export function Mini({ label, required, accessory, children }: { label: string; 
 // coordinate space of the chart (viewBox 0 0 327 555).
 // Hover → light teal tint; Selected → solid teal fill (#59C1E3 / #3FA8CA).
 // Targets whichever service is currently being edited (activeService).
-export function InteractiveToothChart({ activeService, onToothToggle, width = 170 }: {
+export function InteractiveToothChart({ activeService, onToothToggle, onArchToggle, width = 170 }: {
   activeService: ServiceSelection | null;
   onToothToggle: (code: string) => void;
+  /** Arch mode (dentures): a click on "Select Arch" or on any tooth selects
+   *  or clears that whole jaw instead of a single tooth. */
+  onArchToggle?: (jaw: 'upper' | 'lower') => void;
   /** Width of the rendered chart. Either a number (treated as px) or a CSS
    *  expression (e.g. "min(240px, calc(100vh - 220px))") so callers can
    *  cap the chart size to the available viewport. Height follows the FDI
@@ -2102,7 +2117,16 @@ export function InteractiveToothChart({ activeService, onToothToggle, width = 17
   width?: number | string;
 }) {
   const [hoveredTooth, setHoveredTooth] = useState<string | null>(null);
+  const [hoveredJaw, setHoveredJaw] = useState<'upper' | 'lower' | null>(null);
   const selected = activeService?.teeth ?? [];
+  const archMode = !!onArchToggle;
+  // Teeth arrive as chart ids ("16") or as codes ("UR6", from prescriptions
+  // and the arch picker) — a tooth is lit if either form is selected.
+  const toCode = (id: string) => `${['', 'UR', 'UL', 'LL', 'LR'][Number(id[0])] ?? ''}${id[1]}`;
+  const isSelected = (id: string) => selected.includes(id) || selected.includes(toCode(id));
+  const jawOf = (id: string): 'upper' | 'lower' => isUpperTooth(id) ? 'upper' : 'lower';
+  // Centres of the two "Select Arch" labels in the FDI artwork.
+  const ARCH_HIT: Record<'upper' | 'lower', { cy: number }> = { upper: { cy: 190 }, lower: { cy: 408 } };
 
   // Hit-area centres and radii in SVG units (viewBox 0 0 327 555). Tuned
   // by measuring path centroids from /public/FDI.svg so the ellipses land
@@ -2157,6 +2181,10 @@ export function InteractiveToothChart({ activeService, onToothToggle, width = 17
         <p className="text-[11px] text-[#717182]">
           {!activeService
             ? 'Pick a service from the left to start selecting teeth.'
+            : archMode
+              ? (selected.length === 0
+                  ? 'A denture covers the whole jaw — click an arch to select it.'
+                  : <><span className="font-semibold text-[#030213]">{archLabel(selected)}</span> selected · click an arch to add or remove it</>)
             : selected.length === 0
               ? 'Click any tooth to add it to the selection.'
               : <><span className="font-semibold text-[#030213]">{selected.length}</span>{' '}
@@ -2196,9 +2224,26 @@ export function InteractiveToothChart({ activeService, onToothToggle, width = 17
           className="absolute inset-0 w-full h-full"
           style={{ cursor: activeService ? 'pointer' : 'default' }}
         >
+          {/* Arch mode — the "Select Arch" label in the middle of each jaw is
+              a hit area too. */}
+          {archMode && (['upper', 'lower'] as const).map(jaw => (
+            <ellipse
+              key={`arch-${jaw}`}
+              cx={163}
+              cy={ARCH_HIT[jaw].cy}
+              rx={72}
+              ry={46}
+              fill={hoveredJaw === jaw ? 'rgba(89,193,227,0.10)' : 'transparent'}
+              onMouseEnter={() => activeService && setHoveredJaw(jaw)}
+              onMouseLeave={() => setHoveredJaw(null)}
+              onClick={() => activeService && onArchToggle!(jaw)}
+            >
+              <title>{`Select the whole ${jaw} arch`}</title>
+            </ellipse>
+          ))}
           {Object.entries(TEETH).map(([id, { cx, cy, rx, ry }]) => {
-            const isSel = selected.includes(id);
-            const isHov = hoveredTooth === id;
+            const isSel = isSelected(id);
+            const isHov = archMode ? hoveredJaw === jawOf(id) : hoveredTooth === id;
             return (
               <ellipse
                 key={id}
@@ -2215,9 +2260,9 @@ export function InteractiveToothChart({ activeService, onToothToggle, width = 17
                 }
                 stroke={isSel ? '#3FA8CA' : 'none'}
                 strokeWidth={isSel ? 1.5 : 0}
-                onMouseEnter={() => activeService && setHoveredTooth(id)}
-                onMouseLeave={() => setHoveredTooth(null)}
-                onClick={() => activeService && onToothToggle(id)}
+                onMouseEnter={() => activeService && (archMode ? setHoveredJaw(jawOf(id)) : setHoveredTooth(id))}
+                onMouseLeave={() => { setHoveredTooth(null); setHoveredJaw(null); }}
+                onClick={() => activeService && (archMode ? onArchToggle!(jawOf(id)) : onToothToggle(id))}
               />
             );
           })}

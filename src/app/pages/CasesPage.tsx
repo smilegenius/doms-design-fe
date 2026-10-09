@@ -46,8 +46,8 @@ import { AiReviewTag } from '../components/AiReviewNotice';
 import { SCANNER_SYNC_COPY, scannerSyncUnsupported, caseCreatedBy, needsReview, statusReach, type CreatedSide, type StatusReach, type ViewerPortal } from '../data/caseProvenance';
 import { useScannerConnections } from '../data/scannerConnections';
 import { getCreatedCases, useCreatedCases } from '../data/createdCases';
-import { isDentureService, nextStageRow, stageRowsFor, stageOrderSummaries, useStageAppends, type StageOrderSummary } from '../data/dentureStages';
-import { DoneEarlierTag, StageStatusPill } from '../components/DentureStages';
+import { isDentureService, nextStageRow, stageRowsFor, useStageAppends, type StageRow } from '../data/dentureStages';
+import { StageStatusCell } from '../components/DentureStages';
 import { hasEmailReply, hasWhatsAppReply, useCaseCommunications } from '../data/caseCommunications';
 import {
   RescanLink, originalIdOf, relatedIdsOf, relationshipOf, rescanIdsOf, useRescanLinks,
@@ -815,7 +815,7 @@ export const draftCases: Case[] = [
   },
   // DN2: a Full Denture for Margaret Lee, never on the platform before. The
   // prescription lists the earlier stages with their (past) dates plus Finish —
-  // a new case is created and the past stages show as "Done earlier".
+  // a new case is created and the past stages show as "Done elsewhere".
   {
     id: 'CASE-DRAFT-DN2',
     patientName: 'Margaret Lee',
@@ -830,6 +830,7 @@ export const draftCases: Case[] = [
       scanFileCount: 0, attachmentCount: 2,
       stages: ['Special Tray', 'Bite Registration', 'Finish'],
       stageDates: { 'Special Tray': '20-Mar-2026', 'Bite Registration': '10-Apr-2026', Finish: '05-Jun-2026' },
+      doneElsewhere: ['Special Tray', 'Bite Registration'],
     }],
     status: 'draft',
     createdAt: '30-Jun-2026',
@@ -1566,7 +1567,7 @@ function UpgradeModal({ onUpgrade, onBack }: { onUpgrade: () => void; onBack: ()
 // ─── Tree guide for nested list rows ─────────────────────────────────────────
 // Drawn in the source-icon column of a child row: a line that drops from the
 // centre of the parent's icon and turns into the row with a rounded elbow.
-// Depth 2 (a denture's stage orders under its service row) keeps the depth-1
+// Depth 2 (a denture's stages under its service row) keeps the depth-1
 // line running when more services follow, and turns in one step further.
 // Positions are measured from the cell's left edge: the icon cell is pl-3
 // (12px) and the icon 32px wide, so its centre is at 28px.
@@ -1811,7 +1812,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   // opens everything underneath: service rows, and the stages of every denture.
   const stageKey = (caseId: string, serviceId: string) => `${caseId}::${serviceId}`;
   // ONE expand control for every level (case → services, case or service →
-  // stage orders): an arrow before the status that turns when open. Rows with
+  // stages): an arrow before the status that turns when open. Rows with
   // nothing nested get the same-width spacer so every status pill lines up.
   const expandArrow = (open: boolean, onToggle: () => void, title: string) => (
     <button
@@ -1827,23 +1828,24 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
     </button>
   );
   const arrowSpacer = <span className="w-5 h-5 flex-shrink-0" aria-hidden />;
-  // One row per stage ORDER, as the case page's tabs read: "Initial" with the
-  // stages it bundles (each with its own requested date), then "Order 2"…
-  // Status = where the order is now; Delivery = its next open stage's date.
-  function renderStageOrderRows(c: Case, orders: StageOrderSummary[], nested = false, parentLast = true) {
-    return orders.map((o, i) => (
+  // One row per STAGE, in the order they happen — no order grouping. Each row
+  // carries its own status (or "Done elsewhere") and its own date; that is the
+  // only place a denture shows a date in the list.
+  function renderStageRows(c: Case, rows: StageRow[], nested = false, parentLast = true) {
+    const next = nextStageRow(rows);
+    return rows.map((r, i) => (
       <tr
-        key={`${c.id}-order-${o.id}`}
+        key={`${c.id}-stage-${r.stage}`}
         onClick={() => openCase(c)}
         className="bg-[#FAF8FF] hover:bg-[#F5F3FF] transition-colors cursor-pointer [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]"
       >
         <td className="pl-4 pr-1 py-2" />
         <td className="pl-3 pr-2 py-2 relative">
-          <TreeGuide depth={nested ? 2 : 1} first={i === 0} last={i === orders.length - 1} parentLast={parentLast} />
+          <TreeGuide depth={nested ? 2 : 1} first={i === 0} last={i === rows.length - 1} parentLast={parentLast} />
         </td>
         {visibleCols.status && (
           <td className="pr-4 py-2 whitespace-nowrap" style={{ paddingLeft: nested ? 68 : 42 }}>
-            {o.doneEarlier ? <DoneEarlierTag size="xs" /> : <StageStatusPill status={o.status} size="xs" />}
+            <StageStatusCell row={r} size="xs" />
           </td>
         )}
         {visibleCols.score && <td className="px-4 py-2" />}
@@ -1851,13 +1853,13 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
         {visibleCols.caseId && (
           <td className={`${nested ? 'pl-8' : 'pl-4'} pr-4 py-2`}>
             <div className="flex items-center gap-1.5 whitespace-nowrap">
-              <span className="text-[11px] font-bold text-[#5B21B6]">{o.label}</span>
-              {o.followUp && (
+              <span className={`text-[11px] font-bold ${r.doneEarlier ? 'text-[#717182]' : 'text-[#5B21B6]'}`}>{r.stage}</span>
+              {r === next && !r.doneEarlier && (
+                <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#F5F3FF] text-[#7C3AED] border border-[#DDD6FE]">Next</span>
+              )}
+              {r.followUp && (
                 <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">Follow-up Rx</span>
               )}
-            </div>
-            <div className="text-[10px] text-[#717182] mt-0.5 whitespace-nowrap">
-              {o.rows.map(r => r.stage).join(', ')}
             </div>
           </td>
         )}
@@ -1866,17 +1868,14 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
         {visibleCols.updatedAt   && <td className="px-4 py-2" />}
         {visibleCols.deliveryDate && (
           <td className="px-4 py-2 whitespace-nowrap text-[11px]">
-            {o.next
-              ? <>
-                  {o.next.date ? <span className="text-[#030213]">{o.next.date}</span> : <span className="text-[#D97706]">No date</span>}
-                  <div className="text-[10px] text-[#717182] mt-0.5">{o.next.stage}</div>
-                </>
-              : <span className="text-[#A0A0B0]">{o.rows[o.rows.length - 1]?.date ?? '—'}</span>}
+            {r.doneEarlier
+              ? <span className="text-[#A0A0B0]">{r.date ? `Done ${r.date}` : 'Done'}</span>
+              : r.date ? <span className="text-[#030213]">{r.date}</span> : <span className="text-[#D97706]">No date</span>}
           </td>
         )}
         {visibleCols.patient  && <td className="px-4 py-2" />}
         {visibleCols.service  && (
-          <td className="px-4 py-2 whitespace-nowrap"><span className="text-[10px] text-[#A0A0B0]">Stage order</span></td>
+          <td className="px-4 py-2 whitespace-nowrap"><span className="text-[10px] text-[#A0A0B0]">Stage</span></td>
         )}
         {visibleCols.practice && <td className="px-4 py-2" />}
         {visibleCols.dentist  && <td className="px-4 py-2" />}
@@ -2575,17 +2574,20 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                   // The lab's latest due-date change is the date the case is
                   // working to — it wins over the original requested date.
                   const dueDateChange = latestDueDateChange(c.id, dueDateChanges);
-                  // A single-service denture has no service date — the row shows
-                  // the next open stage's date instead.
+                  // No case-level date where dates live lower down: a
+                  // single-service denture dates each stage, a multi-service
+                  // case dates each service. Their dates show on the child rows.
                   const soloDenture = c.serviceItems.length === 1 && isDentureService(c.serviceItems[0].name) && c.status !== 'draft'
                     ? c.serviceItems[0] : null;
                   const soloStageRows = soloDenture ? stageRowsFor(c.id, c.createdAt, soloDenture) : [];
-                  const soloOrders = soloDenture ? stageOrderSummaries(c.id, c.createdAt, soloDenture) : [];
-                  const soloNext = soloDenture ? nextStageRow(soloStageRows) : null;
-                  const effectiveDelivery = dueDateChange?.next ?? (soloNext ? soloNext.date : c.requestedDelivery);
-                  const overdue = isOverdue(effectiveDelivery);
                   const isExpanded = expandedRows.has(c.id);
                   const isMulti = c.serviceItems.length > 1;
+                  const dateScope: 'stage' | 'service' | null =
+                    isMulti ? 'service'
+                    : c.serviceItems.length === 1 && isDentureService(c.serviceItems[0].name) ? 'stage'
+                    : null;
+                  const effectiveDelivery = dueDateChange?.next ?? (dateScope ? null : c.requestedDelivery);
+                  const overdue = isOverdue(effectiveDelivery);
                   const caseScore = scoreCase(c);
                   // Plan-limit teaser (lab): the paywalled demo case appears in the
                   // list with its data blurred and an "Upgrade plan" CTA where the
@@ -2659,22 +2661,22 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                       </td>
                       {visibleCols.status && (
                         <td
-                          className={`px-4 py-3 whitespace-nowrap ${!locked && (isMulti || soloOrders.length > 0) ? 'cursor-pointer' : ''}`}
+                          className={`px-4 py-3 whitespace-nowrap ${!locked && (isMulti || soloStageRows.length > 0) ? 'cursor-pointer' : ''}`}
                           onClick={(e) => {
-                            if (locked || !(isMulti || soloOrders.length > 0)) return;
+                            if (locked || !(isMulti || soloStageRows.length > 0)) return;
                             e.stopPropagation();
                             toggleRow(c.id);
                           }}
                         >
                           <div className="flex items-start gap-1.5">
                           <div className="pt-px">
-                            {!locked && (isMulti || soloOrders.length > 0)
+                            {!locked && (isMulti || soloStageRows.length > 0)
                               ? expandArrow(
                                   isExpanded,
                                   () => toggleRow(c.id),
                                   isMulti
                                     ? (isExpanded ? 'Hide services' : 'Show services')
-                                    : (isExpanded ? 'Hide stage orders' : 'Show stage orders'),
+                                    : (isExpanded ? 'Hide stages' : 'Show stages'),
                                 )
                               : arrowSpacer}
                           </div>
@@ -2757,10 +2759,9 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                             overdue
                               ? <span className="font-semibold text-[#D4183D]">{effectiveDelivery}</span>
                               : <span className="text-[#030213]">{effectiveDelivery}</span>
-                          ) : <span className="text-[#B0B0C0]">—</span>}
-                          {soloNext && !dueDateChange && (
-                            <div className="text-[10px] text-[#717182] mt-0.5">{soloNext.stage}</div>
-                          )}
+                          ) : dateScope
+                            ? <span className="text-[11px] text-[#A0A0B0]" title={dateScope === 'stage' ? 'Each stage has its own date — expand to see them' : 'Each service has its own date — expand to see them'}>{dateScope === 'stage' ? 'By stage' : 'By service'}</span>
+                            : <span className="text-[#B0B0C0]">—</span>}
                           {dueDateChange && <DueDateChangedTag change={dueDateChange} />}
                         </td>
                       )}
@@ -2854,15 +2855,14 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                     </tr>
 
                     {/* ── Stage rows of a single-service denture ── */}
-                    {soloDenture && isExpanded && renderStageOrderRows(c, soloOrders)}
+                    {soloDenture && isExpanded && renderStageRows(c, soloStageRows)}
 
                     {/* ── Child service rows — visible when expanded ── */}
                     {isExpanded && isMulti && c.serviceItems.map((si, idx) => {
                       const dentureRows = isDentureService(si.name) ? stageRowsFor(c.id, c.createdAt, si) : [];
-                      const dentureOrders = isDentureService(si.name) ? stageOrderSummaries(c.id, c.createdAt, si) : [];
                       const ordersOpen = expandedRows.has(stageKey(c.id, si.id));
-                      const dentureNext = dentureRows.length ? nextStageRow(dentureRows) : null;
-                      const siDelivery = dentureNext ? dentureNext.date : si.deliveryDate;
+                      // A denture has no service-level date — its stages carry them.
+                      const siDelivery = isDentureService(si.name) ? null : si.deliveryDate;
                       return (
                       <React.Fragment key={`${c.id}-${si.id}`}>
                       <tr
@@ -2890,16 +2890,16 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                         {/* Status — service-level badge */}
                         {visibleCols.status && (
                           <td
-                            className={`px-4 py-2 whitespace-nowrap ${dentureOrders.length > 0 ? 'cursor-pointer' : ''}`}
+                            className={`px-4 py-2 whitespace-nowrap ${dentureRows.length > 0 ? 'cursor-pointer' : ''}`}
                             onClick={(e) => {
-                              if (dentureOrders.length === 0) return;
+                              if (dentureRows.length === 0) return;
                               e.stopPropagation();
                               toggleRow(stageKey(c.id, si.id));
                             }}
                           >
                             <div className="flex items-center gap-1.5">
-                              {dentureOrders.length > 0
-                                ? expandArrow(ordersOpen, () => toggleRow(stageKey(c.id, si.id)), ordersOpen ? 'Hide stage orders' : 'Show stage orders')
+                              {dentureRows.length > 0
+                                ? expandArrow(ordersOpen, () => toggleRow(stageKey(c.id, si.id)), ordersOpen ? 'Hide stages' : 'Show stages')
                                 : arrowSpacer}
                               <StatusBadge status={si.status} />
                             </div>
@@ -2927,8 +2927,9 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                               ? isOverdue(siDelivery)
                                 ? <span className="font-semibold text-[#D4183D]">{siDelivery}</span>
                                 : <span className="text-[#030213]">{siDelivery}</span>
-                              : <span className="text-[#B0B0C0]">—</span>}
-                            {dentureNext && <div className="text-[10px] text-[#717182] mt-0.5">{dentureNext.stage}</div>}
+                              : dentureRows.length
+                                ? <span className="text-[11px] text-[#A0A0B0]" title="Each stage has its own date — expand to see them">By stage</span>
+                                : <span className="text-[#B0B0C0]">—</span>}
                           </td>
                         )}
                         {visibleCols.patient   && <td className="px-4 py-2" />}
@@ -2943,7 +2944,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                         {visibleCols.lab       && <td className="px-4 py-2" />}
                         <td className="px-4 py-2" />
                       </tr>
-                      {dentureOrders.length > 0 && ordersOpen && renderStageOrderRows(c, dentureOrders, true, idx === c.serviceItems.length - 1)}
+                      {dentureRows.length > 0 && ordersOpen && renderStageRows(c, dentureRows, true, idx === c.serviceItems.length - 1)}
                       </React.Fragment>
                       );
                     })}

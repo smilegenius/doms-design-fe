@@ -16,9 +16,13 @@ import { removeCreatedCases, useCreatedCases } from '../data/createdCases';
 //   2. Denture stages are dated one by one, with "Copy date to selected".
 //   3. A follow-up prescription for an existing denture case is appended to
 //      that case as a new stage order (no duplicate case, no duplicate stage).
-//   4. No matching case → a new case; stages dated before it reached DOMS
-//      show as "Done earlier".
+//   4. No matching case → a new case; stages done before it reached Smile
+//      Genius are marked "Done elsewhere" (done, but not on this portal).
 //   5. The service / stage dates appear in the creation summary.
+// Round 2 (9-Oct-2026 feedback): dentures pick an arch instead of teeth; stage
+// dates are edited upfront on the service card, one stage per row; no
+// "Initial / Order N" grouping — one row per stage everywhere; no case-level
+// date on multi-service cases and no service-level date on a denture.
 // Same shape as the other walkthroughs: each step opens the exact screen.
 
 type Persona = 'clinic' | 'lab' | 'system';
@@ -51,7 +55,7 @@ const PERSONA: Record<Persona, { label: string; cls: string; icon: React.ReactNo
 const STAGES: Stage[] = [
   {
     label: 'Delivery date moves from the case to each service',
-    blurb: 'The case no longer has one Requested Delivery date. Every non-denture service (crown, bridge, veneer, aligner…) carries its own date. A denture has no service-level date at all: each stage is dated instead (task 2). The case list and the case page show the earliest date that is still ahead.',
+    blurb: 'The case no longer has one Requested Delivery date. Every non-denture service (crown, bridge, veneer, aligner…) carries its own date. A denture has no service-level date at all: each stage is dated instead (task 2). A multi-service case has no case-level date at all: the case list reads “By service” and the dates sit on each service row.',
     steps: [
       {
         title: 'Quick Create — clinic',
@@ -86,8 +90,8 @@ const STAGES: Stage[] = [
         title: 'Multi-service case: crown + denture',
         persona: 'clinic',
         icon: <Layers className="w-4 h-4" />,
-        description: 'CASE-DN-3002 (Amira Khan) has a Crown with its own date (17-Jul-2026) and a Partial Denture dated per stage. The Case Summary cards show the crown’s date and, for the denture, the next open stage and its date.',
-        shows: ['Crown · 17-Jul-2026', 'Partial Denture · Delivery · Bite Registration'],
+        description: 'CASE-DN-3002 (Amira Khan) has a Crown with its own date (17-Jul-2026) and a Partial Denture dated per stage. There is no case-level Delivery Date: the header and the order details read “Set per service”. The Case Summary cards show the crown’s date and, for the denture, its next stage.',
+        shows: ['Delivery Date · Set per service', 'Crown · 17-Jul-2026', 'Partial Denture · Next stage · Bite Registration'],
         path: '/clinic/cases/CASE-DN-3002',
         portal: 'clinic',
       },
@@ -95,14 +99,14 @@ const STAGES: Stage[] = [
   },
   {
     label: 'Date each denture stage, and copy a date across stages',
-    blurb: `A denture has five stages: ${DENTURE_STAGES.join(', ')}. Ticking a stage enables its own date. “Copy date to selected” takes the first dated stage and writes that date onto every other ticked stage. A note under the list says there is no service-level date for dentures.`,
+    blurb: `A denture has five stages: ${DENTURE_STAGES.join(', ')}. Ticking a stage enables its own date. “Copy date to selected” takes the first dated stage and writes that date onto every other ticked stage. A denture covers a whole jaw, so it is picked as an arch (Upper / Lower / Both) instead of tooth by tooth.`,
     steps: [
       {
-        title: 'Stages & delivery dates in the service drawer',
+        title: 'Stages & delivery dates, upfront on the service card',
         persona: 'clinic',
         icon: <CopyCheck className="w-4 h-4" />,
-        description: 'CASE-DRAFT-DN2 is a Full Denture for Margaret Lee. Open the service (“Set stage dates”): the denture block lists all five stages, each with a date field. The service card shows every stage with its date. A stage with no date is flagged, and the service is not complete until every ticked stage has one.',
-        shows: ['5 stages, one date each', 'Copy date to selected', 'No service-level delivery date for dentures'],
+        description: 'CASE-DRAFT-DN2 is a Full Denture for Margaret Lee. The service card itself lists all five stages, one per row, each with its tick and date, so they can be edited without opening anything. In the service window the stages come first, followed by the arch picker, which replaces the tooth chart. A stage with no date is flagged, and the service is not complete until every ticked stage has a date (or is done elsewhere).',
+        shows: ['Vertical stage list on the card', 'Copy date to selected', 'Arch · Upper / Lower / Both'],
         tryIt: ['Tick Try In, give it a date, then tick Retry', 'Press “Copy date to selected”'],
         path: '/clinic/cases/quick-new/CASE-DRAFT-DN2',
         portal: 'clinic',
@@ -112,8 +116,8 @@ const STAGES: Stage[] = [
         title: 'New Stage Order on the case page — lab',
         persona: 'lab',
         icon: <Plus className="w-4 h-4" />,
-        description: 'On a denture case, “New Stage Order” uses the same picker. Stages already ordered are listed, locked, with their date and status, and each new stage needs its own date before the order can be created. The stage table under the tabs shows every stage of the service, its status, its requested delivery date and the order it belongs to.',
-        shows: ['Already-ordered stages locked', 'Stages · requested delivery table'],
+        description: 'On a denture case, “New Stage Order” uses the same picker. Stages already ordered are listed, locked, with their date and status, and each new stage needs its own date before the order can be created. There are no order tabs: one vertical table lists every stage of the service with its status, its date and where it came from (original Rx, follow-up Rx, or before Smile Genius).',
+        shows: ['Already-ordered stages locked', 'One row per stage — no “Initial” / “Order 2”'],
         tryIt: ['Open Partial Denture → New Stage Order', 'Pick Try In + Finish, date one, copy it to the other'],
         path: '/lab/cases/CASE-DN-3002',
         portal: 'lab',
@@ -122,8 +126,8 @@ const STAGES: Stage[] = [
         title: 'Stages in the case list',
         persona: 'clinic',
         icon: <List className="w-4 h-4" />,
-        description: 'The Status column is an accordion, and stages are listed the way the case page groups them: by stage order. On a denture case, the status pill has a chevron and an “N stage orders” count. Opening it shows one row per order, “Initial” then “Order 2”…, with the stages it covers, its status and the next open stage’s date. On a multi-service case, “N Services” opens the services, and the denture’s service row has its own chevron (a third level) for its stage orders.',
-        shows: ['Status ▾ · N stage orders', 'Initial · Special Tray, Bite Registration, Try In', 'Case → service → stage orders'],
+        description: 'The Status column is an accordion. On a denture case, the chevron opens one row per stage, in the order they happen, each with its own status and date; the next open stage is tagged “Next”. The denture itself has no date: its Delivery cell reads “By stage”. On a multi-service case, “N Services” opens the services (the case row reads “By service”), and the denture’s service row has its own chevron for its stages.',
+        shows: ['Delivery · By stage', 'One row per stage', 'Case → service → stages'],
         tryIt: ['CASE-DN-3001 and CASE-DN-3002 sit at the top of the list: open the chevron by the status', 'On CASE-DN-3002, open “2 Services”, then the chevron on the Partial Denture row'],
         path: '/clinic/cases',
         portal: 'clinic',
@@ -132,7 +136,7 @@ const STAGES: Stage[] = [
   },
   {
     label: 'Follow-up prescription → add the stage to the existing case',
-    blurb: 'When a denture prescription arrives for a patient who already has that denture case (same practice, patient, dentist and denture service), Smile Genius doesn’t create a new case. The new stages are appended to the existing case as a new stage order. Stages the case already has are skipped, never ordered twice.',
+    blurb: 'When a denture prescription arrives for a patient who already has that denture case (same practice, patient, dentist and denture service), Smile Genius doesn’t create a new case. The new stages are appended to the existing case, tagged “Follow-up Rx”. Stages the case already has are skipped, never ordered twice.',
     steps: [
       {
         title: 'The follow-up is matched while you fill it',
@@ -154,37 +158,37 @@ const STAGES: Stage[] = [
         portal: 'lab',
       },
       {
-        title: 'The case gains a stage order',
+        title: 'The case gains the new stages',
         persona: 'clinic',
         icon: <Layers className="w-4 h-4" />,
-        description: 'After submitting, CASE-DN-3001 has a second stage-order tab. Finish (plus any other new stage) is listed in the stage table with its own date and a “Follow-up Rx” tag. No new case appears in the list.',
-        shows: ['Order 2', 'Follow-up Rx', 'No duplicate case'],
+        description: 'After submitting, Finish (plus any other new stage) joins CASE-DN-3001’s stage table with its own date and a “Follow-up Rx” tag. No new case appears in the list.',
+        shows: ['Follow-up Rx', 'No duplicate case'],
         path: '/clinic/cases/CASE-DN-3001',
         portal: 'clinic',
       },
     ],
   },
   {
-    label: 'No matching case → a new case, earlier stages marked done',
-    blurb: 'If no existing case matches, the prescription creates a new case, even when it only asks for a later stage. Stages it lists with a date in the past were done before the case reached Smile Genius, so the case shows them as “Done earlier” instead of as open work.',
+    label: 'No matching case → a new case, earlier stages done elsewhere',
+    blurb: 'If no existing case matches, the prescription creates a new case, even when it only asks for a later stage. Stages that were already done, but not on this portal (e.g. at the patient’s previous lab), are marked “Done elsewhere” with an optional done-on date, and the case shows them as done, not as open work. Stages done on this portal are covered by the follow-up match above.',
     steps: [
       {
-        title: 'Past dates are called out while you fill it',
+        title: 'Mark a stage “Done elsewhere” while you fill it',
         persona: 'clinic',
         icon: <History className="w-4 h-4" />,
-        description: 'CASE-DRAFT-DN2 lists Special Tray (20-Mar-2026) and Bite Registration (10-Apr-2026), both done at the patient’s previous lab, plus Finish (05-Jun-2026). In the picker, a past date shows “Past date — this stage will show as done earlier”. On the service card, it reads “· done earlier”.',
-        shows: ['Past date — this stage will show as done earlier'],
-        tryIt: ['Pick a lab and press Create case'],
+        description: 'CASE-DRAFT-DN2 lists Special Tray (20-Mar-2026) and Bite Registration (10-Apr-2026), both done at the patient’s previous lab, plus Finish (05-Jun-2026). Both are ticked “Done elsewhere”: their date becomes a “Done on” date (optional, today or earlier), while upcoming stages only accept delivery dates from today on. Typing a past date into an upcoming stage flips it to done elsewhere.',
+        shows: ['Done elsewhere toggle per stage', 'Done on · 20-Mar-2026', 'Delivery dates can’t be in the past'],
+        tryIt: ['Toggle Done elsewhere on Finish and back', 'Pick a lab and press Create case'],
         path: '/clinic/cases/quick-new/CASE-DRAFT-DN2',
         portal: 'clinic',
         highlight: true,
       },
       {
-        title: 'The new case shows them as “Done earlier”',
+        title: 'The new case shows them as “Done elsewhere”',
         persona: 'system',
         icon: <History className="w-4 h-4" />,
-        description: 'The created case (SG-…) shows Special Tray and Bite Registration with a “Done earlier” tag instead of a status, in the list’s stage rows and in the case’s stage table. Finish is the open stage, and its date leads the Delivery Date column.',
-        shows: ['Done earlier', 'Finish · New'],
+        description: 'The created case (SG-…) shows Special Tray and Bite Registration with a “Done elsewhere” tag and their done-on dates instead of a status, in the list’s stage rows and in the case’s stage table. Finish is the open stage, tagged “Next”.',
+        shows: ['Done elsewhere · Done 20-Mar-2026', 'Finish · Next'],
         tryIt: ['Search “Margaret” and expand the stages'],
         path: '/clinic/cases',
         portal: 'clinic',
@@ -199,8 +203,8 @@ const STAGES: Stage[] = [
         title: 'Case Summary panel — detailed Create Case',
         persona: 'clinic',
         icon: <ClipboardList className="w-4 h-4" />,
-        description: 'Each service in the Case Summary panel (left column) shows “Delivery · <date>”. A denture lists each selected stage with its date. A missing date shows in amber.',
-        shows: ['Delivery · 02-Jun-2026', 'Special Tray · 05-May-2026 …'],
+        description: 'Each service in the Case Summary panel (left column) shows “Delivery · <date>”. A denture shows its arch and lists each selected stage with its date (or “Done elsewhere”). A missing date shows in amber.',
+        shows: ['Delivery · 02-Jun-2026', 'Upper arch', 'Special Tray · 05-May-2026 …'],
         path: '/clinic/cases/new',
         portal: 'clinic',
       },
@@ -208,7 +212,7 @@ const STAGES: Stage[] = [
         title: 'Lab Order Form — Quick Create',
         persona: 'lab',
         icon: <ClipboardList className="w-4 h-4" />,
-        description: 'The order-form preview (the left pane on scanner cases) drops the single Requested Delivery field. Each service lists its own Delivery, and a denture lists “Stages · requested delivery”.',
+        description: 'The order-form preview (the left pane on scanner cases) drops the single Requested Delivery field. Each service lists its own Delivery, and a denture lists its arch and “Stages · requested delivery”.',
         shows: ['Delivery per service', 'Stages · requested delivery'],
         path: '/lab/cases/quick-new/CASE-DRAFT-DN2',
         portal: 'lab',

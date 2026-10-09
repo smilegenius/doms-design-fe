@@ -62,8 +62,8 @@ import {
   subjectFromCase,
   useRescanLinks,
 } from '../data/rescanDetection';
-import { DENTURE_SERVICES, DENTURE_STAGES, isDentureService, nextStageRow, stageOrdersFor, stageRowsFor, stageRowsFromOrders, isoToCaseDate as isoToStageDate } from '../data/dentureStages';
-import { StageDatePicker, StageStatusCell, NO_SERVICE_DATE_COPY } from '../components/DentureStages';
+import { DENTURE_SERVICES, DENTURE_STAGES, archLabel, isDentureService, nextStageRow, stageOrdersFor, stageRowsFor, stageRowsFromOrders, isoToCaseDate as isoToStageDate, caseDateToISO } from '../data/dentureStages';
+import { StageDatePicker, StageStatusCell } from '../components/DentureStages';
 
 // Conversation hub entry point — parked while the CareStack flow is reviewed.
 const SHOW_CONVERSATION_HUB = false;
@@ -118,6 +118,8 @@ export interface ServiceItem {
   stages?: string[];
   /** Denture: requested delivery per selected stage ("DD-MMM-YYYY"). */
   stageDates?: Record<string, string | null>;
+  /** Denture: stages done before the case reached Smile Genius (their date is the done-on date). */
+  doneElsewhere?: string[];
   stageOrders?: StageOrder[];
   /** Clear Aligners only — set when the case's "Phasing" field is Yes. Drives
       the open-ended, auto-named Phase 1 / Phase 2 … phase-order tab strip.
@@ -1427,6 +1429,9 @@ function CaseSummaryOverview({
   );
   // Which card's status dropdown is currently open (null = none)
   const [openStatusId, setOpenStatusId] = useState<string | null>(null);
+  // Delivery dates edited on the cards ("DD-MMM-YYYY"), keyed by service id,
+  // or service id + stage for a denture's next stage.
+  const [dateEdits, setDateEdits] = useState<Record<string, string | null>>({});
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4" onClick={() => setOpenStatusId(null)}>
@@ -1443,7 +1448,10 @@ function CaseSummaryOverview({
         const attachCount  = si.attachmentCount ?? 0;
         // Denture: no service-level date — the card shows the next open stage.
         const nextStage    = isDentureService(si.name) ? nextStageRow(stageRowsFor(caseData.id, caseData.createdAt, si)) : null;
-        const cardDelivery = isDentureService(si.name) ? (nextStage?.date ?? null) : si.deliveryDate;
+        const dateKey      = nextStage ? `${si.id}::${nextStage.stage}` : si.id;
+        const cardDelivery = dateKey in dateEdits
+          ? dateEdits[dateKey]
+          : isDentureService(si.name) ? (nextStage?.date ?? null) : si.deliveryDate;
         const countdown    = deliveryCountdown(cardDelivery);
         const countdownTone =
           countdown?.tone === 'overdue' ? 'bg-[#FFEBEE] text-[#C62828] border-[#F9DCDC]' :
@@ -1528,7 +1536,7 @@ function CaseSummaryOverview({
             {/* ── Info strip — quick prescription facts (tooth count, material, shade, order type, files) ── */}
             <div className="flex items-center flex-wrap gap-1.5">
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#F8F9FC] text-[#5A5568] border border-[#E0E0E6]">
-                {toothCount} {toothCount === 1 ? 'tooth' : 'teeth'}
+                {isDentureService(si.name) && toothCount > 0 ? archLabel(si.fdi ?? []) : `${toothCount} ${toothCount === 1 ? 'tooth' : 'teeth'}`}
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#F8F9FC] text-[#5A5568] border border-[#E0E0E6]">
                 {si.material ?? '—'}
@@ -1594,30 +1602,39 @@ function CaseSummaryOverview({
 
             {/* ── Footer: delivery date + countdown + action ── */}
             <div
-              className="flex items-center justify-between gap-3 pt-3 border-t border-[#F0EFF6] mt-auto"
+              className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 pt-3 border-t border-[#F0EFF6] mt-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div>
-                <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-0.5">{nextStage ? `Delivery · ${nextStage.stage}` : 'Delivery'}</p>
+              <div className="flex-shrink-0">
+                <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-0.5 whitespace-nowrap">{nextStage ? `Next stage · ${nextStage.stage}` : 'Delivery'}</p>
                 <div className="flex items-center gap-1.5">
-                  <p className="text-xs font-medium text-[#030213]">{cardDelivery ?? '—'}</p>
+                  {/* Editable in place — the service's date, or the next
+                      stage's date for a denture. */}
+                  <input
+                    type="date"
+                    value={cardDelivery ? caseDateToISO(cardDelivery) : ''}
+                    disabled={isReceived}
+                    aria-label={nextStage ? `${si.name} ${nextStage.stage} delivery date` : `${si.name} delivery date`}
+                    onChange={(e) => setDateEdits(prev => ({ ...prev, [dateKey]: e.target.value ? isoToStageDate(e.target.value) : null }))}
+                    className="px-2 py-1 text-xs font-medium text-[#030213] border border-[#E0E0E6] rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] disabled:bg-transparent disabled:border-transparent disabled:px-0 transition-colors"
+                  />
                   {countdown && !isReceived && (
-                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold border ${countdownTone}`}>
+                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold border whitespace-nowrap ${countdownTone}`}>
                       {countdown.label}
                     </span>
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 ml-auto">
                 {isReceived ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0]">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0] whitespace-nowrap">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     Received
                   </span>
                 ) : (
                   <button
                     onClick={(e) => { e.stopPropagation(); onMarkReceived?.(si); }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm whitespace-nowrap"
                   >
                     <Check className="w-3.5 h-3.5" />
                     Mark as Received
@@ -1625,7 +1642,7 @@ function CaseSummaryOverview({
                 )}
                 <button
                   onClick={(e) => { e.stopPropagation(); onSelectService(si.id); }}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors border border-[#C8D8FC]"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors border border-[#C8D8FC] whitespace-nowrap"
                 >
                   Details
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -1653,13 +1670,6 @@ const PHASE_STATUS_MAP: Record<string, { label: string; bg: string; color: strin
   received:     { label: 'Received',    bg: '#E0F7FA', color: '#00838F', border: '#B2EBF2', dot: '#0097A7' },
 };
 
-// Combine a stage order's stage names into the tab / banner label. The
-// initial order usually bundles several ("Special Tray, Bite Registration,
-// Try In"); later orders are often a single remaining stage.
-function stageOrderLabel(o: StageOrder): string {
-  return o.stages.length ? o.stages.join(', ') : 'Stage order';
-}
-
 // ── Staging model ────────────────────────────────────────────────────────────
 // Two flavours of staged service share the same tab strip:
 //   • 'catalog' (denture) — a FIXED set of named stages; each order picks from
@@ -1673,13 +1683,6 @@ function getStaging(service: ServiceItem): Staging {
   // phasing === false (the "Phasing: No" answer) opts out.
   if (service.name === 'Clear Aligners' && service.phasing !== false) return { mode: 'phased' };
   return null;
-}
-
-// Tab caption for a stage order. Catalog orders read "Initial" / "Order N";
-// phased orders ARE a phase, so the caption is the phase name itself.
-function stageTabCaption(o: StageOrder, idx: number, mode: 'catalog' | 'phased'): string {
-  if (mode === 'phased') return o.stages[0] ?? `Phase ${idx + 1}`;
-  return idx === 0 ? 'Initial' : `Order ${idx + 1}`;
 }
 
 // Seed the initial stage orders for a staged service when the data doesn't
@@ -1775,6 +1778,7 @@ function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseNa
                     stages={picked}
                     dates={dates}
                     existing={existing}
+                    allowDoneElsewhere={false}
                     onChange={(st, d) => { setPicked(st); setDates(d); }}
                   />
                 )}
@@ -2757,12 +2761,11 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
 }) {
   const [subTab, setSubTab] = useState<ServiceSubTab>('details');
   // ── Stage / phase orders (denture catalog · aligner phasing) ────────────
-  // Staged services render a tab strip under the service name. Denture bundles
-  // the stages picked at creation into the "Initial" order, then "New Stage
-  // Order" picks from the remaining catalog. Aligners (Phasing = Yes) start at
-  // "Phase 1" and "New Phase Order" appends auto-named Phase 2, Phase 3, …
+  // Denture: one flat vertical list of stages, each with its own status and
+  // date; "New Stage Order" picks from the remaining catalog. Aligners
+  // (Phasing = Yes) get a tab strip starting at "Phase 1", and "New Phase
+  // Order" appends auto-named Phase 2, Phase 3, …
   const staging = getStaging(service);
-  const stageMode = staging?.mode ?? null;            // 'catalog' | 'phased' | null
   const stageCatalog = staging?.mode === 'catalog' ? staging.catalog : null;
   const isPhased = staging?.mode === 'phased';
   const [stageOrders, setStageOrders] = useState<StageOrder[]>(
@@ -2779,9 +2782,8 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   // Denture: one row per ordered stage with its own date + status. The
   // service itself has no delivery date.
   const stageRows = stageCatalog ? stageRowsFromOrders(stageOrders, caseData.createdAt) : [];
-  const activeNextStage = stageCatalog && activeStageOrder
-    ? nextStageRow(stageRowsFromOrders([activeStageOrder], caseData.createdAt))
-    : null;
+  // The stage the denture is heading to next drives the identity card status.
+  const dentureNextStage = stageCatalog ? nextStageRow(stageRows) : null;
   // Per-service viewer + order panel state — scoped to this view so each
   // service tab keeps its own viewer format and accordion state.
   const [viewerFormat, setViewerFormat] = useState<ViewerFormat>('3D');
@@ -2791,10 +2793,11 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   // When the service is staged, the active stage order drives the status +
   // delivery shown in the identity card so each stage-order tab reads as its
   // own order. Non-staged services fall back to the service-level values.
-  const effectiveStatus = (staging && activeStageOrder) ? activeStageOrder.status : service.status;
-  const effectiveDelivery = activeNextStage
-    ? activeNextStage.date
-    : (staging && activeStageOrder) ? activeStageOrder.deliveryDate : service.deliveryDate;
+  // A denture has no tabs: its next open stage stands in, and it has no single
+  // delivery date — each stage carries its own.
+  const effectiveStatus = dentureNextStage ? dentureNextStage.status
+    : (staging && activeStageOrder) ? activeStageOrder.status : service.status;
+  const effectiveDelivery = (staging && activeStageOrder) ? activeStageOrder.deliveryDate : service.deliveryDate;
   const s = STATUS_MAP[effectiveStatus];
   const iStyle = SERVICE_ICON_COLOR[service.name] ?? { bg: '#FFF7ED', color: '#F59E0B' };
 
@@ -2808,7 +2811,8 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
 
   // Per-service prescription values — fall back to em-dash when missing.
   const fdiList = service.fdi ?? [];
-  const fdiLabel = fdiList.length ? fdiList.join(', ') : '—';
+  // A denture covers a whole jaw — it reads as an arch, not tooth numbers.
+  const fdiLabel = !fdiList.length ? '—' : stageCatalog ? archLabel(fdiList) : fdiList.join(', ');
   const upperTeeth = fdiList.filter(t => t < 30);
   const lowerTeeth = fdiList.filter(t => t >= 30);
   const scanCount  = service.scanFileCount ?? 0;
@@ -2816,12 +2820,76 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden mt-3 mx-6 mb-6 gap-3 min-h-0">
-      {/* ── Stage / phase order strip (denture catalog · aligner phasing) ────
-          One tab per order. Denture: first tab "Initial" bundles the stages
-          picked at creation, "New Stage Order" picks from remaining stages.
-          Aligner phasing: tabs are auto-named Phase 1, Phase 2, … and
-          "New Phase Order" is always available. ── */}
-      {staging && (
+      {/* ── Denture stages — one vertical list, one row per stage. No order
+          grouping: every stage carries its own status and delivery date, and
+          "New Stage Order" picks from the stages not ordered yet. ── */}
+      {stageCatalog && (
+        <div className="bg-white border border-[#E0E0E6] rounded-xl flex-shrink-0 overflow-hidden">
+          <div className="flex items-center justify-between gap-2 px-4 py-2.5">
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">Stages · requested delivery</p>
+              {remainingStages.length > 0 && (
+                <p className="text-[10px] text-[#A0A0B0] mt-0.5">
+                  {remainingStages.length} stage{remainingStages.length === 1 ? '' : 's'} not yet ordered
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => setStagePickerOpen(true)}
+              disabled={!canAddOrder}
+              title={remainingStages.length === 0 ? 'All stages have been ordered' : 'Order another stage'}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#7C3AED] to-[#A59DFF] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity flex-shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New Stage Order
+            </button>
+          </div>
+          {stageRows.length > 0 && (
+            <table className="w-full text-xs border-t border-[#F0EFF6]">
+              <thead>
+                <tr className="text-[10px] text-[#A0A0B0] uppercase tracking-wider">
+                  <th className="text-left font-semibold px-4 py-1.5">Stage</th>
+                  <th className="text-left font-semibold px-4 py-1.5">Status</th>
+                  <th className="text-left font-semibold px-4 py-1.5">Date</th>
+                  <th className="text-left font-semibold px-4 py-1.5">Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stageRows.map(r => {
+                  const o = stageOrders[r.orderIndex];
+                  const isNext = r.stage === dentureNextStage?.stage && !r.doneEarlier;
+                  return (
+                    <tr key={r.stage} className={`border-t border-[#F5F5F9] ${isNext ? 'bg-[#FAF8FF]' : ''}`}>
+                      <td className={`px-4 py-2 font-semibold whitespace-nowrap ${r.doneEarlier ? 'text-[#5A5568]' : 'text-[#030213]'}`}>{r.stage}</td>
+                      <td className="px-4 py-2"><StageStatusCell row={r} size="xs" /></td>
+                      <td className={`px-4 py-2 whitespace-nowrap ${r.doneEarlier ? 'text-[#717182]' : r.date ? 'text-[#030213]' : 'text-[#D97706]'}`}>
+                        {r.doneEarlier
+                          ? (r.date ? `Done ${r.date}` : 'Done — date not given')
+                          : (r.date ?? 'No date set')}
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        {r.followUp ? (
+                          <span title={o?.followUpFrom ? `Added from follow-up prescription ${o.followUpFrom}` : 'Added from a follow-up prescription'} className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">
+                            Follow-up Rx
+                          </span>
+                        ) : r.doneEarlier ? (
+                          <span className="text-[11px] text-[#A0A0B0]">Before Smile Genius</span>
+                        ) : (
+                          <span className="text-[11px] text-[#A0A0B0]">Original Rx</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ── Phase order strip (aligner phasing) — one tab per phase, auto-named
+          Phase 1, Phase 2, … ; "New Phase Order" is always available. ── */}
+      {isPhased && (
         <div className="bg-white border border-[#E0E0E6] rounded-xl flex-shrink-0 overflow-hidden">
           <div className="flex items-center gap-1 px-1.5 pt-1.5 overflow-x-auto">
             {stageOrders.map((o, idx) => (
@@ -2833,88 +2901,36 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                     ? 'border-[#7C3AED] text-[#5B21B6] bg-[#F5F3FF]'
                     : 'border-transparent text-[#717182] hover:text-[#030213] hover:bg-[#F8F9FC]'
                 }`}
-                title={stageOrderLabel(o)}
+                title={o.stages[0] ?? `Phase ${idx + 1}`}
               >
                 <span className="w-4 h-4 rounded-full bg-gradient-to-br from-[#7C3AED] to-[#A59DFF] text-white text-[8px] font-bold flex items-center justify-center flex-shrink-0">
                   {idx + 1}
                 </span>
-                <span className="truncate">{stageTabCaption(o, idx, stageMode!)}</span>
+                <span className="truncate">{o.stages[0] ?? `Phase ${idx + 1}`}</span>
               </button>
             ))}
             <button
               onClick={() => setStagePickerOpen(true)}
               disabled={!canAddOrder}
-              title={
-                isPhased ? 'Add the next phase'
-                : remainingStages.length === 0 ? 'All stages have been ordered'
-                : 'Order another stage'
-              }
+              title="Add the next phase"
               className="ml-auto mr-1 mb-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#7C3AED] to-[#A59DFF] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity flex-shrink-0 self-center"
             >
               <Plus className="w-3.5 h-3.5" />
-              {isPhased ? 'New Phase Order' : 'New Stage Order'}
+              New Phase Order
             </button>
           </div>
-          {/* Active order's stages */}
+          {/* Active phase */}
           <div className="px-4 py-2.5 border-t border-[#F0EFF6] bg-[#FAFBFF] flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">{isPhased ? 'Phase:' : 'Stages:'}</span>
+            <span className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">Phase:</span>
             {(activeStageOrder?.stages ?? []).map(stage => (
               <span key={stage} className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#F5F3FF] text-[#5B21B6] border border-[#DDD6FE]">
                 {stage}
               </span>
             ))}
-            {isPhased ? (
-              <span className="ml-auto text-[10px] text-[#A0A0B0]">
-                {stageOrders.length} phase{stageOrders.length === 1 ? '' : 's'} ordered
-              </span>
-            ) : remainingStages.length > 0 && (
-              <span className="ml-auto text-[10px] text-[#A0A0B0]">
-                {remainingStages.length} stage{remainingStages.length === 1 ? '' : 's'} not yet ordered
-              </span>
-            )}
+            <span className="ml-auto text-[10px] text-[#A0A0B0]">
+              {stageOrders.length} phase{stageOrders.length === 1 ? '' : 's'} ordered
+            </span>
           </div>
-          {/* Denture — every ordered stage with its own requested delivery
-              date. There is no service-level date to show instead. */}
-          {stageCatalog && stageRows.length > 0 && (
-            <div className="border-t border-[#F0EFF6]">
-              <div className="flex items-center justify-between gap-2 px-4 pt-2.5 pb-1">
-                <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">Stages · requested delivery</p>
-                <span className="text-[10px] text-[#A0A0B0]">No service-level delivery date</span>
-              </div>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-[10px] text-[#A0A0B0] uppercase tracking-wider">
-                    <th className="text-left font-semibold px-4 py-1.5">Stage</th>
-                    <th className="text-left font-semibold px-4 py-1.5">Status</th>
-                    <th className="text-left font-semibold px-4 py-1.5">Requested Delivery</th>
-                    <th className="text-left font-semibold px-4 py-1.5">Order</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stageRows.map(r => {
-                    const o = stageOrders[r.orderIndex];
-                    return (
-                      <tr key={r.stage} className={`border-t border-[#F5F5F9] ${o?.id === activeStageOrder?.id ? 'bg-[#FAF8FF]' : ''}`}>
-                        <td className="px-4 py-2 font-semibold text-[#030213] whitespace-nowrap">{r.stage}</td>
-                        <td className="px-4 py-2"><StageStatusCell row={r} size="xs" /></td>
-                        <td className={`px-4 py-2 whitespace-nowrap ${r.date ? 'text-[#030213]' : 'text-[#D97706]'}`}>{r.date ?? 'No date set'}</td>
-                        <td className="px-4 py-2 whitespace-nowrap">
-                          <button onClick={() => o && setActiveStageId(o.id)} className="text-[11px] font-semibold text-[#7C3AED] hover:underline">
-                            {o ? stageTabCaption(o, r.orderIndex, 'catalog') : '—'}
-                          </button>
-                          {r.followUp && (
-                            <span title={o?.followUpFrom ? `Added from follow-up prescription ${o.followUpFrom}` : 'Added from a follow-up prescription'} className="ml-1.5 inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">
-                              Follow-up Rx
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       )}
 
@@ -2987,8 +3003,12 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               </div>
               <div className="grid grid-cols-2 gap-4 text-xs">
                 <div>
-                  <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">{activeNextStage ? `Delivery · ${activeNextStage.stage}` : 'Delivery Date'}</p>
-                  <p className="font-medium text-[#030213]">{effectiveDelivery ?? '—'}</p>
+                  <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">{stageCatalog ? 'Next stage' : 'Delivery Date'}</p>
+                  <p className="font-medium text-[#030213]">
+                    {stageCatalog
+                      ? (dentureNextStage ? `${dentureNextStage.stage} · ${dentureNextStage.date ?? 'no date'}` : '—')
+                      : (effectiveDelivery ?? '—')}
+                  </p>
                 </div>
                 <div>
                   <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">{isPhased ? 'Phase' : stageCatalog ? 'Stages' : 'Phases'}</p>
@@ -2996,7 +3016,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                     {isPhased
                       ? (activeStageOrder?.stages[0] ?? '—')
                       : stageCatalog
-                        ? (activeStageOrder?.stages.length ?? 0)
+                        ? stageRows.length
                         : (service.phases ? service.phases.length : 1)}
                   </p>
                 </div>
@@ -3267,7 +3287,8 @@ function OrderFormBody({ caseData, service, wide = false }: {
   const svc = service ?? caseData.serviceItems?.[0] ?? null;
   const svcName = svc?.name ?? caseData.services[0] ?? 'Service';
   const fdiList = svc?.fdi ?? [];
-  const fdiLabel = fdiList.length ? fdiList.join(', ') : '—';
+  // A denture covers a whole jaw — it reads as an arch, not tooth numbers.
+  const fdiLabel = !fdiList.length ? '—' : svc && isDentureService(svc.name) ? archLabel(fdiList) : fdiList.join(', ');
   const scanCount = svc?.scanFileCount ?? 0;
   const attachCount = svc?.attachmentCount ?? 0;
   const instructions = svc?.instructions?.trim() ?? '';
@@ -3331,7 +3352,13 @@ function OrderFormBody({ caseData, service, wide = false }: {
     <>
       <Section title="Creation">
         <KV label="Created On" value={caseData.createdAt} />
-        <KV label="Requested Delivery Date" value={caseData.requestedDelivery ?? '—'} muted={!caseData.requestedDelivery} />
+        {/* No case-level date once dates live lower down: on each service of a
+            multi-service case, on each stage of a denture. */}
+        {(caseData.serviceItems?.length ?? 0) > 1
+          ? <KV label="Requested Delivery Date" value="Per service" muted />
+          : svc && isDentureService(svc.name)
+            ? <KV label="Requested Delivery Date" value="Per stage" muted />
+            : <KV label="Requested Delivery Date" value={caseData.requestedDelivery ?? '—'} muted={!caseData.requestedDelivery} />}
         <GroupDivider />
         <KV label="Created by" value={caseData.practice} />
         <KV label="Submitted by" value={submittedByLabel(caseData)} />
@@ -3849,7 +3876,13 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const s = STATUS_MAP[caseData.status];
   const service = caseData.services[0] ?? 'Service';
   const iconStyle = SERVICE_ICON_COLOR[service] ?? { bg: '#FFF7ED', color: '#F59E0B' };
-  const missingDeliveryDate = !deliveryDate.trim();
+  // A multi-service case has no case-level delivery date — every service
+  // carries its own, and a denture dates each stage. Same for a solo denture.
+  const caseDateScope: 'service' | 'stage' | null =
+    (caseData.serviceItems?.length ?? 0) > 1 ? 'service'
+    : caseData.serviceItems?.length === 1 && isDentureService(caseData.serviceItems[0].name) ? 'stage'
+    : null;
+  const missingDeliveryDate = !caseDateScope && !deliveryDate.trim();
   // Offline lab (Low Potential / Non-participating) — the lab never sees this
   // case on the platform, so a pinned notice keeps the manual handling visible.
   // Clinic-only: the host passes showOfflineLabNotice; informational only, no
@@ -4190,6 +4223,11 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             {/* Delivery date / Created by / Received via */}
             <div>
               <p className={`text-[10px] uppercase tracking-wider font-semibold mb-1 ${missingDeliveryDate ? 'text-[#D4183D]' : 'text-[#A0A0B0]'}`}>Delivery Date</p>
+              {caseDateScope ? (
+                <p className="text-[11px] text-[#717182]" title={caseDateScope === 'service' ? 'Each service carries its own delivery date' : 'Each denture stage carries its own delivery date'}>
+                  {caseDateScope === 'service' ? 'Set per service' : 'Set per stage'}
+                </p>
+              ) : (
               <input
                 type="date"
                 value={toIsoDate(deliveryDate)}
@@ -4207,6 +4245,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                     : 'border-[#E0E0E6] focus:border-[#4D8EF7] focus:ring-2 focus:ring-[#4D8EF7]/20'
                 }`}
               />
+              )}
               {/* CareStack appointment — status (with the linked date/time)
                   opens the CareStack drawer; sits under the delivery date. */}
               {csEnabled && (

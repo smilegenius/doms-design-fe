@@ -1,0 +1,66 @@
+{
+  "expo": {
+    "name": "Smile Genius Go",
+    "slug": "smile-genius-go",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "uk.co.smilegenius.go",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Take a photo of a written prescription to turn it into a case.",
+        "NSMicrophoneUsageDescription": "Record a voice note to turn it into a case."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "uk.co.smilegenius.go",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Record a voice note to turn it into a case."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Take a photo of a written prescription to turn it into a case."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Attach photos and X-rays to a case."
+        }
+      ],
+      "expo-font",
+      "expo-asset"
+    ],
+    "scheme": "smilegeniusgo",
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

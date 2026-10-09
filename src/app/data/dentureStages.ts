@@ -10,8 +10,12 @@ import { DEMO_TODAY, formatCaseDate, parseCaseDate } from './rescanDetection';
 //   • A follow-up prescription (same patient / practice / dentist / denture
 //     service) is appended to the existing case as a new stage order; stages
 //     already ordered are never duplicated.
-//   • No matching case → a new case is created. Stages dated before the case
-//     reached DOMS are shown as "Done earlier" rather than as open work.
+//   • No matching case → a new case is created. Stages the prescription says
+//     were already done somewhere else are "Done elsewhere" — done, but not on
+//     this portal — rather than open work. (Stages done on this portal are the
+//     follow-up case above.)
+//   • A denture is made for a whole jaw: it's picked and shown as an arch, not
+//     as a list of tooth numbers.
 
 /** Fabrication stages of a denture, in the order they happen. */
 export const DENTURE_STAGES = ['Special Tray', 'Bite Registration', 'Try In', 'Retry', 'Finish'];
@@ -27,6 +31,54 @@ export const isDentureItem = (itemId: string) => DENTURE_ITEM_IDS.includes(itemI
 export function sortStages(stages: string[]): string[] {
   const rank = (s: string) => { const i = DENTURE_STAGES.indexOf(s); return i < 0 ? 99 : i; };
   return [...stages].sort((a, b) => rank(a) - rank(b));
+}
+
+// ── Arches ────────────────────────────────────────────────────────────────────
+// A denture covers a jaw, so it's picked as Upper / Lower / Both. The form still
+// stores tooth codes (UR1…LR8) so submit and the chart-driven services don't
+// change; picking an arch writes every tooth of that jaw.
+
+export type Arch = 'upper' | 'lower' | 'both';
+
+const quadrantCodes = (prefix: string) => [1, 2, 3, 4, 5, 6, 7, 8].map(n => `${prefix}${n}`);
+export const ARCH_TEETH: Record<'upper' | 'lower', string[]> = {
+  upper: [...quadrantCodes('UR'), ...quadrantCodes('UL')],
+  lower: [...quadrantCodes('LL'), ...quadrantCodes('LR')],
+};
+
+export function archTeeth(arch: Arch): string[] {
+  return arch === 'both' ? [...ARCH_TEETH.upper, ...ARCH_TEETH.lower] : ARCH_TEETH[arch];
+}
+
+/** Upper jaw? Takes a tooth code ("UR6"), an FDI id from the chart ("16") or an FDI number (16). */
+export function isUpperTooth(t: string | number): boolean {
+  if (typeof t === 'number') return [1, 2, 5, 6].includes(Math.floor(t / 10));
+  return /^\d{2}$/.test(t) ? '1256'.includes(t[0]) : t.toUpperCase().startsWith('U');
+}
+
+/** The jaw(s) a set of teeth touches — tooth codes ("UR6"), chart ids ("16") or FDI numbers (16). */
+export function archOf(teeth: (string | number)[]): Arch | null {
+  const isUpper = isUpperTooth;
+  const upper = teeth.some(isUpper);
+  const lower = teeth.some(t => !isUpper(t));
+  return upper && lower ? 'both' : upper ? 'upper' : lower ? 'lower' : null;
+}
+
+/** Turn one jaw on or off (chart click on a denture) — returns the new tooth codes. */
+export function toggleArch(teeth: string[], jaw: 'upper' | 'lower'): string[] {
+  const now = archOf(teeth);
+  const upper = now === 'upper' || now === 'both';
+  const lower = now === 'lower' || now === 'both';
+  const nextUpper = jaw === 'upper' ? !upper : upper;
+  const nextLower = jaw === 'lower' ? !lower : lower;
+  return [...(nextUpper ? ARCH_TEETH.upper : []), ...(nextLower ? ARCH_TEETH.lower : [])];
+}
+
+export const ARCH_LABELS: Record<Arch, string> = { upper: 'Upper arch', lower: 'Lower arch', both: 'Upper & lower arch' };
+
+export function archLabel(teeth: (string | number)[]): string {
+  const arch = archOf(teeth);
+  return arch ? ARCH_LABELS[arch] : 'No arch selected';
 }
 
 // ── Dates ─────────────────────────────────────────────────────────────────────
@@ -72,6 +124,8 @@ export interface StageOrderLike {
   stageStatuses?: Record<string, CaseStatus>;
   /** Set when the order arrived as a follow-up prescription. */
   followUpFrom?: string;
+  /** Stages done before the case reached Smile Genius — done, but not on this portal. */
+  doneElsewhere?: string[];
 }
 
 export interface StagedServiceLike {
@@ -80,12 +134,13 @@ export interface StagedServiceLike {
   deliveryDate: string | null;
   stages?: string[];
   stageDates?: Record<string, string | null>;
+  doneElsewhere?: string[];
   stageOrders?: StageOrderLike[];
 }
 
 /**
  * The stage orders of a denture service: what the case carries (or one
- * "Initial" order built from its stages), then every appended follow-up.
+ * single order built from its stages), then every appended follow-up.
  * Generated mock cases carry neither, so they fall back to the catalogue
  * minus its last stage — leaving one to demo "New Stage Order".
  */
@@ -104,6 +159,7 @@ export function stageOrdersFor(caseId: string, createdAt: string, service: Stage
       deliveryDate: service.deliveryDate,
       createdAt,
       stageDates: service.stageDates ?? Object.fromEntries(stages.map(s => [s, service.deliveryDate])),
+      doneElsewhere: service.doneElsewhere,
     }];
   }
   const appended = getStageAppends(caseId, service.name).map((a, i): StageOrderLike => ({
@@ -127,8 +183,9 @@ export interface StageRow {
   stage: string;
   date: string | null;
   status: CaseStatus;
-  /** Index of the stage order it belongs to (0 = Initial). */
+  /** Index of the stage order it came in with (0 = the case's own prescription). */
   orderIndex: number;
+  /** Done before the case reached Smile Genius — flagged on the Rx, or dated before the case. */
   doneEarlier: boolean;
   followUp: boolean;
 }
@@ -149,7 +206,7 @@ export function stageRowsFromOrders(orders: StageOrderLike[], createdAt: string)
         date,
         status: o.stageStatuses?.[stage] ?? o.status,
         orderIndex,
-        doneEarlier: isDoneEarlier(date, createdAt),
+        doneEarlier: !!o.doneElsewhere?.includes(stage) || isDoneEarlier(date, createdAt),
         followUp: !!o.followUpFrom,
       });
     }
@@ -268,35 +325,4 @@ export function findFollowUpMatch(subject: FollowUpSubject, incomingStages: stri
 export function nextStageRow(rows: StageRow[]): StageRow | null {
   const closed: CaseStatus[] = ['completed', 'delivered'];
   return rows.find(r => !r.doneEarlier && !closed.includes(r.status)) ?? rows[rows.length - 1] ?? null;
-}
-
-/** One stage order as the case list shows it: "Initial · Special Tray, Bite Registration". */
-export interface StageOrderSummary {
-  id: string;
-  /** "Initial" for the first order, then "Order 2", "Order 3"… — as the case page tabs read. */
-  label: string;
-  rows: StageRow[];
-  /** The stage the order is heading to next (null when every stage is done). */
-  next: StageRow | null;
-  status: CaseStatus;
-  /** Every stage of the order predates the case — it happened outside DOMS. */
-  doneEarlier: boolean;
-  followUp: boolean;
-}
-
-export function stageOrderSummaries(caseId: string, createdAt: string, service: StagedServiceLike): StageOrderSummary[] {
-  const closed: CaseStatus[] = ['completed', 'delivered'];
-  return stageOrdersFor(caseId, createdAt, service).map((o, i) => {
-    const rows = stageRowsFromOrders([o], createdAt);
-    const open = rows.find(r => !r.doneEarlier && !closed.includes(r.status)) ?? null;
-    return {
-      id: o.id,
-      label: i === 0 ? 'Initial' : `Order ${i + 1}`,
-      rows,
-      next: open,
-      status: open?.status ?? rows[rows.length - 1]?.status ?? o.status,
-      doneEarlier: rows.length > 0 && rows.every(r => r.doneEarlier),
-      followUp: !!o.followUpFrom,
-    };
-  });
 }
