@@ -109,7 +109,7 @@ import {
   findServiceItem,
 } from './CreateCasePage';
 import {
-  isDentureItem, isPastISO, caseDateToISO, archLabel, archOf, archTeeth, toggleArch, findFollowUpMatch, addStageAppend, TODAY_ISO as TODAY_ISO_FOR_DATES,
+  isDentureItem, isPastISO, caseDateToISO, archLabel, archOf, archTeeth, toggleArch, groupTeeth, findFollowUpMatch, addStageAppend, TODAY_ISO as TODAY_ISO_FOR_DATES,
   type FollowUpMatch,
 } from '../data/dentureStages';
 import { ArchPicker, StageDatePicker, StageDateList, StageStatusCell, stagesComplete } from '../components/DentureStages';
@@ -1680,7 +1680,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
     const serviceItems = selections.map((sel, i) => ({
       id: `${id}-s${i + 1}`,
       name: CATALOG_ID_TO_SERVICE_NAME[sel.itemId] ?? getServiceDisplayName(sel),
-      status: 'new' as const,
+      status: 'submitted' as const,
       deliveryDate: !isDentureItem(sel.itemId) && sel.requestedDelivery ? isoToCaseDate(sel.requestedDelivery) : null,
       stageDates: isDentureItem(sel.itemId)
         ? Object.fromEntries((sel.stages ?? []).map(s => [s, sel.stageDates?.[s] ? isoToCaseDate(sel.stageDates[s]) : null]))
@@ -1703,7 +1703,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       lab: isLab ? LAB_PORTAL_LAB : (selectedLab?.name ?? LAB_PORTAL_LAB),
       services: serviceItems.map(si => si.name),
       serviceItems,
-      status: 'new',
+      status: 'submitted',
       createdAt: created,
       updatedAt: created,
       requestedDelivery: earliestRequestedISO ? isoToCaseDate(earliestRequestedISO) : null,
@@ -2922,7 +2922,17 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                       >
                                         {archLabel(sortedTeeth)}
                                       </span>
-                                    ) : sortedTeeth.length > 0 ? sortedTeeth.map(code => (
+                                    ) : sortedTeeth.length > 0 ? [
+                                      ...groupTeeth(sortedTeeth).arches.map(a => (
+                                        <span
+                                          key={a}
+                                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white border whitespace-nowrap"
+                                          style={{ color, borderColor: rowBorder }}
+                                        >
+                                          {a}
+                                        </span>
+                                      )),
+                                      ...groupTeeth(sortedTeeth).rest.map(code => (
                                       <span
                                         key={code}
                                         className="inline-flex items-center justify-center px-1 py-0.5 rounded text-[10px] font-mono font-bold bg-white border"
@@ -2930,7 +2940,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                       >
                                         {code}
                                       </span>
-                                    )) : <span className="text-[#A0A0B0] italic text-[10px]">—</span>}
+                                    ))] : <span className="text-[#A0A0B0] italic text-[10px]">—</span>}
                                   </div>
                                   <span className="flex items-center gap-1 text-[10px] font-semibold text-[#030213] min-w-0">
                                     <span className="truncate">{sel.material || <span className="text-[#A0A0B0] italic font-normal">—</span>}</span>
@@ -4057,6 +4067,7 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
             activeService={selection}
             width="min(240px, calc((100vh - 250px) * 0.589))"
             onArchToggle={isDenture ? (jaw) => onUpdate({ teeth: toggleArch(teeth, jaw) }) : undefined}
+            onTeethSet={(next) => onUpdate({ teeth: next })}
             onToothToggle={(code) => {
               const next = teeth.includes(code) ? teeth.filter(c => c !== code) : [...teeth, code];
               onUpdate({ teeth: next });
@@ -4116,14 +4127,20 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
             </p>
           ) : (
             <div className="flex flex-wrap gap-1">
-              {teeth.slice().sort().map(c => (
-                <span
-                  key={c}
-                  className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-mono font-semibold bg-white text-[#1565C0] border border-[#BFDBFE]"
-                >
-                  {c}
-                </span>
-              ))}
+              {/* A full jaw collapses into one "Upper Arch" / "Lower Arch" chip. */}
+              {(() => { const g = groupTeeth(teeth); return [
+                ...g.arches.map(a => (
+                  <span key={a} className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-white text-[#1565C0] border border-[#BFDBFE]">{a}</span>
+                )),
+                ...g.rest.slice().sort().map(c => (
+                  <span
+                    key={c}
+                    className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-mono font-semibold bg-white text-[#1565C0] border border-[#BFDBFE]"
+                  >
+                    {c}
+                  </span>
+                )),
+              ]; })()}
             </div>
           )}
         </div>}
@@ -4297,6 +4314,7 @@ function ServiceDetailsDrawer({ selection, onUpdate, onClose }: {
               <InteractiveToothChart
                 activeService={selection}
                 width="min(260px, calc((100vh - 360px) * 0.589))"
+                onTeethSet={(next) => onUpdate({ teeth: next })}
                 onToothToggle={(code) => {
                   const next = teeth.includes(code) ? teeth.filter(c => c !== code) : [...teeth, code];
                   onUpdate({ teeth: next });

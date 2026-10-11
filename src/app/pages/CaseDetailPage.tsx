@@ -8,6 +8,7 @@ import {
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply, Pencil,
   Copy, Plug, GitBranch, Lock as LockIcon,
+  History as HistoryIcon,
 } from 'lucide-react';
 import SideDrawer from '../components/SideDrawer';
 import ActionMenu from '../components/ActionMenu';
@@ -62,7 +63,7 @@ import {
   subjectFromCase,
   useRescanLinks,
 } from '../data/rescanDetection';
-import { DENTURE_SERVICES, DENTURE_STAGES, archLabel, isDentureService, nextStageRow, stageOrdersFor, stageRowsFor, stageRowsFromOrders, isoToCaseDate as isoToStageDate, caseDateToISO } from '../data/dentureStages';
+import { DENTURE_SERVICES, DENTURE_STAGES, archLabel, isDentureService, nextStageRow, stageOrdersFor, stageRowsFor, stageRowsFromOrders, isoToCaseDate as isoToStageDate, caseDateToISO, type StageRow } from '../data/dentureStages';
 import { StageDatePicker, StageStatusCell } from '../components/DentureStages';
 
 // Conversation hub entry point — parked while the CareStack flow is reviewed.
@@ -91,6 +92,8 @@ export interface StageOrder {
   stageStatuses?: Record<string, CaseStatus>;
   /** Set when this order arrived as a follow-up prescription (draft / Rx id). */
   followUpFrom?: string;
+  /** Denture stages done before the case reached Smile Genius. */
+  doneElsewhere?: string[];
 }
 
 // Catalog of fabrication stages per staged service. A service whose name is a
@@ -305,7 +308,8 @@ export const STATUS_MAP: Record<CaseStatus, { label: string; bg: string; color: 
 };
 
 // Statuses offered by the status dropdown — every lifecycle status except Draft.
-const PICKABLE_STATUSES = (Object.keys(STATUS_MAP) as CaseStatus[]).filter(st => st !== 'draft');
+// No "New" status on the portals — a case starts as Submitted.
+const PICKABLE_STATUSES = (Object.keys(STATUS_MAP) as CaseStatus[]).filter(st => st !== 'draft' && st !== 'new');
 
 // Live-portal status control: a split pill (status | ▾). The left half shows
 // the current status; the ▾ opens the status list with the current one ticked.
@@ -405,7 +409,7 @@ function buildCasePipeline(c: CaseForDetail): CaseTimelineStep[] {
   const blocked = c.status === 'refinement' || c.status === 'on-hold';
 
   const stages: CaseTimelineStep[] = [
-    { label: 'New',           done: true,             timestamp: c.createdAt, sub: 'Case created' },
+    { label: 'Created',       done: true,             timestamp: c.createdAt, sub: 'Case created' },
     { label: 'Submitted',     done: rank >= 1,        timestamp: rank >= 1 ? c.createdAt : undefined, sub: 'Sent to lab' },
     { label: 'In Production', done: rank >= 2 && !blocked, timestamp: rank >= 2 ? c.updatedAt : undefined, sub: 'Being manufactured' },
     { label: 'Quality Check', done: rank >= 3 && !blocked, timestamp: rank >= 3 ? c.updatedAt : undefined, sub: 'QA review' },
@@ -1323,7 +1327,7 @@ function ServiceMiniTimeline({ status, onClick }: { status: CaseStatus; onClick?
   const rank    = PIPELINE_RANK[status] ?? 0;
   const blocked = status === 'refinement' || status === 'on-hold';
 
-  const STAGES = ['New', 'Submitted', 'In Prod.', 'QC', 'Shipped', 'Delivered'];
+  const STAGES = ['Created', 'Submitted', 'In Prod.', 'QC', 'Shipped', 'Delivered'];
 
   return (
     <button
@@ -1432,6 +1436,15 @@ function CaseSummaryOverview({
   // Delivery dates edited on the cards ("DD-MMM-YYYY"), keyed by service id,
   // or service id + stage for a denture's next stage.
   const [dateEdits, setDateEdits] = useState<Record<string, string | null>>({});
+  // Denture cards — stages ordered from the card ("New Stage Order") and
+  // stages ticked as received, keyed by service id / service id + stage.
+  const [addedStages, setAddedStages] = useState<Record<string, StageRow[]>>({});
+  const [receivedStages, setReceivedStages] = useState<Set<string>>(new Set());
+  const [stagePickerFor, setStagePickerFor] = useState<ServiceItem | null>(null);
+  const dentureRowsOf = (si: ServiceItem): StageRow[] =>
+    [...stageRowsFor(caseData.id, caseData.createdAt, si), ...(addedStages[si.id] ?? [])]
+      .map(r => receivedStages.has(`${si.id}::${r.stage}`) ? { ...r, status: 'delivered' as CaseStatus } : r)
+      .sort((a, b) => DENTURE_STAGES.indexOf(a.stage) - DENTURE_STAGES.indexOf(b.stage));
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4" onClick={() => setOpenStatusId(null)}>
@@ -1447,7 +1460,8 @@ function CaseSummaryOverview({
         const scanCount    = si.scanFileCount   ?? 0;
         const attachCount  = si.attachmentCount ?? 0;
         // Denture: no service-level date — the card shows the next open stage.
-        const nextStage    = isDentureService(si.name) ? nextStageRow(stageRowsFor(caseData.id, caseData.createdAt, si)) : null;
+        const dentureRows  = isDentureService(si.name) ? dentureRowsOf(si) : null;
+        const nextStage    = dentureRows ? nextStageRow(dentureRows) : null;
         const dateKey      = nextStage ? `${si.id}::${nextStage.stage}` : si.id;
         const cardDelivery = dateKey in dateEdits
           ? dateEdits[dateKey]
@@ -1490,7 +1504,7 @@ function CaseSummaryOverview({
                   <p className="text-[11px] text-[#717182]">
                     {(() => {
                       const st = getStaging(si);
-                      if (st?.mode === 'catalog') return `${stageRowsFor(caseData.id, caseData.createdAt, si).length} stages`;
+                      if (st?.mode === 'catalog') return `${dentureRowsOf(si).length} stages`;
                       if (st?.mode === 'phased')  return 'Phasing enabled';
                       return si.phases ? `${si.phases.length} phases` : 'Single phase';
                     })()}
@@ -1511,7 +1525,7 @@ function CaseSummaryOverview({
                 </button>
                 {openStatusId === si.id && (
                   <div className="absolute right-0 top-full mt-1 z-30 bg-white border border-[#E0E0E6] rounded-lg shadow-xl py-1 min-w-[180px]">
-                    {(Object.keys(STATUS_MAP) as CaseStatus[]).map((st) => {
+                    {PICKABLE_STATUSES.map((st) => {
                       const ss = STATUS_MAP[st];
                       return (
                         <button
@@ -1592,20 +1606,73 @@ function CaseSummaryOverview({
               </div>
             )}
 
-            {/* ── Mini pipeline timeline — click to open full timeline modal ── */}
+            {/* ── Denture — every stage in a list, each with its own status and
+                editable delivery date (a denture has no single service date). ── */}
+            {dentureRows ? (
+              <div className="border border-[#F0EFF6] rounded-lg divide-y divide-[#F0EFF6] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                {dentureRows.map(r => {
+                  const key = `${si.id}::${r.stage}`;
+                  const date = key in dateEdits ? dateEdits[key] : r.date;
+                  const received = receivedStages.has(key);
+                  const closed = r.status === 'completed' || r.status === 'delivered';
+                  return (
+                    <div key={r.stage} className={`flex items-center gap-2 px-3 py-1.5 ${r.doneEarlier ? 'bg-[#FAFAFB]' : 'bg-white'}`}>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-xs font-semibold truncate ${r.doneEarlier ? 'text-[#717182]' : 'text-[#030213]'}`}>{r.stage}</p>
+                        {/* Mark as received — a light tick per stage (undo while it's local). */}
+                        {!r.doneEarlier && (!closed || received) && (
+                          <button
+                            type="button"
+                            onClick={() => setReceivedStages(prev => {
+                              const next = new Set(prev);
+                              if (next.has(key)) next.delete(key); else next.add(key);
+                              return next;
+                            })}
+                            title={received ? 'Undo — not received yet' : `Mark ${r.stage} as received`}
+                            className={`mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold transition-colors ${
+                              received ? 'text-[#15803D]' : 'text-[#A0A0B0] hover:text-[#4D8EF7]'
+                            }`}
+                          >
+                            <span className={`w-3 h-3 rounded-full border flex items-center justify-center ${received ? 'bg-[#16A34A] border-[#16A34A]' : 'border-current'}`}>
+                              <Check className={`w-2 h-2 ${received ? 'text-white' : ''}`} strokeWidth={3.5} />
+                            </span>
+                            {received ? 'Received' : 'Mark received'}
+                          </button>
+                        )}
+                      </div>
+                      <StageStatusCell row={r} size="xs" />
+                      {r.doneEarlier ? (
+                        <span className="w-[124px] text-[11px] text-[#A0A0B0] whitespace-nowrap text-right">{r.date ? `Done ${r.date}` : 'Done'}</span>
+                      ) : (
+                        <input
+                          type="date"
+                          value={date ? caseDateToISO(date) : ''}
+                          aria-label={`${si.name} ${r.stage} delivery date`}
+                          onChange={(e) => setDateEdits(prev => ({ ...prev, [key]: e.target.value ? isoToStageDate(e.target.value) : null }))}
+                          className={`w-[124px] px-2 py-1 text-[11px] text-[#030213] border rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] transition-colors ${date ? 'border-[#E0E0E6]' : 'border-[#FCD34D]'}`}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+            /* ── Mini pipeline timeline — click to open full timeline modal ── */
             <div onClick={(e) => e.stopPropagation()}>
               <ServiceMiniTimeline
                 status={currentStatus}
                 onClick={() => onOpenTimeline?.()}
               />
             </div>
+            )}
 
             {/* ── Footer: delivery date + countdown + action ── */}
             <div
               className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 pt-3 border-t border-[#F0EFF6] mt-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex-shrink-0">
+              {/* A denture's dates live on its stage list above. */}
+              {!dentureRows && <div className="flex-shrink-0">
                 <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-0.5 whitespace-nowrap">{nextStage ? `Next stage · ${nextStage.stage}` : 'Delivery'}</p>
                 <div className="flex items-center gap-1.5">
                   {/* Editable in place — the service's date, or the next
@@ -1624,9 +1691,21 @@ function CaseSummaryOverview({
                     </span>
                   )}
                 </div>
-              </div>
+              </div>}
               <div className="flex items-center gap-2 ml-auto">
-                {isReceived ? (
+                {/* Denture — receiving happens per stage (tick above); the
+                    card's main action orders the next stage(s). */}
+                {dentureRows ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setStagePickerFor(si); }}
+                    disabled={DENTURE_STAGES.every(st => dentureRows.some(r => r.stage === st))}
+                    title={DENTURE_STAGES.every(st => dentureRows.some(r => r.stage === st)) ? 'All stages have been ordered' : 'Order the next stage(s)'}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#7C3AED] to-[#A59DFF] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity shadow-sm whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    New Stage Order
+                  </button>
+                ) : isReceived ? (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0] whitespace-nowrap">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     Received
@@ -1652,6 +1731,33 @@ function CaseSummaryOverview({
           </div>
         );
       })}
+      {stagePickerFor && (() => {
+        const si = stagePickerFor;
+        const existing = dentureRowsOf(si);
+        return (
+          <StageOrderPickerModal
+            service={si}
+            mode="catalog"
+            remaining={DENTURE_STAGES.filter(st => !existing.some(r => r.stage === st))}
+            existing={existing}
+            nextPhaseName=""
+            onCancel={() => setStagePickerFor(null)}
+            onConfirm={(stages, dates) => {
+              setAddedStages(prev => ({
+                ...prev,
+                [si.id]: [
+                  ...(prev[si.id] ?? []),
+                  ...stages.map((stage): StageRow => ({
+                    stage, date: dates[stage] ? isoToStageDate(dates[stage]) : null,
+                    status: 'submitted', orderIndex: 99, doneEarlier: false, followUp: false,
+                  })),
+                ],
+              }));
+              setStagePickerFor(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -1746,7 +1852,7 @@ function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseNa
                 service.material && `Material: ${service.material}`,
                 service.shade && `Shade: ${service.shade}`,
                 service.orderType && service.orderType,
-                (service.fdi?.length ?? 0) > 0 && `${service.fdi!.length} teeth`,
+                (service.fdi?.length ?? 0) > 0 && (isDentureService(service.name) ? archLabel(service.fdi!) : `${service.fdi!.length} teeth`),
               ].filter(Boolean).map((chip, i) => (
                 <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-white text-[#5A5568] border border-[#E0E0E6]">
                   {chip as string}
@@ -2782,8 +2888,18 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   // Denture: one row per ordered stage with its own date + status. The
   // service itself has no delivery date.
   const stageRows = stageCatalog ? stageRowsFromOrders(stageOrders, caseData.createdAt) : [];
-  // The stage the denture is heading to next drives the identity card status.
-  const dentureNextStage = stageCatalog ? nextStageRow(stageRows) : null;
+  // Denture tabs: one per stage order (stages ordered together share a tab),
+  // leaving out stages done elsewhere — no lab work happened for those here.
+  const doneElsewhereRows = stageRows.filter(r => r.doneEarlier);
+  const dentureTabs = stageCatalog
+    ? stageOrders
+        .map((order, i) => ({ order, rows: stageRows.filter(r => r.orderIndex === i && !r.doneEarlier) }))
+        .filter(t => t.rows.length > 0)
+    : [];
+  const activeDentureTab = dentureTabs.find(t => t.order.id === activeStageId) ?? dentureTabs[0] ?? null;
+  const activeOrderLabel = activeDentureTab ? activeDentureTab.rows.map(r => r.stage).join(' + ') : '';
+  // The identity card follows the open tab: its next open stage.
+  const dentureNextStage = stageCatalog ? nextStageRow(activeDentureTab?.rows ?? stageRows) : null;
   // Per-service viewer + order panel state — scoped to this view so each
   // service tab keeps its own viewer format and accordion state.
   const [viewerFormat, setViewerFormat] = useState<ViewerFormat>('3D');
@@ -2820,14 +2936,15 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden mt-3 mx-6 mb-6 gap-3 min-h-0">
-      {/* ── Denture stages — one vertical list, one row per stage. No order
-          grouping: every stage carries its own status and delivery date, and
-          "New Stage Order" picks from the stages not ordered yet. ── */}
+      {/* ── Denture stage orders — one tab per order, named by its stages
+          ("Special Tray + Bite Registration"). Stages ordered together share a
+          tab; each tab has its own Details / Invoice / Shipping below. Stages
+          done elsewhere had no lab work here, so they sit in a note above. ── */}
       {stageCatalog && (
         <div className="bg-white border border-[#E0E0E6] rounded-xl flex-shrink-0 overflow-hidden">
-          <div className="flex items-center justify-between gap-2 px-4 py-2.5">
+          <div className="flex items-center justify-between gap-2 px-4 pt-2.5">
             <div className="min-w-0">
-              <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">Stages · requested delivery</p>
+              <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider">Stage orders</p>
               {remainingStages.length > 0 && (
                 <p className="text-[10px] text-[#A0A0B0] mt-0.5">
                   {remainingStages.length} stage{remainingStages.length === 1 ? '' : 's'} not yet ordered
@@ -2844,43 +2961,66 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               New Stage Order
             </button>
           </div>
-          {stageRows.length > 0 && (
-            <table className="w-full text-xs border-t border-[#F0EFF6]">
+          {doneElsewhereRows.length > 0 && (
+            <p className="mx-4 mt-2 inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#717182]">
+              <HistoryIcon className="w-3 h-3 text-[#A0A0B0]" />
+              <span className="font-semibold text-[#5A5568]">Done elsewhere:</span>
+              {doneElsewhereRows.map(r => (
+                <span key={r.stage}>{r.stage}{r.date ? ` · ${r.date}` : ''}</span>
+              ))}
+            </p>
+          )}
+          {/* Tabs — one per stage order */}
+          <div className="flex items-center gap-1 px-1.5 pt-2 overflow-x-auto border-b border-[#F0EFF6]">
+            {dentureTabs.map(({ order, rows }) => (
+              <button
+                key={order.id}
+                onClick={() => setActiveStageId(order.id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-xs font-semibold border-b-2 transition-colors whitespace-nowrap flex-shrink-0 max-w-[320px] ${
+                  activeDentureTab?.order.id === order.id
+                    ? 'border-[#7C3AED] text-[#5B21B6] bg-[#F5F3FF]'
+                    : 'border-transparent text-[#717182] hover:text-[#030213] hover:bg-[#F8F9FC]'
+                }`}
+                title={rows.map(r => r.stage).join(' + ')}
+              >
+                <span className="truncate">{rows.map(r => r.stage).join(' + ')}</span>
+                {order.followUpFrom && (
+                  <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">Follow-up Rx</span>
+                )}
+              </button>
+            ))}
+          </div>
+          {/* Active order's stages — status + editable delivery date */}
+          {activeDentureTab && (
+            <table className="w-full text-xs">
               <thead>
                 <tr className="text-[10px] text-[#A0A0B0] uppercase tracking-wider">
                   <th className="text-left font-semibold px-4 py-1.5">Stage</th>
                   <th className="text-left font-semibold px-4 py-1.5">Status</th>
-                  <th className="text-left font-semibold px-4 py-1.5">Date</th>
-                  <th className="text-left font-semibold px-4 py-1.5">Source</th>
+                  <th className="text-left font-semibold px-4 py-1.5">Delivery date</th>
                 </tr>
               </thead>
               <tbody>
-                {stageRows.map(r => {
-                  const o = stageOrders[r.orderIndex];
-                  const isNext = r.stage === dentureNextStage?.stage && !r.doneEarlier;
-                  return (
-                    <tr key={r.stage} className={`border-t border-[#F5F5F9] ${isNext ? 'bg-[#FAF8FF]' : ''}`}>
-                      <td className={`px-4 py-2 font-semibold whitespace-nowrap ${r.doneEarlier ? 'text-[#5A5568]' : 'text-[#030213]'}`}>{r.stage}</td>
-                      <td className="px-4 py-2"><StageStatusCell row={r} size="xs" /></td>
-                      <td className={`px-4 py-2 whitespace-nowrap ${r.doneEarlier ? 'text-[#717182]' : r.date ? 'text-[#030213]' : 'text-[#D97706]'}`}>
-                        {r.doneEarlier
-                          ? (r.date ? `Done ${r.date}` : 'Done — date not given')
-                          : (r.date ?? 'No date set')}
-                      </td>
-                      <td className="px-4 py-2 whitespace-nowrap">
-                        {r.followUp ? (
-                          <span title={o?.followUpFrom ? `Added from follow-up prescription ${o.followUpFrom}` : 'Added from a follow-up prescription'} className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">
-                            Follow-up Rx
-                          </span>
-                        ) : r.doneEarlier ? (
-                          <span className="text-[11px] text-[#A0A0B0]">Before Smile Genius</span>
-                        ) : (
-                          <span className="text-[11px] text-[#A0A0B0]">Original Rx</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {activeDentureTab.rows.map(r => (
+                  <tr key={r.stage} className="border-t border-[#F5F5F9]">
+                    <td className="px-4 py-2 font-semibold whitespace-nowrap text-[#030213]">{r.stage}</td>
+                    <td className="px-4 py-2"><StageStatusCell row={r} size="xs" /></td>
+                    <td className="px-4 py-1.5 whitespace-nowrap">
+                      <input
+                        type="date"
+                        value={r.date ? caseDateToISO(r.date) : ''}
+                        aria-label={`${r.stage} delivery date`}
+                        onChange={(e) => {
+                          const next = e.target.value ? isoToStageDate(e.target.value) : null;
+                          setStageOrders(prev => prev.map((so, i) => i === r.orderIndex
+                            ? { ...so, stageDates: { ...(so.stageDates ?? {}), [r.stage]: next } }
+                            : so));
+                        }}
+                        className={`px-2 py-1 text-xs text-[#030213] border rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] transition-colors ${r.date ? 'border-[#E0E0E6]' : 'border-[#FCD34D]'}`}
+                      />
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
@@ -2989,7 +3129,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                     <span className="text-base font-bold" style={{ color: iStyle.color }}>{service.name.charAt(0)}</span>
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-[#030213]">{service.name}</p>
+                    <p className="text-sm font-semibold text-[#030213]">{service.name}{activeOrderLabel && <span className="font-normal text-[#717182]"> · {activeOrderLabel}</span>}</p>
                     <p className="text-[11px] text-[#717182]">{caseData.id} · {caseData.patientName}</p>
                   </div>
                 </div>
@@ -3016,7 +3156,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                     {isPhased
                       ? (activeStageOrder?.stages[0] ?? '—')
                       : stageCatalog
-                        ? stageRows.length
+                        ? (activeDentureTab?.rows.length ?? 0)
                         : (service.phases ? service.phases.length : 1)}
                   </p>
                 </div>
@@ -3236,8 +3376,15 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
             </div>
           </>
         )}
+        {/* Denture: invoice + shipping belong to the open stage order. */}
+        {activeOrderLabel && subTab !== 'details' && (
+          <div className="bg-[#F5F3FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 text-xs text-[#5B21B6]">
+            {subTab === 'invoice' ? 'Invoice' : 'Shipping'} for <span className="font-semibold">{activeOrderLabel}</span>
+            {(activeDentureTab?.rows.length ?? 0) > 1 && <span className="text-[#7C3AED]"> — ordered together, so they share one {subTab === 'invoice' ? 'invoice' : 'shipment'}</span>}
+          </div>
+        )}
         {subTab === 'invoice'  && <InvoiceTab  caseId={caseData.id} />}
-        {subTab === 'shipping' && <ShippingTab shipment={shipment} serviceName={service.name} />}
+        {subTab === 'shipping' && <ShippingTab shipment={shipment} serviceName={activeOrderLabel ? `${service.name} · ${activeOrderLabel}` : service.name} />}
       </div>
       </div>
 
@@ -3258,7 +3405,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
             const newOrder: StageOrder = {
               id: `so-${stageOrders.length + 1}`,
               stages,
-              status: 'new',
+              status: 'submitted',
               deliveryDate: earliest ? isoToStageDate(earliest) : null,
               createdAt: caseData.updatedAt,
               ...(stageCatalog ? { stageDates } : {}),
@@ -4222,12 +4369,12 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
 
             {/* Delivery date / Created by / Received via */}
             <div>
-              <p className={`text-[10px] uppercase tracking-wider font-semibold mb-1 ${missingDeliveryDate ? 'text-[#D4183D]' : 'text-[#A0A0B0]'}`}>Delivery Date</p>
-              {caseDateScope ? (
-                <p className="text-[11px] text-[#717182]" title={caseDateScope === 'service' ? 'Each service carries its own delivery date' : 'Each denture stage carries its own delivery date'}>
-                  {caseDateScope === 'service' ? 'Set per service' : 'Set per stage'}
-                </p>
-              ) : (
+              {/* No case-level date when dates live per service / per stage —
+                  the field is left out of the header entirely. */}
+              {!caseDateScope && (
+                <p className={`text-[10px] uppercase tracking-wider font-semibold mb-1 ${missingDeliveryDate ? 'text-[#D4183D]' : 'text-[#A0A0B0]'}`}>Delivery Date</p>
+              )}
+              {caseDateScope ? null : (
               <input
                 type="date"
                 value={toIsoDate(deliveryDate)}

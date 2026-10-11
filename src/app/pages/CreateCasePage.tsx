@@ -10,7 +10,7 @@ import ModalPortal from '../components/ModalPortal';
 import { mockSuppliers } from '../data/suppliersData';
 import { mockStaffMembers } from '../data/clinicsData';
 import { findCustomService, isCustomServiceId } from '../data/customServices';
-import { archLabel, isDentureItem, isUpperTooth, isoToCaseDate, toggleArch } from '../data/dentureStages';
+import { archLabel, groupTeeth, isDentureItem, isUpperTooth, isoToCaseDate, toggleArch } from '../data/dentureStages';
 import { StageDatePicker, StageDateList } from '../components/DentureStages';
 
 // ─── Create Case — 3-step wizard ─────────────────────────────────────────────
@@ -1398,8 +1398,9 @@ function ServiceDetailsStep({
                 <p className="text-[11px] text-[#A0A0B0] italic">Pick teeth from the chart →</p>
               ) : (
                 <div className="flex flex-wrap gap-1">
-                  {(activeService.teeth ?? []).map(t => (
-                    <span key={t} className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-semibold bg-[#EEF4FF] text-[#1565C0] border border-[#BFDBFE]">
+                  {/* A full jaw collapses into one "Upper Arch" / "Lower Arch" chip. */}
+                  {(() => { const g = groupTeeth(activeService.teeth ?? []); return [...g.arches, ...g.rest]; })().map(t => (
+                    <span key={t} className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[#EEF4FF] text-[#1565C0] border border-[#BFDBFE] ${t.includes('Arch') ? '' : 'font-mono'}`}>
                       {t}
                     </span>
                   ))}
@@ -1435,6 +1436,7 @@ function ServiceDetailsStep({
                   onArchToggle={isDentureItem(activeService.itemId)
                     ? (jaw) => onUpdateSelection(activeService.itemId, { teeth: toggleArch(activeService.teeth ?? [], jaw) })
                     : undefined}
+                  onTeethSet={(teeth) => onUpdateSelection(activeService.itemId, { teeth })}
                   onToothToggle={(code) => {
                     const current = activeService.teeth ?? [];
                     const next = current.includes(code) ? current.filter(c => c !== code) : [...current, code];
@@ -2104,9 +2106,12 @@ export function Mini({ label, required, accessory, children }: { label: string; 
 // coordinate space of the chart (viewBox 0 0 327 555).
 // Hover → light teal tint; Selected → solid teal fill (#59C1E3 / #3FA8CA).
 // Targets whichever service is currently being edited (activeService).
-export function InteractiveToothChart({ activeService, onToothToggle, onArchToggle, width = 170 }: {
+export function InteractiveToothChart({ activeService, onToothToggle, onTeethSet, onArchToggle, width = 170 }: {
   activeService: ServiceSelection | null;
   onToothToggle: (code: string) => void;
+  /** Replace the whole selection in one go — "Select Arch" and Clear use it
+   *  (toggling tooth by tooth would each see the same stale selection). */
+  onTeethSet?: (teeth: string[]) => void;
   /** Arch mode (dentures): a click on "Select Arch" or on any tooth selects
    *  or clears that whole jaw instead of a single tooth. */
   onArchToggle?: (jaw: 'upper' | 'lower') => void;
@@ -2127,6 +2132,16 @@ export function InteractiveToothChart({ activeService, onToothToggle, onArchTogg
   const jawOf = (id: string): 'upper' | 'lower' => isUpperTooth(id) ? 'upper' : 'lower';
   // Centres of the two "Select Arch" labels in the FDI artwork.
   const ARCH_HIT: Record<'upper' | 'lower', { cy: number }> = { upper: { cy: 190 }, lower: { cy: 408 } };
+  // "Select Arch" on any other service: select every tooth of that jaw, or
+  // clear the jaw when it's already fully selected. Other teeth are kept.
+  const selectJaw = (jaw: 'upper' | 'lower') => {
+    if (onArchToggle) { onArchToggle(jaw); return; }
+    if (!onTeethSet) return;
+    const jawIds = Object.keys(TEETH).filter(id => jawOf(id) === jaw);
+    const others = selected.filter(t => (isUpperTooth(t) ? 'upper' : 'lower') !== jaw);
+    onTeethSet(jawIds.every(isSelected) ? others : [...others, ...jawIds]);
+  };
+  const canSelectJaw = archMode || !!onTeethSet;
 
   // Hit-area centres and radii in SVG units (viewBox 0 0 327 555). Tuned
   // by measuring path centroids from /public/FDI.svg so the ellipses land
@@ -2189,11 +2204,11 @@ export function InteractiveToothChart({ activeService, onToothToggle, onArchTogg
               ? 'Click any tooth to add it to the selection.'
               : <><span className="font-semibold text-[#030213]">{selected.length}</span>{' '}
                   {selected.length === 1 ? 'tooth' : 'teeth'} selected ·{' '}
-                  <span className="text-[#030213] font-medium">{selected.slice().sort().join(', ')}</span></>}
+                  <span className="text-[#030213] font-medium">{(() => { const g = groupTeeth(selected); return [...g.arches, ...g.rest.slice().sort()].join(', '); })()}</span></>}
         </p>
         {activeService && selected.length > 0 && (
           <button
-            onClick={() => selected.forEach(t => onToothToggle(t))}
+            onClick={() => onTeethSet ? onTeethSet([]) : selected.forEach(t => onToothToggle(t))}
             className="text-[11px] text-[#717182] hover:text-[#D4183D] flex-shrink-0"
           >
             Clear
@@ -2224,9 +2239,9 @@ export function InteractiveToothChart({ activeService, onToothToggle, onArchTogg
           className="absolute inset-0 w-full h-full"
           style={{ cursor: activeService ? 'pointer' : 'default' }}
         >
-          {/* Arch mode — the "Select Arch" label in the middle of each jaw is
-              a hit area too. */}
-          {archMode && (['upper', 'lower'] as const).map(jaw => (
+          {/* The "Select Arch" label in the middle of each jaw selects (or
+              clears) that whole jaw — on every service. */}
+          {canSelectJaw && (['upper', 'lower'] as const).map(jaw => (
             <ellipse
               key={`arch-${jaw}`}
               cx={163}
@@ -2236,14 +2251,14 @@ export function InteractiveToothChart({ activeService, onToothToggle, onArchTogg
               fill={hoveredJaw === jaw ? 'rgba(89,193,227,0.10)' : 'transparent'}
               onMouseEnter={() => activeService && setHoveredJaw(jaw)}
               onMouseLeave={() => setHoveredJaw(null)}
-              onClick={() => activeService && onArchToggle!(jaw)}
+              onClick={() => activeService && selectJaw(jaw)}
             >
               <title>{`Select the whole ${jaw} arch`}</title>
             </ellipse>
           ))}
           {Object.entries(TEETH).map(([id, { cx, cy, rx, ry }]) => {
             const isSel = isSelected(id);
-            const isHov = archMode ? hoveredJaw === jawOf(id) : hoveredTooth === id;
+            const isHov = hoveredJaw === jawOf(id) || (!archMode && hoveredTooth === id);
             return (
               <ellipse
                 key={id}
@@ -2262,7 +2277,7 @@ export function InteractiveToothChart({ activeService, onToothToggle, onArchTogg
                 strokeWidth={isSel ? 1.5 : 0}
                 onMouseEnter={() => activeService && (archMode ? setHoveredJaw(jawOf(id)) : setHoveredTooth(id))}
                 onMouseLeave={() => { setHoveredTooth(null); setHoveredJaw(null); }}
-                onClick={() => activeService && (archMode ? onArchToggle!(jawOf(id)) : onToothToggle(id))}
+                onClick={() => activeService && (archMode ? onArchToggle!(jawOf(id)) : onToothToggle(selected.includes(id) ? id : selected.includes(toCode(id)) ? toCode(id) : id))}
               />
             );
           })}

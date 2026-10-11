@@ -1,4 +1,4 @@
-import { Check, CopyCheck, History } from 'lucide-react';
+import { Check, CopyCheck, History, X } from 'lucide-react';
 import type { CaseStatus } from '../pages/CasesPage';
 import { STATUS_MAP } from '../pages/CaseDetailPage';
 import { ARCH_LABELS, DENTURE_STAGES, TODAY_ISO, archOf, archTeeth, isPastISO, type Arch, type StageRow } from '../data/dentureStages';
@@ -120,8 +120,13 @@ export function StageDatePicker({
         </button>
       </div>
 
-      <div className="border border-[#E0E0E6] rounded-xl divide-y divide-[#F0EFF6] bg-white overflow-hidden">
-        {catalog.map(stage => {
+      {compact && selected.length === 0 && (
+        <p className="text-[11px] text-[#D97706]">No stages picked yet — add them with Edit.</p>
+      )}
+      <div className={`border border-[#E0E0E6] rounded-xl divide-y divide-[#F0EFF6] bg-white overflow-hidden ${compact && selected.length === 0 ? 'hidden' : ''}`}>
+        {/* Compact (service card): only the picked stages, each with a ✕ to
+            drop it — picking more happens in the service window. */}
+        {(compact ? selected : catalog).map(stage => {
           const prior = ordered.get(stage);
           if (prior) {
             return (
@@ -137,6 +142,65 @@ export function StageDatePicker({
           }
           const active = stages.includes(stage);
           const done = active && isDone(stage);
+          // Offered only where it can apply: a stage with no date yet, or one
+          // already marked done. A future delivery date means upcoming work.
+          const doneChip = active && allowDoneElsewhere && (done || !dates[stage]) && (
+            <button
+              type="button"
+              onClick={() => setDone(stage, !done)}
+              aria-pressed={done}
+              title="Done before this case reached Smile Genius — e.g. at the patient's previous lab"
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap transition-colors ${
+                done ? 'bg-[#F3F3F5] text-[#5A5568] border-[#C9C9D3]' : 'bg-white text-[#A0A0B0] border-[#E0E0E6] hover:text-[#5A5568]'
+              }`}
+            >
+              {done ? <Check className="w-2.5 h-2.5" strokeWidth={3} /> : <History className="w-2.5 h-2.5" />}
+              Done elsewhere
+            </button>
+          );
+          const dateField = (
+            <label className="flex items-center gap-1.5 flex-shrink-0">
+              <span className={`text-[10px] font-semibold uppercase tracking-wide min-w-[54px] ${compact ? 'text-left' : 'text-right'} whitespace-nowrap ${active ? 'text-[#717182]' : 'text-[#C0C0CC]'}`}>
+                {done ? 'Done on' : 'Delivery'}
+              </span>
+              <input
+                type="date"
+                value={dates[stage] ?? ''}
+                disabled={!active}
+                min={active && !done && allowDoneElsewhere ? TODAY_ISO : undefined}
+                max={done ? TODAY_ISO : undefined}
+                aria-label={`${stage} ${done ? 'done-on' : 'delivery'} date`}
+                title={done ? 'Optional — when it was done' : undefined}
+                onChange={(e) => setDate(stage, e.target.value)}
+                className={`w-[140px] px-2.5 py-1.5 text-xs border rounded-lg bg-white outline-none focus:border-[#4D8EF7] disabled:bg-[#F8F9FC] disabled:text-[#C0C0CC] ${
+                  active && !done && !dates[stage] ? 'border-[#FCD34D]' : 'border-[#E0E0E6]'
+                } ${done ? 'text-[#5A5568]' : 'text-[#030213]'}`}
+              />
+            </label>
+          );
+          // Compact (service card): name + ✕ on top, date + "Done elsewhere" below.
+          if (compact) {
+            return (
+              <div key={stage} className={`${rowPad} space-y-1.5 ${done ? 'bg-[#FAFAFB]' : 'bg-[#F8FAFF]'}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm truncate flex-1 min-w-0 font-semibold ${done ? 'text-[#5A5568]' : 'text-[#1565C0]'}`}>{stage}</span>
+                  <button
+                    type="button"
+                    onClick={() => toggle(stage)}
+                    aria-label={`Remove ${stage}`}
+                    title={`Remove ${stage}`}
+                    className="w-6 h-6 rounded-md flex items-center justify-center text-[#A0A0B0] hover:text-[#C62828] hover:bg-[#FFEBEE] transition-colors flex-shrink-0"
+                  >
+                    <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  {dateField}
+                  {doneChip}
+                </div>
+              </div>
+            );
+          }
           return (
             <div key={stage} className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${rowPad} ${done ? 'bg-[#FAFAFB]' : active ? 'bg-[#F8FAFF]' : ''}`}>
               <button
@@ -151,38 +215,8 @@ export function StageDatePicker({
                 </span>
                 <span className={`text-sm truncate ${done ? 'font-semibold text-[#5A5568]' : active ? 'font-semibold text-[#1565C0]' : 'text-[#5A5568]'}`}>{stage}</span>
               </button>
-              {active && allowDoneElsewhere && (
-                <button
-                  type="button"
-                  onClick={() => setDone(stage, !done)}
-                  aria-pressed={done}
-                  title="Done before this case reached Smile Genius — e.g. at the patient's previous lab"
-                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap transition-colors ${
-                    done ? 'bg-[#F3F3F5] text-[#5A5568] border-[#C9C9D3]' : 'bg-white text-[#A0A0B0] border-[#E0E0E6] hover:text-[#5A5568]'
-                  }`}
-                >
-                  {done ? <Check className="w-2.5 h-2.5" strokeWidth={3} /> : <History className="w-2.5 h-2.5" />}
-                  Done elsewhere
-                </button>
-              )}
-              <label className="flex items-center gap-1.5 flex-shrink-0">
-                <span className={`text-[10px] font-semibold uppercase tracking-wide min-w-[54px] text-right whitespace-nowrap ${active ? 'text-[#717182]' : 'text-[#C0C0CC]'}`}>
-                  {done ? 'Done on' : 'Delivery'}
-                </span>
-                <input
-                  type="date"
-                  value={dates[stage] ?? ''}
-                  disabled={!active}
-                  min={active && !done && allowDoneElsewhere ? TODAY_ISO : undefined}
-                  max={done ? TODAY_ISO : undefined}
-                  aria-label={`${stage} ${done ? 'done-on' : 'delivery'} date`}
-                  title={done ? 'Optional — when it was done' : undefined}
-                  onChange={(e) => setDate(stage, e.target.value)}
-                  className={`w-[140px] px-2.5 py-1.5 text-xs border rounded-lg bg-white outline-none focus:border-[#4D8EF7] disabled:bg-[#F8F9FC] disabled:text-[#C0C0CC] ${
-                    active && !done && !dates[stage] ? 'border-[#FCD34D]' : 'border-[#E0E0E6]'
-                  } ${done ? 'text-[#5A5568]' : 'text-[#030213]'}`}
-                />
-              </label>
+              {doneChip}
+              {dateField}
             </div>
           );
         })}

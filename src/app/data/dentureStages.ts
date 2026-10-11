@@ -64,6 +64,36 @@ export function archOf(teeth: (string | number)[]): Arch | null {
   return upper && lower ? 'both' : upper ? 'upper' : lower ? 'lower' : null;
 }
 
+/** FDI number for a tooth code ("UR6") or chart id ("16"); null if neither. */
+function fdiOf(t: string): number | null {
+  if (/^\d{2}$/.test(t)) return Number(t);
+  const m = /^(UR|UL|LL|LR)([1-8])$/.exec(t.toUpperCase());
+  const quadrant: Record<string, number> = { UR: 1, UL: 2, LL: 3, LR: 4 };
+  return m ? quadrant[m[1]] * 10 + Number(m[2]) : null;
+}
+
+/**
+ * Group a tooth selection for display: a jaw with all 16 teeth reads as one
+ * "Upper Arch" / "Lower Arch" chip, any other teeth stay as single chips.
+ */
+export function groupTeeth(teeth: string[]): { arches: ('Upper Arch' | 'Lower Arch')[]; rest: string[] } {
+  const fdis = new Map(teeth.map(t => [t, fdiOf(t)]));
+  const jawFull = (quads: number[]) => {
+    const have = new Set([...fdis.values()].filter((n): n is number => n !== null && quads.includes(Math.floor(n / 10))));
+    return have.size === 16;
+  };
+  const upper = jawFull([1, 2]);
+  const lower = jawFull([3, 4]);
+  const arches: ('Upper Arch' | 'Lower Arch')[] = [...(upper ? ['Upper Arch' as const] : []), ...(lower ? ['Lower Arch' as const] : [])];
+  const rest = teeth.filter(t => {
+    const n = fdis.get(t);
+    if (n == null) return true;
+    const q = Math.floor(n / 10);
+    return !((upper && (q === 1 || q === 2)) || (lower && (q === 3 || q === 4)));
+  });
+  return { arches, rest };
+}
+
 /** Turn one jaw on or off (chart click on a denture) — returns the new tooth codes. */
 export function toggleArch(teeth: string[], jaw: 'upper' | 'lower'): string[] {
   const now = archOf(teeth);

@@ -46,7 +46,7 @@ import { AiReviewTag } from '../components/AiReviewNotice';
 import { SCANNER_SYNC_COPY, scannerSyncUnsupported, caseCreatedBy, needsReview, statusReach, type CreatedSide, type StatusReach, type ViewerPortal } from '../data/caseProvenance';
 import { useScannerConnections } from '../data/scannerConnections';
 import { getCreatedCases, useCreatedCases } from '../data/createdCases';
-import { isDentureService, nextStageRow, stageRowsFor, useStageAppends, type StageRow } from '../data/dentureStages';
+import { isDentureService, stageRowsFor, useStageAppends, type StageRow } from '../data/dentureStages';
 import { StageStatusCell } from '../components/DentureStages';
 import { hasEmailReply, hasWhatsAppReply, useCaseCommunications } from '../data/caseCommunications';
 import {
@@ -177,7 +177,7 @@ const LABS = ['Smile Genius Lab', 'Kingsbridge Dental Lab', 'Patterson Dental UK
 // STATUSES intentionally excludes 'draft' — mock generator + service items
 // shouldn't randomly produce drafts; the draft-status seed cases below are
 // hand-rolled and live in `draftCases`.
-const STATUSES: Exclude<CaseStatus, 'draft'>[] = ['new', 'submitted', 'in-production', 'quality-check', 'shipped', 'delivered', 'refinement', 'on-hold', 'completed'];
+const STATUSES: Exclude<CaseStatus, 'draft'>[] = ['submitted', 'in-production', 'quality-check', 'shipped', 'delivered', 'refinement', 'on-hold', 'completed'];
 const PATIENT_FIRST = ['James', 'Emma', 'Oliver', 'Sophia', 'William', 'Isabella', 'Benjamin', 'Mia', 'Elijah', 'Charlotte', 'Lucas', 'Amelia', 'Mason', 'Harper', 'Logan', 'Evelyn', 'Alexander', 'Abigail', 'Ethan', 'Emily', 'Daniel', 'Elizabeth', 'Michael', 'Sofia', 'Henry', 'Avery', 'Jackson', 'Ella', 'Sebastian', 'Scarlett'];
 const PATIENT_LAST = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Wilson', 'Taylor', 'Anderson', 'Thomas', 'Jackson', 'White', 'Harris', 'Martin', 'Thompson', 'Young', 'Allen', 'King'];
 const DATES_CREATED = ['02-Jan-2026', '15-Jan-2026', '28-Jan-2026', '03-Feb-2026', '14-Feb-2026', '22-Feb-2026', '07-Mar-2026', '17-Mar-2026', '25-Mar-2026', '01-Apr-2026', '10-Apr-2026', '18-Apr-2026', '28-Apr-2026', '05-May-2026', '12-May-2026'];
@@ -465,12 +465,12 @@ export const rescanDemoCases: Case[] = [
     lab: 'Henry Schein',
     services: ['Night Guard'],
     serviceItems: [{
-      id: 'rs2004-s1', name: 'Night Guard', status: 'new', deliveryDate: '30-May-2026',
+      id: 'rs2004-s1', name: 'Night Guard', status: 'submitted', deliveryDate: '30-May-2026',
       fdi: [36, 37], material: 'Acrylic', shade: 'Clear', orderType: 'Private',
       instructions: 'Patient returned — impression distorted, new scan taken.',
       scanFileCount: 5, attachmentCount: 0,
     }],
-    status: 'new',
+    status: 'submitted',
     createdAt: '18-May-2026',
     updatedAt: '18-May-2026',
     requestedDelivery: '30-May-2026',
@@ -545,7 +545,7 @@ export const dentureDemoCases: Case[] = [
         }],
       },
       {
-        id: 'dn3002-s2', name: 'Crown', status: 'new', deliveryDate: '17-Jul-2026',
+        id: 'dn3002-s2', name: 'Crown', status: 'submitted', deliveryDate: '17-Jul-2026',
         fdi: [11], material: 'E.max', shade: 'A3', orderType: 'Private',
         scanFileCount: 2, attachmentCount: 0,
       },
@@ -556,6 +556,43 @@ export const dentureDemoCases: Case[] = [
     requestedDelivery: '10-Jul-2026',
     hasAlert: false,
     scanner: '3Shape',
+    source: 'scanner',
+  },
+  // DN-3003: a Full Denture that arrived part-way through — Special Tray and
+  // Bite Registration were done at the patient's previous lab ("Done
+  // elsewhere"), so the list shows them as done with their dates and Try In
+  // is the next stage.
+  {
+    id: 'CASE-DN-3003',
+    patientName: 'Helen Brooks',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Full Denture'],
+    serviceItems: [{
+      id: 'dn3003-s1', name: 'Full Denture', status: 'in-production', deliveryDate: null,
+      fdi: [11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25, 26, 27], material: 'Acrylic', shade: 'A2', orderType: 'Private',
+      instructions: 'Tray and bite done at the previous lab — records attached. Please continue from try-in.',
+      scanFileCount: 1, attachmentCount: 2,
+      stages: ['Special Tray', 'Bite Registration', 'Try In', 'Finish'],
+      doneElsewhere: ['Special Tray', 'Bite Registration'],
+      stageOrders: [{
+        id: 'so-1',
+        stages: ['Special Tray', 'Bite Registration', 'Try In', 'Finish'],
+        status: 'in-production',
+        deliveryDate: '08-Jul-2026',
+        createdAt: '30-Jun-2026',
+        stageDates: { 'Special Tray': '12-May-2026', 'Bite Registration': '02-Jun-2026', 'Try In': '08-Jul-2026', Finish: '22-Jul-2026' },
+        stageStatuses: { 'Try In': 'in-production', Finish: 'submitted' },
+        doneElsewhere: ['Special Tray', 'Bite Registration'],
+      }],
+    }],
+    status: 'in-production',
+    createdAt: '30-Jun-2026',
+    updatedAt: '01-Jul-2026',
+    requestedDelivery: '08-Jul-2026',
+    hasAlert: false,
+    scanner: 'iTero',
     source: 'scanner',
   },
 ];
@@ -576,7 +613,7 @@ export const upgradeDemoCase: Case = {
   serviceItems: [{
     id: 'rx1042-s1',
     name: 'Crown',
-    status: 'new',
+    status: 'submitted',
     deliveryDate: null,
     fdi: [26],
     material: 'E.max',
@@ -586,7 +623,7 @@ export const upgradeDemoCase: Case = {
     scanFileCount: 2,
     attachmentCount: 1,
   }],
-  status: 'new',
+  status: 'submitted',
   createdAt: '29-Jun-2026',
   updatedAt: '29-Jun-2026',
   requestedDelivery: '10-Jul-2026',
@@ -614,7 +651,7 @@ export const draftCases: Case[] = [
     serviceItems: [{
       id: 'd1-s1',
       name: 'Night Guard',
-      status: 'new',
+      status: 'submitted',
       deliveryDate: null,
       fdi: [16, 17, 26, 27, 36, 37, 46, 47],
       material: 'Soft EVA',
@@ -650,7 +687,7 @@ export const draftCases: Case[] = [
     serviceItems: [{
       id: 'd2-s1',
       name: 'Crown',
-      status: 'new',
+      status: 'submitted',
       deliveryDate: null,
       fdi: [16],
       material: 'Zirconia',
@@ -686,7 +723,7 @@ export const draftCases: Case[] = [
     serviceItems: [{
       id: 'd3-s1',
       name: 'Clear Aligners',
-      status: 'new',
+      status: 'submitted',
       deliveryDate: null,
       fdi: [11, 12, 13, 21, 22, 23, 31, 32, 33, 41, 42, 43],
       material: 'Composite',
@@ -721,7 +758,7 @@ export const draftCases: Case[] = [
     serviceItems: [{
       id: 'd4-s1',
       name: 'Retainer',
-      status: 'new',
+      status: 'submitted',
       deliveryDate: null,
       fdi: [11, 12, 13, 21, 22, 23],
       material: 'Composite',
@@ -753,7 +790,7 @@ export const draftCases: Case[] = [
     serviceItems: [{
       id: 'd5-s1',
       name: 'Crown',
-      status: 'new',
+      status: 'submitted',
       deliveryDate: null,
       fdi: [36],
       material: 'E.max',
@@ -790,7 +827,7 @@ export const draftCases: Case[] = [
     lab: 'Smile Genius Lab',
     services: ['Partial Denture'],
     serviceItems: [{
-      id: 'ddn1-s1', name: 'Partial Denture', status: 'new', deliveryDate: null,
+      id: 'ddn1-s1', name: 'Partial Denture', status: 'submitted', deliveryDate: null,
       fdi: [14, 15, 16, 24, 25, 26], material: 'Acrylic', shade: 'A2', orderType: 'Private',
       instructions: 'Try-in approved — please proceed to finish.',
       scanFileCount: 0, attachmentCount: 1,
@@ -824,7 +861,7 @@ export const draftCases: Case[] = [
     lab: 'Smile Genius Lab',
     services: ['Full Denture'],
     serviceItems: [{
-      id: 'ddn2-s1', name: 'Full Denture', status: 'new', deliveryDate: null,
+      id: 'ddn2-s1', name: 'Full Denture', status: 'submitted', deliveryDate: null,
       fdi: [11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25, 26, 27], material: 'Acrylic', shade: 'A1', orderType: 'Private',
       instructions: 'Special tray and bite were done at our previous lab. Please finish from the records attached.',
       scanFileCount: 0, attachmentCount: 2,
@@ -870,7 +907,7 @@ export const scannerIncompleteCases: Case[] = [
     lab: 'Smile Genius Lab',
     services: ['Crown'],
     serviceItems: [{
-      id: 'sc-inc-s1', name: 'Crown', status: 'new', deliveryDate: null,
+      id: 'sc-inc-s1', name: 'Crown', status: 'submitted', deliveryDate: null,
       fdi: [46], material: 'Zirconia',
       shade: '',                 // ← missing
       orderType: 'Private',
@@ -878,7 +915,7 @@ export const scannerIncompleteCases: Case[] = [
       scanFileCount: 1,          // ← only the upper arch arrived (lower + bite missing)
       attachmentCount: 0,
     }],
-    status: 'new',
+    status: 'submitted',
     createdAt: '18-Jun-2026',
     updatedAt: '18-Jun-2026',
     requestedDelivery: null,     // ← missing → also triggers the delivery-date warning
@@ -896,7 +933,7 @@ export const scannerIncompleteCases: Case[] = [
     lab: 'Smile Genius Lab',
     services: ['Crown'],
     serviceItems: [{
-      id: 'sfr-s1', name: 'Crown', status: 'new', deliveryDate: '03-Jul-2026',
+      id: 'sfr-s1', name: 'Crown', status: 'submitted', deliveryDate: '03-Jul-2026',
       fdi: [24], material: 'E.max',
       shade: '',                 // ← missing
       orderType: 'Private',
@@ -957,13 +994,13 @@ export const postReceivedCase: Case = {
   lab: 'Smile Genius Lab',
   services: ['Crown'],
   serviceItems: [{
-    id: 'post-s1', name: 'Crown', status: 'new', deliveryDate: '10-Jul-2026',
+    id: 'post-s1', name: 'Crown', status: 'submitted', deliveryDate: '10-Jul-2026',
     fdi: [16], material: 'Zirconia', shade: 'A3', orderType: 'Private',
     instructions: 'Impressions sent by Royal Mail — tracking RM 1234 5678 9GB.',
     scanFileCount: 0,
     attachmentCount: 0,
   }],
-  status: 'new',
+  status: 'submitted',
   createdAt: '20-Jun-2026',
   updatedAt: '20-Jun-2026',
   requestedDelivery: '10-Jul-2026',
@@ -989,13 +1026,13 @@ export const whatsappDemoCase: Case = {
   lab: 'Smile Genius Lab',
   services: ['Crown'],
   serviceItems: [{
-    id: 'wa3001-s1', name: 'Crown', status: 'new', deliveryDate: '12-Jul-2026',
+    id: 'wa3001-s1', name: 'Crown', status: 'submitted', deliveryDate: '12-Jul-2026',
     fdi: [26], material: 'E.max', shade: 'A2', orderType: 'Private',
     instructions: 'Emax crown UL6. Scans to follow — dentist ran out of time at the appointment.',
     scanFileCount: 0,
     attachmentCount: 0,
   }],
-  status: 'new',
+  status: 'submitted',
   // Dated just under the upgrade-paywall demo so it sits near the top of the
   // lab list under the default "created-newest" sort — a demo case nobody can
   // find is no demo at all.
@@ -1118,7 +1155,7 @@ export const CURRENT_USER = 'Sana Khan';
 // Statuses a user can move a case to from the listing/detail (excludes 'draft',
 // which only exists pre-submission).
 const CHANGEABLE_STATUSES: CaseStatus[] = [
-  'new', 'sent-for-review', 'submitted', 'in-production',
+  'sent-for-review', 'submitted', 'in-production',
   'quality-check', 'shipped', 'delivered', 'refinement', 'on-hold', 'completed',
 ];
 
@@ -1803,7 +1840,9 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   // upgrade popup shown when a further case is opened past the limit.
   const [viewedCaseIds, setViewedCaseIds] = useState<Set<string>>(() => new Set());
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  // Nested rows (services, denture stages) start OPEN — this tracks the ones
+  // the user has closed.
+  const [collapsedRows, setCollapsedRows] = useState<Set<string>>(new Set());
   // Follow-up prescriptions append denture stages to existing cases — re-read
   // the stage rows whenever one lands.
   useStageAppends();
@@ -1832,7 +1871,6 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   // carries its own status (or "Done elsewhere") and its own date; that is the
   // only place a denture shows a date in the list.
   function renderStageRows(c: Case, rows: StageRow[], nested = false, parentLast = true) {
-    const next = nextStageRow(rows);
     return rows.map((r, i) => (
       <tr
         key={`${c.id}-stage-${r.stage}`}
@@ -1854,9 +1892,6 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
           <td className={`${nested ? 'pl-8' : 'pl-4'} pr-4 py-2`}>
             <div className="flex items-center gap-1.5 whitespace-nowrap">
               <span className={`text-[11px] font-bold ${r.doneEarlier ? 'text-[#717182]' : 'text-[#5B21B6]'}`}>{r.stage}</span>
-              {r === next && !r.doneEarlier && (
-                <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#F5F3FF] text-[#7C3AED] border border-[#DDD6FE]">Next</span>
-              )}
               {r.followUp && (
                 <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">Follow-up Rx</span>
               )}
@@ -1875,7 +1910,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
         )}
         {visibleCols.patient  && <td className="px-4 py-2" />}
         {visibleCols.service  && (
-          <td className="px-4 py-2 whitespace-nowrap"><span className="text-[10px] text-[#A0A0B0]">Stage</span></td>
+          <td className="px-4 py-2" />
         )}
         {visibleCols.practice && <td className="px-4 py-2" />}
         {visibleCols.dentist  && <td className="px-4 py-2" />}
@@ -1885,7 +1920,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
     ));
   }
   function toggleRow(id: string) {
-    setExpandedRows(prev => {
+    setCollapsedRows(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
@@ -2580,7 +2615,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                   const soloDenture = c.serviceItems.length === 1 && isDentureService(c.serviceItems[0].name) && c.status !== 'draft'
                     ? c.serviceItems[0] : null;
                   const soloStageRows = soloDenture ? stageRowsFor(c.id, c.createdAt, soloDenture) : [];
-                  const isExpanded = expandedRows.has(c.id);
+                  const isExpanded = !collapsedRows.has(c.id);
                   const isMulti = c.serviceItems.length > 1;
                   const dateScope: 'stage' | 'service' | null =
                     isMulti ? 'service'
@@ -2760,7 +2795,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                               ? <span className="font-semibold text-[#D4183D]">{effectiveDelivery}</span>
                               : <span className="text-[#030213]">{effectiveDelivery}</span>
                           ) : dateScope
-                            ? <span className="text-[11px] text-[#A0A0B0]" title={dateScope === 'stage' ? 'Each stage has its own date — expand to see them' : 'Each service has its own date — expand to see them'}>{dateScope === 'stage' ? 'By stage' : 'By service'}</span>
+                            ? null
                             : <span className="text-[#B0B0C0]">—</span>}
                           {dueDateChange && <DueDateChangedTag change={dueDateChange} />}
                         </td>
@@ -2860,7 +2895,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                     {/* ── Child service rows — visible when expanded ── */}
                     {isExpanded && isMulti && c.serviceItems.map((si, idx) => {
                       const dentureRows = isDentureService(si.name) ? stageRowsFor(c.id, c.createdAt, si) : [];
-                      const ordersOpen = expandedRows.has(stageKey(c.id, si.id));
+                      const ordersOpen = !collapsedRows.has(stageKey(c.id, si.id));
                       // A denture has no service-level date — its stages carry them.
                       const siDelivery = isDentureService(si.name) ? null : si.deliveryDate;
                       return (
@@ -2928,7 +2963,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                                 ? <span className="font-semibold text-[#D4183D]">{siDelivery}</span>
                                 : <span className="text-[#030213]">{siDelivery}</span>
                               : dentureRows.length
-                                ? <span className="text-[11px] text-[#A0A0B0]" title="Each stage has its own date — expand to see them">By stage</span>
+                                ? null
                                 : <span className="text-[#B0B0C0]">—</span>}
                           </td>
                         )}
@@ -2977,7 +3012,11 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
           >
             {paginated.map(c => {
               const dueDateChange = latestDueDateChange(c.id, dueDateChanges);
-              const effectiveDelivery = dueDateChange?.next ?? c.requestedDelivery;
+              // Same rule as the table: no case-level date on a multi-service
+              // case (dated per service) or a denture (dated per stage).
+              const datedLower = c.serviceItems.length > 1
+                || (c.serviceItems.length === 1 && isDentureService(c.serviceItems[0].name));
+              const effectiveDelivery = dueDateChange?.next ?? (datedLower ? null : c.requestedDelivery);
               const overdue = isOverdue(effectiveDelivery);
               const caseScore = scoreCase(c);
               return (
