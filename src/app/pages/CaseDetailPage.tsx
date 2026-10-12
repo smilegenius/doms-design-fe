@@ -2943,6 +2943,19 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
     () => seedStageOrders(service, caseData.id, caseData.createdAt)
   );
   const [activeStageId, setActiveStageId] = useState<string>(() => seedStageOrders(service, caseData.id, caseData.createdAt)[0]?.id ?? '');
+  const { toast: stageToast } = useToast();
+  // Receiving a stage (or all open ones) marks just those stages delivered —
+  // not the whole case.
+  const receiveStages = (stages: string[]) => {
+    setStageOrders(prev => prev.map(o => {
+      const hit = o.stages.filter(st => stages.includes(st));
+      if (!hit.length) return o;
+      const stageStatuses = { ...(o.stageStatuses ?? {}) };
+      hit.forEach(st => { stageStatuses[st] = 'delivered'; });
+      return { ...o, stageStatuses };
+    }));
+    stageToast.success(`${stages.join(', ')} marked as received`);
+  };
   const [stagePickerOpen, setStagePickerOpen] = useState(false);
   const orderedStages = new Set(stageOrders.flatMap(o => o.stages));
   // Catalog services run out of stages; phased services never do.
@@ -3023,7 +3036,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               const pending = (activeDentureTab?.rows ?? []).filter(r => !r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered');
               return pending.length > 1 ? (
                 <button
-                  onClick={() => onMarkReceived?.(`${service.name} · ${pending.map(r => r.stage).join(', ')}`)}
+                  onClick={() => receiveStages(pending.map(r => r.stage))}
                   title="Confirm receipt of every open stage in this order"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm whitespace-nowrap"
                 >
@@ -3121,7 +3134,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                       {!r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered' && (
                         <button
                           type="button"
-                          onClick={() => onMarkReceived?.(`${service.name} · ${r.stage}`)}
+                          onClick={() => receiveStages([r.stage])}
                           title={`Mark ${r.stage} as received`}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-[#4D8EF7] border border-[#C8D8FC] hover:bg-[#EEF4FF] transition-colors"
                         >
@@ -3259,7 +3272,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                     <p className="font-medium text-[#030213]">{caseData.createdAt}</p>
                   </div>
                 )}
-                <div>
+                <div className={stageCatalog ? 'hidden' : ''}>
                   <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">{stageCatalog ? 'Next stage' : 'Delivery Date'}</p>
                   <p className="font-medium text-[#030213]">
                     {stageCatalog

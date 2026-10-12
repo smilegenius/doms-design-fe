@@ -1934,7 +1934,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
         )}
         {visibleCols.scannerDate && <td className="px-4 py-2" />}
         {visibleCols.createdAt   && <td className="px-4 py-2" />}
-        {visibleCols.updatedAt   && <td className="px-4 py-2" />}
+        {visibleCols.updatedAt   && <td className="px-4 py-2 whitespace-nowrap text-xs text-[#717182]">{(targetFor ? targetFor(r) : c).updatedAt}</td>}
         {visibleCols.deliveryDate && (
           <td className="px-4 py-2 whitespace-nowrap text-[11px]">
             {r.doneEarlier

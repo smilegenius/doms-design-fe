@@ -161,7 +161,7 @@ export function StageDatePicker({
                 type="date"
                 value={dates[stage] ?? ''}
                 disabled={!active}
-                min={active && !done && allowDoneElsewhere ? TODAY_ISO : undefined}
+                min={active && !done ? TODAY_ISO : undefined}
                 max={done ? TODAY_ISO : undefined}
                 aria-label={`${stage} ${done ? 'done-on' : 'delivery'} date`}
                 title={done ? 'Optional — when it was done' : undefined}

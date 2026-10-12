@@ -13,7 +13,8 @@ import { removeCreatedCases, useCreatedCases } from '../data/createdCases';
 // Five developer tasks that change the case-creation and case screens of the
 // Clinic and Lab portals together:
 //   1. The requested delivery date moves from the case to each service.
-//   2. Denture stages are dated one by one, with "Copy date to selected".
+//   2. Denture stages are dated one by one; a date set on one ticked stage
+//      autofills the other ticked stages (no manual copy button).
 //   3. A follow-up prescription for an existing denture case is appended to
 //      that case as a new stage order (no duplicate case, no duplicate stage).
 //   4. No matching case → a new case; stages done before it reached Smile
@@ -23,6 +24,11 @@ import { removeCreatedCases, useCreatedCases } from '../data/createdCases';
 // dates are edited upfront on the service card, one stage per row; no
 // "Initial / Order N" grouping — one row per stage everywhere; no case-level
 // date on multi-service cases and no service-level date on a denture.
+// Round 3 (team walkthrough): upcoming stages never take a past date (only the
+// user marks "Done elsewhere"); stages are received one by one or all at once;
+// the list shows Updated On per stage, a count pill on stage parents and no
+// status on parents with sub-items; a follow-up draft hangs under its matched
+// case as "Draft - New Stage"; the submit button can also "Create a new case".
 // Same shape as the other walkthroughs: each step opens the exact screen.
 
 type Persona = 'clinic' | 'lab' | 'system';
@@ -99,16 +105,16 @@ const STAGES: Stage[] = [
     ],
   },
   {
-    label: 'Date each denture stage, and copy a date across stages',
-    blurb: `A denture has five stages: ${DENTURE_STAGES.join(', ')}. Ticking a stage enables its own date. “Copy date to selected” takes the first dated stage and writes that date onto every other ticked stage. A denture covers a whole jaw, so it is picked as an arch (Upper / Lower / Both) instead of tooth by tooth.`,
+    label: 'Date each denture stage — dates autofill across stages',
+    blurb: `A denture has five stages: ${DENTURE_STAGES.join(', ')}. Ticking a stage enables its own date. A date set on one stage fills every other ticked stage that has none yet, and ticking a new stage takes the date already set. There is no copy button, and an upcoming stage never accepts a past date: only the user can mark a stage “Done elsewhere”. A denture covers a whole jaw, so it is picked as an arch (Upper / Lower / Both) instead of tooth by tooth.`,
     steps: [
       {
         title: 'Stages & delivery dates, upfront on the service card',
         persona: 'clinic',
         icon: <CopyCheck className="w-4 h-4" />,
         description: 'CASE-DRAFT-DN2 is a Full Denture for Margaret Lee. The service card itself lists the picked stages, one per row, each with its date and a ✕ to drop it, so they can be edited without opening anything (more stages are added in the service window). In the service window the stages come first, and the tooth chart works by arch: “Select Arch”, or any tooth, selects or clears the whole jaw. A stage with no date is flagged, and the service is not complete until every ticked stage has a date (or is done elsewhere).',
-        shows: ['Picked stages on the card, ✕ to remove', 'Copy date to selected', 'Chart selects the whole arch'],
-        tryIt: ['Tick Try In, give it a date, then tick Retry', 'Press “Copy date to selected”'],
+        shows: ['Picked stages on the card, ✕ to remove', 'Dates autofill across ticked stages', 'Chart selects the whole arch'],
+        tryIt: ['Tick Try In, give it a date, then tick Retry: it takes the same date', 'Type a past date on an upcoming stage: it is rejected. Use “Done elsewhere” instead'],
         path: '/clinic/cases/quick-new/CASE-DRAFT-DN2',
         portal: 'clinic',
         highlight: true,
@@ -117,9 +123,9 @@ const STAGES: Stage[] = [
         title: 'New Stage Order on the case page — lab',
         persona: 'lab',
         icon: <Plus className="w-4 h-4" />,
-        description: 'On a denture case, “New Stage Order” uses the same picker. Stages already ordered are listed, locked, with their date and status, and each new stage needs its own date before the order can be created. The denture tab has one tab per stage order, named by its stages (“Special Tray + Bite Registration”, never “Initial”). Each tab lists its stages with status and editable date, and has its own Details / Invoice / Shipping. Stages ordered together share one invoice and shipment. Stages done elsewhere are a note above the tabs.',
-        shows: ['Tabs named by their stages', 'Details / Invoice / Shipping per stage order', 'Already-ordered stages locked'],
-        tryIt: ['Open Partial Denture → New Stage Order', 'Pick Try In + Finish, date one, copy it to the other'],
+        description: 'On a denture case, “New Stage Order” uses the same picker. Stages already ordered are listed, locked, with their date and status, and each new stage needs its own date before the order can be created. The stage tabs are grouped by order: stages ordered together sit close inside one group, and a new order is a separate group (CASE-DN-3002’s Partial Denture has three orders; CASE-DN-3001 one order of three stages). Each order lists its stages with status, created / updated on, an editable date and a “Mark received” button at the end of the row (not on completed stages), plus “Mark all as Received”. Receiving marks just those stages, not the whole case. Details / Invoice / Shipping are per order. Stages ordered together share one invoice and shipment. Stages done elsewhere are a note above the tabs.',
+        shows: ['Stage tabs grouped by order', 'Mark received per stage / all', 'Already-ordered stages locked'],
+        tryIt: ['Open Partial Denture → New Stage Order (called Quick Stage Order)', 'Pick Try In + Finish, date one: the other follows. Add case instructions, or use “Edit full case”'],
         path: '/lab/cases/CASE-DN-3002',
         portal: 'lab',
       },
@@ -127,7 +133,7 @@ const STAGES: Stage[] = [
         title: 'Stages in the case list',
         persona: 'clinic',
         icon: <List className="w-4 h-4" />,
-        description: 'The Status column is an accordion. On a denture case, the chevron opens one row per stage, in the order they happen, each with its own status and date. Nested rows open by default. The denture itself has no date (its Delivery cell is blank). On a multi-service case, “N Services” opens the services, and the denture’s service row has its own chevron for its stages. CASE-DN-3003 shows stages done elsewhere.',
+        description: 'The Status column is an accordion. On a denture case, the parent shows a count pill (“3 Stages”) instead of a status, and the chevron opens one row per order: stages ordered together share a row (names comma-separated, one status). Each row has its own Updated On and delivery date. Nested rows open by default. The denture itself has no date (its Delivery cell is blank). On a multi-service case, “N Services” opens the services, and the denture’s service row has its own chevron for its stages. CASE-DN-3003 shows stages done elsewhere.',
         shows: ['Open by default', 'One row per stage', 'Case → service → stages'],
         tryIt: ['CASE-DN-3001 and CASE-DN-3002 sit at the top of the list: open the chevron by the status', 'On CASE-DN-3002, open “2 Services”, then the chevron on the Partial Denture row'],
         path: '/clinic/cases',
@@ -155,7 +161,7 @@ const STAGES: Stage[] = [
         icon: <GitMerge className="w-4 h-4" />,
         description: 'CASE-DRAFT-DN1 is a Finish prescription for John Smith, who already has CASE-DN-3001 (Special Tray, Bite Registration, Try In). A green “Matching case found” panel lists what is already ordered, and the submit button reads “Add to CASE-DN-3001”. In the drawer, those stages appear locked.',
         shows: ['Matching case found — CASE-DN-3001', 'Already ordered on CASE-DN-3001', 'Add to CASE-DN-3001'],
-        tryIt: ['Open the service: Special Tray, Bite Registration and Try In are locked as already ordered', 'Tick Retry, copy Finish’s date onto it, then press “Add to CASE-DN-3001”'],
+        tryIt: ['Open the service: Special Tray, Bite Registration and Try In are locked as already ordered', 'Tick Retry (it takes Finish’s date), then press “Add to CASE-DN-3001”', 'Open the arrow beside the button to “Create a new case” instead'],
         path: '/clinic/cases/quick-new/CASE-DRAFT-DN1',
         portal: 'clinic',
         highlight: true,

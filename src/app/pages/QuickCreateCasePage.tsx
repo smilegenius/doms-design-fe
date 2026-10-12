@@ -1501,6 +1501,8 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   const [submitMode, setSubmitMode] = useState<'append' | 'new'>('append');
   const [submitMenuOpen, setSubmitMenuOpen] = useState(false);
   const followUp: FollowUpMatch | null = submitMode === 'append' ? followUpMatch : null;
+  // Past ("done elsewhere") stages come only from a prescription; manual entry has no old dates.
+  const allowDoneElsewhere = !!prefillDraft;
   const activeDetailsService = activeDetailsId
     ? selections.find(s => s.itemId === activeDetailsId) ?? null
     : null;
@@ -2804,6 +2806,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                               stages={sel.stages ?? []}
                               dates={sel.stageDates ?? {}}
                               doneElsewhere={sel.doneElsewhere}
+                              allowDoneElsewhere={allowDoneElsewhere || (sel.doneElsewhere?.length ?? 0) > 0}
                               existing={followUp?.existing}
                               onChange={(stages, stageDates, doneElsewhere) => updateService(sel.itemId, { stages, stageDates, doneElsewhere })}
                             />
@@ -3242,6 +3245,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         <ServicePickerWithDetails
           selections={selections}
           followUp={followUp}
+          allowDoneElsewhere={allowDoneElsewhere}
           initialActiveId={activeDetailsId}
           caseInstructions={caseInstructions}
           onCaseInstructionsChange={setCaseInstructions}
@@ -3550,10 +3554,12 @@ function PatientExtrasDrawer({ value, onChange, onClose }: {
 function ServicePickerWithDetails({
   selections, initialActiveId,
   caseInstructions, onCaseInstructionsChange,
-  onToggle, onUpdate, onRemove, onClose, followUp,
+  onToggle, onUpdate, onRemove, onClose, followUp, allowDoneElsewhere,
 }: {
   selections: ServiceSelection[];
   followUp?: FollowUpMatch | null;
+  /** "Done elsewhere" is offered only when the case came from a prescription (email / AI), not manual entry. */
+  allowDoneElsewhere?: boolean;
   initialActiveId: string | null;
   /** Shared case-level instructions — same text across every service. */
   caseInstructions: string;
@@ -3720,6 +3726,7 @@ function ServicePickerWithDetails({
               <ServiceDetailsBody
                 selection={activeSel}
                 followUp={followUp}
+                allowDoneElsewhere={allowDoneElsewhere}
                 caseInstructions={caseInstructions}
                 onCaseInstructionsChange={onCaseInstructionsChange}
                 onUpdate={(patch) => onUpdate(activeSel.itemId, patch)}
@@ -4048,10 +4055,11 @@ function AlignerSpecifics({ selection, onUpdate }: {
 // The set of form fields that render for a single service selection. Used by
 // the standalone ServiceDetailsDrawer + the right pane of
 // ServicePickerWithDetails.
-function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, onCaseInstructionsChange, followUp }: {
+function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, onCaseInstructionsChange, followUp, allowDoneElsewhere }: {
   selection: ServiceSelection;
   /** Denture follow-up match — its ordered stages show locked in the picker. */
   followUp?: FollowUpMatch | null;
+  allowDoneElsewhere?: boolean;
   onUpdate: (patch: Partial<ServiceSelection>) => void;
   onRemove?: () => void;
   /** Shared case-level instructions — same value across all services. */
@@ -4150,6 +4158,7 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
                 stages={selection.stages ?? []}
                 dates={selection.stageDates ?? {}}
                 doneElsewhere={selection.doneElsewhere}
+                allowDoneElsewhere={allowDoneElsewhere || (selection.doneElsewhere?.length ?? 0) > 0}
                 existing={followUp?.existing}
                 onChange={(stages, stageDates, doneElsewhere) => onUpdate({ stages, stageDates, doneElsewhere })}
               />

@@ -1331,6 +1331,7 @@ function ServiceDetailsStep({
                     stages={activeService.stages ?? []}
                     dates={activeService.stageDates ?? {}}
                     doneElsewhere={activeService.doneElsewhere}
+                    allowDoneElsewhere={false}
                     onChange={(stages, stageDates, doneElsewhere) => onUpdateSelection(activeService.itemId, { stages, stageDates, doneElsewhere })}
                   />
                 </Mini>
