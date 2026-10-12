@@ -13,6 +13,7 @@ import {
 import SideDrawer from '../components/SideDrawer';
 import ActionMenu from '../components/ActionMenu';
 import ModalPortal from '../components/ModalPortal';
+import CasesIcon from '../components/icons/CasesIcon';
 import UrgentBadge from '../components/UrgentBadge';
 import UrgentConfirmModal from '../components/UrgentConfirmModal';
 import { OfflineLabNotice, offlineLabStatusFor } from '../components/OfflineLabNotice';
@@ -1691,8 +1692,8 @@ function CaseSummaryOverview({
                 denture) is taller; collapses to nothing otherwise. */}
             {!dentureRows && (
               <div className="relative flex-1 min-h-0 overflow-hidden pointer-events-none" aria-hidden>
-                <div className="absolute inset-0 rounded-lg border border-dashed border-[#E0E0E6] flex items-center justify-center text-[11px] text-[#A0A0B0] opacity-50 select-none">
-                  No further stages or orders on this service
+                <div className="absolute inset-0 flex items-center justify-center py-2 select-none">
+                  <CasesIcon className="h-full max-h-28 w-auto aspect-square max-w-full text-[#A0A0B0] opacity-[0.12]" />
                 </div>
               </div>
             )}
@@ -3051,25 +3052,36 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               ))}
             </p>
           )}
-          {/* Tabs — one per stage order */}
-          <div className="flex items-center gap-1 px-1.5 pt-2 overflow-x-auto border-b border-[#F0EFF6]">
-            {dentureTabs.map(({ order, rows }) => (
-              <button
-                key={order.id}
-                onClick={() => setActiveStageId(order.id)}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-xs font-semibold border-b-2 transition-colors whitespace-nowrap flex-shrink-0 max-w-[320px] ${
-                  activeDentureTab?.order.id === order.id
-                    ? 'border-[#7C3AED] text-[#5B21B6] bg-[#F5F3FF]'
-                    : 'border-transparent text-[#717182] hover:text-[#030213] hover:bg-[#F8F9FC]'
-                }`}
-                title={rows.map(r => r.stage).join(' + ')}
-              >
-                <span className="truncate">{rows.map(r => r.stage).join(' + ')}</span>
-                {order.followUpFrom && (
-                  <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">New stage</span>
-                )}
-              </button>
-            ))}
+          {/* Tabs — one per stage; stages ordered together sit close inside
+              one group, a new order is a separate group. */}
+          <div className="flex items-end gap-4 px-3 pt-2 overflow-x-auto border-b border-[#F0EFF6]">
+            {dentureTabs.map(({ order, rows }) => {
+              const active = activeDentureTab?.order.id === order.id;
+              return (
+                <div
+                  key={order.id}
+                  className={`flex items-center gap-0.5 px-1 rounded-t-lg border-b-2 flex-shrink-0 transition-colors ${
+                    active ? 'border-[#7C3AED] bg-[#F5F3FF]' : 'border-transparent bg-[#F8F9FC]'
+                  }`}
+                >
+                  {rows.map(r => (
+                    <button
+                      key={r.stage}
+                      onClick={() => setActiveStageId(order.id)}
+                      title={rows.length > 1 ? `${r.stage} — ordered with ${rows.filter(x => x !== r).map(x => x.stage).join(', ')}` : r.stage}
+                      className={`px-2.5 py-2 text-xs font-semibold whitespace-nowrap transition-colors ${
+                        active ? 'text-[#5B21B6]' : 'text-[#717182] hover:text-[#030213]'
+                      }`}
+                    >
+                      {r.stage}
+                    </button>
+                  ))}
+                  {order.followUpFrom && (
+                    <span className="mr-1 inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">New stage</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {/* Active order's stages — status + editable delivery date */}
           {activeDentureTab && (
