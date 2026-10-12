@@ -46,7 +46,7 @@ import { AiReviewTag } from '../components/AiReviewNotice';
 import { SCANNER_SYNC_COPY, scannerSyncUnsupported, caseCreatedBy, needsReview, statusReach, type CreatedSide, type StatusReach, type ViewerPortal } from '../data/caseProvenance';
 import { useScannerConnections } from '../data/scannerConnections';
 import { getCreatedCases, useCreatedCases } from '../data/createdCases';
-import { isDentureService, stageRowsFor, useStageAppends, type StageRow } from '../data/dentureStages';
+import { isDentureService, stageRowsFor, findFollowUpMatch, nextStageRow, useStageAppends, type StageRow } from '../data/dentureStages';
 import { StageStatusCell } from '../components/DentureStages';
 import { hasEmailReply, hasWhatsAppReply, useCaseCommunications } from '../data/caseCommunications';
 import {
@@ -533,16 +533,25 @@ export const dentureDemoCases: Case[] = [
         id: 'dn3002-s1', name: 'Partial Denture', status: 'in-production', deliveryDate: null,
         fdi: [34, 35, 36, 44, 45, 46], material: 'Chrome Cobalt', shade: 'A3', orderType: 'Private',
         scanFileCount: 1, attachmentCount: 0,
-        stages: ['Special Tray', 'Bite Registration'],
-        stageOrders: [{
-          id: 'so-1',
-          stages: ['Special Tray', 'Bite Registration'],
-          status: 'in-production',
-          deliveryDate: '03-Jul-2026',
-          createdAt: '30-Jun-2026',
-          stageDates: { 'Special Tray': '03-Jul-2026', 'Bite Registration': '10-Jul-2026' },
-          stageStatuses: { 'Special Tray': 'completed', 'Bite Registration': 'in-production' },
-        }],
+        // Three separate stage orders, placed one after the other.
+        stages: ['Special Tray', 'Bite Registration', 'Try In'],
+        stageOrders: [
+          {
+            id: 'so-1', stages: ['Special Tray'], status: 'completed',
+            deliveryDate: '03-Jul-2026', createdAt: '30-Jun-2026',
+            stageDates: { 'Special Tray': '03-Jul-2026' },
+          },
+          {
+            id: 'so-2', stages: ['Bite Registration'], status: 'in-production',
+            deliveryDate: '10-Jul-2026', createdAt: '01-Jul-2026',
+            stageDates: { 'Bite Registration': '10-Jul-2026' },
+          },
+          {
+            id: 'so-3', stages: ['Try In'], status: 'submitted',
+            deliveryDate: '24-Jul-2026', createdAt: '03-Jul-2026',
+            stageDates: { 'Try In': '24-Jul-2026' },
+          },
+        ],
       },
       {
         id: 'dn3002-s2', name: 'Crown', status: 'submitted', deliveryDate: '17-Jul-2026',
@@ -1444,7 +1453,7 @@ function BulkStatusModal({ selections, missingByCase, onClose, onConfirm }: {
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-xs font-semibold text-[#030213] flex-shrink-0">{c.id}</span>
                           <span className="text-[11px] text-[#717182] truncate">{c.patientName}</span>
-                          <span className="ml-auto flex-shrink-0"><StatusBadge status={c.status} /></span>
+                          {!multi && <span className="ml-auto flex-shrink-0"><StatusBadge status={c.status} /></span>}
                         </div>
                         {multi && (full ? (
                           <p className="text-[10px] text-[#717182] mt-1">All {c.serviceItems.length} services will be updated</p>
@@ -1866,15 +1875,33 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
       />
     </button>
   );
+  // Parent of stage rows: a count pill instead of an empty cell (like "2 Services").
+  const stageCountPill = (n: number) => (
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap border bg-[#EEF4FF] text-[#1565C0] border-[#C8D8FC]">
+      <Layers className="w-3 h-3" />
+      {n} Stage{n === 1 ? '' : 's'}
+    </span>
+  );
   const arrowSpacer = <span className="w-5 h-5 flex-shrink-0" aria-hidden />;
   // One row per STAGE, in the order they happen — no order grouping. Each row
   // carries its own status (or "Done elsewhere") and its own date; that is the
   // only place a denture shows a date in the list.
-  function renderStageRows(c: Case, rows: StageRow[], nested = false, parentLast = true) {
+  function renderStageRows(c: Case, rawRows: StageRow[], nested = false, parentLast = true, targetFor?: (r: StageRow) => Case) {
+    // Stages ordered together read as ONE row — names comma-separated, one
+    // status (the next open stage's) and that stage's date.
+    const groups: StageRow[][] = [];
+    for (const r of rawRows) {
+      const g = groups.find(g => g[0].orderIndex === r.orderIndex && g[0].doneEarlier === r.doneEarlier && g[0].status !== 'draft' === (r.status !== 'draft'));
+      if (g) g.push(r); else groups.push([r]);
+    }
+    const rows: StageRow[] = groups.map(g => {
+      const lead = g.length === 1 ? g[0] : (nextStageRow(g) ?? g[g.length - 1]);
+      return { ...lead, stage: g.map(x => x.stage).join(', '), followUp: g.some(x => x.followUp) };
+    });
     return rows.map((r, i) => (
       <tr
         key={`${c.id}-stage-${r.stage}`}
-        onClick={() => openCase(c)}
+        onClick={() => openCase(targetFor ? targetFor(r) : c)}
         className="bg-[#FAF8FF] hover:bg-[#F5F3FF] transition-colors cursor-pointer [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]"
       >
         <td className="pl-4 pr-1 py-2" />
@@ -1883,7 +1910,14 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
         </td>
         {visibleCols.status && (
           <td className="pr-4 py-2 whitespace-nowrap" style={{ paddingLeft: nested ? 68 : 42 }}>
-            <StageStatusCell row={r} size="xs" />
+            {r.status === 'draft' && !r.doneEarlier
+              ? (
+                <span className="inline-flex items-center gap-1.5 px-2 py-px rounded-full text-[10px] font-medium whitespace-nowrap border bg-[#FFF8E1] text-[#A16207] border-[#FDE68A]">
+                  <PenLine className="w-2.5 h-2.5" />
+                  Draft - New Stage
+                </span>
+              )
+              : <StageStatusCell row={r} size="xs" />}
           </td>
         )}
         {visibleCols.score && <td className="px-4 py-2" />}
@@ -1892,8 +1926,8 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
           <td className={`${nested ? 'pl-8' : 'pl-4'} pr-4 py-2`}>
             <div className="flex items-center gap-1.5 whitespace-nowrap">
               <span className={`text-[11px] font-bold ${r.doneEarlier ? 'text-[#717182]' : 'text-[#5B21B6]'}`}>{r.stage}</span>
-              {r.followUp && (
-                <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">Follow-up Rx</span>
+              {r.followUp && r.status !== 'draft' && (
+                <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">New stage</span>
               )}
             </div>
           </td>
@@ -2615,6 +2649,27 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                   const soloDenture = c.serviceItems.length === 1 && isDentureService(c.serviceItems[0].name) && c.status !== 'draft'
                     ? c.serviceItems[0] : null;
                   const soloStageRows = soloDenture ? stageRowsFor(c.id, c.createdAt, soloDenture) : [];
+                  // A draft Rx that matches an existing denture case: the matched
+                  // case's stage orders hang under it (opening that case), with
+                  // only the new stage(s) as the draft.
+                  const draftDenture = c.status === 'draft' && c.serviceItems.length === 1 && isDentureService(c.serviceItems[0].name)
+                    ? c.serviceItems[0] : null;
+                  const followUpMatch = draftDenture
+                    ? findFollowUpMatch(
+                        { patientName: c.patientName, practice: c.practice, dentist: c.dentist, serviceName: draftDenture.name },
+                        draftDenture.stages ?? [],
+                        mockCases,
+                      )
+                    : null;
+                  const followUpRows: StageRow[] = followUpMatch && draftDenture
+                    ? [
+                        ...followUpMatch.existing,
+                        ...followUpMatch.toAdd.map((stage): StageRow => ({
+                          stage, date: draftDenture.stageDates?.[stage] ?? null, status: 'draft',
+                          orderIndex: 99, doneEarlier: false, followUp: true,
+                        })),
+                      ]
+                    : [];
                   const isExpanded = !collapsedRows.has(c.id);
                   const isMulti = c.serviceItems.length > 1;
                   const dateScope: 'stage' | 'service' | null =
@@ -2638,7 +2693,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                   return (
                     <React.Fragment key={c.id}>
                     {/* ── Parent row ── */}
-                    <tr onClick={() => openCase(c)} className="group bg-white hover:bg-[#F8F9FC] transition-colors cursor-pointer relative [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]">
+                    <tr onClick={followUpRows.length > 0 ? undefined : () => openCase(c)} className={`group bg-white transition-colors relative ${followUpRows.length > 0 ? '' : 'hover:bg-[#F8F9FC] cursor-pointer'} [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]`}>
                       {/* Bulk-select checkbox — checking a multi-service case
                           checks every sub-case; partial sub-case selection shows
                           the indeterminate dash. Drafts/locked rows are exempt. */}
@@ -2696,16 +2751,16 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                       </td>
                       {visibleCols.status && (
                         <td
-                          className={`px-4 py-3 whitespace-nowrap ${!locked && (isMulti || soloStageRows.length > 0) ? 'cursor-pointer' : ''}`}
+                          className={`px-4 py-3 whitespace-nowrap ${!locked && (isMulti || soloStageRows.length > 0 || followUpRows.length > 0) ? 'cursor-pointer' : ''}`}
                           onClick={(e) => {
-                            if (locked || !(isMulti || soloStageRows.length > 0)) return;
+                            if (locked || !(isMulti || soloStageRows.length > 0 || followUpRows.length > 0)) return;
                             e.stopPropagation();
                             toggleRow(c.id);
                           }}
                         >
                           <div className="flex items-start gap-1.5">
                           <div className="pt-px">
-                            {!locked && (isMulti || soloStageRows.length > 0)
+                            {!locked && (isMulti || soloStageRows.length > 0 || followUpRows.length > 0)
                               ? expandArrow(
                                   isExpanded,
                                   () => toggleRow(c.id),
@@ -2730,7 +2785,8 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                               {c.serviceItems.length} Services
                             </span>
                           ) : null}
-                          {!locked && !isMulti && <StatusBadge status={c.status} />}
+                          {!locked && !isMulti && soloStageRows.length > 0 && stageCountPill(soloStageRows.length)}
+                          {!locked && !isMulti && soloStageRows.length === 0 && followUpRows.length === 0 && <StatusBadge status={c.status} />}
                           {!locked && c.statusOverride && (
                             <div className="mt-1"><OverrideTag override={c.statusOverride} /></div>
                           )}
@@ -2891,6 +2947,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
 
                     {/* ── Stage rows of a single-service denture ── */}
                     {soloDenture && isExpanded && renderStageRows(c, soloStageRows)}
+                    {followUpMatch && isExpanded && renderStageRows(c, followUpRows, false, true, r => (r.status === 'draft' ? c : followUpMatch.case))}
 
                     {/* ── Child service rows — visible when expanded ── */}
                     {isExpanded && isMulti && c.serviceItems.map((si, idx) => {
@@ -2936,7 +2993,8 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                               {dentureRows.length > 0
                                 ? expandArrow(ordersOpen, () => toggleRow(stageKey(c.id, si.id)), ordersOpen ? 'Hide stages' : 'Show stages')
                                 : arrowSpacer}
-                              <StatusBadge status={si.status} />
+                              {/* A staged service shows its status on each stage row instead. */}
+                              {dentureRows.length === 0 ? <StatusBadge status={si.status} /> : stageCountPill(dentureRows.length)}
                             </div>
                           </td>
                         )}

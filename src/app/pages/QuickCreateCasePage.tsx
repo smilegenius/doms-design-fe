@@ -1483,7 +1483,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // The incoming prescription's own practice/dentist win when it came from a
   // draft — that's what the prescription says, whatever the pickers show.
   const createdCases = useCreatedCases();
-  const followUp: FollowUpMatch | null = useMemo(() => {
+  const followUpMatch: FollowUpMatch | null = useMemo(() => {
     if (selections.length !== 1 || !isDentureItem(selections[0].itemId)) return null;
     const sel = selections[0];
     return findFollowUpMatch(
@@ -1497,6 +1497,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       [...createdCases, ...mockCases],
     );
   }, [selections, patientName, prefillDraft, isLab, selectedLab, selectedDentist, createdCases]);
+  // The matched case can be ignored: "Create a new case" in the submit menu.
+  const [submitMode, setSubmitMode] = useState<'append' | 'new'>('append');
+  const [submitMenuOpen, setSubmitMenuOpen] = useState(false);
+  const followUp: FollowUpMatch | null = submitMode === 'append' ? followUpMatch : null;
   const activeDetailsService = activeDetailsId
     ? selections.find(s => s.itemId === activeDetailsId) ?? null
     : null;
@@ -2909,18 +2913,24 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                 <span className="text-[9px] font-bold text-[#A0A0B0] uppercase tracking-wider">Shade</span>
                                 {/* Data row — spans the 3 parent cols with
                                     subgrid so its cells align to header. */}
+                                {/* A denture with both jaws gets one row per arch. */}
+                                {(isDentureItem(sel.itemId) && sortedTeeth.some(t => Number(t) < 30) && sortedTeeth.some(t => Number(t) >= 30)
+                                  ? [sortedTeeth.filter(t => Number(t) < 30), sortedTeeth.filter(t => Number(t) >= 30)]
+                                  : [sortedTeeth]
+                                ).map((rowTeeth, rowIdx) => (
                                 <div
+                                  key={rowIdx}
                                   className="col-span-3 grid grid-cols-subgrid items-center px-1.5 py-1 rounded-md border"
                                   style={{ background: rowBg, borderColor: rowBorder }}
                                 >
                                   <div className="flex flex-wrap items-center gap-1">
                                     {/* A denture reads as its arch, not tooth by tooth. */}
-                                    {isDentureItem(sel.itemId) && sortedTeeth.length > 0 ? (
+                                    {isDentureItem(sel.itemId) && rowTeeth.length > 0 ? (
                                       <span
                                         className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white border whitespace-nowrap"
                                         style={{ color, borderColor: rowBorder }}
                                       >
-                                        {archLabel(sortedTeeth)}
+                                        {archLabel(rowTeeth)}
                                       </span>
                                     ) : sortedTeeth.length > 0 ? [
                                       ...groupTeeth(sortedTeeth).arches.map(a => (
@@ -2953,6 +2963,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                     {!aiPrefilled && sel.shade && aiFields[`service:${sel.itemId}:shade`] != null && <AiSparkle label confidence={aiFields[`service:${sel.itemId}:shade`]} />}
                                   </span>
                                 </div>
+                                ))}
                               </div>
                               {/* Other non-per-tooth chips, if any */}
                               {(sel.brand || sel.retainerType || sel.applianceOption || (sel.stages?.length ?? 0) > 0) && (
@@ -3125,15 +3136,65 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </span>
               ))}
             </div>
+            <div className="relative flex items-center gap-2">
+              {followUpMatch && (
+                <span
+                  tabIndex={0}
+                  title={`A matching denture case (${followUpMatch.case.id}) already exists for this patient. Add the new stage(s) to it, or create a separate case instead.`}
+                  className="text-[#A0A0B0] hover:text-[#4D8EF7] cursor-help"
+                >
+                  <Info className="w-4 h-4" />
+                </span>
+              )}
+              <div className="flex items-stretch">
             <button
               onClick={handleSubmit}
               disabled={!canSubmit}
               title={followUp ? `Add the new stages to ${followUp.case.id}` : canSubmit ? 'Submit this case' : 'Fill patient, lab, and at least one service to submit'}
-              className="inline-flex items-center gap-2 px-7 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 shadow-[0_4px_12px_rgba(77,142,247,0.35)] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
+              className={`inline-flex items-center gap-2 px-7 py-3 rounded-l-xl ${followUpMatch ? "" : "rounded-r-xl"} text-sm font-bold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 shadow-[0_4px_12px_rgba(77,142,247,0.35)] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none`}
             >
               {followUp ? <GitMerge className="w-4 h-4" /> : <Check className="w-4 h-4" strokeWidth={3} />}
               {followUp ? `Add to ${followUp.case.id}` : 'Create case'}
             </button>
+
+                {followUpMatch && (
+                  <button
+                    type="button"
+                    onClick={() => setSubmitMenuOpen(o => !o)}
+                    aria-label="More ways to submit"
+                    aria-expanded={submitMenuOpen}
+                    className="px-2.5 rounded-r-xl text-white bg-gradient-to-r from-[#8F9CF9] to-[#A59DFF] border-l border-white/30 hover:opacity-95 shadow-[0_4px_12px_rgba(77,142,247,0.35)]"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              {followUpMatch && submitMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSubmitMenuOpen(false)} />
+                  <div className="absolute right-0 bottom-full mb-2 z-50 w-72 bg-white border border-[#E0E0E6] rounded-xl shadow-xl py-1">
+                    {([
+                      { mode: 'append' as const, icon: <GitMerge className="w-4 h-4" />, label: `Add to ${followUpMatch.case.id}`, hint: 'New stage order on the existing case' },
+                      { mode: 'new' as const, icon: <Plus className="w-4 h-4" />, label: 'Create a new case', hint: 'Ignore the match and make a separate case' },
+                    ]).map(o => (
+                      <button
+                        key={o.mode}
+                        type="button"
+                        onClick={() => { setSubmitMode(o.mode); setSubmitMenuOpen(false); }}
+                        className="w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-[#F8F9FC]"
+                      >
+                        <span className="mt-0.5 text-[#4D8EF7]">{o.icon}</span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-xs font-semibold text-[#030213]">{o.label}</span>
+                          <span className="block text-[11px] text-[#717182]">{o.hint}</span>
+                        </span>
+                        {submitMode === o.mode && <Check className="w-3.5 h-3.5 text-[#4D8EF7] mt-1" strokeWidth={3} />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>

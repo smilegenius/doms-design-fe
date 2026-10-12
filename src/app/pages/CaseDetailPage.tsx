@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, Fragment } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, AlertTriangle, MessageSquare, MessageCircle, ChevronDown, ChevronUp,
   FileText, MapPin, Download, Calendar, Lightbulb, Maximize2, Minimize2,
@@ -90,6 +90,8 @@ export interface StageOrder {
   stageDates?: Record<string, string | null>;
   /** Per-stage status once the stages of one order move apart. */
   stageStatuses?: Record<string, CaseStatus>;
+  /** Case instructions for this stage order (edited in Quick Stage Order). */
+  instructions?: string;
   /** Set when this order arrived as a follow-up prescription (draft / Rx id). */
   followUpFrom?: string;
   /** Denture stages done before the case reached Smile Genius. */
@@ -1509,11 +1511,12 @@ function CaseSummaryOverview({
                       return si.phases ? `${si.phases.length} phases` : 'Single phase';
                     })()}
                   </p>
+                  <p className="text-[10px] text-[#A0A0B0] mt-0.5">Updated: {caseData.updatedAt}</p>
                 </div>
               </div>
 
               {/* Clickable status pill → opens per-card status-change dropdown */}
-              <div className="relative flex-shrink-0 z-10" onClick={(e) => e.stopPropagation()}>
+              <div className={`relative flex-shrink-0 z-10 ${dentureRows ? "hidden" : ""}`} onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => setOpenStatusId(openStatusId === si.id ? null : si.id)}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border hover:opacity-80 transition-opacity"
@@ -1570,8 +1573,7 @@ function CaseSummaryOverview({
                 {orderType}
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]" title={`${scanCount} scan file${scanCount === 1 ? '' : 's'}`}>
-                <Eye className="w-2.5 h-2.5" />
-                {scanCount}
+                {scanCount} scan{scanCount === 1 ? '' : 's'}
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#F5F3FF] text-[#7C3AED] border border-[#DDD6FE]" title={`${attachCount} attachment${attachCount === 1 ? '' : 's'}`}>
                 <Paperclip className="w-2.5 h-2.5" />
@@ -1610,36 +1612,15 @@ function CaseSummaryOverview({
                 editable delivery date (a denture has no single service date). ── */}
             {dentureRows ? (
               <div className="border border-[#F0EFF6] rounded-lg divide-y divide-[#F0EFF6] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                {/* One simple row per stage — name, status, date, and receiving at the end. */}
                 {dentureRows.map(r => {
                   const key = `${si.id}::${r.stage}`;
                   const date = key in dateEdits ? dateEdits[key] : r.date;
                   const received = receivedStages.has(key);
                   const closed = r.status === 'completed' || r.status === 'delivered';
                   return (
-                    <div key={r.stage} className={`flex items-center gap-2 px-3 py-1.5 ${r.doneEarlier ? 'bg-[#FAFAFB]' : 'bg-white'}`}>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-xs font-semibold truncate ${r.doneEarlier ? 'text-[#717182]' : 'text-[#030213]'}`}>{r.stage}</p>
-                        {/* Mark as received — a light tick per stage (undo while it's local). */}
-                        {!r.doneEarlier && (!closed || received) && (
-                          <button
-                            type="button"
-                            onClick={() => setReceivedStages(prev => {
-                              const next = new Set(prev);
-                              if (next.has(key)) next.delete(key); else next.add(key);
-                              return next;
-                            })}
-                            title={received ? 'Undo — not received yet' : `Mark ${r.stage} as received`}
-                            className={`mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold transition-colors ${
-                              received ? 'text-[#15803D]' : 'text-[#A0A0B0] hover:text-[#4D8EF7]'
-                            }`}
-                          >
-                            <span className={`w-3 h-3 rounded-full border flex items-center justify-center ${received ? 'bg-[#16A34A] border-[#16A34A]' : 'border-current'}`}>
-                              <Check className={`w-2 h-2 ${received ? 'text-white' : ''}`} strokeWidth={3.5} />
-                            </span>
-                            {received ? 'Received' : 'Mark received'}
-                          </button>
-                        )}
-                      </div>
+                    <div key={r.stage} className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 ${r.doneEarlier ? 'bg-[#FAFAFB]' : 'bg-white'}`}>
+                      <p className={`flex-1 basis-[110px] min-w-0 text-xs font-semibold truncate ${r.doneEarlier ? 'text-[#717182]' : 'text-[#030213]'}`}>{r.stage}</p>
                       <StageStatusCell row={r} size="xs" />
                       {r.doneEarlier ? (
                         <span className="w-[124px] text-[11px] text-[#A0A0B0] whitespace-nowrap text-right">{r.date ? `Done ${r.date}` : 'Done'}</span>
@@ -1652,18 +1633,68 @@ function CaseSummaryOverview({
                           className={`w-[124px] px-2 py-1 text-[11px] text-[#030213] border rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] transition-colors ${date ? 'border-[#E0E0E6]' : 'border-[#FCD34D]'}`}
                         />
                       )}
+                      {/* Receiving — at the end of the row (undo while it's local). */}
+                      <span className="w-[112px] flex justify-end">
+                        {!r.doneEarlier && (!closed || received) && (
+                          <button
+                            type="button"
+                            onClick={() => setReceivedStages(prev => {
+                              const next = new Set(prev);
+                              if (next.has(key)) next.delete(key); else next.add(key);
+                              return next;
+                            })}
+                            title={received ? 'Undo — not received yet' : `Mark ${r.stage} as received`}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border whitespace-nowrap transition-colors ${
+                              received
+                                ? 'text-[#15803D] bg-[#DCFCE7] border-[#BBF7D0]'
+                                : 'text-[#4D8EF7] border-[#C8D8FC] hover:bg-[#EEF4FF]'
+                            }`}
+                          >
+                            <Check className="w-3 h-3" strokeWidth={3} />
+                            {received ? 'Received' : 'Mark received'}
+                          </button>
+                        )}
+                      </span>
                     </div>
                   );
                 })}
               </div>
             ) : (
             /* ── Mini pipeline timeline — click to open full timeline modal ── */
-            <div onClick={(e) => e.stopPropagation()}>
-              <ServiceMiniTimeline
-                status={currentStatus}
-                onClick={() => onOpenTimeline?.()}
-              />
+            <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+              <div className="flex-1 min-w-0">
+                <ServiceMiniTimeline
+                  status={currentStatus}
+                  onClick={() => onOpenTimeline?.()}
+                />
+              </div>
+              <div className="flex-shrink-0 flex items-center gap-1.5">
+                {/* Editable in place — the service's delivery date. */}
+                <input
+                  type="date"
+                  value={cardDelivery ? caseDateToISO(cardDelivery) : ''}
+                  disabled={isReceived}
+                  aria-label={`${si.name} delivery date`}
+                  onChange={(e) => setDateEdits(prev => ({ ...prev, [dateKey]: e.target.value ? isoToStageDate(e.target.value) : null }))}
+                  className="px-2 py-1 text-xs font-medium text-[#030213] border border-[#E0E0E6] rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] disabled:bg-transparent disabled:border-transparent disabled:px-0 transition-colors"
+                />
+                {countdown && !isReceived && (
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold border whitespace-nowrap ${countdownTone}`}>
+                    {countdown.label}
+                  </span>
+                )}
+              </div>
             </div>
+            )}
+
+            {/* Fills the white space when a neighbouring card (e.g. a staged
+                denture) is taller; collapses to nothing otherwise. */}
+            {!dentureRows && (
+              <div className="relative flex-1 min-h-0 overflow-hidden pointer-events-none" aria-hidden>
+                <div className="absolute inset-0 rounded-lg border border-dashed border-[#E0E0E6] flex items-center justify-center text-[11px] text-[#A0A0B0] opacity-50 select-none">
+                  No further stages or orders on this service
+                </div>
+              </div>
             )}
 
             {/* ── Footer: delivery date + countdown + action ── */}
@@ -1671,31 +1702,33 @@ function CaseSummaryOverview({
               className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 pt-3 border-t border-[#F0EFF6] mt-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* A denture's dates live on its stage list above. */}
-              {!dentureRows && <div className="flex-shrink-0">
-                <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-0.5 whitespace-nowrap">{nextStage ? `Next stage · ${nextStage.stage}` : 'Delivery'}</p>
-                <div className="flex items-center gap-1.5">
-                  {/* Editable in place — the service's date, or the next
-                      stage's date for a denture. */}
-                  <input
-                    type="date"
-                    value={cardDelivery ? caseDateToISO(cardDelivery) : ''}
-                    disabled={isReceived}
-                    aria-label={nextStage ? `${si.name} ${nextStage.stage} delivery date` : `${si.name} delivery date`}
-                    onChange={(e) => setDateEdits(prev => ({ ...prev, [dateKey]: e.target.value ? isoToStageDate(e.target.value) : null }))}
-                    className="px-2 py-1 text-xs font-medium text-[#030213] border border-[#E0E0E6] rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] disabled:bg-transparent disabled:border-transparent disabled:px-0 transition-colors"
-                  />
-                  {countdown && !isReceived && (
-                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold border whitespace-nowrap ${countdownTone}`}>
-                      {countdown.label}
-                    </span>
-                  )}
-                </div>
-              </div>}
               <div className="flex items-center gap-2 ml-auto">
                 {/* Denture — receiving happens per stage (tick above); the
                     card's main action orders the next stage(s). */}
-                {dentureRows ? (
+                {dentureRows ? (<>
+                  {/* Two or more stage orders still to receive — one CTA for all. */}
+                  {(() => {
+                    const pending = dentureRows.filter(r =>
+                      !r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered' && !receivedStages.has(`${si.id}::${r.stage}`));
+                    if (pending.length < 1 || dentureRows.length < 2) return null;
+                    return (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setReceivedStages(prev => {
+                            const next = new Set(prev);
+                            pending.forEach(r => next.add(`${si.id}::${r.stage}`));
+                            return next;
+                          });
+                        }}
+                        title={`Mark ${pending.map(r => r.stage).join(' + ')} as received`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm whitespace-nowrap"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        Mark all as Received
+                      </button>
+                    );
+                  })()}
                   <button
                     onClick={(e) => { e.stopPropagation(); setStagePickerFor(si); }}
                     disabled={DENTURE_STAGES.every(st => dentureRows.some(r => r.stage === st))}
@@ -1705,7 +1738,7 @@ function CaseSummaryOverview({
                     <Plus className="w-3.5 h-3.5" />
                     New Stage Order
                   </button>
-                ) : isReceived ? (
+                </>) : isReceived ? (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0] whitespace-nowrap">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     Received
@@ -1737,6 +1770,7 @@ function CaseSummaryOverview({
         return (
           <StageOrderPickerModal
             service={si}
+            caseId={caseData.id}
             mode="catalog"
             remaining={DENTURE_STAGES.filter(st => !existing.some(r => r.stage === st))}
             existing={existing}
@@ -1811,8 +1845,10 @@ function seedStageOrders(service: ServiceItem, caseId: string, createdAt: string
 //     ordered ones never appear).
 //   • phased (aligner)  — nothing to choose; the next phase is auto-named
 //     ("Phase N") and shown read-only, so it's a one-confirm action.
-function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseName, onCancel, onConfirm }: {
+function StageOrderPickerModal({ service, caseId, mode, remaining, existing, nextPhaseName, onCancel, onConfirm }: {
   service: ServiceItem;
+  /** Enables the "Edit full case" hand-off to the case form. */
+  caseId?: string;
   mode: 'catalog' | 'phased';
   remaining: string[];
   /** Denture: stages already ordered on this case — listed with date + status. */
@@ -1820,8 +1856,11 @@ function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseNa
   nextPhaseName: string;
   onCancel: () => void;
   /** `dates` — ISO per picked stage (denture only). */
-  onConfirm: (stages: string[], dates: Record<string, string>) => void;
+  onConfirm: (stages: string[], dates: Record<string, string>, instructions: string) => void;
 }) {
+  const navigate = useNavigate();
+  const inLab = useLocation().pathname.startsWith('/lab');
+  const [instructions, setInstructions] = useState(service.instructions ?? '');
   // Catalog mode pre-selects the first remaining stage so the common
   // "next stage" path is one click. Phased mode has no selection.
   const [picked, setPicked] = useState<string[]>(remaining.length ? [remaining[0]] : []);
@@ -1836,7 +1875,7 @@ function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseNa
         <div className={`relative w-full ${isPhased ? 'max-w-md' : 'max-w-lg'} max-h-[90vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150`}>
           {/* Header */}
           <div className="px-5 pt-5 pb-3 border-b border-[#F0EFF6] flex-shrink-0">
-            <h3 className="text-sm font-bold text-[#030213]">{isPhased ? 'New Phase Order' : 'New Stage Order'}</h3>
+            <h3 className="text-sm font-bold text-[#030213]">{isPhased ? 'Quick Phase Order' : 'Quick Stage Order'}</h3>
             <p className="text-xs text-[#717182] mt-0.5">
               {service.name} · {isPhased ? `adds ${nextPhaseName}, auto-filled from the case` : 'pick the stage(s) to order next'}
             </p>
@@ -1891,8 +1930,33 @@ function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseNa
               </>
             )}
           </div>
+          <div className="px-5 pb-4">
+            <label className="block text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-1.5">
+              Case instructions
+              {(isPhased ? [nextPhaseName] : picked).length > 0 && (
+                <span className="normal-case tracking-normal font-medium text-[#4D8EF7]"> · for {(isPhased ? [nextPhaseName] : picked).join(', ')}</span>
+              )}
+            </label>
+            <textarea
+              value={instructions}
+              onChange={e => setInstructions(e.target.value)}
+              rows={2}
+              placeholder="Add instructions for this order…"
+              className="w-full px-3 py-2 rounded-lg border border-[#E0E0E6] text-xs text-[#030213] placeholder:text-[#A0A0B0] resize-none focus:outline-none focus:ring-2 focus:ring-[#4D8EF7]/30 focus:border-[#4D8EF7]"
+            />
+          </div>
           {/* Footer */}
           <div className="px-5 py-4 border-t border-[#F0EFF6] flex items-center justify-end gap-2 bg-[#FAFBFC] flex-shrink-0">
+            {caseId && (
+              <button
+                onClick={() => navigate(`/${inLab ? 'lab' : 'clinic'}/cases/quick-new/${encodeURIComponent(caseId)}`)}
+                title="Update anything on the case, plus the next stage orders"
+                className="mr-auto inline-flex items-center gap-1 text-xs font-semibold text-[#4D8EF7] hover:underline"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Edit full case
+              </button>
+            )}
             <button
               onClick={onCancel}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-[#5A5568] bg-[#F0EFF6] hover:bg-[#E5E3ED] transition-colors"
@@ -1901,7 +1965,7 @@ function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseNa
             </button>
             <button
               disabled={!canCreate}
-              onClick={() => onConfirm(isPhased ? [nextPhaseName] : picked, dates)}
+              onClick={() => onConfirm(isPhased ? [nextPhaseName] : picked, dates, instructions.trim())}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
             >
               <Plus className="w-4 h-4" />
@@ -2933,6 +2997,8 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   const lowerTeeth = fdiList.filter(t => t >= 30);
   const scanCount  = service.scanFileCount ?? 0;
   const attachCount = service.attachmentCount ?? 0;
+  // Multi-service cases carry no case-level dates, so each service shows when it was created.
+  const showCreatedOn = (caseData.serviceItems?.length ?? 0) > 1 && !stageCatalog;
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden mt-3 mx-6 mb-6 gap-3 min-h-0">
@@ -2951,6 +3017,20 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                 </p>
               )}
             </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+            {(() => {
+              const pending = (activeDentureTab?.rows ?? []).filter(r => !r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered');
+              return pending.length > 1 ? (
+                <button
+                  onClick={() => onMarkReceived?.(`${service.name} · ${pending.map(r => r.stage).join(', ')}`)}
+                  title="Confirm receipt of every open stage in this order"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm whitespace-nowrap"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Mark all as Received
+                </button>
+              ) : null;
+            })()}
             <button
               onClick={() => setStagePickerOpen(true)}
               disabled={!canAddOrder}
@@ -2960,6 +3040,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               <Plus className="w-3.5 h-3.5" />
               New Stage Order
             </button>
+            </div>
           </div>
           {doneElsewhereRows.length > 0 && (
             <p className="mx-4 mt-2 inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#717182]">
@@ -2985,7 +3066,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               >
                 <span className="truncate">{rows.map(r => r.stage).join(' + ')}</span>
                 {order.followUpFrom && (
-                  <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">Follow-up Rx</span>
+                  <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">New stage</span>
                 )}
               </button>
             ))}
@@ -2997,7 +3078,10 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                 <tr className="text-[10px] text-[#A0A0B0] uppercase tracking-wider">
                   <th className="text-left font-semibold px-4 py-1.5">Stage</th>
                   <th className="text-left font-semibold px-4 py-1.5">Status</th>
+                  <th className="text-left font-semibold px-4 py-1.5">Created on</th>
+                  <th className="text-left font-semibold px-4 py-1.5">Updated on</th>
                   <th className="text-left font-semibold px-4 py-1.5">Delivery date</th>
+                  <th className="px-4 py-1.5" />
                 </tr>
               </thead>
               <tbody>
@@ -3005,6 +3089,8 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                   <tr key={r.stage} className="border-t border-[#F5F5F9]">
                     <td className="px-4 py-2 font-semibold whitespace-nowrap text-[#030213]">{r.stage}</td>
                     <td className="px-4 py-2"><StageStatusCell row={r} size="xs" /></td>
+                    <td className="px-4 py-2 whitespace-nowrap text-[#030213]">{activeDentureTab.order.createdAt || caseData.createdAt}</td>
+                    <td className="px-4 py-2 whitespace-nowrap text-[#030213]">{caseData.updatedAt}</td>
                     <td className="px-4 py-1.5 whitespace-nowrap">
                       <input
                         type="date"
@@ -3018,6 +3104,19 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                         }}
                         className={`px-2 py-1 text-xs text-[#030213] border rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] transition-colors ${r.date ? 'border-[#E0E0E6]' : 'border-[#FCD34D]'}`}
                       />
+                    </td>
+                    <td className="px-4 py-1.5 whitespace-nowrap text-right">
+                      {!r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered' && (
+                        <button
+                          type="button"
+                          onClick={() => onMarkReceived?.(`${service.name} · ${r.stage}`)}
+                          title={`Mark ${r.stage} as received`}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-[#4D8EF7] border border-[#C8D8FC] hover:bg-[#EEF4FF] transition-colors"
+                        >
+                          <Check className="w-3 h-3" />
+                          Mark received
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -3141,7 +3240,13 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                   {s.label}
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-4 text-xs">
+              <div className={`grid ${showCreatedOn ? 'grid-cols-3' : 'grid-cols-2'} gap-4 text-xs`}>
+                {showCreatedOn && (
+                  <div>
+                    <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">Created on</p>
+                    <p className="font-medium text-[#030213]">{caseData.createdAt}</p>
+                  </div>
+                )}
                 <div>
                   <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">{stageCatalog ? 'Next stage' : 'Delivery Date'}</p>
                   <p className="font-medium text-[#030213]">
@@ -3392,12 +3497,13 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
       {stagePickerOpen && staging && (
         <StageOrderPickerModal
           service={service}
+          caseId={caseData.id}
           mode={staging.mode}
           remaining={remainingStages}
           existing={stageRows}
           nextPhaseName={nextPhaseName}
           onCancel={() => setStagePickerOpen(false)}
-          onConfirm={(stages, dates) => {
+          onConfirm={(stages, dates, instructions) => {
             // Denture: each stage keeps its own date; the order's headline
             // date is the earliest of them.
             const stageDates = Object.fromEntries(stages.map(st => [st, dates[st] ? isoToStageDate(dates[st]) : null]));
@@ -3408,6 +3514,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               status: 'submitted',
               deliveryDate: earliest ? isoToStageDate(earliest) : null,
               createdAt: caseData.updatedAt,
+              ...(instructions ? { instructions } : {}),
               ...(stageCatalog ? { stageDates } : {}),
             };
             setStageOrders(prev => [...prev, newOrder]);
@@ -3482,6 +3589,22 @@ function OrderFormBody({ caseData, service, wide = false }: {
         {svc?.material && <KV label="Material" value={svc.material} />}
         {svc?.shade && <KV label="Tooth Shade" value={svc.shade} />}
       </Section>
+      {svc?.stages && svc.stages.length > 0 && (
+        <Section title="Stages">
+          {svc.stages.map(st => {
+            const elsewhere = svc.doneElsewhere?.includes(st);
+            const date = svc.stageDates?.[st];
+            return (
+              <KV
+                key={st}
+                label={st}
+                value={elsewhere ? `Done elsewhere${date ? ` · ${date}` : ''}` : date ?? '—'}
+                muted={!elsewhere && !date}
+              />
+            );
+          })}
+        </Section>
+      )}
       <Section title="Scan Files">
         {scanCount > 0
           ? <p className="text-xs text-[#030213]">{scanCount} scan file{scanCount === 1 ? '' : 's'} included in this order.</p>
@@ -4259,7 +4382,10 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               portal pattern). The host applies the pick, or opens the compact
               override / Smile Genius-only popup first. Also flips
               automatically through the missing-info email loop. */}
-          <StatusDropdown status={caseData.status} onPick={onPickStatus} />
+          {/* Multi-service / staged cases show status per service or stage instead. */}
+          {!((caseData.serviceItems?.length ?? 0) > 1 || caseData.serviceItems?.some(si => (si.stages?.length ?? 0) > 1 || isDentureService(si.name))) && (
+            <StatusDropdown status={caseData.status} onPick={onPickStatus} />
+          )}
 
           <CreatedByIcon createdBy={caseCreatedBy(caseData, viewerPortal)} showName />
 
@@ -4286,12 +4412,15 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               layout. The timeline is reachable from the strip above and the
               menu; the details grid below is always open. */}
           <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-            {caseData.status !== 'delivered' && caseData.status !== 'completed' && (
+            {/* Multi-service / multi-stage cases are received per service or stage on their cards. */}
+            {caseData.status !== 'delivered' && caseData.status !== 'completed'
+              && (caseData.serviceItems?.length ?? 0) <= 1
+              && !caseData.serviceItems?.some(si => (si.stages?.length ?? 0) > 1 || isDentureService(si.name)) && (
               <button
                 onClick={() => setReceivedModal({})}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity shadow-sm"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity shadow-sm whitespace-nowrap"
               >
-                <Check className="w-4 h-4" />
+                <Check className="w-3.5 h-3.5" />
                 Mark as Received
               </button>
             )}

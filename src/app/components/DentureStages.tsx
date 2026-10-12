@@ -1,4 +1,4 @@
-import { Check, CopyCheck, History, X } from 'lucide-react';
+import { Check, History, X } from 'lucide-react';
 import type { CaseStatus } from '../pages/CasesPage';
 import { STATUS_MAP } from '../pages/CaseDetailPage';
 import { ARCH_LABELS, DENTURE_STAGES, TODAY_ISO, archOf, archTeeth, isPastISO, type Arch, type StageRow } from '../data/dentureStages';
@@ -67,12 +67,9 @@ export function StageDatePicker({
   const ordered = new Map(existing.map(r => [r.stage, r]));
   const selected = catalog.filter(s => stages.includes(s));
   const isDone = (s: string) => allowDoneElsewhere && doneElsewhere.includes(s);
-  // "Copy date to selected" takes the first dated upcoming stage (catalogue
-  // order) and writes it onto every other upcoming stage. Stages done
-  // elsewhere keep their own done-on date.
-  const upcoming = selected.filter(s => !isDone(s));
-  const source = upcoming.find(s => dates[s]);
-  const canCopy = !!source && upcoming.length > 1 && upcoming.some(s => dates[s] !== dates[source!]);
+  // Dates autofill across ticked stages (no manual copy). The source is the
+  // first dated upcoming stage; stages done elsewhere keep their own done-on date.
+  const source = selected.filter(s => !isDone(s)).find(s => dates[s]);
 
   const emit = (nextStages: string[], nextDates: Record<string, string>, nextDone: string[]) =>
     onChange(nextStages, nextDates, nextDone.filter(s => nextStages.includes(s)));
@@ -83,13 +80,26 @@ export function StageDatePicker({
       delete nextDates[stage];
       emit(stages.filter(s => s !== stage), nextDates, doneElsewhere);
     } else {
-      emit([...stages, stage], dates, doneElsewhere);
+      // Ticking a stage autofills the date already set on another upcoming one.
+      emit([...stages, stage], source ? { ...dates, [stage]: dates[source] } : dates, doneElsewhere);
     }
   };
-  // A past date can only mean the stage already happened — flip it to done.
+  // An upcoming stage never takes a past date — only the user marking it
+  // "Done elsewhere" turns it into past work (that date is then a done-on date).
   const setDate = (stage: string, iso: string) => {
-    const nextDone = allowDoneElsewhere && isPastISO(iso) && !doneElsewhere.includes(stage) ? [...doneElsewhere, stage] : doneElsewhere;
-    emit(stages, { ...dates, [stage]: iso }, nextDone);
+    const nextDone = doneElsewhere;
+    if (iso && isPastISO(iso) && !isDone(stage)) {
+      const cleared = { ...dates };
+      delete cleared[stage];
+      emit(stages, cleared, nextDone);
+      return;
+    }
+    const nextDates = { ...dates, [stage]: iso };
+    // Autofill the other ticked stages that have no date yet.
+    if (iso && !nextDone.includes(stage)) {
+      for (const s of stages) if (s !== stage && !nextDone.includes(s) && !nextDates[s]) nextDates[s] = iso;
+    }
+    emit(stages, nextDates, nextDone);
   };
   const setDone = (stage: string, done: boolean) => {
     const nextDates = { ...dates };
@@ -97,28 +107,12 @@ export function StageDatePicker({
     if (dates[stage] && (done ? !isPastISO(dates[stage]) && dates[stage] !== TODAY_ISO : isPastISO(dates[stage]))) delete nextDates[stage];
     emit(stages, nextDates, done ? [...doneElsewhere, stage] : doneElsewhere.filter(s => s !== stage));
   };
-  const copyDate = () => {
-    if (!source) return;
-    emit(stages, { ...dates, ...Object.fromEntries(upcoming.map(s => [s, dates[source]])) }, doneElsewhere);
-  };
 
   const rowPad = compact ? 'px-2.5 py-1.5' : 'px-3 py-2';
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        {!compact && <p className="text-[11px] text-[#717182]">Tick a stage, then set its delivery date</p>}
-        <button
-          type="button"
-          onClick={copyDate}
-          disabled={!canCopy}
-          title={canCopy ? `Copy ${source}'s date to every selected stage` : 'Select two or more stages and date one of them'}
-          className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-[#4D8EF7] border border-[#C8D8FC] bg-white hover:bg-[#EEF4FF] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-        >
-          <CopyCheck className="w-3 h-3" />
-          Copy date to selected
-        </button>
-      </div>
+      {!compact && <p className="text-[11px] text-[#717182]">Tick a stage, then set its delivery date</p>}
 
       {compact && selected.length === 0 && (
         <p className="text-[11px] text-[#D97706]">No stages picked yet — add them with Edit.</p>
@@ -181,9 +175,13 @@ export function StageDatePicker({
           // Compact (service card): name + ✕ on top, date + "Done elsewhere" below.
           if (compact) {
             return (
-              <div key={stage} className={`${rowPad} space-y-1.5 ${done ? 'bg-[#FAFAFB]' : 'bg-[#F8FAFF]'}`}>
-                <div className="flex items-center gap-2">
-                  <span className={`text-sm truncate flex-1 min-w-0 font-semibold ${done ? 'text-[#5A5568]' : 'text-[#1565C0]'}`}>{stage}</span>
+              <div key={stage} className={`${rowPad} ${done ? 'bg-[#FAFAFB]' : 'bg-[#F8FAFF]'}`}>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  <span className={`text-sm truncate flex-1 basis-[120px] min-w-0 font-semibold ${done ? 'text-[#5A5568]' : 'text-[#1565C0]'}`}>{stage}</span>
+                  {doneChip}
+                  {/* Date sits on the right, in line with a single-unit service's delivery. */}
+                  {/* Right gap = the "Edit" button a single-unit row has, so both dates end on the same line. */}
+                  <div className="mr-[62px] flex-shrink-0">{dateField}</div>
                   <button
                     type="button"
                     onClick={() => toggle(stage)}
@@ -193,10 +191,6 @@ export function StageDatePicker({
                   >
                     <X className="w-3.5 h-3.5" strokeWidth={2.5} />
                   </button>
-                </div>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  {dateField}
-                  {doneChip}
                 </div>
               </div>
             );

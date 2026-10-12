@@ -140,6 +140,16 @@ const STAGES: Stage[] = [
     blurb: 'When a denture prescription arrives for a patient who already has that denture case (same practice, patient, dentist and denture service), Smile Genius doesn’t create a new case. The new stages are appended to the existing case, tagged “Follow-up Rx”. Stages the case already has are skipped, never ordered twice.',
     steps: [
       {
+        title: 'The draft sits in the list with the earlier stage orders',
+        persona: 'clinic',
+        icon: <List className="w-4 h-4" />,
+        description: 'Before it is filled, the follow-up draft (CASE-DRAFT-DN1) already shows where it belongs. Its chevron opens the matched case’s earlier stage orders (Special Tray, Bite Registration, Try In) in the same hierarchy, with only the new stage (Finish) marked Draft. Clicking an earlier stage opens CASE-DN-3001’s details; clicking the draft stage opens the prescription. So the user can always navigate back to the older case from the draft.',
+        shows: ['Earlier stage orders under the draft', 'Only the new stage is Draft', 'Earlier stages open CASE-DN-3001'],
+        tryIt: ['On CASE-DRAFT-DN1 (John Smith), open the chevron by the status', 'Click Special Tray to open CASE-DN-3001; click Finish to open the draft'],
+        path: '/clinic/cases',
+        portal: 'clinic',
+      },
+      {
         title: 'The follow-up is matched while you fill it',
         persona: 'system',
         icon: <GitMerge className="w-4 h-4" />,
@@ -177,7 +187,7 @@ const STAGES: Stage[] = [
         title: 'Mark a stage “Done elsewhere” while you fill it',
         persona: 'clinic',
         icon: <History className="w-4 h-4" />,
-        description: 'CASE-DRAFT-DN2 lists Special Tray (20-Mar-2026) and Bite Registration (10-Apr-2026), both done at the patient’s previous lab, plus Finish (05-Jun-2026). Both are ticked “Done elsewhere”: their date becomes a “Done on” date (optional, today or earlier), while upcoming stages only accept delivery dates from today on. Typing a past date into an upcoming stage flips it to done elsewhere.',
+        description: 'CASE-DRAFT-DN2 lists Special Tray (20-Mar-2026) and Bite Registration (10-Apr-2026), both done at the patient’s previous lab, plus Finish (05-Jun-2026). Both are ticked “Done elsewhere”: their date becomes a “Done on” date (optional, today or earlier), while upcoming stages only accept delivery dates from today on. A past date is never accepted on an upcoming stage: only the user can mark a stage “Done elsewhere”.',
         shows: ['Done elsewhere toggle per stage', 'Done on · 20-Mar-2026', 'Delivery dates can’t be in the past'],
         tryIt: ['Toggle Done elsewhere on Finish and back', 'Pick a lab and press Create case'],
         path: '/clinic/cases/quick-new/CASE-DRAFT-DN2',
