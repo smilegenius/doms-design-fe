@@ -29,8 +29,8 @@ export const FLOWS: FlowEntry[] = [
   {
     // Five developer tasks across the clinic + lab creation and case screens.
     title: 'Denture stages & service-level dates',
-    description: 'Delivery dates move from the case to each service, every denture stage gets its own date (a date filled on one ticked stage autofills the rest), follow-up prescriptions join the existing case, and stages done before a case reached DOMS show as done elsewhere. Round 2: arch picker, stages upfront and one row per stage. Round 3: stage-level receiving, new-stage drafts under their existing case, and no past dates on upcoming stages.',
-    detail: 'Clinic · Lab · 5 tasks',
+    description: 'Four clinic scenarios, each on the list, detail and create / draft screens: a single manual case, a multi-service manual case with a denture, and a scanner case that matches a multi-service case with its earlier stages matched or done elsewhere.',
+    detail: 'Clinic · 4 scenarios',
     icon: <Layers className="w-5 h-5 text-[#B45309]" />,
     badge: 'Walkthrough',
     accent: '#B45309',

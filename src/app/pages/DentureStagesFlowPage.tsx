@@ -60,179 +60,147 @@ const PERSONA: Record<Persona, { label: string; cls: string; icon: React.ReactNo
 
 const STAGES: Stage[] = [
   {
-    label: 'Delivery date moves from the case to each service',
-    blurb: 'The case no longer has one Requested Delivery date. Every non-denture service (crown, bridge, veneer, aligner…) carries its own date. A denture has no service-level date at all: each stage is dated instead (task 2). A multi-service case has no case-level date at all: the header leaves Delivery Date out, the case list leaves the case row’s date blank, and the dates sit on each service row. There is no “New” status: a case starts as Submitted.',
+    label: 'Single manual case',
+    blurb: 'A clinic user creates a case by hand with one denture service. Stages are picked and dated upfront (a date set on one stage fills the other ticked stages), past dates are refused, and there is no “Done elsewhere” on manual entry. The case then reads the same way on the list, the detail page and the creation screen.',
     steps: [
       {
-        title: 'Quick Create — clinic',
-        persona: 'clinic',
-        icon: <CalendarDays className="w-4 h-4" />,
-        description: 'Case Details is down to Patient, Lab, Dentist and Order Type. Each service card in the Services card has its own “Requested delivery” date, and the same field opens at the top of the service drawer. A newly added service starts on the default date (14 days out).',
-        shows: ['No case-level Delivery', 'Requested delivery on every service card'],
-        tryIt: ['Add a second service and give it a different date'],
-        path: '/clinic/cases/quick-new/CASE-DRAFT-001',
-        portal: 'clinic',
-        highlight: true,
-      },
-      {
-        title: 'Quick Create — lab',
-        persona: 'lab',
-        icon: <FlaskConical className="w-4 h-4" />,
-        description: 'The lab enters cases on the same screen, so it gets the same per-service date.',
-        shows: ['Same per-service date, lab wording'],
-        path: '/lab/cases/quick-new/CASE-DRAFT-002',
-        portal: 'lab',
-      },
-      {
-        title: 'Detailed Create Case — clinic',
-        persona: 'clinic',
-        icon: <FilePen className="w-4 h-4" />,
-        description: 'The “Case Order Details” card keeps Dentist on Record and Order Type only. The service editor asks for the Requested Delivery Date, or for stages and their dates when the service is a denture.',
-        shows: ['Case Order Details without a date', 'Requested Delivery Date in the service editor'],
-        path: '/clinic/cases/new',
-        portal: 'clinic',
-      },
-      {
-        title: 'Multi-service case: crown + denture',
-        persona: 'clinic',
-        icon: <Layers className="w-4 h-4" />,
-        description: 'CASE-DN-3002 (Amira Khan) has a Crown with its own date (17-Jul-2026) and a Partial Denture dated per stage. There is no case-level Delivery Date in the header. On Case Summary, the Crown card has its own editable date. The denture card lists every stage with its status and an editable date, a “Mark received” tick under each open stage, and “New Stage Order” in place of Mark as Received.',
-        shows: ['No header Delivery Date', 'Crown · 17-Jul-2026 (editable)', 'Denture card · stages · Mark received · New Stage Order'],
-        tryIt: ['Tick “Mark received” on Bite Registration', 'Press New Stage Order on the denture card and order Try In'],
-        path: '/clinic/cases/CASE-DN-3002',
-        portal: 'clinic',
-      },
-    ],
-  },
-  {
-    label: 'Date each denture stage — dates autofill across stages',
-    blurb: `A denture has five stages: ${DENTURE_STAGES.join(', ')}. Ticking a stage enables its own date. A date set on one stage fills every other ticked stage that has none yet, and ticking a new stage takes the date already set. There is no copy button, and an upcoming stage never accepts a past date: only the user can mark a stage “Done elsewhere”. A denture covers a whole jaw, so it is picked as an arch (Upper / Lower / Both) instead of tooth by tooth.`,
-    steps: [
-      {
-        title: 'Stages & delivery dates, upfront on the service card',
-        persona: 'clinic',
-        icon: <CopyCheck className="w-4 h-4" />,
-        description: 'CASE-DRAFT-DN2 is a Full Denture for Margaret Lee. The service card itself lists the picked stages, one per row, each with its date and a ✕ to drop it, so they can be edited without opening anything (more stages are added in the service window). In the service window the stages come first, and the tooth chart works by arch: “Select Arch”, or any tooth, selects or clears the whole jaw. A stage with no date is flagged, and the service is not complete until every ticked stage has a date (or is done elsewhere).',
-        shows: ['Picked stages on the card, ✕ to remove', 'Dates autofill across ticked stages', 'Chart selects the whole arch'],
-        tryIt: ['Tick Try In, give it a date, then tick Retry: it takes the same date', 'Type a past date on an upcoming stage: it is rejected. Use “Done elsewhere” instead'],
-        path: '/clinic/cases/quick-new/CASE-DRAFT-DN2',
-        portal: 'clinic',
-        highlight: true,
-      },
-      {
-        title: 'New Stage Order on the case page — lab',
-        persona: 'lab',
-        icon: <Plus className="w-4 h-4" />,
-        description: 'On a denture case, “New Stage Order” uses the same picker. Stages already ordered are listed, locked, with their date and status, and each new stage needs its own date before the order can be created. The stage tabs are grouped by order: stages ordered together sit close inside one group, and a new order is a separate group (CASE-DN-3002’s Partial Denture has three orders; CASE-DN-3001 one order of three stages). Each order lists its stages with status, created / updated on, an editable date and a “Mark received” button at the end of the row (not on completed stages), plus “Mark all as Received”. Receiving marks just those stages, not the whole case. Details / Invoice / Shipping are per order. Stages ordered together share one invoice and shipment. Stages done elsewhere are a note above the tabs.',
-        shows: ['Stage tabs grouped by order', 'Mark received per stage / all', 'Already-ordered stages locked'],
-        tryIt: ['Open Partial Denture → New Stage Order (called Quick Stage Order)', 'Pick Try In + Finish, date one: the other follows. Add case instructions, or use “Edit full case”'],
-        path: '/lab/cases/CASE-DN-3002',
-        portal: 'lab',
-      },
-      {
-        title: 'Stages in the case list',
+        title: 'List — one denture case',
         persona: 'clinic',
         icon: <List className="w-4 h-4" />,
-        description: 'The Status column is an accordion. On a denture case, the parent shows a count pill (“3 Stages”) instead of a status, and the chevron opens one row per order: stages ordered together share a row (names comma-separated, one status). Each row has its own Updated On and delivery date. Nested rows open by default. The denture itself has no date (its Delivery cell is blank). On a multi-service case, “N Services” opens the services, and the denture’s service row has its own chevron for its stages. CASE-DN-3003 shows stages done elsewhere.',
-        shows: ['Open by default', 'One row per stage', 'Case → service → stages'],
-        tryIt: ['CASE-DN-3001 and CASE-DN-3002 sit at the top of the list: open the chevron by the status', 'On CASE-DN-3002, open “2 Services”, then the chevron on the Partial Denture row'],
-        path: '/clinic/cases',
-        portal: 'clinic',
-      },
-    ],
-  },
-  {
-    label: 'Follow-up prescription → add the stage to the existing case',
-    blurb: 'When a denture prescription arrives for a patient who already has that denture case (same practice, patient, dentist and denture service), Smile Genius doesn’t create a new case. The new stages are appended to the existing case, tagged “Follow-up Rx”. Stages the case already has are skipped, never ordered twice.',
-    steps: [
-      {
-        title: 'The draft sits in the list with the earlier stage orders',
-        persona: 'clinic',
-        icon: <List className="w-4 h-4" />,
-        description: 'Before it is filled, the follow-up draft (CASE-DRAFT-DN1) already shows where it belongs. Its chevron opens the matched case’s earlier stage orders (Special Tray, Bite Registration, Try In) in the same hierarchy, with only the new stage (Finish) marked Draft. Clicking an earlier stage opens CASE-DN-3001’s details; clicking the draft stage opens the prescription. So the user can always navigate back to the older case from the draft.',
-        shows: ['Earlier stage orders under the draft', 'Only the new stage is Draft', 'Earlier stages open CASE-DN-3001'],
-        tryIt: ['On CASE-DRAFT-DN1 (John Smith), open the chevron by the status', 'Click Special Tray to open CASE-DN-3001; click Finish to open the draft'],
+        description: 'CASE-DN-3001 (John Smith): the parent row shows a count pill (“1 Stage”) instead of a status. Its chevron opens one row per stage order. The three stages were ordered together, so they read as one row, “Special Tray, Bite Registration, Try In”, with one status, its Updated On and delivery date.',
+        shows: ['Count pill, no parent status', 'Stages ordered together = one row', 'Updated On per stage row'],
+        tryIt: ['Find CASE-DN-3001 and open the chevron'],
         path: '/clinic/cases',
         portal: 'clinic',
       },
       {
-        title: 'The follow-up is matched while you fill it',
-        persona: 'system',
-        icon: <GitMerge className="w-4 h-4" />,
-        description: 'CASE-DRAFT-DN1 is a Finish prescription for John Smith, who already has CASE-DN-3001 (Special Tray, Bite Registration, Try In). A green “Matching case found” panel lists what is already ordered, and the submit button reads “Add to CASE-DN-3001”. In the drawer, those stages appear locked.',
-        shows: ['Matching case found — CASE-DN-3001', 'Already ordered on CASE-DN-3001', 'Add to CASE-DN-3001'],
-        tryIt: ['Open the service: Special Tray, Bite Registration and Try In are locked as already ordered', 'Tick Retry (it takes Finish’s date), then press “Add to CASE-DN-3001”', 'Open the arrow beside the button to “Create a new case” instead'],
-        path: '/clinic/cases/quick-new/CASE-DRAFT-DN1',
-        portal: 'clinic',
-        highlight: true,
-      },
-      {
-        title: 'Same from the lab side',
-        persona: 'lab',
-        icon: <FlaskConical className="w-4 h-4" />,
-        description: 'The lab opening the same prescription sees the same match. The lab doesn’t need to pick the clinic first, because the existing case already has it.',
-        path: '/lab/cases/quick-new/CASE-DRAFT-DN1',
-        portal: 'lab',
-      },
-      {
-        title: 'The case gains the new stages',
+        title: 'Detail — stage orders',
         persona: 'clinic',
-        icon: <Layers className="w-4 h-4" />,
-        description: 'After submitting, Finish (plus any other new stage) joins CASE-DN-3001’s stage table with its own date and a “Follow-up Rx” tag. No new case appears in the list.',
-        shows: ['Follow-up Rx', 'No duplicate case'],
+        icon: <ClipboardList className="w-4 h-4" />,
+        description: 'The header has no case status. The stage orders card groups the stage tabs by order (one tight group here), lists each stage with status, created / updated on and an editable date, and has “Mark received” at the end of each open stage (not on Completed ones), plus “Mark all as Received”. Receiving marks only those stages. “New Stage Order” opens Quick Stage Order, with case instructions for the picked stages and “Edit full case”.',
+        shows: ['Grouped stage tabs', 'Mark received per stage / all', 'Quick Stage Order'],
+        tryIt: ['Mark Try In as received', 'Open New Stage Order and pick Retry + Finish: one date fills both'],
         path: '/clinic/cases/CASE-DN-3001',
         portal: 'clinic',
+        highlight: true,
+      },
+      {
+        title: 'Create — manual Quick Create',
+        persona: 'clinic',
+        icon: <FilePen className="w-4 h-4" />,
+        description: 'Add a Partial Denture. The service card lists the picked stages one per row, each with its delivery date, aligned to the right like a single-unit service. A both-arch denture shows an Upper arch row and a Lower arch row. A past date on an upcoming stage is refused, and “Done elsewhere” is not offered on a manual case.',
+        shows: ['Dates autofill across ticked stages', 'No past dates', 'No “Done elsewhere”'],
+        tryIt: ['Tick Special Tray, give it a date, then tick Try In: it takes the same date'],
+        path: '/clinic/cases/quick-new',
+        portal: 'clinic',
       },
     ],
   },
   {
-    label: 'No matching case → a new case, earlier stages done elsewhere',
-    blurb: 'If no existing case matches, the prescription creates a new case, even when it only asks for a later stage. Stages that were already done, but not on this portal (e.g. at the patient’s previous lab), are marked “Done elsewhere” with an optional done-on date, and the case shows them as done, not as open work. Stages done on this portal are covered by the follow-up match above.',
+    label: 'Multi-service manual case (with a denture)',
+    blurb: 'One manual case with a denture and another service. Nothing at case level: no status or date on the parent, and each service carries its own.',
     steps: [
       {
-        title: 'Mark a stage “Done elsewhere” while you fill it',
+        title: 'List — services and stages',
         persona: 'clinic',
-        icon: <History className="w-4 h-4" />,
-        description: 'CASE-DRAFT-DN2 lists Special Tray (20-Mar-2026) and Bite Registration (10-Apr-2026), both done at the patient’s previous lab, plus Finish (05-Jun-2026). Both are ticked “Done elsewhere”: their date becomes a “Done on” date (optional, today or earlier), while upcoming stages only accept delivery dates from today on. A past date is never accepted on an upcoming stage: only the user can mark a stage “Done elsewhere”.',
-        shows: ['Done elsewhere toggle per stage', 'Done on · 20-Mar-2026', 'Delivery dates can’t be in the past'],
-        tryIt: ['Toggle Done elsewhere on Finish and back', 'Pick a lab and press Create case'],
-        path: '/clinic/cases/quick-new/CASE-DRAFT-DN2',
+        icon: <List className="w-4 h-4" />,
+        description: 'CASE-DN-3002 (Amira Khan): “2 Services” opens the services. The Partial Denture service row shows “3 Stages” with no status, and one row per stage order (three separate orders here), each with its status, Updated On and date. The Crown keeps its own status and date.',
+        shows: ['“2 Services” → “3 Stages”', 'Three separate stage orders', 'Crown · own status and date'],
+        tryIt: ['Open “2 Services”, then the chevron on the Partial Denture row'],
+        path: '/clinic/cases',
+        portal: 'clinic',
+      },
+      {
+        title: 'Detail — case summary and stage tabs',
+        persona: 'clinic',
+        icon: <Layers className="w-4 h-4" />,
+        description: 'No case status or Mark as Received in the header. On Case Summary, the Partial Denture card lists each stage with status, date and “Mark received” at the end (not on Completed), with “Mark all as Received” and “New Stage Order” in the footer. The Crown card shows its delivery date next to its timeline, and a faint icon fills any leftover space. In the Partial Denture tab, each of the three orders is its own tab group.',
+        shows: ['Mark received per stage · Mark all', 'Crown date beside its timeline', 'Three separate order groups'],
+        tryIt: ['Tick Mark received on Bite Registration, then use Mark all as Received'],
+        path: '/clinic/cases/CASE-DN-3002',
         portal: 'clinic',
         highlight: true,
       },
       {
-        title: 'The new case shows them as “Done elsewhere”',
-        persona: 'system',
-        icon: <History className="w-4 h-4" />,
-        description: 'The created case (SG-…) shows Special Tray and Bite Registration with a “Done elsewhere” tag and their done-on dates instead of a status, in the list’s stage rows and in the case’s stage table. Finish is the open stage.',
-        shows: ['Done elsewhere · Done 20-Mar-2026', 'Finish · Submitted'],
-        tryIt: ['Search “Margaret” and expand the stages'],
-        path: '/clinic/cases',
+        title: 'Create — manual, denture + Crown',
+        persona: 'clinic',
+        icon: <FilePen className="w-4 h-4" />,
+        description: 'Add a Partial Denture and a Crown. The Crown has its own delivery date on its card; the denture has dated stages. Neither takes a past date, and nothing can be marked as done elsewhere.',
+        shows: ['Crown date on its card', 'Denture stages on its card'],
+        tryIt: ['Add both services and give the Crown a different date'],
+        path: '/clinic/cases/quick-new',
         portal: 'clinic',
       },
     ],
   },
   {
-    label: 'Service-level dates in the creation summary',
-    blurb: 'Whatever summarises the case before it is submitted now carries the per-service dates, and the per-stage dates for a denture.',
+    label: 'Scanner case matches a multi-service case — earlier stages matched',
+    blurb: 'A scanner-created Finish prescription for Priya Shah arrives as a draft. She already has CASE-DN-3004 (Partial Denture + Crown), and the denture’s earlier stages were all ordered here, so they show as Completed. Only the new stage is a draft.',
     steps: [
       {
-        title: 'Case Summary panel — detailed Create Case',
+        title: 'List — the draft under its case',
+        persona: 'clinic',
+        icon: <List className="w-4 h-4" />,
+        description: 'CASE-DRAFT-DN3 has no status of its own and is not clickable. Its chevron lists the earlier stages from CASE-DN-3004 (Special Tray, Bite Registration, Try In as one Completed row) and then Finish as “Draft - New Stage”. Clicking the earlier row opens CASE-DN-3004; clicking the draft row opens the prescription.',
+        shows: ['Earlier stages: Completed', 'Finish: Draft - New Stage', 'Earlier row opens CASE-DN-3004'],
+        tryIt: ['Find CASE-DRAFT-DN3 (Priya Shah) and open the chevron'],
+        path: '/clinic/cases',
+        portal: 'clinic',
+        highlight: true,
+      },
+      {
+        title: 'Detail — the matched case',
         persona: 'clinic',
         icon: <ClipboardList className="w-4 h-4" />,
-        description: 'Each service in the Case Summary panel (left column) shows “Delivery · <date>”. A denture shows its arch and lists each selected stage with its date (or “Done elsewhere”). A missing date shows in amber.',
-        shows: ['Delivery · 02-Jun-2026', 'Upper arch', 'Special Tray · 05-May-2026 …'],
-        path: '/clinic/cases/new',
+        description: 'CASE-DN-3004 is a multi-service case. Its Partial Denture stages are all Completed, so no receive buttons show on them, and a new stage order is what moves the work on. The Crown card has its own date and status.',
+        shows: ['Stages Completed', 'No receive buttons on Completed'],
+        path: '/clinic/cases/CASE-DN-3004',
         portal: 'clinic',
       },
       {
-        title: 'Lab Order Form — Quick Create',
-        persona: 'lab',
-        icon: <ClipboardList className="w-4 h-4" />,
-        description: 'The order-form preview (the left pane on scanner cases) drops the single Requested Delivery field. Each service lists its own Delivery, and a denture lists its arch and “Stages · requested delivery”.',
-        shows: ['Delivery per service', 'Stages · requested delivery'],
-        path: '/lab/cases/quick-new/CASE-DRAFT-DN2',
-        portal: 'lab',
+        title: 'Draft — matching case found',
+        persona: 'system',
+        icon: <GitMerge className="w-4 h-4" />,
+        description: 'The draft opens in Quick Create with a green “Matching case found — CASE-DN-3004” panel, the earlier stages locked as Completed, and only Finish to date. The submit button reads “Add to CASE-DN-3004”. Its arrow offers “Create a new case” instead, with an info icon explaining the choice.',
+        shows: ['Matching case found', 'Earlier stages locked · Completed', 'Add to CASE-DN-3004 / Create a new case'],
+        tryIt: ['Open the arrow beside the button and look at both options'],
+        path: '/clinic/cases/quick-new/CASE-DRAFT-DN3',
+        portal: 'clinic',
+      },
+    ],
+  },
+  {
+    label: 'Scanner case matches a multi-service case — earlier stages not matched',
+    blurb: 'A scanner-created Finish prescription for Daniel Ortiz matches CASE-DN-3005 (Full Denture + Night Guard), but that case’s earlier stages were not done on this portal. They were done at his previous lab, so they show as “Done elsewhere”, not as a status.',
+    steps: [
+      {
+        title: 'List — the draft under its case',
+        persona: 'clinic',
+        icon: <List className="w-4 h-4" />,
+        description: 'CASE-DRAFT-DN4 hangs the earlier stages from CASE-DN-3005 under it, with the Special Tray and Bite Registration rows tagged “Done elsewhere” and their done-on dates, then Try In, then Finish as “Draft - New Stage”.',
+        shows: ['Earlier stages: Done elsewhere', 'Finish: Draft - New Stage'],
+        tryIt: ['Find CASE-DRAFT-DN4 (Daniel Ortiz) and open the chevron'],
+        path: '/clinic/cases',
+        portal: 'clinic',
+        highlight: true,
+      },
+      {
+        title: 'Detail — the matched case',
+        persona: 'clinic',
+        icon: <History className="w-4 h-4" />,
+        description: 'CASE-DN-3005 lists Special Tray and Bite Registration as “Done elsewhere” in a note above the stage tabs, with their done-on dates. Try In is the open stage and has the receive button. The Night Guard card has its own date.',
+        shows: ['Done elsewhere · done-on dates', 'Try In: open'],
+        path: '/clinic/cases/CASE-DN-3005',
+        portal: 'clinic',
+      },
+      {
+        title: 'Draft — matching case found',
+        persona: 'system',
+        icon: <GitMerge className="w-4 h-4" />,
+        description: 'The draft opens in Quick Create with “Matching case found — CASE-DN-3005”. The earlier stages are locked and shown as Done elsewhere, only Finish is dated, and the submit button reads “Add to CASE-DN-3005” with the “Create a new case” option beside it.',
+        shows: ['Matching case found', 'Earlier stages locked · Done elsewhere', 'Add to CASE-DN-3005'],
+        path: '/clinic/cases/quick-new/CASE-DRAFT-DN4',
+        portal: 'clinic',
       },
     ],
   },
@@ -245,7 +213,7 @@ export default function DentureStagesFlowPage() {
   const isAuthed = !!user;
   const appends = useStageAppends();
   const created = useCreatedCases();
-  const demoCreated = created.filter(c => c.patientName === 'Margaret Lee');
+  const demoCreated = created;
   const dirty = appends.length > 0 || demoCreated.length > 0;
 
   const open = (step: Step) => {
@@ -257,11 +225,9 @@ export default function DentureStagesFlowPage() {
 
   const resetDemo = () => {
     resetStageAppends();
-    removeCreatedCases(c => c.patientName === 'Margaret Lee');
-    toast.success('Demo data reset: follow-up stages removed and the Margaret Lee case cleared.');
+    removeCreatedCases(() => true);
+    toast.success('Demo data reset: added stage orders and newly created cases removed.');
   };
-
-  let n = 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
@@ -287,11 +253,11 @@ export default function DentureStagesFlowPage() {
               </div>
             </div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[#FFF8E1] border border-[#FDE68A] text-[#B45309] mb-3">
-              October 2026 · 5 tasks
+              October 2026 · 4 scenarios
             </span>
             <h1 className="text-2xl sm:text-3xl font-bold text-[#030213] mb-2">Denture stages &amp; service-level dates</h1>
             <p className="text-sm text-[#717182] leading-relaxed max-w-xl mx-auto">
-              One denture treatment, several prescriptions over time, every stage under a single case. These changes cover the case-creation and case screens in the Clinic and Lab portals. Each step opens the exact screen.
+              Four clinic scenarios for a denture treatment that arrives in several prescriptions over time. Each one is shown on three screens: the case list, the case detail page and the creation / draft screen. Each step opens the exact screen.
             </p>
           </div>
 
@@ -302,7 +268,7 @@ export default function DentureStagesFlowPage() {
               <p className="text-xs text-[#5A5568] min-w-0">
                 {dirty
                   ? <>Demo data changed: <span className="font-semibold text-[#030213]">{appends.length}</span> follow-up stage order{appends.length === 1 ? '' : 's'}, <span className="font-semibold text-[#030213]">{demoCreated.length}</span> new denture case{demoCreated.length === 1 ? '' : 's'}</>
-                  : <>Demo data is fresh: CASE-DN-3001 has three stages and Margaret Lee has no case yet</>}
+                  : <>Demo data is fresh: no stage orders added and no new cases created</>}
               </p>
             </div>
             <button
@@ -315,77 +281,37 @@ export default function DentureStagesFlowPage() {
             </button>
           </div>
 
-          {/* Tasks */}
-          <div className="space-y-8">
+          {/* Scenarios — one compact card each, with a navigation per screen */}
+          <div className="space-y-4">
             {STAGES.map((stage, si) => (
-              <section key={stage.label}>
-                <div className="flex items-baseline gap-2 mb-1 flex-wrap">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#A59DFF]">Task {si + 1}</span>
-                  <h2 className="text-base font-bold text-[#030213]">{stage.label}</h2>
+              <section key={stage.label} className="bg-white border border-[#E0E0E6] rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-4 sm:px-5 pt-4 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-full bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white text-[11px] font-bold flex items-center justify-center tabular-nums flex-shrink-0">{si + 1}</span>
+                    <h2 className="text-sm font-bold text-[#030213] leading-snug">{stage.label}</h2>
+                  </div>
+                  <p className="text-xs text-[#717182] leading-relaxed mt-1.5">{stage.blurb}</p>
                 </div>
-                <p className="text-xs text-[#717182] leading-relaxed mb-3 max-w-2xl">{stage.blurb}</p>
-                <div className="space-y-3">
-                  {stage.steps.map(step => {
-                    n += 1;
-                    const p = PERSONA[step.persona];
-                    return (
-                      <div
-                        key={step.title}
-                        className={`bg-white border rounded-2xl p-4 sm:p-5 shadow-sm transition-shadow hover:shadow-md ${
-                          step.highlight ? 'border-[#DDD6FE] ring-1 ring-[#DDD6FE]' : 'border-[#E0E0E6]'
-                        }`}
-                      >
-                        <div className="flex items-start gap-3 sm:gap-4">
-                          <div className="flex flex-col items-center gap-2 flex-shrink-0">
-                            <span className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white text-xs font-bold flex items-center justify-center tabular-nums">{n}</span>
-                            <span className="w-8 h-8 rounded-lg bg-[#F3F3F5] text-[#5A5568] flex items-center justify-center">{step.icon}</span>
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="text-sm font-bold text-[#030213] leading-snug">{step.title}</h3>
-                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${p.cls}`}>
-                                {p.icon}{p.label}
-                              </span>
-                              {step.highlight && (
-                                <span className="inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#F5F3FF] text-[#6D28D9] border border-[#DDD6FE]">Key demo</span>
-                              )}
-                            </div>
-                            <p className="text-xs text-[#5A5568] leading-relaxed mt-1.5">{step.description}</p>
-                            {step.shows && (
-                              <div className="flex flex-wrap gap-1.5 mt-2.5">
-                                {step.shows.map(s => (
-                                  <span key={s} className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#F8F9FC] text-[#5A5568] border border-[#F0EFF6]">{s}</span>
-                                ))}
-                              </div>
-                            )}
-                            {step.tryIt && (
-                              <div className="mt-3 rounded-xl bg-[#F8F9FC] border border-[#F0EFF6] px-3 py-2.5">
-                                <p className="text-[10px] font-bold uppercase tracking-widest text-[#A0A0B0] mb-1">Try it</p>
-                                <ol className="space-y-0.5">
-                                  {step.tryIt.map((t, i) => (
-                                    <li key={t} className="text-[11px] text-[#5A5568] flex gap-2">
-                                      <span className="text-[#A0A0B0] tabular-nums flex-shrink-0">{i + 1}.</span>
-                                      <span>{t}</span>
-                                    </li>
-                                  ))}
-                                </ol>
-                              </div>
-                            )}
-                            <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
-                              <code className="text-[10px] text-[#A0A0B0] font-mono truncate">{step.path}</code>
-                              <button
-                                onClick={() => open(step)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity shadow-sm"
-                              >
-                                Open screen
-                                <ArrowRight className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+                <div className="divide-y divide-[#F0EFF6] border-t border-[#F0EFF6]">
+                  {stage.steps.map(step => (
+                    <div key={step.title} className="flex items-center gap-3 px-4 sm:px-5 py-2.5">
+                      <span className="w-7 h-7 rounded-lg bg-[#F3F3F5] text-[#5A5568] flex items-center justify-center flex-shrink-0">{step.icon}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-[#030213] leading-snug">{step.title}</p>
+                        {step.shows && (
+                          <p className="text-[11px] text-[#717182] leading-snug truncate" title={step.description}>{step.shows.join(' · ')}</p>
+                        )}
                       </div>
-                    );
-                  })}
+                      <button
+                        onClick={() => open(step)}
+                        title={step.description}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#4D8EF7] border border-[#C8D8FC] hover:bg-[#EEF4FF] transition-colors flex-shrink-0"
+                      >
+                        Open
+                        <ArrowRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </section>
             ))}

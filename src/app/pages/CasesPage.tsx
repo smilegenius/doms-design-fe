@@ -604,6 +604,89 @@ export const dentureDemoCases: Case[] = [
     scanner: 'iTero',
     source: 'scanner',
   },
+  // DN-3004: scenario 3 — a multi-service case whose Partial Denture stages
+  // were all ordered here and are Completed. A scanner-created follow-up draft
+  // (CASE-DRAFT-DN3, Finish) matches it, and so do its earlier stages.
+  {
+    id: 'CASE-DN-3004',
+    patientName: 'Priya Shah',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Partial Denture', 'Crown'],
+    serviceItems: [
+      {
+        id: 'dn3004-s1', name: 'Partial Denture', status: 'in-production', deliveryDate: null,
+        fdi: [14, 15, 16, 24, 25, 26], material: 'Chrome Cobalt', shade: 'A2', orderType: 'Private',
+        scanFileCount: 1, attachmentCount: 0,
+        stages: ['Special Tray', 'Bite Registration', 'Try In'],
+        stageOrders: [{
+          id: 'so-1',
+          stages: ['Special Tray', 'Bite Registration', 'Try In'],
+          status: 'completed',
+          deliveryDate: '13-Jul-2026',
+          createdAt: '30-Jun-2026',
+          stageDates: { 'Special Tray': '01-Jul-2026', 'Bite Registration': '06-Jul-2026', 'Try In': '13-Jul-2026' },
+          stageStatuses: { 'Special Tray': 'completed', 'Bite Registration': 'completed', 'Try In': 'completed' },
+        }],
+      },
+      {
+        id: 'dn3004-s2', name: 'Crown', status: 'submitted', deliveryDate: '20-Jul-2026',
+        fdi: [21], material: 'E.max', shade: 'A2', orderType: 'Private',
+        scanFileCount: 1, attachmentCount: 0,
+      },
+    ],
+    status: 'in-production',
+    createdAt: '30-Jun-2026',
+    updatedAt: '13-Jul-2026',
+    requestedDelivery: '13-Jul-2026',
+    hasAlert: false,
+    scanner: '3Shape',
+    source: 'scanner',
+  },
+  // DN-3005: scenario 4 — a multi-service case where the earlier stages were
+  // done at the patient's previous lab ("Done elsewhere"). A scanner-created
+  // follow-up draft (CASE-DRAFT-DN4, Finish) matches the case, not those stages.
+  {
+    id: 'CASE-DN-3005',
+    patientName: 'Daniel Ortiz',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Full Denture', 'Night Guard'],
+    serviceItems: [
+      {
+        id: 'dn3005-s1', name: 'Full Denture', status: 'in-production', deliveryDate: null,
+        fdi: [11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25, 26, 27], material: 'Acrylic', shade: 'A3', orderType: 'Private',
+        instructions: 'Tray and bite done at the previous lab — records attached.',
+        scanFileCount: 1, attachmentCount: 1,
+        stages: ['Special Tray', 'Bite Registration', 'Try In'],
+        doneElsewhere: ['Special Tray', 'Bite Registration'],
+        stageOrders: [{
+          id: 'so-1',
+          stages: ['Special Tray', 'Bite Registration', 'Try In'],
+          status: 'in-production',
+          deliveryDate: '15-Jul-2026',
+          createdAt: '30-Jun-2026',
+          stageDates: { 'Special Tray': '14-May-2026', 'Bite Registration': '04-Jun-2026', 'Try In': '15-Jul-2026' },
+          stageStatuses: { 'Try In': 'in-production' },
+          doneElsewhere: ['Special Tray', 'Bite Registration'],
+        }],
+      },
+      {
+        id: 'dn3005-s2', name: 'Night Guard', status: 'submitted', deliveryDate: '22-Jul-2026',
+        fdi: [16, 17, 26, 27, 36, 37, 46, 47], material: 'Soft EVA', shade: 'Clear', orderType: 'Private',
+        scanFileCount: 1, attachmentCount: 0,
+      },
+    ],
+    status: 'in-production',
+    createdAt: '30-Jun-2026',
+    updatedAt: '02-Jul-2026',
+    requestedDelivery: '15-Jul-2026',
+    hasAlert: false,
+    scanner: 'iTero',
+    source: 'scanner',
+  },
 ];
 
 export const mockCases: Case[] = [...dentureDemoCases, ...rescanDemoCases, ...generatedCases];
@@ -894,6 +977,52 @@ export const draftCases: Case[] = [
       bodyPreview: 'Hi team, Margaret moved to us mid-treatment. Special tray (20 Mar) and bite (10 Apr) were done elsewhere, records attached. Please finish the upper full denture.',
     },
   },
+  // DN3 / DN4: scanner-created follow-up prescriptions (Finish) for patients who
+  // already have a multi-service case — scenarios 3 and 4 of the flow.
+  {
+    id: 'CASE-DRAFT-DN3',
+    patientName: 'Priya Shah',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Partial Denture'],
+    serviceItems: [{
+      id: 'ddn3-s1', name: 'Partial Denture', status: 'submitted', deliveryDate: null,
+      fdi: [14, 15, 16, 24, 25, 26], material: 'Chrome Cobalt', shade: 'A2', orderType: 'Private',
+      scanFileCount: 1, attachmentCount: 0,
+      stages: ['Finish'],
+      stageDates: { Finish: '27-Jul-2026' },
+    }],
+    status: 'draft',
+    createdAt: '14-Jul-2026',
+    updatedAt: '14-Jul-2026',
+    requestedDelivery: '27-Jul-2026',
+    hasAlert: false,
+    scanner: '3Shape',
+    source: 'scanner',
+  },
+  {
+    id: 'CASE-DRAFT-DN4',
+    patientName: 'Daniel Ortiz',
+    practice: 'Smile Genius Manchester',
+    dentist: 'Dr. Webb',
+    lab: 'Smile Genius Lab',
+    services: ['Full Denture'],
+    serviceItems: [{
+      id: 'ddn4-s1', name: 'Full Denture', status: 'submitted', deliveryDate: null,
+      fdi: [11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25, 26, 27], material: 'Acrylic', shade: 'A3', orderType: 'Private',
+      scanFileCount: 1, attachmentCount: 0,
+      stages: ['Finish'],
+      stageDates: { Finish: '29-Jul-2026' },
+    }],
+    status: 'draft',
+    createdAt: '15-Jul-2026',
+    updatedAt: '15-Jul-2026',
+    requestedDelivery: '29-Jul-2026',
+    hasAlert: false,
+    scanner: 'iTero',
+    source: 'scanner',
+  },
 ];
 
 mockCases.unshift(...draftCases);
@@ -1122,15 +1251,15 @@ function isOverdue(dateStr: string | null): boolean {
   return parseDate(dateStr) < today;
 }
 
-function StatusBadge({ status }: { status: CaseStatus }) {
+function StatusBadge({ status, compact }: { status: CaseStatus; compact?: boolean }) {
   const s = STATUS_STYLE[status];
   const Icon = s.icon;
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap border"
+      className={`inline-flex items-center gap-1.5 rounded-full font-medium whitespace-nowrap border ${compact ? 'px-2 py-px text-[10px]' : 'px-2.5 py-0.5 text-xs'}`}
       style={{ background: s.bg, color: s.text, borderColor: s.border }}
     >
-      <Icon className="w-3 h-3" />
+      <Icon className={compact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
       {STATUS_LABEL[status]}
     </span>
   );
@@ -1882,6 +2011,15 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
       {n} Stage{n === 1 ? '' : 's'}
     </span>
   );
+  // The yellow Draft pill for a stage that is only on a prescription so far.
+  const draftStagePill = (size: 'xs' | 'sm' = 'xs') => (
+    <span className={`inline-flex items-center gap-1.5 rounded-full font-medium whitespace-nowrap border bg-[#FFF8E1] text-[#A16207] border-[#FDE68A] ${
+      size === 'sm' ? 'px-2.5 py-0.5 text-xs' : 'px-2 py-px text-[10px]'
+    }`}>
+      <PenLine className={size === 'sm' ? 'w-3 h-3' : 'w-2.5 h-2.5'} />
+      Draft - New Stage
+    </span>
+  );
   const arrowSpacer = <span className="w-5 h-5 flex-shrink-0" aria-hidden />;
   // One row per STAGE, in the order they happen — no order grouping. Each row
   // carries its own status (or "Done elsewhere") and its own date; that is the
@@ -1911,12 +2049,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
         {visibleCols.status && (
           <td className="pr-4 py-2 whitespace-nowrap" style={{ paddingLeft: nested ? 68 : 42 }}>
             {r.status === 'draft' && !r.doneEarlier
-              ? (
-                <span className="inline-flex items-center gap-1.5 px-2 py-px rounded-full text-[10px] font-medium whitespace-nowrap border bg-[#FFF8E1] text-[#A16207] border-[#FDE68A]">
-                  <PenLine className="w-2.5 h-2.5" />
-                  Draft - New Stage
-                </span>
-              )
+              ? draftStagePill()
               : <StageStatusCell row={r} size="xs" />}
           </td>
         )}
@@ -1969,7 +2102,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   // Drafts (no lifecycle status yet) and the plan-limit teaser row can't be
   // bulk-updated — same rule as the single-row "Change status" action.
-  const isSelectable = (c: Case) => c.status !== 'draft' && !c.forceUpgrade;
+  const isSelectable = (c: Case) => !isClinic && c.status !== 'draft' && !c.forceUpgrade;
 
   function setCaseSelected(c: Case, on: boolean) {
     setSelectedSubs(prev => {
@@ -2326,8 +2459,9 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
           caseData={selectedCase as any}
           onBack={() => { setSelectedCase(null); onCaseSelected?.(null); }}
           onArchiveToggle={() => toggleArchive(selectedCase)}
-          onRequestStatusChange={() => setStatusModalCase(selectedCase)}
-          onPickStatus={(s) => pickStatus(selectedCase, s as CaseStatus)}
+          // Clinics can't change a status by hand: receiving is their only way.
+          onRequestStatusChange={isClinic ? undefined : () => setStatusModalCase(selectedCase)}
+          onPickStatus={isClinic ? undefined : (s) => pickStatus(selectedCase, s as CaseStatus)}
           onSetStatus={(toStatus) => applyStatusChange(selectedCase, toStatus)}
           onDeliveryDateChange={(next) => applyDeliveryDateChange(selectedCase, next)}
           onRequestShipmentDetails={() => setShipmentModalCase(selectedCase)}
@@ -2342,6 +2476,10 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
             if (!target) return;
             setSelectedCase(target);
             onCaseSelected?.(target.id);
+          }}
+          onOpenDraftCase={(id) => {
+            const target = cases.find(c => c.id === id);
+            if (target) openCase(target);
           }}
         />
         {shipmentModalCase && (
@@ -2786,11 +2924,19 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                             </span>
                           ) : null}
                           {!locked && !isMulti && soloStageRows.length > 0 && stageCountPill(soloStageRows.length)}
-                          {!locked && !isMulti && soloStageRows.length === 0 && followUpRows.length === 0 && <StatusBadge status={c.status} />}
+                          {/* A follow-up draft is always flagged for review, above its stage status. */}
+                          {!locked && followUpRows.length > 0 && (
+                            <div className="mb-1"><AiReviewTag /></div>
+                          )}
+                          {!locked && followUpRows.length > 0 && (() => {
+                            const last = followUpRows[followUpRows.length - 1];
+                            return last.status === 'draft' && !last.doneEarlier ? draftStagePill() : <StageStatusCell row={last} size="xs" />;
+                          })()}
+                          {!locked && !isMulti && soloStageRows.length === 0 && followUpRows.length === 0 && <StatusBadge status={c.status} compact={c.status === 'draft'} />}
                           {!locked && c.statusOverride && (
                             <div className="mt-1"><OverrideTag override={c.statusOverride} /></div>
                           )}
-                          {!locked && needsReview(c) && (
+                          {!locked && followUpRows.length === 0 && needsReview(c) && (
                             <div className="mt-1"><AiReviewTag /></div>
                           )}
                           {!locked && !visibleCols.caseId && (
@@ -2909,7 +3055,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                             are NOT here: they badge the source icon on the left, so
                             they are visible without hovering every row. */}
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                          {c.status !== 'draft' && (
+                          {c.status !== 'draft' && !isClinic && (
                             <button
                               title="Change status"
                               onClick={() => setStatusModalCase(c)}
@@ -3131,7 +3277,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
                             <Eye className="w-3.5 h-3.5 text-[#717182]" />
                             View Case
                           </button>
-                          {c.status !== 'draft' && (
+                          {c.status !== 'draft' && !isClinic && (
                             <button
                               onClick={() => { setGridMenuOpen(null); setStatusModalCase(c); }}
                               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#030213] hover:bg-[#F8F9FC]"

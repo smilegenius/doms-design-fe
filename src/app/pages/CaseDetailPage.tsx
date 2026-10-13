@@ -64,7 +64,7 @@ import {
   subjectFromCase,
   useRescanLinks,
 } from '../data/rescanDetection';
-import { DENTURE_SERVICES, DENTURE_STAGES, archLabel, isDentureService, nextStageRow, stageOrdersFor, stageRowsFor, stageRowsFromOrders, isoToCaseDate as isoToStageDate, caseDateToISO, type StageRow } from '../data/dentureStages';
+import { DENTURE_SERVICES, DENTURE_STAGES, archLabel, isDentureService, findFollowUpMatch, nextStageRow, stageOrdersFor, stageRowsFor, stageRowsFromOrders, isoToCaseDate as isoToStageDate, caseDateToISO, type StageRow } from '../data/dentureStages';
 import { StageDatePicker, StageStatusCell } from '../components/DentureStages';
 
 // Conversation hub entry point — parked while the CareStack flow is reviewed.
@@ -274,6 +274,8 @@ interface CaseDetailPageProps {
   /** Open another case in place — used by the Related Cases section to move
       between an original and its rescans. */
   onOpenRelatedCase?: (caseId: string) => void;
+  /** Opens a draft prescription that is linked to this case. */
+  onOpenDraftCase?: (draftId: string) => void;
   /** Lab portal only — when this case has been scored and the lab has NO
       business email connected, show the "Connect Email" notice (automated
       case scoring emails can't be sent until an account is connected). */
@@ -1385,6 +1387,15 @@ function ServiceMiniTimeline({ status, onClick }: { status: CaseStatus; onClick?
   );
 }
 
+/** A draft prescription linked to this case: only its new stage(s) are drafts. */
+interface MatchedDraft {
+  id: string;
+  serviceName: string;
+  stages: string[];
+  dates: Record<string, string | null>;
+  createdAt: string;
+}
+
 // ─── Case Summary Overview — shown on the default "Case Summary" top tab ────────
 // One card per service item. Cards are clickable (navigates to that service tab)
 // and surface: status-change dropdown, mini pipeline timeline, and a quick
@@ -1422,7 +1433,14 @@ function CaseSummaryOverview({
   onSelectService,
   onOpenTimeline,
   onMarkReceived,
+  drafts = [],
+  onOpenDraft,
+  readOnlyStatus = false,
 }: {
+  /** Clinics can't change a status; their only route is receiving. */
+  readOnlyStatus?: boolean;
+  drafts?: MatchedDraft[];
+  onOpenDraft?: (draftId: string) => void;
   serviceItems: ServiceItem[];
   caseData: CaseForDetail;
   onSelectService: (id: string) => void;
@@ -1449,8 +1467,63 @@ function CaseSummaryOverview({
       .map(r => receivedStages.has(`${si.id}::${r.stage}`) ? { ...r, status: 'delivered' as CaseStatus } : r)
       .sort((a, b) => DENTURE_STAGES.indexOf(a.stage) - DENTURE_STAGES.indexOf(b.stage));
 
+  const summaryFiller = (
+    <div className="relative flex-1 min-h-0 overflow-hidden pointer-events-none" aria-hidden>
+      <div className="absolute inset-0 flex items-center justify-center py-2 select-none">
+        <CasesIcon className="h-full max-h-28 w-auto aspect-square max-w-full text-[#A0A0B0] opacity-[0.06]" />
+      </div>
+    </div>
+  );
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4" onClick={() => setOpenStatusId(null)}>
+    <div className="grid grid-cols-1 md:grid-cols-2 md:auto-rows-fr gap-4" onClick={() => setOpenStatusId(null)}>
+      {/* Latest card: a linked draft prescription, only its new stage(s) are drafts. */}
+      {drafts.map(d => (
+        <div
+          key={d.id}
+          onClick={() => onOpenDraft?.(d.id)}
+          className="relative bg-[#FFFDF5] border border-dashed border-[#FDE68A] rounded-xl p-5 hover:shadow-md hover:border-[#F5C84C] transition-all cursor-pointer flex flex-col gap-3"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              {(() => {
+                const dStyle = SERVICE_ICON_COLOR[d.serviceName] ?? { bg: '#FFF7ED', color: '#F59E0B' };
+                return (
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: dStyle.bg }}>
+                    <span className="text-base font-bold" style={{ color: dStyle.color }}>{d.serviceName.charAt(0)}</span>
+                  </div>
+                );
+              })()}
+              <div>
+                <p className="text-sm font-semibold text-[#030213]">{d.serviceName}</p>
+                <p className="text-[11px] text-[#717182]">{d.stages.length} new stage{d.stages.length === 1 ? '' : 's'} · from {d.id}</p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border bg-[#FFF8E1] text-[#A16207] border-[#FDE68A] whitespace-nowrap">
+              <Pencil className="w-3 h-3" />
+              Draft - New Stage
+            </span>
+          </div>
+          <div className="border border-[#FDE68A]/70 rounded-lg divide-y divide-[#FDE68A]/50 bg-white overflow-hidden">
+            {d.stages.map(st => (
+              <div key={st} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                <span className="text-xs font-semibold text-[#030213]">{st}</span>
+                <span className="text-[11px] text-[#717182]">{d.dates[st] ?? 'No date'}</span>
+              </div>
+            ))}
+          </div>
+          {summaryFiller}
+          <div className="mt-auto flex justify-end pt-3 border-t border-[#FDE68A]/60">
+            <button
+              onClick={(e) => { e.stopPropagation(); onOpenDraft?.(d.id); }}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#A16207] border border-[#FDE68A] hover:bg-[#FFF8E1] transition-colors whitespace-nowrap"
+            >
+              Open draft
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      ))}
       {serviceItems.map((si) => {
         const currentStatus = (cardStatuses[si.id] ?? si.status) as CaseStatus;
         const s       = STATUS_MAP[currentStatus];
@@ -1519,13 +1592,14 @@ function CaseSummaryOverview({
               {/* Clickable status pill → opens per-card status-change dropdown */}
               <div className={`relative flex-shrink-0 z-10 ${dentureRows ? "hidden" : ""}`} onClick={(e) => e.stopPropagation()}>
                 <button
-                  onClick={() => setOpenStatusId(openStatusId === si.id ? null : si.id)}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border hover:opacity-80 transition-opacity"
+                  onClick={() => { if (!readOnlyStatus) setOpenStatusId(openStatusId === si.id ? null : si.id); }}
+                  disabled={readOnlyStatus}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-opacity ${readOnlyStatus ? 'cursor-default' : 'hover:opacity-80'}`}
                   style={{ background: s.bg, color: s.color, borderColor: s.border }}
                 >
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.dot }} />
                   {s.label}
-                  <ChevronDown className="w-3 h-3 opacity-60" />
+                  {!readOnlyStatus && <ChevronDown className="w-3 h-3 opacity-60" />}
                 </button>
                 {openStatusId === si.id && (
                   <div className="absolute right-0 top-full mt-1 z-30 bg-white border border-[#E0E0E6] rounded-lg shadow-xl py-1 min-w-[180px]">
@@ -1688,15 +1762,8 @@ function CaseSummaryOverview({
             </div>
             )}
 
-            {/* Fills the white space when a neighbouring card (e.g. a staged
-                denture) is taller; collapses to nothing otherwise. */}
-            {!dentureRows && (
-              <div className="relative flex-1 min-h-0 overflow-hidden pointer-events-none" aria-hidden>
-                <div className="absolute inset-0 flex items-center justify-center py-2 select-none">
-                  <CasesIcon className="h-full max-h-28 w-auto aspect-square max-w-full text-[#A0A0B0] opacity-[0.12]" />
-                </div>
-              </div>
-            )}
+            {/* Fills any leftover height (cards share one row height) with a very faint icon. */}
+            {summaryFiller}
 
             {/* ── Footer: delivery date + countdown + action ── */}
             <div
@@ -3948,7 +4015,7 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
-export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onPickStatus, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach, viewerPortal, listLabel = 'Cases' }: CaseDetailPageProps) {
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onPickStatus, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onOpenDraftCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach, viewerPortal, listLabel = 'Cases' }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   // The lab's latest due-date change (if any) is the date the case is working
@@ -4007,6 +4074,21 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const [topTab, setTopTab] = useState<string>(
     isMultiService ? 'summary' : (serviceItems[0]?.id ?? 'summary')
   );
+  // Draft prescriptions linked to this case (a follow-up for one of its stages).
+  const matchedDrafts: MatchedDraft[] = useMemo(() => {
+    if (!allCases?.length) return [];
+    return allCases.flatMap((d): MatchedDraft[] => {
+      if (d.status !== 'draft' || d.serviceItems.length !== 1 || !isDentureService(d.serviceItems[0].name)) return [];
+      const si = d.serviceItems[0];
+      const m = findFollowUpMatch(
+        { patientName: d.patientName, practice: d.practice, dentist: d.dentist, serviceName: si.name },
+        si.stages ?? [],
+        allCases as any,
+      );
+      if (!m || m.case.id !== caseData.id) return [];
+      return [{ id: d.id, serviceName: si.name, stages: m.toAdd, dates: (si.stageDates ?? {}) as Record<string, string | null>, createdAt: d.createdAt }];
+    });
+  }, [allCases, caseData.id]);
   // Details card collapses by default to reclaim vertical space.
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Email thread lives in a case-level side drawer, opened from the header.
@@ -4632,6 +4714,20 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               </button>
             );
           })}
+          {/* Drafts tab: shown when a draft prescription is linked to this case */}
+          {matchedDrafts.length > 0 && (
+            <button
+              onClick={() => setTopTab('__drafts')}
+              className={`inline-flex items-center gap-1.5 px-4 py-3.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap flex-shrink-0 ${
+                topTab === '__drafts'
+                  ? 'border-[#F59E0B] text-[#A16207]'
+                  : 'border-transparent text-[#717182] hover:text-[#030213]'
+              }`}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              Drafts ({matchedDrafts.length})
+            </button>
+          )}
         </div>
       </div>
 
@@ -4645,7 +4741,34 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             onSelectService={(id) => setTopTab(id)}
             onOpenTimeline={() => setTimelineOpen(true)}
             onMarkReceived={(si) => setReceivedModal({ label: si.name })}
+            drafts={matchedDrafts}
+            onOpenDraft={onOpenDraftCase}
+            readOnlyStatus={viewerPortal === 'clinic'}
           />
+        </div>
+      ) : topTab === '__drafts' ? (
+        /* Drafts: one row per linked draft prescription */
+        <div className="mt-3 mx-6 mb-6 flex-1 overflow-y-auto">
+          <div className="bg-white border border-[#E0E0E6] rounded-xl divide-y divide-[#F0EFF6] overflow-hidden">
+            {matchedDrafts.map(d => (
+              <button
+                key={d.id}
+                onClick={() => onOpenDraftCase?.(d.id)}
+                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[#F8F9FC] transition-colors"
+              >
+                <span className="inline-flex items-center gap-1.5 px-2 py-px rounded-full text-[10px] font-medium border bg-[#FFF8E1] text-[#A16207] border-[#FDE68A] whitespace-nowrap">
+                  <Pencil className="w-2.5 h-2.5" />
+                  Draft - New Stage
+                </span>
+                <span className="text-xs font-bold text-[#030213]">{d.id}</span>
+                <span className="text-xs text-[#5A5568] flex-1 min-w-0 truncate">
+                  {d.serviceName} · {d.stages.map(st => `${st}${d.dates[st] ? ` (${d.dates[st]})` : ''}`).join(', ')}
+                </span>
+                <span className="text-[11px] text-[#A0A0B0] whitespace-nowrap">Created {d.createdAt}</span>
+                <ArrowRight className="w-3.5 h-3.5 text-[#4D8EF7] flex-shrink-0" />
+              </button>
+            ))}
+          </div>
         </div>
       ) : (
         // Per-service view — find the matching ServiceItem and render its detail
