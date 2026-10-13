@@ -109,7 +109,7 @@ import {
   findServiceItem,
 } from './CreateCasePage';
 import {
-  isDentureItem, isPastISO, caseDateToISO, archLabel, archOf, archTeeth, toggleArch, groupTeeth, findFollowUpMatch, addStageAppend, TODAY_ISO as TODAY_ISO_FOR_DATES,
+  isDentureItem, isUpperTooth, isPastISO, caseDateToISO, archLabel, archOf, archTeeth, toggleArch, groupTeeth, findFollowUpMatch, addStageAppend, TODAY_ISO as TODAY_ISO_FOR_DATES,
   type FollowUpMatch,
 } from '../data/dentureStages';
 import { ArchPicker, StageDatePicker, StageDateList, StageStatusCell, stagesComplete } from '../components/DentureStages';
@@ -2917,8 +2917,8 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                 {/* Data row — spans the 3 parent cols with
                                     subgrid so its cells align to header. */}
                                 {/* A denture with both jaws gets one row per arch. */}
-                                {(isDentureItem(sel.itemId) && sortedTeeth.some(t => Number(t) < 30) && sortedTeeth.some(t => Number(t) >= 30)
-                                  ? [sortedTeeth.filter(t => Number(t) < 30), sortedTeeth.filter(t => Number(t) >= 30)]
+                                {(isDentureItem(sel.itemId) && sortedTeeth.some(t => isUpperTooth(t)) && sortedTeeth.some(t => !isUpperTooth(t))
+                                  ? [sortedTeeth.filter(t => isUpperTooth(t)), sortedTeeth.filter(t => !isUpperTooth(t))]
                                   : [sortedTeeth]
                                 ).map((rowTeeth, rowIdx) => (
                                 <div

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, Fragment } from 'react';
-import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, AlertTriangle, MessageSquare, MessageCircle, ChevronDown, ChevronUp,
   FileText, MapPin, Download, Calendar, Lightbulb, Maximize2, Minimize2,
@@ -1837,7 +1837,6 @@ function CaseSummaryOverview({
         return (
           <StageOrderPickerModal
             service={si}
-            caseId={caseData.id}
             mode="catalog"
             remaining={DENTURE_STAGES.filter(st => !existing.some(r => r.stage === st))}
             existing={existing}
@@ -1912,10 +1911,8 @@ function seedStageOrders(service: ServiceItem, caseId: string, createdAt: string
 //     ordered ones never appear).
 //   • phased (aligner)  — nothing to choose; the next phase is auto-named
 //     ("Phase N") and shown read-only, so it's a one-confirm action.
-function StageOrderPickerModal({ service, caseId, mode, remaining, existing, nextPhaseName, onCancel, onConfirm }: {
+function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseName, onCancel, onConfirm }: {
   service: ServiceItem;
-  /** Enables the "Edit full case" hand-off to the case form. */
-  caseId?: string;
   mode: 'catalog' | 'phased';
   remaining: string[];
   /** Denture: stages already ordered on this case — listed with date + status. */
@@ -1925,8 +1922,6 @@ function StageOrderPickerModal({ service, caseId, mode, remaining, existing, nex
   /** `dates` — ISO per picked stage (denture only). */
   onConfirm: (stages: string[], dates: Record<string, string>, instructions: string) => void;
 }) {
-  const navigate = useNavigate();
-  const inLab = useLocation().pathname.startsWith('/lab');
   const [instructions, setInstructions] = useState(service.instructions ?? '');
   // Catalog mode pre-selects the first remaining stage so the common
   // "next stage" path is one click. Phased mode has no selection.
@@ -2014,16 +2009,6 @@ function StageOrderPickerModal({ service, caseId, mode, remaining, existing, nex
           </div>
           {/* Footer */}
           <div className="px-5 py-4 border-t border-[#F0EFF6] flex items-center justify-end gap-2 bg-[#FAFBFC] flex-shrink-0">
-            {caseId && (
-              <button
-                onClick={() => navigate(`/${inLab ? 'lab' : 'clinic'}/cases/quick-new/${encodeURIComponent(caseId)}`)}
-                title="Update anything on the case, plus the next stage orders"
-                className="mr-auto inline-flex items-center gap-1 text-xs font-semibold text-[#4D8EF7] hover:underline"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                Edit full case
-              </button>
-            )}
             <button
               onClick={onCancel}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-[#5A5568] bg-[#F0EFF6] hover:bg-[#E5E3ED] transition-colors"
@@ -3588,7 +3573,6 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
       {stagePickerOpen && staging && (
         <StageOrderPickerModal
           service={service}
-          caseId={caseData.id}
           mode={staging.mode}
           remaining={remainingStages}
           existing={stageRows}

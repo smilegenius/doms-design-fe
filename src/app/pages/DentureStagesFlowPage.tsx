@@ -77,7 +77,7 @@ const STAGES: Stage[] = [
         title: 'Detail — stage orders',
         persona: 'clinic',
         icon: <ClipboardList className="w-4 h-4" />,
-        description: 'The header has no case status. The stage orders card groups the stage tabs by order (one tight group here), lists each stage with status, created / updated on and an editable date, and has “Mark received” at the end of each open stage (not on Completed ones), plus “Mark all as Received”. Receiving marks only those stages. “New Stage Order” opens Quick Stage Order, with case instructions for the picked stages and “Edit full case”.',
+        description: 'The header has no case status. The stage orders card groups the stage tabs by order (one tight group here), lists each stage with status, created / updated on and an editable date, and has “Mark received” at the end of each open stage (not on Completed ones), plus “Mark all as Received”. Receiving marks only those stages. “New Stage Order” opens Quick Stage Order, with case instructions for the picked stages.',
         shows: ['Grouped stage tabs', 'Mark received per stage / all', 'Quick Stage Order'],
         tryIt: ['Mark Try In as received', 'Open New Stage Order and pick Retry + Finish: one date fills both'],
         path: '/clinic/cases/CASE-DN-3001',
