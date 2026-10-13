@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Mail, MessageCircle, List, FileText, UserX } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Mail, MessageCircle, UserX } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 
@@ -29,12 +29,6 @@ const SCENARIOS: Scenario[] = [
     blurb: 'CASE-051 arrived from the scanner incomplete, and Dr. Harper has no private email and did not write in. Pressing “Email dentist” sends nothing: an error says there is no email on file and the dentist’s private information opens on the email field. Saving an address sends the missing-info email and sets the case to Sent for Review.',
     navs: [
       {
-        title: 'List — the incomplete case',
-        note: 'CASE-051 · Need Attention · Dr. Harper',
-        icon: <List className="w-4 h-4" />,
-        path: '/lab/cases',
-      },
-      {
         title: 'Detail — press Email dentist',
         note: 'Error toast · private info opens on Email · save to send',
         icon: <Mail className="w-4 h-4" />,
@@ -57,6 +51,24 @@ const SCENARIOS: Scenario[] = [
         note: 'Same private record, opened by hand: email · phone · notes',
         icon: <UserX className="w-4 h-4" />,
         path: '/lab/cases/CASE-051',
+      },
+    ],
+  },
+  {
+    label: 'Both channels available — chase by email or WhatsApp',
+    blurb: 'The comparison case: CASE-WA-3001 (Dr. Amelia Hart) is incomplete, she has a number on file, and an email address is saved in her private information (the lock beside the dentist). With WhatsApp automation on, “Email dentist” and “WhatsApp dentist” sit side by side. Either one sends the missing-info message on its own channel and sets the case to Sent for Review.',
+    navs: [
+      {
+        title: 'Detail — Email dentist and WhatsApp dentist',
+        note: 'Both buttons · each sends on its channel · Sent for Review',
+        icon: <Mail className="w-4 h-4" />,
+        path: '/lab/cases/CASE-WA-3001',
+      },
+      {
+        title: 'Detail — the conversation hub',
+        note: 'Email and WhatsApp threads for the same case, side by side',
+        icon: <MessageCircle className="w-4 h-4" />,
+        path: '/lab/cases/CASE-WA-3001',
       },
     ],
   },
@@ -96,11 +108,11 @@ export default function DentistContactFlowPage() {
               </div>
             </div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[#FEF2F2] border border-[#FECACA] text-[#D4183D] mb-3">
-              October 2026 · 2 negative scenarios
+              October 2026 · 3 scenarios
             </span>
             <h1 className="text-2xl sm:text-3xl font-bold text-[#030213] mb-2">Dentist with no contact on file</h1>
             <p className="text-sm text-[#717182] leading-relaxed max-w-xl mx-auto">
-              What the lab sees when it chases a dentist by email or WhatsApp and there is no email address or phone number to send to. Each step opens the exact screen.
+              What the lab sees when it chases a dentist by email or WhatsApp: first with no email address or phone number to send to, then with both channels available. Each step opens the exact screen.
             </p>
           </div>
 

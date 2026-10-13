@@ -29,8 +29,8 @@ export const FLOWS: FlowEntry[] = [
   {
     // Negative scenarios: chasing a dentist who has no email / no number on file.
     title: 'Dentist with no contact on file',
-    description: 'Email dentist and WhatsApp dentist when there is no email address or phone number for the dentist: nothing is sent, the lab is told why, and the private record opens on the missing field. Saving it retries the send.',
-    detail: 'Lab · 2 negative scenarios',
+    description: 'Email dentist and WhatsApp dentist when there is no email address or phone number for the dentist: nothing is sent, the lab is told why, and the private record opens on the missing field. Saving it retries the send. A third scenario shows a case where both channels are available.',
+    detail: 'Lab · 3 scenarios',
     icon: <UserX className="w-5 h-5 text-[#D4183D]" />,
     badge: 'Negative',
     accent: '#D4183D',

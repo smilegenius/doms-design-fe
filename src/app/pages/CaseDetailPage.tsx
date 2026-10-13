@@ -4187,6 +4187,16 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // The WhatsApp twin of the button above: same outcome, same recipient, same
   // "case has been chased" result — only the channel differs.
   function sendMissingInfoWhatsApp() {
+    // The channel itself must be on and connected before anything else matters.
+    const channelBlocked = whatsappBlockReason(headerWhatsapp);
+    if (channelBlocked) {
+      toast.error(`${BLOCK_REASON_TEXT[channelBlocked]} ${channelBlocked === 'disabled' ? 'Turn it on' : 'Connect one'} in Settings to message dentists on WhatsApp.`);
+      return;
+    }
+    if (!headerWhatsapp.automation[chaseCategory].enabled && headerWhatsapp.sendMode !== 'manual') {
+      toast.error('WhatsApp chasing is switched off for this kind of case. Turn it on in Settings → Case Scoring.');
+      return;
+    }
     // No number on file — nothing can be sent, on either sending mode. Say why
     // and open the lab's private record for this dentist, which is where a
     // number gets added; saving it retries the send straight away.
@@ -4336,7 +4346,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                   <Send className="w-3.5 h-3.5" />
                   Email dentist
                 </button>
-                {whatsappChaseReady && (
+                {/* Both chase channels are always offered on an incomplete case; if WhatsApp
+                    isn't switched on, pressing it says why instead of hiding the button. */}
+                {(
                   <button
                     onClick={sendMissingInfoWhatsApp}
                     title={headerWhatsapp.sendMode === 'manual'
