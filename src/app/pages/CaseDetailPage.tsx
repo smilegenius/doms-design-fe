@@ -37,7 +37,7 @@ import {
   whatsappNumberFor,
 } from '../data/whatsappComms';
 import { recordEmail, recordInboundEmail, sendWhatsAppMessage, useCaseCommunications } from '../data/caseCommunications';
-import { dentistPhoneFor, useDentistPrivateInfo } from '../data/dentistPrivateInfo';
+import { dentistPhoneFor, dentistPrivateEmailFor, useDentistPrivateInfo } from '../data/dentistPrivateInfo';
 import PrivateInformationModal from '../components/PrivateInformationModal';
 import WhatsAppAutomationSimulator from '../components/WhatsAppAutomationSimulator';
 import { WHATSAPP_DEMO_CASE_ID } from './CasesPage';
@@ -2285,9 +2285,9 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived,
   // The dentist's email on file. Email-sourced cases carry it (they wrote
   // in); otherwise it's unknown and the compose modal asks for it on the
   // spot — no email, no send.
-  const dentistEmailOnFile = caseData.source === 'email'
+  const dentistEmailOnFile = dentistPrivateEmailFor(caseData.dentist) ?? (caseData.source === 'email'
     ? `${(caseData.dentist.split(' ').filter(Boolean).slice(-1)[0] ?? 'dentist').toLowerCase()}@${String((caseData as any).practice ?? 'practice').toLowerCase().replace(/[^a-z0-9]+/g, '')}.co.uk`
-    : undefined;
+    : undefined);
   const templateGroups: { label: string; dot?: string; items: ScoringEmailTemplate[] }[] = [
     { label: CATEGORY_META['needs-review'].label, dot: CATEGORY_META['needs-review'].dot, items: DEFAULT_TEMPLATES['needs-review'] },
     { label: CATEGORY_META.incomplete.label, dot: CATEGORY_META.incomplete.dot, items: DEFAULT_TEMPLATES.incomplete },
@@ -4093,6 +4093,8 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // The lab's private record for this case's dentist. Opens on demand, and
   // automatically when a WhatsApp send has no number to go to.
   const [privateInfoOpen, setPrivateInfoOpen] = useState(false);
+  // Which chase was blocked for want of a contact: the modal focuses that field, and saving it retries the send.
+  const [blockedChannel, setBlockedChannel] = useState<'email' | 'whatsapp'>('whatsapp');
 
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
@@ -4159,12 +4161,21 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const whatsappChaseReady =
     whatsappBlockReason(headerWhatsapp) === null && headerWhatsapp.automation[chaseCategory].enabled;
 
-  function sendMissingInfoEmail() {
+  function sendMissingInfoEmail(afterSave = false) {
     // Manual sending mode (Settings → Case Scoring → Case Scoring Emails):
     // nothing sends automatically — just open the Conversation hub, where the
     // user picks a template and sends it themselves.
     if (emailSendMode === 'manual') {
       setThreadOpen(true, 'email');
+      return;
+    }
+    // No email on file (no private address, and the case didn't arrive by email):
+    // nothing can be sent. Say why and open the lab's private record for this
+    // dentist; saving an address retries the send straight away.
+    if (!afterSave && !dentistPrivateEmailFor(caseData.dentist) && caseData.source !== 'email') {
+      toast.error(`No email on file for ${caseData.dentist} — add a private email to email them.`);
+      setBlockedChannel('email');
+      setPrivateInfoOpen(true);
       return;
     }
     setEmailSent(true);
@@ -4182,6 +4193,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
     const phone = dentistPhoneFor(caseData.dentist);
     if (!phone) {
       toast.error(`No phone number on file for ${caseData.dentist} — add a private number to message them on WhatsApp.`);
+      setBlockedChannel('whatsapp');
       setPrivateInfoOpen(true);
       return;
     }
@@ -4315,7 +4327,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                  lab running both picks how to chase this case. */
               <span className="inline-flex items-center gap-1.5">
                 <button
-                  onClick={sendMissingInfoEmail}
+                  onClick={() => sendMissingInfoEmail()}
                   title={emailSendMode === 'manual'
                     ? 'Open the conversation — manual sending is on, pick a template and send it yourself'
                     : 'Auto-email the dentist the list of missing items'}
@@ -4813,9 +4825,12 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
       <PrivateInformationModal
         isOpen={privateInfoOpen}
         dentist={caseData.dentist}
-        focusField="phone"
+        focusField={blockedChannel === 'email' ? 'email' : 'phone'}
         onClose={() => setPrivateInfoOpen(false)}
-        onSaved={(info) => { if (info.phone) sendMissingInfoWhatsApp(); }}
+        onSaved={(info) => {
+          if (blockedChannel === 'email') { if (info.email) sendMissingInfoEmail(true); }
+          else if (info.phone) sendMissingInfoWhatsApp();
+        }}
       />
 
       {/* CareStack side drawer — mapping status, the CareStack appointment and

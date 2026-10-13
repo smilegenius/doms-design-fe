@@ -2916,11 +2916,8 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                 <span className="text-[9px] font-bold text-[#A0A0B0] uppercase tracking-wider">Shade</span>
                                 {/* Data row — spans the 3 parent cols with
                                     subgrid so its cells align to header. */}
-                                {/* A denture with both jaws gets one row per arch. */}
-                                {(isDentureItem(sel.itemId) && sortedTeeth.some(t => isUpperTooth(t)) && sortedTeeth.some(t => !isUpperTooth(t))
-                                  ? [sortedTeeth.filter(t => isUpperTooth(t)), sortedTeeth.filter(t => !isUpperTooth(t))]
-                                  : [sortedTeeth]
-                                ).map((rowTeeth, rowIdx) => (
+                                {/* One row; a denture with both jaws stacks an Upper and a Lower pill in its first cell. */}
+                                {[sortedTeeth].map((rowTeeth, rowIdx) => (
                                 <div
                                   key={rowIdx}
                                   className="col-span-3 grid grid-cols-subgrid items-center px-1.5 py-1 rounded-md border"
@@ -2929,12 +2926,20 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                   <div className="flex flex-wrap items-center gap-1">
                                     {/* A denture reads as its arch, not tooth by tooth. */}
                                     {isDentureItem(sel.itemId) && rowTeeth.length > 0 ? (
-                                      <span
-                                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white border whitespace-nowrap"
-                                        style={{ color, borderColor: rowBorder }}
-                                      >
-                                        {archLabel(rowTeeth)}
-                                      </span>
+                                      <div className="flex flex-col items-start gap-1">
+                                        {(rowTeeth.some(t => isUpperTooth(t)) && rowTeeth.some(t => !isUpperTooth(t))
+                                          ? ['Upper arch', 'Lower arch']
+                                          : [archLabel(rowTeeth)]
+                                        ).map(label => (
+                                          <span
+                                            key={label}
+                                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white border whitespace-nowrap"
+                                            style={{ color, borderColor: rowBorder }}
+                                          >
+                                            {label}
+                                          </span>
+                                        ))}
+                                      </div>
                                     ) : sortedTeeth.length > 0 ? [
                                       ...groupTeeth(sortedTeeth).arches.map(a => (
                                         <span

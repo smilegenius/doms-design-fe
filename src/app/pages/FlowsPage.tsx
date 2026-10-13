@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX } from 'lucide-react';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 
 // ─── Flows ───────────────────────────────────────────────────────────────────
@@ -26,6 +26,19 @@ export interface FlowEntry {
 }
 
 export const FLOWS: FlowEntry[] = [
+  {
+    // Negative scenarios: chasing a dentist who has no email / no number on file.
+    title: 'Dentist with no contact on file',
+    description: 'Email dentist and WhatsApp dentist when there is no email address or phone number for the dentist: nothing is sent, the lab is told why, and the private record opens on the missing field. Saving it retries the send.',
+    detail: 'Lab · 2 negative scenarios',
+    icon: <UserX className="w-5 h-5 text-[#D4183D]" />,
+    badge: 'Negative',
+    accent: '#D4183D',
+    accentSoft: '#FEF2F2',
+    path: '/flows/dentist-contact',
+    date: '13 Oct 2026',
+    month: '2026-10',
+  },
   {
     // Five developer tasks across the clinic + lab creation and case screens.
     title: 'Denture stages & service-level dates',

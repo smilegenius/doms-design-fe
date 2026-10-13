@@ -154,7 +154,7 @@ export function StageDatePicker({
           );
           const dateField = (
             <label className="flex items-center gap-1.5 flex-shrink-0">
-              <span className={`text-[10px] font-semibold uppercase tracking-wide min-w-[54px] ${compact ? 'text-left' : 'text-right'} whitespace-nowrap ${active ? 'text-[#717182]' : 'text-[#C0C0CC]'}`}>
+              <span className={`text-[10px] font-semibold uppercase whitespace-nowrap ${compact ? 'tracking-wider' : 'tracking-wide min-w-[54px] text-right'} ${active ? (compact ? 'text-[#5A5568]' : 'text-[#717182]') : 'text-[#C0C0CC]'}`}>
                 {done ? 'Done on' : 'Delivery'}
               </span>
               <input
@@ -166,7 +166,7 @@ export function StageDatePicker({
                 aria-label={`${stage} ${done ? 'done-on' : 'delivery'} date`}
                 title={done ? 'Optional — when it was done' : undefined}
                 onChange={(e) => setDate(stage, e.target.value)}
-                className={`w-[140px] px-2.5 py-1.5 text-xs border rounded-lg bg-white outline-none focus:border-[#4D8EF7] disabled:bg-[#F8F9FC] disabled:text-[#C0C0CC] ${
+                className={`${compact ? 'px-2 py-1 text-[11px] rounded-md' : 'w-[140px] px-2.5 py-1.5 text-xs rounded-lg'} border bg-white outline-none focus:border-[#4D8EF7] disabled:bg-[#F8F9FC] disabled:text-[#C0C0CC] ${
                   active && !done && !dates[stage] ? 'border-[#FCD34D]' : 'border-[#E0E0E6]'
                 } ${done ? 'text-[#5A5568]' : 'text-[#030213]'}`}
               />
@@ -177,11 +177,11 @@ export function StageDatePicker({
             return (
               <div key={stage} className={`${rowPad} ${done ? 'bg-[#FAFAFB]' : 'bg-[#F8FAFF]'}`}>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  <span className={`text-sm truncate flex-1 basis-[120px] min-w-0 font-semibold ${done ? 'text-[#5A5568]' : 'text-[#1565C0]'}`}>{stage}</span>
+                  <span className={`text-xs truncate flex-1 basis-[120px] min-w-0 font-semibold ${done ? 'text-[#5A5568]' : 'text-[#030213]'}`}>{stage}</span>
                   {doneChip}
                   {/* Date sits on the right, in line with a single-unit service's delivery. */}
                   {/* Right gap = the "Edit" button a single-unit row has, so both dates end on the same line. */}
-                  <div className="mr-[62px] flex-shrink-0">{dateField}</div>
+                  <div className="mr-12 flex-shrink-0">{dateField}</div>
                   <button
                     type="button"
                     onClick={() => toggle(stage)}
