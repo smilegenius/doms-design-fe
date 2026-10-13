@@ -1486,14 +1486,9 @@ function CaseSummaryOverview({
         >
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              {(() => {
-                const dStyle = SERVICE_ICON_COLOR[d.serviceName] ?? { bg: '#FFF7ED', color: '#F59E0B' };
-                return (
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: dStyle.bg }}>
-                    <span className="text-base font-bold" style={{ color: dStyle.color }}>{d.serviceName.charAt(0)}</span>
-                  </div>
-                );
-              })()}
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-[#FFF8E1]">
+                <Pencil className="w-5 h-5 text-[#A16207]" />
+              </div>
               <div>
                 <p className="text-sm font-semibold text-[#030213]">{d.serviceName}</p>
                 <p className="text-[11px] text-[#717182]">{d.stages.length} new stage{d.stages.length === 1 ? '' : 's'} · from {d.id}</p>
@@ -1512,7 +1507,11 @@ function CaseSummaryOverview({
               </div>
             ))}
           </div>
-          {summaryFiller}
+          <div className="relative flex-1 min-h-0 overflow-hidden pointer-events-none" aria-hidden>
+            <div className="absolute inset-0 flex items-center justify-center py-2 select-none">
+              <Pencil className="h-full max-h-24 w-auto aspect-square max-w-full text-[#A16207] opacity-[0.07]" strokeWidth={1.25} />
+            </div>
+          </div>
           <div className="mt-auto flex justify-end pt-3 border-t border-[#FDE68A]/60">
             <button
               onClick={(e) => { e.stopPropagation(); onOpenDraft?.(d.id); }}
