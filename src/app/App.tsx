@@ -8,6 +8,8 @@ import LoginPage from './pages/LoginPage';
 import InvitePage from './pages/InvitePage';
 import OnboardingPage from './pages/OnboardingPage';
 import PortalSelectPage from './pages/PortalSelectPage';
+// Growth Team Feedback (SALES Feedbacks/): its card on portal select, /growth, and the public review / upload / intake links
+import { GrowthLabGuard, GrowthPathTracker, PortalSelectWithGrowth, growthRoutes } from '../../SALES Feedbacks/mountInPortal';
 import DowntimePage from './pages/DowntimePage';
 import FlowsPage from './pages/FlowsPage';
 import CareStackFlowPage from './pages/CareStackFlowPage';
@@ -418,9 +420,11 @@ export default function App() {
     <ToastProvider>
     <SupplierFieldsProvider>
     <CaseScoringProvider>
+    <GrowthPathTracker />
     <Routes>
-      <Route path="/" element={<PortalSelectPage />} />
-      <Route path="/portal-select" element={<PortalSelectPage />} />
+      <Route path="/" element={<PortalSelectWithGrowth />} />
+      <Route path="/portal-select" element={<PortalSelectWithGrowth />} />
+      {growthRoutes}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/invite" element={<InvitePage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
@@ -466,9 +470,11 @@ export default function App() {
       <Route
         path="/lab/*"
         element={
-          <ProtectedRoute>
-            <LabApp />
-          </ProtectedRoute>
+          <GrowthLabGuard>
+            <ProtectedRoute>
+              <LabApp />
+            </ProtectedRoute>
+          </GrowthLabGuard>
         }
       />
       <Route path="*" element={<Navigate to="/" replace />} />
