@@ -10,7 +10,7 @@ import { FEATURES, ME, useGo, useScoped } from '../store';
 import {
   ATTENTION, Attention, HomeStatus, LabCase, PRACTICES, dayOffset, fmtDate, gbp, initials, invoiceNeedsAction, matchesAttention, patientById,
 } from '../data';
-import { Card, IconTile, NewWorkSheet, Screen, Sheet, cx } from '../ui';
+import { Card, IconTile, NewWorkSheet, Screen, Sheet, cx, useBase } from '../ui';
 
 export function PracticeSwitcher({ inline }: { inline?: boolean }) {
   const { practice, setPractice, cases, soloPractice } = useGo();
@@ -145,6 +145,7 @@ function Faces({ list }: { list: LabCase[] }) {
 
 function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?: boolean }) {
   const navigate = useNavigate();
+  const base = useBase();
   const a = ATTENTION.find(x => x.id === id)!;
   const st = STATUS_STYLE[id];
   const h = HERO[id];
@@ -167,7 +168,7 @@ function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?
 
   if (wide) {
     return (
-      <button onClick={() => navigate(`/go/work?f=${id}`)} aria-label={`${a.label}: ${n}`} className={cx(shell, 'flex items-center gap-3.5 p-4')}>
+      <button onClick={() => navigate(`${base}/work?f=${id}`)} aria-label={`${a.label}: ${n}`} className={cx(shell, 'flex items-center gap-3.5 p-4')}>
         {deco}
         <span className={cx('go-chip w-12 h-12 rounded-[16px] flex items-center justify-center flex-shrink-0', h.chip)}>
           <Icon className="w-6 h-6" />
@@ -181,7 +182,7 @@ function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?
     );
   }
   return (
-    <button onClick={() => navigate(`/go/work?f=${id}`)} aria-label={`${a.label}: ${n}`} className={cx(shell, 'p-3.5 pb-3')}>
+    <button onClick={() => navigate(`${base}/work?f=${id}`)} aria-label={`${a.label}: ${n}`} className={cx(shell, 'p-3.5 pb-3')}>
       {deco}
       <span className="relative flex items-center justify-between">
         <span className={cx('go-chip w-10 h-10 rounded-[14px] flex items-center justify-center', h.chip)}>
@@ -195,7 +196,7 @@ function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?
   );
 }
 
-function StatusTiles({ cases }: { cases: LabCase[] }) {
+export function StatusTiles({ cases }: { cases: LabCase[] }) {
   const { dashOrder } = useGo();
   const live = dashOrder
     .map(id => ({ id, list: cases.filter(c => matchesAttention(c, id)) }))

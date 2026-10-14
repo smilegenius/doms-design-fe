@@ -3,7 +3,7 @@ import { Bell, Building2, ChevronDown, ChevronRight, Clock, FileText, Layers as 
 import { ME, Notice, NotifyPrefs, ThemePref, useGo } from '../store';
 import { HOME_STATUSES, PRACTICES, fmtDateTime, relDay } from '../data';
 import { StatusChip, statusShort } from './Home';
-import { Avatar, Btn, Card, EmptyState, IconTile, Screen, Section, Toggle, TopBar, Tone, cx } from '../ui';
+import { Avatar, Btn, Card, EmptyState, IconTile, Screen, Section, Toggle, TopBar, Tone, cx, useBase } from '../ui';
 
 function ThemeCard({ v, label, icon }: { v: ThemePref; label: string; icon: React.ReactNode }) {
   const { themePref, setThemePref } = useGo();
@@ -56,6 +56,7 @@ const THEME_NAME: Record<ThemePref, string> = { light: 'Light', dark: 'Dark', sy
 export function AccountScreen() {
   const navigate = useNavigate();
   const { signOut, themePref, notifyPrefs, dashOrder } = useGo();
+  const base = useBase();
   const nOn = Object.values(notifyPrefs).filter(Boolean).length;
   return (
     <Screen tabs header={<TopBar large title="Account" />}>
@@ -75,17 +76,17 @@ export function AccountScreen() {
 
       <Section title="Settings">
         <Card className="divide-y divide-go-line overflow-hidden">
-          <SettingRow to="/go/account/appearance" icon={<Sun className="w-5 h-5" />} tone="brand" label="Appearance" value={THEME_NAME[themePref]} />
-          <SettingRow to="/go/account/practices" icon={<Building2 className="w-5 h-5" />} tone="teal" label="Your practices" value={`${PRACTICES.length} practice${PRACTICES.length === 1 ? '' : 's'}`} />
-          <SettingRow to="/go/account/notifications" icon={<Bell className="w-5 h-5" />} tone="pink" label="Notifications" value={nOn ? `${nOn} of 3 turned on` : 'All turned off'} />
-          <SettingRow to="/go/account/dashboard" icon={<LayoutList className="w-5 h-5" />} tone="violet" label="Home screen order"
+          <SettingRow to={`${base}/account/appearance`} icon={<Sun className="w-5 h-5" />} tone="brand" label="Appearance" value={THEME_NAME[themePref]} />
+          <SettingRow to={`${base}/account/practices`} icon={<Building2 className="w-5 h-5" />} tone="teal" label="Your practices" value={`${PRACTICES.length} practice${PRACTICES.length === 1 ? '' : 's'}`} />
+          <SettingRow to={`${base}/account/notifications`} icon={<Bell className="w-5 h-5" />} tone="pink" label="Notifications" value={nOn ? `${nOn} of 3 turned on` : 'All turned off'} />
+          <SettingRow to={`${base}/account/dashboard`} icon={<LayoutList className="w-5 h-5" />} tone="violet" label="Home screen order"
             value={dashOrder.slice(0, 3).map(statusShort).join(', ') + '…'} />
         </Card>
       </Section>
 
       <div className="px-4 mt-6">
         <Btn block variant="secondary" className="!text-go-bad" icon={<LogOut className="w-[18px] h-[18px]" />}
-          onClick={() => { signOut(); navigate('/go/signin', { replace: true }); }}>Sign out</Btn>
+          onClick={() => { signOut(); navigate(`${base}/signin`, { replace: true }); }}>Sign out</Btn>
         <p className="text-center text-[11.5px] text-go-faint mt-4">Smile Genius Go</p>
       </div>
     </Screen>
@@ -93,7 +94,7 @@ export function AccountScreen() {
 }
 
 const SubPage = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <Screen header={<TopBar back fallback="/go/account" title={title} />}>{children}</Screen>
+  <Screen header={<TopBar back fallback={`${useBase()}/account`} title={title} />}>{children}</Screen>
 );
 
 export function AppearanceSettings() {

@@ -13,7 +13,7 @@ import {
   ATTENTION, Attention, CLINICIANS, labStatusOf, LABS, LabCase, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
   createdOn, initials, patientById, STAGE_NAMES, StageLine, dueLabel, patchItemStages, phaseName, remainingStages, stagedKindOf, practiceName, readiness, relDay, shortName, stageIndex,
 } from '../data';
-import { Btn, Card, Chips, EmptyState, IconTile, Input, Label, Pill, PickerField, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, cx } from '../ui';
+import { Btn, Card, Chips, EmptyState, IconTile, Input, Label, Pill, PickerField, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, cx, useBase } from '../ui';
 
 // ─── Rows and cards ─────────────────────────────────────────────────────────
 // Two views of the same cases: a dense list (default) and roomier cards.
@@ -21,7 +21,8 @@ import { Btn, Card, Chips, EmptyState, IconTile, Input, Label, Pill, PickerField
 
 const drShort = (c: LabCase) => clinicianName(c.clinician).replace(/^Dr (\S)\S* /, 'Dr $1. ');
 const labShort = (c: LabCase) => labName(c.lab).replace(/ (Dental )?(Lab|Laboratory|Works)$/, '');
-const openCase = (c: LabCase) => (c.stage === 'draft' ? `/go/new/manual?draft=${c.id}` : `/go/work/${c.id}`);
+// The light version has no step-by-step form, so a draft opens its case page there
+const openCase = (c: LabCase, base = '/go') => (c.stage === 'draft' && base === '/go' ? `/go/new/manual?draft=${c.id}` : `${base}/work/${c.id}`);
 
 /** Status pill text; an overdue case shows how late it is ("2 days late") instead of "Late". */
 const pillLabel = (c: LabCase, label: string) => {
@@ -55,9 +56,10 @@ const Initials = ({ c, size = 40 }: { c: LabCase; size?: number }) => (
 /** List view: initials · patient + case ID · dentist + lab · status + delivery date. */
 function CaseRow({ c }: { c: LabCase }) {
   const navigate = useNavigate();
+  const base = useBase();
   const r = readiness(c);
   return (
-    <button onClick={() => navigate(openCase(c))} className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-go-raised transition">
+    <button onClick={() => navigate(openCase(c, base))} className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-go-raised transition">
       <Initials c={c} />
       <span className="flex-1 min-w-0">
         <span className="flex items-baseline gap-1.5 min-w-0">
@@ -79,10 +81,11 @@ function CaseRow({ c }: { c: LabCase }) {
 /** Card view: one card per case with the service, dentist, lab and delivery date spelled out. */
 function CaseCard({ c }: { c: LabCase }) {
   const navigate = useNavigate();
+  const base = useBase();
   const r = readiness(c);
   const p = patientById(c.patientId);
   return (
-    <Card onClick={() => navigate(openCase(c))} className="p-3.5">
+    <Card onClick={() => navigate(openCase(c, base))} className="p-3.5">
       <span className="flex items-center gap-3">
         <Initials c={c} size={36} />
         <span className="flex-1 min-w-0">
@@ -541,6 +544,7 @@ export function CaseDetailScreen() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const { cases, updateCase, toast } = useGo();
+  const base = useBase();
   const c = cases.find(x => x.id === id);
   const tab = (params.get('tab') as Tab) || 'details';
   const setTab = (t: Tab) => setParams(t === 'details' ? {} : { tab: t }, { replace: true });
@@ -548,9 +552,9 @@ export function CaseDetailScreen() {
   const [receiveOpen, setReceiveOpen] = useState(params.get('receive') === '1');
   const [orderFor, setOrderFor] = useState<number | null>(null);
   if (!c) {
-    return <Screen header={<TopBar back fallback="/go/work" title="Lab work" />}><EmptyState icon={<Search className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
+    return <Screen header={<TopBar back fallback={`${base}/work`} title="Lab work" />}><EmptyState icon={<Search className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
   }
-  if (c.stage === 'draft') return <Navigate to={`/go/new/manual?draft=${c.id}`} replace />;
+  if (c.stage === 'draft' && base === '/go') return <Navigate to={`/go/new/manual?draft=${c.id}`} replace />;
   const p = patientById(c.patientId);
   const r = readiness(c);
   const a = nextAction(c);
@@ -558,12 +562,12 @@ export function CaseDetailScreen() {
 
   // One-line next step with its action — reads like a to-do, not a card.
   const step: { icon: React.ReactNode; tone: Tone; title: string; body: string; cta?: { label: string; run: () => void } } = {
-    finish: { icon: <ClipboardCheck className="w-5 h-5" />, tone: 'neutral' as Tone, title: 'Draft not sent yet', body: 'Finish the details and send it to the lab.', cta: { label: 'Finish case', run: () => navigate(`/go/new/manual?draft=${c.id}`) } },
+    finish: { icon: <ClipboardCheck className="w-5 h-5" />, tone: 'neutral' as Tone, title: 'Draft not sent yet', body: 'Finish the details and send it to the lab.', cta: { label: 'Finish case', run: () => navigate(base === '/go' ? `/go/new/manual?draft=${c.id}` : `${base}/new`) } },
     // Only the lab can put a case on or off hold. The practice answers in Comments when the lab is waiting on it.
     'on-hold': c.onHold?.side === 'Practice'
       ? { icon: <Pause className="w-5 h-5" />, tone: 'warn' as Tone, title: 'On hold · the lab is waiting for you', body: c.onHold.reason, cta: { label: 'Reply', run: () => setTab('messages') } }
       : { icon: <Pause className="w-5 h-5" />, tone: 'warn' as Tone, title: 'On hold by the lab', body: `${c.onHold?.reason ?? ''} · Only the lab can take it off hold.` },
-    dispatch: { icon: <Truck className="w-5 h-5" />, tone: 'warn' as Tone, title: 'Send it to the lab', body: 'Include the impressions, bite and signed lab form.', cta: { label: 'Dispatch', run: () => navigate(`/go/work/${c.id}/dispatch`) } },
+    dispatch: { icon: <Truck className="w-5 h-5" />, tone: 'warn' as Tone, title: 'Send it to the lab', body: 'Include the impressions, bite and signed lab form.', cta: { label: 'Dispatch', run: () => navigate(base === '/go' ? `/go/work/${c.id}/dispatch` : `${base}/dispatch/${c.id}`) } },
     reply: { icon: <MessageSquare className="w-5 h-5" />, tone: 'pink' as Tone, title: `${labName(c.lab)} needs more information`, body: 'The case is paused until you reply.', cta: { label: 'Reply', run: () => setTab('messages') } },
     'check-in': { icon: <PackageCheck className="w-5 h-5" />, tone: 'brand' as Tone, title: 'Arriving from the lab', body: shipped ? `Shipped ${fmtDate(shipped.at)}${shipped.text ? ` · ${shipped.text}` : ''}` : 'On its way back.', cta: { label: 'Mark as received', run: () => setReceiveOpen(true) } },
     chase: { icon: <Clock className="w-5 h-5" />, tone: 'bad' as Tone, title: 'Chase the lab', body: c.appointment ? 'Or move the patient’s appointment.' : `Delivery date was ${fmtDate(c.returnBy)}.`, cta: { label: 'Chase', run: () => setChase(true) } },
@@ -584,7 +588,7 @@ export function CaseDetailScreen() {
   ];
 
   return (
-    <Screen header={<TopBar back fallback="/go/work" title={p.name} sub={`${c.id} · DOB ${p.dob}`} />}
+    <Screen header={<TopBar back fallback={`${base}/work`} title={p.name} sub={`${c.id} · DOB ${p.dob}`} />}
       // Sticky next-step bar: Dispatch / Reply / Mark as received / Chase stay in thumb reach.
       // Hidden on the Comments tab while replying — the composer there is the action.
       footer={step.cta && !((a === 'reply' || a === 'on-hold') && tab === 'messages') ? (

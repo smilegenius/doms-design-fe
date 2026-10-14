@@ -18,7 +18,7 @@ import { DispatchScreen, ReceiveScreen } from './screens/Logistics';
 import CaptureScreen from './screens/Capture';
 import ManualCaseScreen from './screens/ManualCase';
 import { FinanceScreen, InvoiceScreen, InvoicesComingSoon, StatementScreen } from './screens/Finance';
-import { LITE, LiteAccount, LiteCreate, LiteDispatch, LiteHome, LiteReceived, LiteToDispatch } from './lite/LiteScreens';
+import { LITE, LiteCreate, LiteDeliveries, LiteDispatch, LiteHome } from './lite/LiteScreens';
 import { AccountScreen, AppearanceSettings, DashboardSettings, NotificationSettings, NotificationsScreen, PracticesSettings } from './screens/Account';
 
 // Reviewer navigation. Each entry can carry scenarios: variants of the same
@@ -116,14 +116,38 @@ const LITE_JUMPS: Jump[] = [
     { label: 'Single practice · no dropdown', to: `${LITE}/home`, solo: 'isc' },
     { label: 'Empty', to: `${LITE}/home`, fill: 0 },
   ] },
-  { group: 'Create', label: 'Create from prescription', to: `${LITE}/new` },
-  { group: 'Received', label: 'Received', to: `${LITE}/received` },
-  { group: 'To dispatch', label: 'To dispatch', to: `${LITE}/dispatch`, scenarios: [
-    { label: 'List', to: `${LITE}/dispatch` },
+  { group: 'Lab work', label: 'All lab work', to: `${LITE}/work`, scenarios: [
+    { label: 'All cases', to: `${LITE}/work` },
+    { label: 'Overdue', to: `${LITE}/work?f=overdue` },
+    { label: 'Ready to dispatch', to: `${LITE}/work?f=ready` },
+    { label: 'On hold', to: `${LITE}/work?f=on-hold` },
+    { label: 'Draft', to: `${LITE}/work?f=draft` },
+    { label: 'Arriving from lab', to: `${LITE}/work?f=arriving` },
+  ] },
+  { group: 'Lab work', label: 'Case detail', to: `${LITE}/work/SG-28491`, scenarios: [
+    { label: 'Not sent yet', to: `${LITE}/work/SG-28491` },
+    { label: 'Multi-service · on hold', to: `${LITE}/work/SG-28472` },
+    { label: 'Arriving from the lab', to: `${LITE}/work/SG-28488` },
+    { label: 'Overdue · chase the lab', to: `${LITE}/work/SG-28479` },
+  ] },
+  { group: 'Create', label: 'Create from prescription', to: `${LITE}/new`, scenarios: [
+    { label: 'Everything read from the prescription', to: `${LITE}/new` },
+    { label: 'Some details not found', to: `${LITE}/new?rx=partial` },
+  ] },
+  { group: 'Deliveries', label: 'Deliveries', to: `${LITE}/deliveries`, scenarios: [
+    { label: 'To dispatch', to: `${LITE}/deliveries` },
+    { label: 'Arriving · mark as received', to: `${LITE}/deliveries?tab=arriving` },
+    { label: 'Received', to: `${LITE}/deliveries?tab=received` },
     { label: 'Print label · crown, private', to: `${LITE}/dispatch/SG-28491` },
     { label: 'Print label · partial denture, NHS', to: `${LITE}/dispatch/SG-28497` },
   ] },
-  { group: 'Me', label: 'Me', to: `${LITE}/account` },
+  { group: 'Me', label: 'Settings', to: `${LITE}/account`, scenarios: [
+    { label: 'Account', to: `${LITE}/account` },
+    { label: 'Appearance', to: `${LITE}/account/appearance` },
+    { label: 'Your practices', to: `${LITE}/account/practices` },
+    { label: 'Notifications', to: `${LITE}/account/notifications` },
+    { label: 'Home screen order', to: `${LITE}/account/dashboard` },
+  ] },
 ];
 
 function ThemeSwitch() {
@@ -304,11 +328,18 @@ function LiteRoutes() {
       <Route path="forgot" element={<ForgotScreen base={LITE} />} />
       <Route element={<RequireAuth to={`${LITE}/signin`} />}>
         <Route path="home" element={<LiteHome />} />
+        <Route path="work" element={<LabWorkScreen />} />
+        <Route path="work/:id" element={<CaseDetailScreen />} />
         <Route path="new" element={<LiteCreate />} />
-        <Route path="received" element={<LiteReceived />} />
-        <Route path="dispatch" element={<LiteToDispatch />} />
+        <Route path="deliveries" element={<LiteDeliveries />} />
+        <Route path="received" element={<Navigate to={`${LITE}/deliveries?tab=received`} replace />} />
+        <Route path="dispatch" element={<Navigate to={`${LITE}/deliveries`} replace />} />
         <Route path="dispatch/:id" element={<LiteDispatch />} />
-        <Route path="account" element={<LiteAccount />} />
+        <Route path="account" element={<AccountScreen />} />
+        <Route path="account/appearance" element={<AppearanceSettings />} />
+        <Route path="account/practices" element={<PracticesSettings />} />
+        <Route path="account/notifications" element={<NotificationSettings />} />
+        <Route path="account/dashboard" element={<DashboardSettings />} />
       </Route>
       <Route path="*" element={<Navigate to={signedIn ? `${LITE}/home` : `${LITE}/signin`} replace />} />
     </Routes>
@@ -317,9 +348,10 @@ function LiteRoutes() {
 
 function GoRoutes({ lite }: { lite?: boolean }) {
   const { signedIn } = useGo();
-  const { pathname, search } = useLocation();
+  const { pathname, search, key } = useLocation();
   return (
-    <div key={pathname.startsWith('/go/new') ? pathname + search : pathname} className="absolute inset-0 go-fade-in">
+    // Create (light) restarts at the scan screen every time it is opened
+    <div key={pathname.startsWith('/go/new') ? pathname + search : pathname === '/go/lite/new' ? key : pathname} className="absolute inset-0 go-fade-in">
       {lite ? <LiteRoutes /> : <Routes>
         <Route path="signin" element={signedIn ? <Navigate to="/go/home" replace /> : <SignInScreen />} />
         <Route path="forgot" element={<ForgotScreen />} />
