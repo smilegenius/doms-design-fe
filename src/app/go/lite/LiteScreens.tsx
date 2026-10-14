@@ -2,70 +2,26 @@
 // The short flow: sign in → home → create (from a prescription photo, one page)
 // → received → to dispatch (print label). No audio, no step-by-step form, no
 // lab-work list, no invoices. Mounted at /go/lite/*.
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  CheckCircle2, ChevronRight, FlaskConical, Home, ImageUp, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Trash, Truck, User, X, Zap, ZapOff,
+  Building2, Check, CheckCircle2, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
 } from '../icons';
 import { ME, useGo, useScoped } from '../store';
 import {
-  CLINICIANS, LabCase, PRACTICES, PracticeId, SERVICE_CATEGORIES, caseTitle, fmtDate, initials, labName, patientById, shortName,
+  CLINICIANS, LabCase, clinicianName, practiceName, PRACTICES, PracticeId, SERVICE_CATEGORIES, caseTitle, fmtDate, initials, labName, patientById, shortName,
 } from '../data';
 import { Btn, Card, EmptyState, GoMark, Input, Label, PickerField, Pill, Screen, Segmented, TextArea, TopBar, cx, useBack } from '../ui';
 import { CaseForm, FormItem, LabPicker, PatientPicker, ToothPicker, buildCase, emptyForm, newItem } from '../screens/ManualCase';
 import { PaperRx } from '../screens/ReadSource';
-import { PracticeSwitcher } from '../screens/Home';
+import { PracticeSwitcher, StatusTiles } from '../screens/Home';
 import { DispatchScreen, ReceiveSheet } from '../screens/Logistics';
 
 export const LITE = '/go/lite';
 
 const plusDays = (n: number) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
 const iso = (d: string) => (d ? new Date(`${d}T12:00`).toISOString() : undefined);
-
-// ─── Tab bar: Home · To dispatch · + · Received · Me ────────────────────────
-
-function LiteTabBar() {
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
-  const { cases } = useScoped();
-  const toDispatch = cases.filter(c => c.stage === 'ready' && !c.onHold).length;
-  const arriving = cases.filter(c => c.stage === 'shipped').length;
-  const tabs = [
-    { to: `${LITE}/home`, label: 'Home', icon: Home },
-    { to: `${LITE}/dispatch`, label: 'To dispatch', icon: Truck, badge: toDispatch },
-    null,
-    { to: `${LITE}/received`, label: 'Received', icon: PackageCheck, badge: arriving },
-    { to: `${LITE}/account`, label: 'Me', icon: User },
-  ];
-  return (
-    <nav className="go-tabbar absolute bottom-0 inset-x-0 z-20 px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-2 pointer-events-none">
-      <div className="pointer-events-auto relative flex items-center justify-around h-16 rounded-[26px] bg-go-surface/80 backdrop-blur-2xl border border-go-line go-card-shadow">
-        {tabs.map((t, i) => {
-          if (!t) {
-            return (
-              <button key="new" onClick={() => navigate(`${LITE}/new`)} aria-label="Create lab work"
-                className="-mt-7 w-14 h-14 rounded-[20px] go-grad go-glow text-white flex items-center justify-center active:scale-95 transition ring-4 ring-go-bg">
-                <Plus className="w-6 h-6" strokeWidth={2.5} />
-              </button>
-            );
-          }
-          const active = pathname.startsWith(t.to);
-          const Icon = t.icon;
-          return (
-            <button key={t.to} onClick={() => navigate(t.to)} className="relative flex-1 flex flex-col items-center gap-0.5 py-1">
-              <span className={cx('relative flex items-center justify-center w-10 h-7 rounded-full transition', active && 'bg-go-brand-soft')}>
-                <Icon className={cx('w-[20px] h-[20px] transition', active ? 'text-go-brand' : 'text-go-muted')} />
-                {!!t.badge && <span className="absolute -top-1 right-0 min-w-[16px] h-4 px-1 rounded-full bg-go-bad text-white text-[9px] font-bold flex items-center justify-center">{t.badge}</span>}
-              </span>
-              <span className={cx('text-[10px] font-semibold', active ? 'text-go-brand' : 'text-go-muted')}>{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
-    </nav>
-  );
-}
 
 // ─── Case row (To dispatch and Received) ────────────────────────────────────
 
@@ -92,127 +48,83 @@ function CaseRow({ c, onClick, right, action }: { c: LabCase; onClick?: () => vo
 export function LiteHome() {
   const navigate = useNavigate();
   const { cases } = useScoped();
-  const toDispatch = cases.filter(c => c.stage === 'ready' && !c.onHold);
-  const arriving = cases.filter(c => c.stage === 'shipped');
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const tile = (label: string, n: number, chip: string, icon: React.ReactNode, to: string) => (
-    <button onClick={() => navigate(to)} aria-label={`${label}: ${n}`}
-      className="relative text-left overflow-hidden rounded-[24px] border border-go-line bg-go-surface go-card-shadow p-3.5 active:scale-[.98] transition">
-      <span className={cx('go-chip w-10 h-10 rounded-[14px] flex items-center justify-center', chip)}>{icon}</span>
-      <span className="block text-[34px] font-bold tabular-nums leading-none tracking-tight mt-3 text-go-ink">{n}</span>
-      <span className="mt-1.5 flex items-center gap-1 text-[13.5px] font-semibold text-go-ink">{label}<ChevronRight className="w-3.5 h-3.5 text-go-faint" /></span>
-    </button>
-  );
   return (
-    <Screen tabs={<LiteTabBar />}>
-      <div className="px-5 pt-3">
-        <p className="text-[12.5px] text-go-muted">
-          {greet}, <span className="font-semibold text-go-ink2">{ME.first}</span> · {new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
-        </p>
-        <h1 className="mt-0.5"><PracticeSwitcher inline /></h1>
+    <Screen tabs>
+      <div className="flex items-start justify-between gap-3 px-5 pt-3">
+        <div className="min-w-0">
+          <p className="text-[12.5px] text-go-muted">
+            {greet}, <span className="font-semibold text-go-ink2">{ME.first}</span> · {new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+          </p>
+          <h1 className="mt-0.5"><PracticeSwitcher inline /></h1>
+        </div>
+        <button onClick={() => navigate(`${LITE}/account`)} aria-label="Me"
+          className="go-grad text-white font-bold rounded-full w-10 h-10 flex items-center justify-center text-[13px] flex-shrink-0">{initials(ME.name)}</button>
       </div>
 
-      <div className="px-4 mt-5">
+      <div className="px-4 mt-4">
         <button onClick={() => navigate(`${LITE}/new`)}
-          className="go-rise relative w-full overflow-hidden text-left rounded-[28px] border border-go-brand/25 bg-gradient-to-br from-go-brand-soft via-go-surface to-go-violet-soft go-card-shadow p-5 active:scale-[.99] transition">
+          className="go-rise relative w-full overflow-hidden text-left rounded-[24px] border border-go-brand/25 bg-gradient-to-br from-go-brand-soft via-go-surface to-go-violet-soft go-card-shadow p-4 flex items-center gap-3.5 active:scale-[.99] transition">
           <span className="pointer-events-none absolute -top-16 -right-12 w-48 h-48 rounded-full bg-go-lav/30 blur-3xl" />
-          <span className="relative w-14 h-14 rounded-[20px] go-grad go-glow text-white flex items-center justify-center"><Plus className="w-7 h-7" strokeWidth={2.5} /></span>
-          <span className="relative flex items-center gap-1.5 mt-3">
-            <span className="text-[22px] font-bold text-go-ink tracking-tight leading-tight">Create lab work</span>
-            <ChevronRight className="w-5 h-5 text-go-brand" />
+          <span className="relative w-12 h-12 rounded-[16px] go-grad go-glow text-white flex items-center justify-center flex-shrink-0"><Plus className="w-6 h-6" strokeWidth={2.5} /></span>
+          <span className="relative flex-1 min-w-0">
+            <span className="block text-[17px] font-bold text-go-ink tracking-tight leading-tight">Create lab work</span>
+            <span className="block text-[12.5px] text-go-ink2 mt-0.5 leading-snug">Scan the prescription. We’ll fill in the details.</span>
           </span>
-          <span className="relative block text-[13px] text-go-ink2 mt-1 leading-snug">Take a photo of the prescription, then choose the patient, service and teeth.</span>
+          <ChevronRight className="relative w-5 h-5 text-go-brand flex-shrink-0" />
         </button>
       </div>
 
-      <div className="px-4 mt-3 grid grid-cols-2 gap-2.5">
-        {tile('To dispatch', toDispatch.length, 'go-chip-ready', <Truck className="w-5 h-5" />, `${LITE}/dispatch`)}
-        {tile('Arriving', arriving.length, 'go-chip-date', <PackageCheck className="w-5 h-5" />, `${LITE}/received`)}
-      </div>
+      <div className="px-4 mt-3"><StatusTiles cases={cases} /></div>
     </Screen>
   );
 }
 
-// ─── To dispatch → print label ──────────────────────────────────────────────
+// ─── Deliveries: to dispatch (print label) · arriving · received ───────────
 
-export function LiteToDispatch() {
+type DeliveryTab = 'dispatch' | 'arriving' | 'received';
+
+export function LiteDeliveries() {
   const navigate = useNavigate();
   const { cases } = useScoped();
-  const list = cases.filter(c => c.stage === 'ready' && !c.onHold).sort((a, b) => (a.returnBy || '9').localeCompare(b.returnBy || '9'));
-  return (
-    <Screen tabs={<LiteTabBar />} header={<TopBar large title="To dispatch" sub={list.length ? 'Print the label, pack it and send it to the lab.' : undefined} />}>
-      <div className="px-4 space-y-2.5">
-        {list.map(c => (
-          <CaseRow key={c.id} c={c} onClick={() => navigate(`${LITE}/dispatch/${c.id}`)}
-            right={<span className="inline-flex items-center gap-1 h-9 px-3 rounded-xl bg-go-brand-soft text-go-brand-ink text-[12.5px] font-semibold flex-shrink-0"><Printer className="w-4 h-4" />Print</span>} />
-        ))}
-        {!list.length && <EmptyState icon={<Truck className="w-7 h-7" />} title="Nothing to dispatch" body="New lab work you create will appear here, ready to print and send." />}
-      </div>
-    </Screen>
-  );
-}
-
-// ─── Received ───────────────────────────────────────────────────────────────
-
-export function LiteReceived() {
-  const { cases } = useScoped();
-  const [tab, setTab] = useState<'arriving' | 'received'>('arriving');
+  const [params, setParams] = useSearchParams();
+  const tab = (['dispatch', 'arriving', 'received'].includes(params.get('tab') ?? '') ? params.get('tab') : 'dispatch') as DeliveryTab;
   const [target, setTarget] = useState<LabCase | null>(null);
+  const toDispatch = cases.filter(c => c.stage === 'ready' && !c.onHold).sort((a, b) => (a.returnBy || '9').localeCompare(b.returnBy || '9'));
   const arriving = cases.filter(c => c.stage === 'shipped');
   const received = cases.filter(c => c.stage === 'received');
-  const list = tab === 'arriving' ? arriving : received;
+  const list = tab === 'dispatch' ? toDispatch : tab === 'arriving' ? arriving : received;
+  const empty = {
+    dispatch: { icon: <Truck className="w-7 h-7" />, title: 'Nothing to dispatch', body: 'New lab work you create will appear here, ready to print and send.' },
+    arriving: { icon: <PackageCheck className="w-7 h-7" />, title: 'Nothing on its way', body: 'Work the lab has shipped will appear here.' },
+    received: { icon: <PackageCheck className="w-7 h-7" />, title: 'Nothing received yet', body: 'Work you mark as received will appear here.' },
+  }[tab];
   return (
-    <Screen tabs={<LiteTabBar />} header={<TopBar large title="Received" />}>
+    <Screen tabs header={<TopBar large title="Deliveries" />}>
       <div className="px-4">
-        <Segmented value={tab} onChange={setTab} options={[{ value: 'arriving', label: 'Arriving', count: arriving.length }, { value: 'received', label: 'Received', count: received.length }]} />
+        <Segmented value={tab} onChange={t => setParams(t === 'dispatch' ? {} : { tab: t }, { replace: true })}
+          options={[{ value: 'dispatch', label: 'To dispatch', count: toDispatch.length }, { value: 'arriving', label: 'Arriving', count: arriving.length }, { value: 'received', label: 'Received', count: received.length }]} />
       </div>
       <div className="px-4 mt-3 space-y-2.5">
         {list.map(c => (
           <CaseRow key={c.id} c={c}
-            right={tab === 'received' ? <Pill tone="ok" dot>Received</Pill> : undefined}
-            action={tab === 'arriving'
-              ? <Btn block size="md" icon={<PackageCheck className="w-4 h-4" />} onClick={() => setTarget(c)}>Mark as received</Btn>
-              : undefined} />
+            onClick={tab === 'dispatch' ? () => navigate(`${LITE}/dispatch/${c.id}`) : undefined}
+            right={tab === 'dispatch'
+              ? <span className="inline-flex items-center gap-1 h-9 px-3 rounded-xl bg-go-brand-soft text-go-brand-ink text-[12.5px] font-semibold flex-shrink-0"><Printer className="w-4 h-4" />Print</span>
+              : tab === 'received' ? <Pill tone="ok" dot>Received</Pill> : undefined}
+            action={tab === 'arriving' ? <Btn block size="md" icon={<PackageCheck className="w-4 h-4" />} onClick={() => setTarget(c)}>Mark as received</Btn> : undefined} />
         ))}
-        {!list.length && (tab === 'arriving'
-          ? <EmptyState icon={<PackageCheck className="w-7 h-7" />} title="Nothing on its way" body="Work the lab has shipped will appear here." />
-          : <EmptyState icon={<PackageCheck className="w-7 h-7" />} title="Nothing received yet" body="Work you mark as received will appear here." />)}
+        {!list.length && <EmptyState icon={empty.icon} title={empty.title} body={empty.body} />}
       </div>
       {target && <ReceiveSheet c={target} open onClose={() => setTarget(null)} />}
     </Screen>
   );
 }
 
-// ─── Me ─────────────────────────────────────────────────────────────────────
-
-export function LiteAccount() {
-  const { signOut, themePref, setThemePref } = useGo();
-  const navigate = useNavigate();
-  return (
-    <Screen tabs={<LiteTabBar />} header={<TopBar large title="Me" />}>
-      <div className="px-4 space-y-4">
-        <Card className="p-4 flex items-center gap-3.5">
-          <span className="go-grad text-white font-bold rounded-full w-12 h-12 flex items-center justify-center text-[16px]">{initials(ME.name)}</span>
-          <div className="min-w-0">
-            <p className="text-[16px] font-semibold text-go-ink">{ME.name}</p>
-            <p className="text-[12.5px] text-go-muted truncate">{ME.role} · {ME.email}</p>
-          </div>
-        </Card>
-        <div>
-          <Label>Appearance</Label>
-          <Segmented value={themePref} onChange={setThemePref}
-            options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'system', label: 'Auto' }]} />
-        </div>
-        <Btn block variant="secondary" icon={<LogOut className="w-5 h-5" />} onClick={() => { signOut(); navigate(`${LITE}/signin`, { replace: true }); }}>Sign out</Btn>
-      </div>
-    </Screen>
-  );
-}
-
 // ─── Dispatch wrapper (reuses the portal's label + courier screen) ──────────
 
-export const LiteDispatch = () => <DispatchScreen list={`${LITE}/dispatch`} />;
+export const LiteDispatch = () => <DispatchScreen list={`${LITE}/deliveries`} />;
 
 // ─── Create: photo of the prescription, then ONE page ───────────────────────
 
@@ -293,29 +205,96 @@ const newBlock = (): Block => ({ uid: `b${++blockSeq}`, itemId: null, teeth: [],
 
 const SERVICE_OPTIONS = SERVICE_CATEGORIES.flatMap(cat => cat.items.map(s => ({ value: s.id, label: s.label, sub: cat.label })));
 
+/** What the scan found on the prescription. 'clean' = everything read; 'partial' = some details missing or unclear. */
+export type RxScenario = 'clean' | 'partial';
+interface Read { practice: PracticeId | null; clinician: string | null; lab: string | null; patientId: string | null; blocks: Block[]; instructions: string }
+const readPrescription = (rx: RxScenario): Read => rx === 'clean'
+  ? {
+    practice: 'cds', clinician: 'reed', lab: 'northstar', patientId: 'P-10231', instructions: 'Light contacts. Match adjacent LL4 shade.',
+    blocks: [{ uid: `b${++blockSeq}`, itemId: 'su-crown', teeth: ['LL5'], returnBy: plusDays(14) }],
+  }
+  : {
+    // Handwriting unclear: no dentist, lab or patient, and no teeth or date
+    practice: 'cds', clinician: null, lab: null, patientId: null, instructions: '',
+    blocks: [{ uid: `b${++blockSeq}`, itemId: 'su-crown', teeth: [], returnBy: '' }],
+  };
+
+/** Scanning screen: the prescription is read and the form is filled in. */
+function Scanning({ photo, onDone }: { photo: Photo; onDone: () => void }) {
+  const steps = ['Finding the prescription', 'Reading the handwriting', 'Finding the patient, dentist and lab'];
+  const [i, setI] = useState(0);
+  useEffect(() => { const t = setInterval(() => setI(x => x + 1), 650); return () => clearInterval(t); }, []);
+  useEffect(() => { if (i >= steps.length) onDone(); }, [i, onDone, steps.length]);
+  return (
+    <Screen>
+      <div className="flex flex-col items-center px-8 pt-16">
+        <div className="relative w-40 h-52 rounded-xl overflow-hidden bg-white border border-go-line">
+          <Prescription photo={photo} className="w-full h-full object-cover" />
+          <span className="go-scanline absolute left-0 right-0 h-1 go-grad shadow-[0_0_20px_4px_rgba(77,142,247,.5)]" />
+        </div>
+        <p className="mt-8 inline-flex items-center gap-2 text-[17px] font-semibold text-go-ink"><Sparkles className="w-5 h-5 text-go-lav" />Reading the prescription…</p>
+        <div className="mt-6 w-full space-y-3">
+          {steps.map((s, k) => (
+            <div key={s} className={cx('flex items-center gap-3 text-[14px] transition', k <= i ? 'text-go-ink' : 'text-go-faint')}>
+              <span className={cx('w-6 h-6 rounded-full flex items-center justify-center', k < i ? 'go-grad text-white' : k === i ? 'border-2 border-go-brand' : 'border-2 border-go-line')}>
+                {k < i ? <Check className="w-3.5 h-3.5" /> : k === i ? <span className="w-2 h-2 rounded-full bg-go-brand go-pulse" /> : null}
+              </span>
+              {s}
+            </div>
+          ))}
+        </div>
+      </div>
+    </Screen>
+  );
+}
+
+/** One line of the practice · dentist · lab card. */
+function DetailRow({ icon, label, value, onClick }: { icon: React.ReactNode; label: string; value: string | null; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="w-full flex items-center gap-3 px-4 py-1.5 text-left">
+      <span className={cx('w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0', value ? 'bg-go-brand-soft text-go-brand' : 'bg-go-warn-soft text-go-warn')}>{icon}</span>
+      <span className="w-[58px] text-[12px] text-go-muted flex-shrink-0">{label}</span>
+      <span className={cx('flex-1 min-w-0 truncate text-[14px]', value ? 'font-semibold text-go-ink' : 'font-medium text-go-warn')}>{value ?? 'Not found · choose'}</span>
+      {value ? <CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-go-warn flex-shrink-0" />}
+    </button>
+  );
+}
+
 export function LiteCreate() {
   const { addCase, toast } = useGo();
   const navigate = useNavigate();
+  const rx: RxScenario = new URLSearchParams(useLocation().search).get('rx') === 'partial' ? 'partial' : 'clean';
   const [photo, setPhoto] = useState<Photo | null>(null);
+  const [scanned, setScanned] = useState(false);
   const [viewing, setViewing] = useState(false);
   const [patientId, setPatientId] = useState<string | null>(null);
-  const [practice, setPractice] = useState<PracticeId | null>(PRACTICES[0].id);
+  const [practice, setPractice] = useState<PracticeId | null>(null);
   const [blocks, setBlocks] = useState<Block[]>(() => [newBlock()]);
   const [instructions, setInstructions] = useState('');
-  const [lab, setLab] = useState<string | null>('northstar');
-  const [clinician, setClinician] = useState<string>('reed');
+  const [lab, setLab] = useState<string | null>(null);
+  const [clinician, setClinician] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const [tried, setTried] = useState(false);
   const [created, setCreated] = useState<LabCase | null>(null);
 
-  if (created) return <Created c={created} onAnother={() => { setCreated(null); setPhoto(null); setPatientId(null); setBlocks([newBlock()]); setInstructions(''); setTried(false); }} />;
+  const reset = () => { setCreated(null); setPhoto(null); setScanned(false); setMore(false); setTried(false); };
+  const applyRead = () => {
+    const r = readPrescription(rx);
+    setPractice(r.practice); setClinician(r.clinician); setLab(r.lab); setPatientId(r.patientId); setBlocks(r.blocks); setInstructions(r.instructions);
+    setScanned(true);
+  };
+  const doneScanning = useCallback(applyRead, [rx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (created) return <Created c={created} onAnother={reset} />;
   if (!photo) return <CameraView onShot={setPhoto} />;
+  if (!scanned) return <Scanning photo={photo} onDone={doneScanning} />;
 
   const patch = (uid: string, p: Partial<Block>) => setBlocks(bs => bs.map(b => (b.uid === uid ? { ...b, ...p } : b)));
   const bad = (v: unknown) => tried && !v;
+  const notFound = [!patientId && 'patient', !clinician && 'dentist', !lab && 'lab', !practice && 'practice', blocks.some(b => !b.itemId) && 'service'].filter(Boolean) as string[];
 
   const submit = () => {
-    if (!patientId || !practice || !lab || blocks.some(b => !b.itemId)) { setTried(true); return; }
+    if (notFound.length) { setTried(true); if (!clinician || !lab || !practice) setMore(true); return; }
     const items: FormItem[] = blocks.map(b => newItem(b.itemId!, { teeth: b.teeth, returnBy: b.returnBy }));
     const form: CaseForm = { ...emptyForm(), practice, clinician, patientId, lab, instructions: instructions.trim(), caseSource: 'Photo of lab form', attachments: [photo.name], items };
     const built = buildCase(form, 'photo');
@@ -332,81 +311,111 @@ export function LiteCreate() {
     setCreated(c);
   };
 
+  const unclear = rx === 'partial' && (!patientId || !clinician || !lab);
   return (
     <Screen
       header={<TopBar back fallback={`${LITE}/home`} title="Create lab work" sub="From the prescription" />}
       footer={<Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={submit}>Create case</Btn>}>
-      {tried && (!patientId || blocks.some(b => !b.itemId)) && <p className="px-5 pt-1 pb-2 text-[13px] text-go-warn font-medium">Please fill in the highlighted details.</p>}
-      <div className="px-4 pt-2 space-y-5">
-        {/* The prescription — tap to view it full size */}
-        <div className="relative">
-          <button onClick={() => setViewing(true)} aria-label="View the prescription full size"
-            className="block w-full h-44 rounded-[22px] overflow-hidden border border-go-line bg-go-raised go-card-shadow relative">
-            <Prescription photo={photo} className="w-full h-full object-cover object-top" />
-            <span className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/60 to-transparent" />
-            <span className="absolute left-3.5 bottom-2.5 text-[12.5px] font-semibold text-white">Tap to view full size</span>
+      {tried && notFound.length > 0
+        ? <p className="px-5 pt-1 text-[13px] text-go-warn font-medium">Please fill in the highlighted details.</p>
+        : unclear && <p className="mx-4 mt-1 px-3 py-2 rounded-2xl bg-go-warn-soft text-[12.5px] text-go-warn font-medium">Some details weren’t clear on the prescription. Please check them.</p>}
+      <div className="px-4 pt-1.5 space-y-2.5">
+        {/* The prescription: tap to view it full size */}
+        <Card className="flex items-center gap-3 p-2">
+          <button onClick={() => setViewing(true)} aria-label="View the prescription full size" className="flex-1 min-w-0 flex items-center gap-3 text-left">
+            <span className="w-10 h-[52px] rounded-lg overflow-hidden border border-go-line bg-white flex-shrink-0 shadow-sm">
+              <Prescription photo={photo} className="w-full h-full object-cover object-top" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[14px] font-semibold text-go-ink">Prescription</span>
+              <span className="block text-[12px] text-go-muted">Tap to view full size</span>
+            </span>
           </button>
-          <button onClick={() => setPhoto(null)} className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 h-8 px-3 rounded-full bg-black/55 backdrop-blur text-white text-[12px] font-semibold">
+          <button onClick={() => { setPhoto(null); setScanned(false); }} className="inline-flex items-center gap-1 h-8 px-3 mr-1 rounded-full bg-go-brand-soft text-go-brand-ink text-[12px] font-semibold flex-shrink-0">
             <RotateCcw className="w-3.5 h-3.5" />Retake
           </button>
-        </div>
+        </Card>
 
-        <PatientPicker value={patientId} onChange={setPatientId} invalid={bad(patientId)} />
-        <PickerField label="Practice" value={practice} onChange={v => setPractice(v as PracticeId)} invalid={bad(practice)}
-          options={PRACTICES.map(p => ({ value: p.id, label: p.name }))} />
-
-        {/* Service · teeth · delivery date, together */}
-        {blocks.map((b, i) => (
-          <Card key={b.uid} className="p-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Service{blocks.length > 1 ? ` ${i + 1}` : ''}</p>
-              {blocks.length > 1 && (
-                <button onClick={() => setBlocks(bs => bs.filter(x => x.uid !== b.uid))} aria-label={`Remove service ${i + 1}`}
-                  className="w-8 h-8 -mr-1 rounded-full flex items-center justify-center text-go-muted hover:text-go-bad hover:bg-go-bad-soft"><Trash className="w-4 h-4" /></button>
-              )}
+        {/* Practice · dentist · lab: one card, three lines. Change opens the pickers. */}
+        <Card className="overflow-hidden py-0.5">
+          {!more ? (
+            <div className="relative">
+              <DetailRow icon={<Building2 className="w-4 h-4" />} label="Practice" value={practice ? practiceName(practice) : null} onClick={() => setMore(true)} />
+              <DetailRow icon={<User className="w-4 h-4" />} label="Dentist" value={clinician ? clinicianName(clinician) : null} onClick={() => setMore(true)} />
+              <DetailRow icon={<FlaskConical className="w-4 h-4" />} label="Lab" value={lab ? labName(lab) : null} onClick={() => setMore(true)} />
             </div>
-            <PickerField label="Service type" value={b.itemId} onChange={v => patch(b.uid, { itemId: v })} placeholder="Choose a service" searchable
-              invalid={tried && !b.itemId} options={SERVICE_OPTIONS} />
-            <div><Label optional>Teeth or arch</Label><ToothPicker value={b.teeth} onChange={v => patch(b.uid, { teeth: v })} /></div>
-            <div>
-              <Label optional>Delivery date</Label>
-              <Input type="date" value={b.returnBy} min={plusDays(1)} onChange={e => patch(b.uid, { returnBy: e.target.value })} />
-              <div className="flex gap-2 mt-2">
-                {[7, 10, 14, 21].map(n => (
-                  <button key={n} onClick={() => patch(b.uid, { returnBy: plusDays(n) })}
-                    className={cx('flex-1 h-9 rounded-xl text-[12.5px] font-semibold border transition', b.returnBy === plusDays(n) ? 'border-go-brand bg-go-brand-soft text-go-brand-ink' : 'border-go-line text-go-ink2')}>
-                    +{n} days
-                  </button>
-                ))}
-              </div>
-            </div>
-          </Card>
-        ))}
-        <button onClick={() => setBlocks(bs => [...bs, newBlock()])}
-          className="w-full h-12 -mt-2 rounded-[20px] border-2 border-dashed border-go-line text-go-brand hover:border-go-brand/60 flex items-center justify-center gap-2 text-[14px] font-semibold transition">
-          <PlusCircle className="w-5 h-5" />Add another service
-        </button>
-
-        <div><Label optional>Case instructions</Label><TextArea rows={4} value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="Any specific instructions for the lab…" /></div>
-
-        {/* Pre-filled so the case can go to a lab; change if the prescription says otherwise */}
-        <div className="rounded-2xl bg-go-raised px-4 py-3">
-          <div className="flex items-center gap-3">
-            <p className="flex-1 min-w-0 text-[12.5px] text-go-ink2 leading-snug">
-              Sending to <span className="font-semibold text-go-ink">{lab ? labName(lab) : 'no lab yet'}</span> · prescribed by <span className="font-semibold text-go-ink">{CLINICIANS.find(c => c.id === clinician)!.name}</span>
-            </p>
-            <button onClick={() => setMore(m => !m)} className="text-[12.5px] font-semibold text-go-brand">{more ? 'Done' : 'Change'}</button>
-          </div>
-          {more && (
-            <div className="mt-3 space-y-4">
-              <LabPicker value={lab} onChange={setLab} invalid={bad(lab)} />
-              <PickerField label="Dentist" value={clinician} onChange={setClinician} options={CLINICIANS.map(c => ({ value: c.id, label: c.name, sub: `GDC ${c.gdc}` }))} />
+          ) : (
+            <div className="px-4 pb-3 pt-2 space-y-4">
+              <PickerField label="Practice" value={practice} onChange={v => setPractice(v as PracticeId)} invalid={bad(practice)} options={PRACTICES.map(p => ({ value: p.id, label: p.name }))} />
+              <PickerField label="Dentist" value={clinician} onChange={setClinician} placeholder="Choose a dentist" invalid={bad(clinician) || (rx === 'partial' && !clinician)}
+                options={CLINICIANS.map(c => ({ value: c.id, label: c.name, sub: `GDC ${c.gdc}` }))} />
+              <LabPicker value={lab} onChange={setLab} invalid={bad(lab) || (rx === 'partial' && !lab)} />
+              <Btn block size="md" variant="soft" onClick={() => setMore(false)}>Done</Btn>
             </div>
           )}
-        </div>
+        </Card>
+
+        <PatientPicker value={patientId} onChange={setPatientId} invalid={bad(patientId) || (rx === 'partial' && !patientId)} />
+
+        {/* Service type up front; teeth and delivery date tuck away until expanded */}
+        {blocks.map((b, i) => (
+          <ServiceBlock key={b.uid} b={b} n={blocks.length > 1 ? i + 1 : 0} invalid={tried && !b.itemId} warn={rx === 'partial' && (!b.teeth.length || !b.returnBy)}
+            onChange={p => patch(b.uid, p)} onRemove={blocks.length > 1 ? () => setBlocks(bs => bs.filter(x => x.uid !== b.uid)) : undefined} />
+        ))}
+        <button onClick={() => setBlocks(bs => [...bs, newBlock()])} className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-go-brand px-1">
+          <PlusCircle className="w-4 h-4" />Add another service
+        </button>
+
+        <div><Label optional>Case instructions</Label><TextArea rows={2} className="!py-2" value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="Any specific instructions for the lab…" /></div>
       </div>
       {viewing && <PhotoViewer photo={photo} onClose={() => setViewing(false)} />}
     </Screen>
+  );
+}
+
+const daysUntil = (d: string) => (d ? Math.round((new Date(`${d}T12:00`).getTime() - new Date().setHours(12, 0, 0, 0)) / 864e5) : null);
+
+/** One service: its type always shown; teeth and delivery date behind one collapsed row. */
+function ServiceBlock({ b, n, invalid, warn, onChange, onRemove }: { b: Block; n: number; invalid: boolean; warn?: boolean; onChange: (p: Partial<Block>) => void; onRemove?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const days = daysUntil(b.returnBy);
+  const summary = [b.teeth.length ? b.teeth.join(', ') : 'No teeth chosen', b.returnBy ? `${fmtDate(iso(b.returnBy)!)}${days && days > 0 ? ` · ${days} days` : ''}` : 'No date'].join(' · ');
+  return (
+    <Card className="p-3.5">
+      <div className="flex items-end gap-2">
+        <div className="flex-1 min-w-0">
+          <PickerField label={n ? `Service type ${n}` : 'Service type'} value={b.itemId} onChange={v => onChange({ itemId: v })} placeholder="Choose a service" searchable
+            invalid={invalid} options={SERVICE_OPTIONS} />
+        </div>
+        {onRemove && <button onClick={onRemove} aria-label={`Remove service ${n}`} className="w-[52px] h-[52px] rounded-2xl flex items-center justify-center text-go-muted hover:text-go-bad hover:bg-go-bad-soft"><Trash className="w-5 h-5" /></button>}
+      </div>
+      <button onClick={() => setOpen(o => !o)} aria-expanded={open} className="mt-2.5 w-full flex items-center gap-2 rounded-xl bg-go-raised px-3 py-2 text-left">
+        <span className="flex-1 min-w-0">
+          <span className="block text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Teeth and delivery</span>
+          <span className={cx('block text-[12.5px] truncate mt-0.5', warn ? 'text-go-warn font-medium' : 'text-go-ink2')}>{warn ? 'Teeth or date not found. Tap to add' : summary}</span>
+        </span>
+        <ChevronDown className={cx('w-4 h-4 text-go-muted transition-transform flex-shrink-0', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="mt-4 space-y-4">
+          <div><Label optional>Teeth or arch</Label><ToothPicker value={b.teeth} onChange={v => onChange({ teeth: v })} /></div>
+          <div>
+            <Label optional>Delivery date</Label>
+            <div className="flex gap-2">
+              <Input type="date" aria-label="Delivery date" value={b.returnBy} min={plusDays(1)} onChange={e => onChange({ returnBy: e.target.value })} className="flex-1 min-w-0" />
+              <label className="flex items-center gap-1.5 h-[52px] pl-3 pr-3 rounded-2xl bg-go-surface border border-go-line focus-within:border-go-brand focus-within:ring-4 focus-within:ring-go-brand/15 transition">
+                <span className="text-[13px] text-go-muted">In</span>
+                <input type="number" inputMode="numeric" min={1} max={365} aria-label="Delivery in how many days" placeholder="14"
+                  value={days !== null && days > 0 ? days : ''}
+                  onChange={e => { const v = parseInt(e.target.value, 10); onChange({ returnBy: v > 0 ? plusDays(Math.min(v, 365)) : '' }); }}
+                  className="w-10 bg-transparent outline-none text-[15px] text-go-ink text-center tabular-nums" />
+                <span className="text-[13px] text-go-muted">days</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 

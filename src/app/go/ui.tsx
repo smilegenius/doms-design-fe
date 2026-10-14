@@ -5,7 +5,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronDown, Check, Search, X, Home, Layers, Plus, Receipt, Wallet, User, CheckCircle2, AlertTriangle, Info, Camera, PenLine, Mic,
+  ChevronLeft, ChevronDown, Check, Search, X, Home, Layers, Plus, Receipt, Wallet, User, Truck, PackageCheck, CheckCircle2, AlertTriangle, Info, Camera, PenLine, Mic,
 } from './icons';
 import { FEATURES, useGo, useScoped } from './store';
 import { LabCase, ReadinessLevel, STAGES, Stage, invoiceNeedsAction, isOverdue, readiness, stageIndex, stageLabel } from './data';
@@ -33,6 +33,11 @@ export function Screen({ header, children, footer, tabs, bg = 'bg-transparent' }
       {tabs && (tabs === true ? <TabBar /> : tabs)}
     </div>
   );
+}
+
+/** '/go' for the full app, '/go/lite' inside the light version. Shared screens build their links from it. */
+export function useBase() {
+  return useLocation().pathname.startsWith('/go/lite') ? '/go/lite' : '/go';
 }
 
 /** Back = browser back when there is history inside the app, else `fallback`. */
@@ -89,6 +94,54 @@ export function IconBtn({ children, onClick, label, badge }: { children: React.R
 // ─── Tab bar ────────────────────────────────────────────────────────────────
 
 export function TabBar() {
+  return useBase() === '/go' ? <FullTabBar /> : <LiteTabBar />;
+}
+
+/** Light version: Home · Lab work · + · Deliveries (to dispatch, arriving, received) · Me. The + goes straight to the prescription scan. */
+function LiteTabBar() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const { cases } = useScoped();
+  const toDispatch = cases.filter(c => c.stage === 'ready' && !c.onHold).length;
+  const arriving = cases.filter(c => c.stage === 'shipped').length;
+  const L = '/go/lite';
+  const tabs = [
+    { to: `${L}/home`, label: 'Home', icon: Home },
+    { to: `${L}/work`, label: 'Lab work', icon: Layers },
+    null,
+    { to: `${L}/deliveries`, label: 'Deliveries', icon: Truck, badge: toDispatch + arriving, also: `${L}/dispatch` },
+    { to: `${L}/account`, label: 'Me', icon: User },
+  ];
+  return (
+    <nav className="go-tabbar absolute bottom-0 inset-x-0 z-20 px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-2 pointer-events-none">
+      <div className="pointer-events-auto relative flex items-center justify-around h-16 rounded-[26px] bg-go-surface/80 backdrop-blur-2xl border border-go-line go-card-shadow">
+        {tabs.map(t => {
+          if (!t) {
+            return (
+              <button key="new" onClick={() => navigate(`${L}/new`)} aria-label="Create lab work"
+                className="-mt-7 w-14 h-14 rounded-[20px] go-grad go-glow text-white flex items-center justify-center active:scale-95 transition ring-4 ring-go-bg">
+                <Plus className="w-6 h-6" strokeWidth={2.5} />
+              </button>
+            );
+          }
+          const active = pathname.startsWith(t.to) || (!!t.also && pathname.startsWith(t.also));
+          const Icon = t.icon;
+          return (
+            <button key={t.to} onClick={() => navigate(t.to)} className="relative flex-1 flex flex-col items-center gap-0.5 py-1">
+              <span className={cx('relative flex items-center justify-center w-10 h-7 rounded-full transition', active && 'bg-go-brand-soft')}>
+                <Icon className={cx('w-[20px] h-[20px] transition', active ? 'text-go-brand' : 'text-go-muted')} />
+                {!!t.badge && <span className="absolute -top-1 right-0 min-w-[16px] h-4 px-1 rounded-full bg-go-bad text-white text-[9px] font-bold flex items-center justify-center">{t.badge}</span>}
+              </span>
+              <span className={cx('text-[10px] font-semibold', active ? 'text-go-brand' : 'text-go-muted')}>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function FullTabBar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { invoices } = useScoped();

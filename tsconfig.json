@@ -16,6 +16,6 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  "include": ["src", "SALES Feedbacks/vite-env.d.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
