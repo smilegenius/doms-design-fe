@@ -133,6 +133,7 @@ const LITE_JUMPS: Jump[] = [
   { group: 'Create', label: 'Create from prescription', to: `${LITE}/new`, scenarios: [
     { label: 'Everything read from the prescription', to: `${LITE}/new` },
     { label: 'Some details not found', to: `${LITE}/new?rx=partial` },
+    { label: 'Several services detected', to: `${LITE}/new?rx=multi` },
   ] },
   { group: 'Deliveries', label: 'Deliveries', to: `${LITE}/deliveries`, scenarios: [
     { label: 'To dispatch', to: `${LITE}/deliveries` },

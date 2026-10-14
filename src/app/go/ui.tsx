@@ -97,7 +97,7 @@ export function TabBar() {
   return useBase() === '/go' ? <FullTabBar /> : <LiteTabBar />;
 }
 
-/** Light version: Home · Lab work · + · Deliveries (to dispatch, arriving, received) · Me. The + goes straight to the prescription scan. */
+/** Light version: Home · Deliveries (to dispatch, arriving, received) · + · Lab work · Me. The + goes straight to the prescription scan. */
 function LiteTabBar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -107,9 +107,9 @@ function LiteTabBar() {
   const L = '/go/lite';
   const tabs = [
     { to: `${L}/home`, label: 'Home', icon: Home },
-    { to: `${L}/work`, label: 'Lab work', icon: Layers },
-    null,
     { to: `${L}/deliveries`, label: 'Deliveries', icon: Truck, badge: toDispatch + arriving, also: `${L}/dispatch` },
+    null,
+    { to: `${L}/work`, label: 'Lab work', icon: Layers },
     { to: `${L}/account`, label: 'Me', icon: User },
   ];
   return (

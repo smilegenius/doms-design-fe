@@ -6,13 +6,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Building2, Check, CheckCircle2, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
+  AlertTriangle, Building2, Check, CheckCircle2, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
 } from '../icons';
 import { ME, useGo, useScoped } from '../store';
 import {
-  CLINICIANS, LabCase, clinicianName, practiceName, PRACTICES, PracticeId, SERVICE_CATEGORIES, caseTitle, fmtDate, initials, labName, patientById, shortName,
+  CLINICIANS, LabCase, clinicianName, practiceName, PRACTICES, PracticeId, SERVICE_CATEGORIES, caseTitle, fmtDate, initials, labName, patientById, serviceLabel, shortName,
 } from '../data';
-import { Btn, Card, EmptyState, GoMark, Input, Label, PickerField, Pill, Screen, Segmented, TextArea, TopBar, cx, useBack } from '../ui';
+import { Btn, Card, EmptyState, GoMark, Input, Label, PickerField, Pill, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, cx, useBack } from '../ui';
 import { CaseForm, FormItem, LabPicker, PatientPicker, ToothPicker, buildCase, emptyForm, newItem } from '../screens/ManualCase';
 import { PaperRx } from '../screens/ReadSource';
 import { PracticeSwitcher, StatusTiles } from '../screens/Home';
@@ -182,7 +182,7 @@ function PhotoViewer({ photo, onClose }: { photo: Photo; onClose: () => void }) 
   const [zoom, setZoom] = useState(false);
   if (!sheetRoot) return null;
   return createPortal(
-    <div role="dialog" aria-modal="true" aria-label="Prescription photo" className="absolute inset-0 z-50 bg-[#05050B] text-white flex flex-col go-fade-in">
+    <div role="dialog" aria-modal="true" aria-label="Prescription photo" className="absolute inset-0 z-50 bg-[#05050B] text-white flex flex-col go-fade-in sm:pt-[50px]">
       <div className="flex items-center justify-between px-4 h-14 flex-shrink-0">
         <button onClick={onClose} aria-label="Close" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center"><X className="w-5 h-5" /></button>
         <span className="text-[15px] font-semibold">Prescription</span>
@@ -205,18 +205,22 @@ const newBlock = (): Block => ({ uid: `b${++blockSeq}`, itemId: null, teeth: [],
 
 const SERVICE_OPTIONS = SERVICE_CATEGORIES.flatMap(cat => cat.items.map(s => ({ value: s.id, label: s.label, sub: cat.label })));
 
-/** What the scan found on the prescription. 'clean' = everything read; 'partial' = some details missing or unclear. */
-export type RxScenario = 'clean' | 'partial';
+/** What the scan found on the prescription.
+ *  clean = everything read · partial = some details missing · multi = several services detected. */
+export type RxScenario = 'clean' | 'partial' | 'multi';
 interface Read { practice: PracticeId | null; clinician: string | null; lab: string | null; patientId: string | null; blocks: Block[]; instructions: string }
-const readPrescription = (rx: RxScenario): Read => rx === 'clean'
+const blockOf = (itemId: string | null, teeth: string[], days: number): Block => ({ uid: `b${++blockSeq}`, itemId, teeth, returnBy: days ? plusDays(days) : '' });
+const readPrescription = (rx: RxScenario): Read => rx === 'partial'
   ? {
-    practice: 'cds', clinician: 'reed', lab: 'northstar', patientId: 'P-10231', instructions: 'Light contacts. Match adjacent LL4 shade.',
-    blocks: [{ uid: `b${++blockSeq}`, itemId: 'su-crown', teeth: ['LL5'], returnBy: plusDays(14) }],
-  }
-  : {
     // Handwriting unclear: no dentist, lab or patient, and no teeth or date
     practice: 'cds', clinician: null, lab: null, patientId: null, instructions: '',
-    blocks: [{ uid: `b${++blockSeq}`, itemId: 'su-crown', teeth: [], returnBy: '' }],
+    blocks: [blockOf('su-crown', [], 0)],
+  }
+  : {
+    practice: 'cds', clinician: 'reed', lab: 'northstar', patientId: 'P-10231', instructions: 'Light contacts. Match adjacent LL4 shade.',
+    blocks: rx === 'multi'
+      ? [blockOf('su-crown', ['LL5'], 14), blockOf('br-pontic', ['LL6'], 14), blockOf('ap-night-guard', ['Upper arch'], 21), blockOf('or-clear-aligners', ['Both arches'], 28)]
+      : [blockOf('su-crown', ['LL5'], 14)],
   };
 
 /** Scanning screen: the prescription is read and the form is filled in. */
@@ -248,22 +252,97 @@ function Scanning({ photo, onDone }: { photo: Photo; onDone: () => void }) {
   );
 }
 
-/** One line of the practice · dentist · lab card. */
+/** One line of a card: icon · label · value · tick (or warning) · arrow. Tap to change in a bottom sheet. */
 function DetailRow({ icon, label, value, onClick }: { icon: React.ReactNode; label: string; value: string | null; onClick: () => void }) {
   return (
-    <button onClick={onClick} className="w-full flex items-center gap-3 px-4 py-1.5 text-left">
+    <button onClick={onClick} className="w-full flex items-center gap-3 px-4 py-1.5 text-left active:bg-go-raised transition">
       <span className={cx('w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0', value ? 'bg-go-brand-soft text-go-brand' : 'bg-go-warn-soft text-go-warn')}>{icon}</span>
       <span className="w-[58px] text-[12px] text-go-muted flex-shrink-0">{label}</span>
-      <span className={cx('flex-1 min-w-0 truncate text-[14px]', value ? 'font-semibold text-go-ink' : 'font-medium text-go-warn')}>{value ?? 'Not found · choose'}</span>
-      {value ? <CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-go-warn flex-shrink-0" />}
+      {value
+        ? <span className="flex-1 min-w-0 truncate text-[14px] font-semibold text-go-ink">{value}</span>
+        : <span className="flex-1 min-w-0 inline-flex items-center gap-1 text-[12.5px] font-medium text-go-warn"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />Not found</span>}
+      {value && <CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" />}
+      <ChevronRight className={cx('w-4 h-4 flex-shrink-0', value ? 'text-go-faint' : 'text-go-warn')} />
     </button>
   );
 }
 
+/** A short list in a bottom sheet (practice, dentist). */
+function OptionSheet({ open, onClose, title, options, value, onChange }: {
+  open: boolean; onClose: () => void; title: string; options: { value: string; label: string; sub?: string }[]; value: string | null; onChange: (v: string) => void;
+}) {
+  const [q, setQ] = useState('');
+  const shown = options.filter(o => `${o.label} ${o.sub ?? ''}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const close = () => { setQ(''); onClose(); };
+  return (
+    <Sheet open={open} onClose={close} title={title}>
+      <div className="sticky top-0 bg-go-surface pb-3 z-10"><SearchBox value={q} onChange={setQ} placeholder={`Search ${title.toLowerCase()}`} /></div>
+      <div className="space-y-1">
+        {shown.map(o => (
+          <button key={o.value} onClick={() => { onChange(o.value); close(); }}
+            className={cx('w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-left transition', o.value === value ? 'bg-go-brand-soft' : 'hover:bg-go-raised')}>
+            <span className="flex-1 min-w-0">
+              <span className="block text-[15px] font-medium text-go-ink">{o.label}</span>
+              {o.sub && <span className="block text-[12px] text-go-muted mt-0.5">{o.sub}</span>}
+            </span>
+            {o.value === value && <Check className="w-5 h-5 text-go-brand" strokeWidth={2.5} />}
+          </button>
+        ))}
+        {!shown.length && <p className="text-center text-[13px] text-go-muted py-8">Nothing found</p>}
+      </div>
+    </Sheet>
+  );
+}
+
+const daysUntil = (d: string) => (d ? Math.round((new Date(`${d}T12:00`).getTime() - new Date().setHours(12, 0, 0, 0)) / 864e5) : null);
+const shortDate = (d: string) => new Date(`${d}T12:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+
+/** Edit one service in a bottom sheet: type (searchable), teeth, delivery date or days. */
+function ServiceEditSheet({ block, isNew, canRemove, onSave, onRemove, onClose }: {
+  block: Block | null; isNew: boolean; canRemove: boolean; onSave: (b: Block) => void; onRemove: () => void; onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<Block | null>(block);
+  const [last, setLast] = useState<Block | null>(null);
+  if (block !== last) { setLast(block); setDraft(block); } // reset each time a different service is opened
+  if (!block || !draft) return null;
+  const set = (p: Partial<Block>) => setDraft(d => (d ? { ...d, ...p } : d));
+  const days = daysUntil(draft.returnBy);
+  return (
+    <Sheet open onClose={onClose} tall title={isNew ? 'Add a service' : 'Edit service'} sub="Service type, teeth and delivery date."
+      footer={(
+        <div className="flex gap-2">
+          {canRemove && !isNew && <Btn variant="secondary" className="!px-4" icon={<Trash className="w-5 h-5" />} onClick={onRemove}>Remove</Btn>}
+          <Btn block disabled={!draft.itemId || !draft.returnBy} onClick={() => onSave(draft)}>{!draft.itemId ? 'Choose a service' : !draft.returnBy ? 'Choose a delivery date' : 'Save service'}</Btn>
+        </div>
+      )}>
+      <div className="space-y-5">
+        <PickerField label="Service type" value={draft.itemId} onChange={v => set({ itemId: v })} placeholder="Choose a service" searchable options={SERVICE_OPTIONS} />
+        <div>
+          <Label>Delivery date</Label>
+          <div className="flex gap-2">
+            <Input type="date" aria-label="Delivery date" value={draft.returnBy} min={plusDays(1)} onChange={e => set({ returnBy: e.target.value })} className="flex-1 min-w-0" />
+            <label className="flex items-center gap-1.5 h-[52px] px-3 rounded-2xl bg-go-surface border border-go-line focus-within:border-go-brand focus-within:ring-4 focus-within:ring-go-brand/15 transition">
+              <span className="text-[13px] text-go-muted">In</span>
+              <input type="number" inputMode="numeric" min={1} max={365} aria-label="Delivery in how many days" placeholder="14"
+                value={days !== null && days > 0 ? days : ''}
+                onChange={e => { const v = parseInt(e.target.value, 10); set({ returnBy: v > 0 ? plusDays(Math.min(v, 365)) : '' }); }}
+                className="w-10 bg-transparent outline-none text-[15px] text-go-ink text-center tabular-nums" />
+              <span className="text-[13px] text-go-muted">days</span>
+            </label>
+          </div>
+        </div>
+        <div><Label optional>Teeth or arch</Label><ToothPicker value={draft.teeth} onChange={v => set({ teeth: v })} /></div>
+      </div>
+    </Sheet>
+  );
+}
+
+type Edit = 'practice' | 'dentist' | 'lab' | 'patient';
+
 export function LiteCreate() {
   const { addCase, toast } = useGo();
-  const navigate = useNavigate();
-  const rx: RxScenario = new URLSearchParams(useLocation().search).get('rx') === 'partial' ? 'partial' : 'clean';
+  const rxParam = new URLSearchParams(useLocation().search).get('rx');
+  const rx: RxScenario = rxParam === 'partial' || rxParam === 'multi' ? rxParam : 'clean';
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [scanned, setScanned] = useState(false);
   const [viewing, setViewing] = useState(false);
@@ -273,11 +352,12 @@ export function LiteCreate() {
   const [instructions, setInstructions] = useState('');
   const [lab, setLab] = useState<string | null>(null);
   const [clinician, setClinician] = useState<string | null>(null);
-  const [more, setMore] = useState(false);
+  const [edit, setEdit] = useState<Edit | null>(null);
+  const [svc, setSvc] = useState<{ block: Block; isNew: boolean } | null>(null);
   const [tried, setTried] = useState(false);
   const [created, setCreated] = useState<LabCase | null>(null);
 
-  const reset = () => { setCreated(null); setPhoto(null); setScanned(false); setMore(false); setTried(false); };
+  const reset = () => { setCreated(null); setPhoto(null); setScanned(false); setEdit(null); setSvc(null); setTried(false); };
   const applyRead = () => {
     const r = readPrescription(rx);
     setPractice(r.practice); setClinician(r.clinician); setLab(r.lab); setPatientId(r.patientId); setBlocks(r.blocks); setInstructions(r.instructions);
@@ -289,12 +369,15 @@ export function LiteCreate() {
   if (!photo) return <CameraView onShot={setPhoto} />;
   if (!scanned) return <Scanning photo={photo} onDone={doneScanning} />;
 
-  const patch = (uid: string, p: Partial<Block>) => setBlocks(bs => bs.map(b => (b.uid === uid ? { ...b, ...p } : b)));
-  const bad = (v: unknown) => tried && !v;
-  const notFound = [!patientId && 'patient', !clinician && 'dentist', !lab && 'lab', !practice && 'practice', blocks.some(b => !b.itemId) && 'service'].filter(Boolean) as string[];
+  const notFound = [!practice && 'practice', !clinician && 'dentist', !lab && 'lab', !patientId && 'patient', blocks.some(b => !b.itemId || !b.returnBy) && 'service'].filter(Boolean) as string[];
 
   const submit = () => {
-    if (notFound.length) { setTried(true); if (!clinician || !lab || !practice) setMore(true); return; }
+    if (notFound.length) {
+      setTried(true);
+      const first = !practice ? 'practice' : !clinician ? 'dentist' : !lab ? 'lab' : !patientId ? 'patient' : null;
+      if (first) setEdit(first); else setSvc({ block: blocks.find(b => !b.itemId || !b.returnBy)!, isNew: false });
+      return;
+    }
     const items: FormItem[] = blocks.map(b => newItem(b.itemId!, { teeth: b.teeth, returnBy: b.returnBy }));
     const form: CaseForm = { ...emptyForm(), practice, clinician, patientId, lab, instructions: instructions.trim(), caseSource: 'Photo of lab form', attachments: [photo.name], items };
     const built = buildCase(form, 'photo');
@@ -311,7 +394,12 @@ export function LiteCreate() {
     setCreated(c);
   };
 
+  const saveService = (b: Block) => {
+    setBlocks(bs => (bs.some(x => x.uid === b.uid) ? bs.map(x => (x.uid === b.uid ? b : x)) : [...bs, b]));
+    setSvc(null);
+  };
   const unclear = rx === 'partial' && (!patientId || !clinician || !lab);
+  const patient = patientId ? patientById(patientId) : null;
   return (
     <Screen
       header={<TopBar back fallback={`${LITE}/home`} title="Create lab work" sub="From the prescription" />}
@@ -336,86 +424,50 @@ export function LiteCreate() {
           </button>
         </Card>
 
-        {/* Practice · dentist · lab: one card, three lines. Change opens the pickers. */}
+        {/* Practice · dentist · lab · patient: one card. Tap a line to change it in a bottom sheet. */}
         <Card className="overflow-hidden py-0.5">
-          {!more ? (
-            <div className="relative">
-              <DetailRow icon={<Building2 className="w-4 h-4" />} label="Practice" value={practice ? practiceName(practice) : null} onClick={() => setMore(true)} />
-              <DetailRow icon={<User className="w-4 h-4" />} label="Dentist" value={clinician ? clinicianName(clinician) : null} onClick={() => setMore(true)} />
-              <DetailRow icon={<FlaskConical className="w-4 h-4" />} label="Lab" value={lab ? labName(lab) : null} onClick={() => setMore(true)} />
-            </div>
-          ) : (
-            <div className="px-4 pb-3 pt-2 space-y-4">
-              <PickerField label="Practice" value={practice} onChange={v => setPractice(v as PracticeId)} invalid={bad(practice)} options={PRACTICES.map(p => ({ value: p.id, label: p.name }))} />
-              <PickerField label="Dentist" value={clinician} onChange={setClinician} placeholder="Choose a dentist" invalid={bad(clinician) || (rx === 'partial' && !clinician)}
-                options={CLINICIANS.map(c => ({ value: c.id, label: c.name, sub: `GDC ${c.gdc}` }))} />
-              <LabPicker value={lab} onChange={setLab} invalid={bad(lab) || (rx === 'partial' && !lab)} />
-              <Btn block size="md" variant="soft" onClick={() => setMore(false)}>Done</Btn>
-            </div>
-          )}
+          <DetailRow icon={<Building2 className="w-4 h-4" />} label="Practice" value={practice ? practiceName(practice) : null} onClick={() => setEdit('practice')} />
+          <DetailRow icon={<User className="w-4 h-4" />} label="Dentist" value={clinician ? clinicianName(clinician) : null} onClick={() => setEdit('dentist')} />
+          <DetailRow icon={<FlaskConical className="w-4 h-4" />} label="Lab" value={lab ? labName(lab) : null} onClick={() => setEdit('lab')} />
+          <DetailRow icon={patient ? <span className="text-[9.5px] font-bold">{initials(patient.name)}</span> : <User className="w-4 h-4" />} label="Patient"
+            value={patient ? patient.name : null} onClick={() => setEdit('patient')} />
         </Card>
 
-        <PatientPicker value={patientId} onChange={setPatientId} invalid={bad(patientId) || (rx === 'partial' && !patientId)} />
-
-        {/* Service type up front; teeth and delivery date tuck away until expanded */}
-        {blocks.map((b, i) => (
-          <ServiceBlock key={b.uid} b={b} n={blocks.length > 1 ? i + 1 : 0} invalid={tried && !b.itemId} warn={rx === 'partial' && (!b.teeth.length || !b.returnBy)}
-            onChange={p => patch(b.uid, p)} onRemove={blocks.length > 1 ? () => setBlocks(bs => bs.filter(x => x.uid !== b.uid)) : undefined} />
-        ))}
-        <button onClick={() => setBlocks(bs => [...bs, newBlock()])} className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-go-brand px-1">
-          <PlusCircle className="w-4 h-4" />Add another service
-        </button>
+        {/* Services: one line each, name and delivery date. Tap to edit in a bottom sheet. */}
+        <Card className="overflow-hidden py-0.5">
+          <p className="px-4 pt-2 pb-0.5 text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Services{blocks.length > 1 ? ` · ${blocks.length}` : ''}</p>
+          {blocks.map((b, i) => (
+            <button key={b.uid} onClick={() => setSvc({ block: b, isNew: false })} className="w-full flex items-center gap-3 px-4 py-2 text-left active:bg-go-raised transition">
+              <span className={cx('w-6 h-6 rounded-lg text-[11px] font-bold flex items-center justify-center flex-shrink-0', b.itemId ? 'bg-go-brand-soft text-go-brand' : 'bg-go-warn-soft text-go-warn')}>{i + 1}</span>
+              <span className="flex-1 min-w-0 truncate">
+                {b.itemId
+                  ? <><span className="text-[14px] font-semibold text-go-ink">{serviceLabel(b.itemId)}</span>{b.teeth.length > 0 && <span className="text-[12px] text-go-muted"> · {b.teeth.join(', ')}</span>}</>
+                  : <span className="text-[14px] font-medium text-go-warn">Choose a service</span>}
+              </span>
+              <span className={cx('text-[12.5px] flex-shrink-0', b.returnBy ? 'text-go-ink2' : 'text-go-warn font-medium')}>{b.returnBy ? shortDate(b.returnBy) : 'No date'}</span>
+              {b.itemId && b.returnBy && <CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" />}
+              <ChevronRight className={cx('w-4 h-4 flex-shrink-0', b.itemId && b.returnBy ? 'text-go-faint' : 'text-go-warn')} />
+            </button>
+          ))}
+          <div className="px-3 pt-1.5 pb-2.5">
+            <Btn block size="md" variant="secondary" icon={<PlusCircle className="w-4 h-4 text-go-brand" />} onClick={() => setSvc({ block: newBlock(), isNew: true })}>Add another service</Btn>
+          </div>
+        </Card>
 
         <div><Label optional>Case instructions</Label><TextArea rows={2} className="!py-2" value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="Any specific instructions for the lab…" /></div>
       </div>
+
       {viewing && <PhotoViewer photo={photo} onClose={() => setViewing(false)} />}
+
+      <OptionSheet open={edit === 'practice'} onClose={() => setEdit(null)} title="Practice" value={practice} onChange={v => setPractice(v as PracticeId)}
+        options={PRACTICES.map(p => ({ value: p.id, label: p.name, sub: p.area }))} />
+      <OptionSheet open={edit === 'dentist'} onClose={() => setEdit(null)} title="Dentist" value={clinician} onChange={setClinician}
+        options={CLINICIANS.map(c => ({ value: c.id, label: c.name, sub: `GDC ${c.gdc}` }))} />
+      <LabPicker bare value={lab} onChange={setLab} open={edit === 'lab'} onOpenChange={o => !o && setEdit(null)} />
+      <PatientPicker bare value={patientId} onChange={setPatientId} open={edit === 'patient'} onOpenChange={o => !o && setEdit(null)} />
+      <ServiceEditSheet block={svc?.block ?? null} isNew={svc?.isNew ?? false} canRemove={blocks.length > 1} onSave={saveService} onClose={() => setSvc(null)}
+        onRemove={() => { setBlocks(bs => bs.filter(x => x.uid !== svc!.block.uid)); setSvc(null); }} />
     </Screen>
-  );
-}
-
-const daysUntil = (d: string) => (d ? Math.round((new Date(`${d}T12:00`).getTime() - new Date().setHours(12, 0, 0, 0)) / 864e5) : null);
-
-/** One service: its type always shown; teeth and delivery date behind one collapsed row. */
-function ServiceBlock({ b, n, invalid, warn, onChange, onRemove }: { b: Block; n: number; invalid: boolean; warn?: boolean; onChange: (p: Partial<Block>) => void; onRemove?: () => void }) {
-  const [open, setOpen] = useState(false);
-  const days = daysUntil(b.returnBy);
-  const summary = [b.teeth.length ? b.teeth.join(', ') : 'No teeth chosen', b.returnBy ? `${fmtDate(iso(b.returnBy)!)}${days && days > 0 ? ` · ${days} days` : ''}` : 'No date'].join(' · ');
-  return (
-    <Card className="p-3.5">
-      <div className="flex items-end gap-2">
-        <div className="flex-1 min-w-0">
-          <PickerField label={n ? `Service type ${n}` : 'Service type'} value={b.itemId} onChange={v => onChange({ itemId: v })} placeholder="Choose a service" searchable
-            invalid={invalid} options={SERVICE_OPTIONS} />
-        </div>
-        {onRemove && <button onClick={onRemove} aria-label={`Remove service ${n}`} className="w-[52px] h-[52px] rounded-2xl flex items-center justify-center text-go-muted hover:text-go-bad hover:bg-go-bad-soft"><Trash className="w-5 h-5" /></button>}
-      </div>
-      <button onClick={() => setOpen(o => !o)} aria-expanded={open} className="mt-2.5 w-full flex items-center gap-2 rounded-xl bg-go-raised px-3 py-2 text-left">
-        <span className="flex-1 min-w-0">
-          <span className="block text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Teeth and delivery</span>
-          <span className={cx('block text-[12.5px] truncate mt-0.5', warn ? 'text-go-warn font-medium' : 'text-go-ink2')}>{warn ? 'Teeth or date not found. Tap to add' : summary}</span>
-        </span>
-        <ChevronDown className={cx('w-4 h-4 text-go-muted transition-transform flex-shrink-0', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <div className="mt-4 space-y-4">
-          <div><Label optional>Teeth or arch</Label><ToothPicker value={b.teeth} onChange={v => onChange({ teeth: v })} /></div>
-          <div>
-            <Label optional>Delivery date</Label>
-            <div className="flex gap-2">
-              <Input type="date" aria-label="Delivery date" value={b.returnBy} min={plusDays(1)} onChange={e => onChange({ returnBy: e.target.value })} className="flex-1 min-w-0" />
-              <label className="flex items-center gap-1.5 h-[52px] pl-3 pr-3 rounded-2xl bg-go-surface border border-go-line focus-within:border-go-brand focus-within:ring-4 focus-within:ring-go-brand/15 transition">
-                <span className="text-[13px] text-go-muted">In</span>
-                <input type="number" inputMode="numeric" min={1} max={365} aria-label="Delivery in how many days" placeholder="14"
-                  value={days !== null && days > 0 ? days : ''}
-                  onChange={e => { const v = parseInt(e.target.value, 10); onChange({ returnBy: v > 0 ? plusDays(Math.min(v, 365)) : '' }); }}
-                  className="w-10 bg-transparent outline-none text-[15px] text-go-ink text-center tabular-nums" />
-                <span className="text-[13px] text-go-muted">days</span>
-              </label>
-            </div>
-          </div>
-        </div>
-      )}
-    </Card>
   );
 }
 
