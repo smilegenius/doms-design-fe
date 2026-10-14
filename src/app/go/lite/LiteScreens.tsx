@@ -12,7 +12,7 @@ import { ME, useGo, useScoped } from '../store';
 import {
   CLINICIANS, LabCase, clinicianName, practiceName, PRACTICES, PracticeId, SERVICE_CATEGORIES, caseTitle, fmtDate, initials, labName, patientById, serviceLabel, shortName,
 } from '../data';
-import { Btn, Card, EmptyState, GoMark, Input, Label, PickerField, Pill, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, cx, useBack } from '../ui';
+import { Btn, Card, EmptyState, GoMark, Input, Label, PickerField, Pill, Screen, SearchBox, Segmented, Sheet, TextArea, Toggle, TopBar, cx, useBack } from '../ui';
 import { CaseForm, FormItem, LabPicker, PatientPicker, ToothPicker, buildCase, emptyForm, newItem } from '../screens/ManualCase';
 import { PaperRx } from '../screens/ReadSource';
 import { PracticeSwitcher, StatusTiles } from '../screens/Home';
@@ -318,15 +318,30 @@ function ConfirmSheet({ info, onRemember, onOnce, onDifferent, onClose }: {
   );
 }
 
+/** Top of a picker opened from "It's a different …": what the prescription says, and whether to remember the new choice. */
+function RememberHeader({ kind, written, on, onChange }: { kind: string; written: string; on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="mb-3 rounded-2xl border border-go-line bg-go-raised p-3.5">
+      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">On the prescription</p>
+      <p className="text-[16px] font-semibold text-go-ink mt-0.5">“{written}”</p>
+      <div className="mt-3 flex items-center gap-3">
+        <span className="flex-1 min-w-0 text-[13px] text-go-ink2 leading-snug">Remember “{written}” as the {kind} I choose</span>
+        <Toggle on={on} onChange={onChange} label={`Remember “${written}” as the ${kind} I choose`} />
+      </div>
+    </div>
+  );
+}
+
 /** A short list in a bottom sheet (practice, dentist). */
-function OptionSheet({ open, onClose, title, options, value, onChange }: {
-  open: boolean; onClose: () => void; title: string; options: { value: string; label: string; sub?: string }[]; value: string | null; onChange: (v: string) => void;
+function OptionSheet({ open, onClose, title, options, value, onChange, header }: {
+  open: boolean; onClose: () => void; title: string; options: { value: string; label: string; sub?: string }[]; value: string | null; onChange: (v: string) => void; header?: React.ReactNode;
 }) {
   const [q, setQ] = useState('');
   const shown = options.filter(o => `${o.label} ${o.sub ?? ''}`.toLowerCase().includes(q.trim().toLowerCase()));
   const close = () => { setQ(''); onClose(); };
   return (
     <Sheet open={open} onClose={close} title={title}>
+      {header}
       <div className="sticky top-0 bg-go-surface pb-3 z-10"><SearchBox value={q} onChange={setQ} placeholder={`Search ${title.toLowerCase()}`} /></div>
       <div className="space-y-1">
         {shown.map(o => (
@@ -349,8 +364,8 @@ const daysUntil = (d: string) => (d ? Math.round((new Date(`${d}T12:00`).getTime
 const shortDate = (d: string) => new Date(`${d}T12:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 
 /** Edit one service in a bottom sheet: type (searchable), teeth, delivery date or days. */
-function ServiceEditSheet({ block, isNew, canRemove, onSave, onRemove, onClose }: {
-  block: Block | null; isNew: boolean; canRemove: boolean; onSave: (b: Block) => void; onRemove: () => void; onClose: () => void;
+function ServiceEditSheet({ block, isNew, canRemove, onSave, onRemove, onClose, header }: {
+  block: Block | null; isNew: boolean; canRemove: boolean; onSave: (b: Block) => void; onRemove: () => void; onClose: () => void; header?: React.ReactNode;
 }) {
   const [draft, setDraft] = useState<Block | null>(block);
   const [last, setLast] = useState<Block | null>(null);
@@ -367,6 +382,7 @@ function ServiceEditSheet({ block, isNew, canRemove, onSave, onRemove, onClose }
         </div>
       )}>
       <div className="space-y-5">
+        {header}
         <PickerField label="Service type" value={draft.itemId} onChange={v => set({ itemId: v })} placeholder="Choose a service" searchable options={SERVICE_OPTIONS} />
         <div>
           <Label>Delivery date</Label>
@@ -411,6 +427,9 @@ export function LiteCreate() {
   const [unsure, setUnsure] = useState<Set<string>>(new Set());
   const [written, setWritten] = useState<Record<string, string>>({});
   const [confirm, setConfirm] = useState<string | null>(null);
+  // Set when the user said "It's a different …": the picker then shows what the prescription says and offers to remember the choice
+  const [fixing, setFixing] = useState<string | null>(null);
+  const [rememberNext, setRememberNext] = useState(true);
   const search = useLocation().search;
 
   const reset = () => { setCreated(null); setPhoto(null); setScanned(false); setEdit(null); setSvc(null); setTried(false); setConfirm(null); };
@@ -465,7 +484,10 @@ export function LiteCreate() {
   };
 
   const saveService = (b: Block) => {
-    if (blocks.find(x => x.uid === b.uid)?.itemId !== b.itemId) clearUnsure(b.uid); // a different service chosen: nothing left to confirm
+    if (blocks.find(x => x.uid === b.uid)?.itemId !== b.itemId) { // a different service chosen: nothing left to confirm
+      clearUnsure(b.uid);
+      if (b.itemId) finishFix(b.uid, 'service', b.itemId, serviceLabel(b.itemId));
+    }
     setBlocks(bs => (bs.some(x => x.uid === b.uid) ? bs.map(x => (x.uid === b.uid ? b : x)) : [...bs, b]));
     setSvc(null);
   };
@@ -481,8 +503,18 @@ export function LiteCreate() {
     if (rememberIt) { remember(confirmInfo.mem, written[confirm], confirmInfo.id); toast(`Remembered: “${written[confirm]}” = ${confirmInfo.matched}`); }
     clearUnsure(confirm); setConfirm(null);
   };
+  const closeEdit = () => { setEdit(null); setFixing(null); };
+  /** A different practice / dentist / lab / service was chosen: remember what the prescription said, if asked to. */
+  const finishFix = (key: string, kind: MemKind, id: string, label: string) => {
+    if (fixing !== key) return;
+    if (rememberNext && written[key]) { remember(kind, written[key], id); toast(`Remembered: “${written[key]}” = ${label}`); }
+    setFixing(null);
+  };
+  const fixHeader = (key: string, kind: string) => (fixing === key && written[key]
+    ? <RememberHeader kind={kind} written={written[key]} on={rememberNext} onChange={setRememberNext} /> : undefined);
   const differentOne = () => {
     const key = confirm; setConfirm(null);
+    if (key) { setFixing(key); setRememberNext(true); }
     if (key === 'practice' || key === 'dentist' || key === 'lab') setEdit(key);
     else if (confirmBlock) setSvc({ block: confirmBlock, isNew: false });
   };
@@ -548,15 +580,17 @@ export function LiteCreate() {
 
       {viewing && <PhotoViewer photo={photo} onClose={() => setViewing(false)} />}
 
-      <OptionSheet open={edit === 'practice'} onClose={() => setEdit(null)} title="Practice" value={practice} onChange={v => { setPractice(v as PracticeId); clearUnsure('practice'); }}
+      <OptionSheet open={edit === 'practice'} onClose={closeEdit} title="Practice" value={practice} header={fixHeader('practice', 'practice')}
+        onChange={v => { setPractice(v as PracticeId); clearUnsure('practice'); finishFix('practice', 'practice', v, practiceName(v as PracticeId)); }}
         options={PRACTICES.map(p => ({ value: p.id, label: p.name, sub: p.area }))} />
-      <OptionSheet open={edit === 'dentist'} onClose={() => setEdit(null)} title="Dentist" value={clinician} onChange={v => { setClinician(v); clearUnsure('dentist'); }}
+      <OptionSheet open={edit === 'dentist'} onClose={closeEdit} title="Dentist" value={clinician} header={fixHeader('dentist', 'dentist')}
+        onChange={v => { setClinician(v); clearUnsure('dentist'); finishFix('dentist', 'dentist', v, clinicianName(v)); }}
         options={CLINICIANS.map(c => ({ value: c.id, label: c.name, sub: `GDC ${c.gdc}` }))} />
-      <LabPicker bare value={lab} onChange={v => { setLab(v); clearUnsure('lab'); }} open={edit === 'lab'} onOpenChange={o => !o && setEdit(null)} />
-      <PatientPicker bare value={patientId} onChange={setPatientId} open={edit === 'patient'} onOpenChange={o => !o && setEdit(null)} />
+      <LabPicker bare value={lab} header={fixHeader('lab', 'lab')} onChange={v => { setLab(v); clearUnsure('lab'); finishFix('lab', 'lab', v, labName(v)); }} open={edit === 'lab'} onOpenChange={o => !o && closeEdit()} />
+      <PatientPicker bare value={patientId} onChange={setPatientId} open={edit === 'patient'} onOpenChange={o => !o && closeEdit()} />
       <ConfirmSheet info={confirmInfo && confirm ? { kind: confirmInfo.kind, written: written[confirm], matched: confirmInfo.matched } : null}
         onRemember={() => settle(true)} onOnce={() => settle(false)} onDifferent={differentOne} onClose={() => setConfirm(null)} />
-      <ServiceEditSheet block={svc?.block ?? null} isNew={svc?.isNew ?? false} canRemove={blocks.length > 1} onSave={saveService} onClose={() => setSvc(null)}
+      <ServiceEditSheet block={svc?.block ?? null} isNew={svc?.isNew ?? false} canRemove={blocks.length > 1} onSave={saveService} onClose={() => { setSvc(null); setFixing(null); }} header={svc ? fixHeader(svc.block.uid, 'service') : undefined}
         onRemove={() => { setBlocks(bs => bs.filter(x => x.uid !== svc!.block.uid)); setSvc(null); }} />
     </Screen>
   );

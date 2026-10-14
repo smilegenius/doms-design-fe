@@ -401,7 +401,7 @@ export function PatientPicker({ value, onChange, invalid, open: openProp, onOpen
 
 // ─── Lab: search, favourites, or add an offline lab on the spot ─────────────
 
-export function LabPicker({ value, onChange, invalid, open: openProp, onOpenChange, bare }: { value: string | null; onChange: (id: string) => void; invalid?: boolean; open?: boolean; onOpenChange?: (o: boolean) => void; bare?: boolean }) {
+export function LabPicker({ value, onChange, invalid, open: openProp, onOpenChange, bare, header }: { value: string | null; onChange: (id: string) => void; invalid?: boolean; open?: boolean; onOpenChange?: (o: boolean) => void; bare?: boolean; header?: React.ReactNode }) {
   const [openInner, setOpenInner] = useState(false);
   const open = openProp ?? openInner;
   const setOpen = (v: boolean) => { setOpenInner(v); onOpenChange?.(v); };
@@ -450,6 +450,7 @@ export function LabPicker({ value, onChange, invalid, open: openProp, onOpenChan
         ) : undefined}>
         {!creating ? (
           <>
+            {header}
             <div className="sticky top-0 bg-go-surface pb-3 z-10 space-y-2">
               <SearchBox value={q} onChange={setQ} placeholder="Lab name or town" />
               <Segmented value={tab} onChange={setTab} options={[{ value: 'all', label: 'All labs', count: LABS.length }, { value: 'fav', label: 'Favourites', count: favs.length }]} />
