@@ -35,7 +35,7 @@ export function DesignStudioBar() {
           {list.filter(c => DEMO_CASE_IDS.includes(c.caseId)).map(c => (
             <button
               key={c.caseId}
-              onClick={() => navigate(`/lab/cases/${c.caseId}/studio?demo=1`)}
+              onClick={() => navigate(`/growth/cases/${c.caseId}/studio?demo=1`)}
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-[#030213] border border-[#E0E0E6] hover:bg-[#F8F9FC]"
             >
               {c.caseId} · {c.patientName}
@@ -66,7 +66,7 @@ export function StudioCaseDock({ caseId }: { caseId: string }) {
         <p className="text-[11px] text-[#717182]">V{v.number} {STATUS_COPY[v.status]}</p>
       </div>
       <button
-        onClick={() => navigate(`/lab/cases/${caseId}/studio`)}
+        onClick={() => navigate(`/growth/cases/${caseId}/studio`)}
         className="ml-1 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90"
       >
         Open <ArrowRight className="w-3 h-3" />

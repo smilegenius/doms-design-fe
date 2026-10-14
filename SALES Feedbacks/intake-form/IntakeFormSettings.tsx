@@ -148,7 +148,7 @@ export default function IntakeFormSettings() {
 
           <div className={`${card} p-5`}>
             <p className="text-sm font-semibold text-[#030213]">Services on the form</p>
-            <p className="text-xs text-[#717182] mt-0.5 mb-3">Each service asks for the fields you've turned on in <button onClick={() => navigate('/lab/settings?tab=prescription-builder')} className="text-[#4D8EF7] font-medium hover:underline">Prescription Builder</button>.</p>
+            <p className="text-xs text-[#717182] mt-0.5 mb-3">Each service asks for the fields you've turned on in <button onClick={() => navigate('/growth/settings?tab=prescription-builder')} className="text-[#4D8EF7] font-medium hover:underline">Prescription Builder</button>.</p>
             <div className="flex flex-wrap gap-1.5">
               {allServices.map(s => {
                 const on = config.services.includes(s);
@@ -231,7 +231,7 @@ export default function IntakeFormSettings() {
                   <p className="text-sm text-[#030213]"><span className="font-mono font-semibold">{s.ref}</span> · {s.patientName} · {s.service}</p>
                   <p className="text-[11px] text-[#717182]">{s.dentist} · {s.practice}{s.knownPractice ? '' : ' (new practice)'} · {portalDateTime(s.at)}{s.files.length ? ` · ${s.files.length} file${s.files.length === 1 ? '' : 's'}` : ''}{s.notified.length ? ` · emailed ${s.notified.length}` : ''}</p>
                 </div>
-                <button onClick={() => navigate(`/lab/cases/quick-new/${encodeURIComponent(s.caseId)}`)} className={btn}>Review draft</button>
+                <button onClick={() => navigate(`/growth/cases/quick-new/${encodeURIComponent(s.caseId)}`)} className={btn}>Review draft</button>
               </div>
             ))}
           </div>

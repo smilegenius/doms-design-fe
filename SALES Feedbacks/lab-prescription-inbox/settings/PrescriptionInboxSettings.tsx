@@ -120,7 +120,7 @@ export default function PrescriptionInboxSettings() {
             </div>
           </div>
           <button
-            onClick={() => navigate('/lab/settings?tab=notifications&focus=rx-inbox')}
+            onClick={() => navigate('/growth/settings?tab=notifications&focus=rx-inbox')}
             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity flex-shrink-0 self-start sm:self-auto"
           >
             Manage notifications <ArrowRight className="w-3 h-3" />

@@ -54,7 +54,7 @@ export default function PrescriptionInboxBar() {
             )}
             {inbound.length > 0 && (
               <button
-                onClick={() => { resetRxInboxDemo(); toast.success('Prescription inbox demo reset'); navigate('/lab/cases'); }}
+                onClick={() => { resetRxInboxDemo(); toast.success('Prescription inbox demo reset'); navigate('/growth/cases'); }}
                 title="Remove inbox drafts and clear the inbox log"
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-[#5A5568] hover:bg-white/60 transition-colors"
               >
