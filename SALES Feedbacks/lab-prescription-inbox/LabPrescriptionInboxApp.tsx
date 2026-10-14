@@ -21,8 +21,9 @@ import { ensureDesignStudioDemo, syncStudioNotifications, useStudio } from '../d
 import { ensureUploadDemo, syncUploadNotifications, useUploadLinks } from '../upload-links/uploadStore';
 import { removeIntakeDraft, syncIntakeNotifications, useIntake } from '../intake-form/intakeStore';
 import IntakeFilesDock from '../intake-form/IntakeFilesDock';
+import { enterGrowth, leaveGrowth } from '../growthIsolation';
 
-// ─── Lab Portal shell (Sales Feedbacks copy) ─────────────────────────────────
+// ─── Growth Team Feedback: Lab Portal shell (Sales Feedbacks copy, at /growth) ─
 // Mirrors src/app/LabApp.tsx: same URL ↔ page mapping, same Layout, same
 // pages, all imported unchanged. Only three things differ, and all are local
 // to this folder:
@@ -34,12 +35,6 @@ import IntakeFilesDock from '../intake-form/IntakeFilesDock';
 //   • Draft review: inbox drafts get a photo dock that opens the page viewer,
 //     website-form drafts a dock with the files the dentist attached.
 //   • Case page: "Design review" and "Request files" items (sandbox overlay).
-
-// NotificationsPage reads the bell list once when it mounts, so mirror what's
-// already stored before the first render (the effects below add later arrivals).
-syncStudioNotifications();
-syncUploadNotifications();
-syncIntakeNotifications();
 
 type LabPage = 'overview' | 'cases' | 'design-studio' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications';
 
@@ -73,6 +68,15 @@ export default function LabPrescriptionInboxApp() {
   const navigate = useNavigate();
   const { resetVersion } = useRxInbox();
   const studio = useStudio();
+  // Growth Team Feedback only: bring its cases into the shared list, and mirror
+  // its bell entries before the first render (NotificationsPage reads the bell
+  // once on mount). Leaving /growth takes both out again (growthIsolation.ts).
+  useState(() => { enterGrowth(); syncStudioNotifications(); syncUploadNotifications(); syncIntakeNotifications(); return 0; });
+  useEffect(() => {
+    enterGrowth();
+    syncStudioNotifications(); syncUploadNotifications(); syncIntakeNotifications();
+    return () => leaveGrowth();
+  }, []);
 
   // Design Studio demo cases join the real Cases list; submitted reviews reach the bell.
   useEffect(() => { ensureDesignStudioDemo(); syncStudioNotifications(); }, [studio]);
@@ -83,9 +87,9 @@ export default function LabPrescriptionInboxApp() {
   useEffect(() => { syncIntakeNotifications(); }, [intake]);
 
   const parsed = useMemo(() => {
-    const rest = location.pathname.replace(/^\/lab\/?/, '').replace(/\/$/, '');
+    const rest = location.pathname.replace(/^\/growth\/?/, '').replace(/\/$/, '');
     const [segment = '', detailId, draftId] = rest.split('/');
-    // Design Studio: /lab/cases/<id>/studio (reserved segment, like quick-new).
+    // Design Studio: /growth/cases/<id>/studio (reserved segment, like quick-new).
     if (segment === 'cases' && detailId && draftId === 'studio') {
       return { page: 'design-studio' as LabPage, caseId: decodeURIComponent(detailId), invoiceId: undefined, prefillDraftId: undefined };
     }
@@ -118,7 +122,7 @@ export default function LabPrescriptionInboxApp() {
   const setActivePage = (p: LabPage, id?: string) => {
     const base = PAGE_TO_PATH[p];
     const segment = id && (p === 'cases' || p === 'invoices') ? `${base}/${encodeURIComponent(id)}` : base;
-    navigate(segment ? `/lab/${segment}` : '/lab');
+    navigate(segment ? `/growth/${segment}` : '/growth');
   };
 
   const handleNavigate = (page: string) => {
@@ -134,7 +138,7 @@ export default function LabPrescriptionInboxApp() {
   }
 
   if (activePage === 'configuration') {
-    return <Navigate to="/lab/settings?tab=case-scoring" replace />;
+    return <Navigate to="/growth/settings?tab=case-scoring" replace />;
   }
 
   if (activePage === 'quick-create-case') {
@@ -183,16 +187,16 @@ export default function LabPrescriptionInboxApp() {
             key={`${resetVersion}-${intake.resetVersion}`}
             portal="lab"
             initialCaseId={caseInitialId}
-            onCreateCase={() => navigate('/lab/cases/quick-new')}
+            onCreateCase={() => navigate('/growth/cases/quick-new')}
             onConfigureScoring={() => setActivePage('configuration')}
-            onOpenDraft={(c) => navigate(`/lab/cases/quick-new/${encodeURIComponent(c.id)}`)}
+            onOpenDraft={(c) => navigate(`/growth/cases/quick-new/${encodeURIComponent(c.id)}`)}
             caseViewLimit={2}
             showConnectEmailNotice
             showScannerExpiryNotice
             onCaseSelected={(caseId, opts) => {
-              if (!caseId) { navigate('/lab/cases'); return; }
+              if (!caseId) { navigate('/growth/cases'); return; }
               const query = opts?.conversation ? `?conversation=1&channel=${opts.conversation}` : '';
-              navigate(`/lab/cases/${encodeURIComponent(caseId)}${query}`);
+              navigate(`/growth/cases/${encodeURIComponent(caseId)}${query}`);
             }}
           />
         </>
@@ -212,7 +216,7 @@ export default function LabPrescriptionInboxApp() {
       )}
       {activePage === 'settings' && <LabSettingsWithInbox />}
       {activePage === 'notifications' && (
-        <NotificationsPage portal="lab" onOpenSettings={() => navigate('/lab/settings?tab=notifications')} />
+        <NotificationsPage portal="lab" onOpenSettings={() => navigate('/growth/settings?tab=notifications')} />
       )}
     </Layout>
   );

@@ -153,7 +153,7 @@ export default function DesignStudioPage({ caseId }: { caseId: string }) {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-5">
-      <button onClick={() => navigate(fromCase ? `/lab/cases/${encodeURIComponent(caseId)}` : '/lab/cases')} className="inline-flex items-center gap-1.5 text-sm text-[#717182] hover:text-[#030213]">
+      <button onClick={() => navigate(fromCase ? `/growth/cases/${encodeURIComponent(caseId)}` : '/growth/cases')} className="inline-flex items-center gap-1.5 text-sm text-[#717182] hover:text-[#030213]">
         <ArrowLeft className="w-4 h-4" /> {fromCase ? 'Back to case' : 'Back to Cases'}
       </button>
 
@@ -173,7 +173,7 @@ export default function DesignStudioPage({ caseId }: { caseId: string }) {
               {DEMO_CASE_IDS.map(id => (
                 <button
                   key={id}
-                  onClick={() => navigate(`/lab/cases/${id}/studio?demo=1`)}
+                  onClick={() => navigate(`/growth/cases/${id}/studio?demo=1`)}
                   className={`px-3 py-1.5 rounded-md text-xs font-semibold ${id === caseId ? 'bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white' : 'text-[#717182] hover:text-[#030213]'}`}
                 >
                   {cases[id]?.demoLabel}

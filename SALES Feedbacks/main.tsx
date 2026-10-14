@@ -1,7 +1,8 @@
 import React, { ReactNode, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { AuthProvider, DEMO_ACCOUNT_EMAIL, useAuth } from '../src/app/context/AuthContext';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { AuthProvider, useAuth } from '../src/app/context/AuthContext';
+import App from '../src/app/App';
 import { ToastProvider } from '../src/app/context/ToastContext';
 import { SupplierFieldsProvider } from '../src/app/context/SupplierFieldsContext';
 import { CaseScoringProvider } from '../src/app/context/CaseScoringContext';
@@ -9,17 +10,41 @@ import LabPrescriptionInboxApp from './lab-prescription-inbox/LabPrescriptionInb
 import DesignReviewPage from './design-studio/review/DesignReviewPage';
 import PublicUploadPage from './upload-links/PublicUploadPage';
 import PublicIntakePage from './intake-form/PublicIntakePage';
+import PortalSelectWithGrowth from './growth-portal/PortalSelectWithGrowth';
+import { GROWTH_BASE, leaveGrowth } from './growthIsolation';
 import '../src/styles/index.css';
 import './lab-prescription-inbox/sandbox.css';
 
 // Same provider stack as src/main.tsx + src/app/App.tsx, so the reused portal
 // pages behave exactly as they do in the live lab portal.
 
-/** The sandbox has no login route — sign in with the prototype's demo account. */
-function DemoSignIn({ children }: { children: ReactNode }) {
-  const { user, login } = useAuth();
-  useEffect(() => { if (!user) login(DEMO_ACCOUNT_EMAIL, ''); }, [user, login]);
-  return user ? <>{children}</> : null;
+// Opened anywhere but Growth Team Feedback: make sure its cases aren't in the
+// shared list the real portals read (growthIsolation.ts).
+if (!window.location.pathname.startsWith(GROWTH_BASE)) leaveGrowth();
+
+/** Signed out (e.g. after Log out): back to the real portal select screen,
+ *  where the Growth Team Feedback card signs in and returns here. */
+function RequireSignIn({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+// A few unchanged portal components link to /lab/... (e.g. the scanner and
+// email notices on Cases). Clicked inside Growth Team Feedback, they should
+// stay in it rather than jump into the real Lab portal.
+let lastPath = window.location.pathname;
+function TrackPath() {
+  const { pathname } = useLocation();
+  useEffect(() => { lastPath = pathname; }, [pathname]);
+  return null;
+}
+function RealApp() {
+  const { pathname, search } = useLocation();
+  if (pathname.startsWith('/lab') && lastPath.startsWith(GROWTH_BASE)) {
+    return <Navigate to={`${GROWTH_BASE}${pathname.slice(4)}${search}`} replace />;
+  }
+  return <App />;
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -29,20 +54,21 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <ToastProvider>
           <SupplierFieldsProvider>
             <CaseScoringProvider>
+              <TrackPath />
               <Routes>
                 {/* Design Studio — the dentist's review link. Public: no sign-in. */}
                 <Route path="/review/:token/*" element={<DesignReviewPage />} />
                 {/* Clinician upload link + the lab's website intake form. Public too. */}
                 <Route path="/upload/:token" element={<PublicUploadPage />} />
                 <Route path="/intake/:slug" element={<PublicIntakePage />} />
-                <Route path="*" element={
-                  <DemoSignIn>
-                    <Routes>
-                      <Route path="/lab/*" element={<LabPrescriptionInboxApp />} />
-                      <Route path="*" element={<Navigate to="/lab/cases" replace />} />
-                    </Routes>
-                  </DemoSignIn>
-                } />
+                {/* Growth Team Feedback: the Lab portal with the Sales Feedbacks features. */}
+                <Route path={`${GROWTH_BASE}/*`} element={<RequireSignIn><LabPrescriptionInboxApp /></RequireSignIn>} />
+                {/* Portal select, with the Growth Team Feedback card added. */}
+                <Route path="/" element={<PortalSelectWithGrowth />} />
+                <Route path="/portal-select" element={<PortalSelectWithGrowth />} />
+                {/* Everything else is the real, unchanged app: login and every other
+                    portal, including the real Lab portal at /lab. */}
+                <Route path="*" element={<RealApp />} />
               </Routes>
             </CaseScoringProvider>
           </SupplierFieldsProvider>

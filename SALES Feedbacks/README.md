@@ -9,7 +9,13 @@ Run from the repo root:
 npx vite --config "SALES Feedbacks/vite.config.ts"
 ```
 
-Then open http://localhost:5180/lab/cases.
+Then open http://localhost:5180. It shows the real portal select screen with one extra card, **Growth Team Feedback**. That card opens this work at **`/growth`**: a copy of the Lab portal with every Sales Feedbacks feature. Sign in with any email if asked; "Use demo account" fills one in.
+
+Everything else is the real, unchanged app, including the real **Lab Portal at `/lab`**. None of the Growth work shows up there:
+- **Cases:** Growth's cases (inbox and website drafts, the Design Studio demo cases, and cases confirmed in Growth) are moved out of the shared case list when you leave `/growth`, and put back when you return (`growthIsolation.ts`).
+- **Bell:** its notifications are removed when you leave `/growth`.
+- **Links:** existing portal links to `/lab/...` that you click inside Growth (for example the scanner and email notices on Cases) stay inside `/growth`.
+- **Moving around:** Log out and Switch portal return to portal select.
 
 The sandbox has its own Vite entry (`index.html`, `main.tsx`, `vite.config.ts`, `tailwind.config.js`) and runs on port 5180. It's separate from the portal's `npm run dev` on 5173, which stays untouched. Because it's a different origin, its localStorage is separate too, so sandbox data never shows up in the real portal.
 
@@ -77,8 +83,8 @@ Every submission writes an immutable sign-off record: who, when, and the version
 
 | Where | URL |
 |---|---|
-| Lab Studio, smile design demo | `/lab/cases/SG-2026-0481/studio?demo=1` (`?demo=1` shows the Smile design / Aligner plan switcher and Reset demo) |
-| Lab Studio, aligner demo | `/lab/cases/SG-2026-0506/studio?demo=1` |
+| Lab Studio, smile design demo | `/growth/cases/SG-2026-0481/studio?demo=1` (`?demo=1` shows the Smile design / Aligner plan switcher and Reset demo) |
+| Lab Studio, aligner demo | `/growth/cases/SG-2026-0506/studio?demo=1` |
 | Dentist, Case A V2 (opens in compare mid-flow) | `/review/rv_8kq2m4x9` |
 | Dentist, Case B V2 (ClinCheck fallback, stage scrubber) | `/review/rv_3fp7w2c5` |
 | Expired link | `/review/rv_expired01` |

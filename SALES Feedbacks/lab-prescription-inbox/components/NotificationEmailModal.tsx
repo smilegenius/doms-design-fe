@@ -88,7 +88,7 @@ export default function NotificationEmailModal({ inbound, email, onClose }: {
                 <p className="text-xs text-[#717182]">This draft has already been reviewed or removed.</p>
               )}
               {draft && (
-                <Button size="sm" onClick={() => { onClose(); navigate(`/lab/cases/quick-new/${encodeURIComponent(draft.id)}`); }}>
+                <Button size="sm" onClick={() => { onClose(); navigate(`/growth/cases/quick-new/${encodeURIComponent(draft.id)}`); }}>
                   Review draft
                 </Button>
               )}

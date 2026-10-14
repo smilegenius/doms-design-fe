@@ -113,7 +113,7 @@ function CaseDesignPanel({ caseId, portalCase, studioCase }: { caseId: string; p
           <span className="text-xs text-[#717182]">{KIND_LABEL[version.kind]} · {provider.label} · {studioDate(version.uploadedAt)} by {version.uploadedBy}</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <Button variant="outline" size="sm" icon={<ExternalLink className="w-3.5 h-3.5" />} onClick={() => navigate(`/lab/cases/${encodeURIComponent(caseId)}/studio?from=case`)}>Open Design Studio</Button>
+          <Button variant="outline" size="sm" icon={<ExternalLink className="w-3.5 h-3.5" />} onClick={() => navigate(`/growth/cases/${encodeURIComponent(caseId)}/studio?from=case`)}>Open Design Studio</Button>
           {canShareNext && <Button size="sm" icon={<Share2 className="w-3.5 h-3.5" />} onClick={() => setShareOpen(true)}>Share next version</Button>}
         </div>
       </div>
@@ -169,7 +169,7 @@ function CaseDesignPanel({ caseId, portalCase, studioCase }: { caseId: string; p
           <p className="text-[11px] font-semibold text-[#717182] uppercase tracking-wide mb-2">Earlier versions</p>
           <div className="space-y-1.5">
             {older.map(v => (
-              <button key={v.id} onClick={() => navigate(`/lab/cases/${encodeURIComponent(caseId)}/studio?from=case`)} className="w-full flex items-center justify-between gap-3 text-left px-2 py-1.5 rounded-lg hover:bg-[#F8F9FC]">
+              <button key={v.id} onClick={() => navigate(`/growth/cases/${encodeURIComponent(caseId)}/studio?from=case`)} className="w-full flex items-center justify-between gap-3 text-left px-2 py-1.5 rounded-lg hover:bg-[#F8F9FC]">
                 <span className="text-xs text-[#030213]">V{v.number} · {studioDate(v.uploadedAt)} · {v.captures.length} capture{v.captures.length === 1 ? '' : 's'}</span>
                 <span className="text-[11px] text-[#717182]">{v.decision === 'approved' ? 'Approved' : v.decision === 'changes-requested' ? 'Changes requested' : VERSION_STATUS[v.status].label}</span>
               </button>
