@@ -69,7 +69,7 @@ function LiteTabBar() {
 
 // ─── Case row (To dispatch and Received) ────────────────────────────────────
 
-function CaseRow({ c, onClick, right }: { c: LabCase; onClick?: () => void; right?: React.ReactNode }) {
+function CaseRow({ c, onClick, right, action }: { c: LabCase; onClick?: () => void; right?: React.ReactNode; action?: React.ReactNode }) {
   const p = patientById(c.patientId);
   return (
     <Card onClick={onClick} className="p-3.5">
@@ -82,6 +82,7 @@ function CaseRow({ c, onClick, right }: { c: LabCase; onClick?: () => void; righ
         </div>
         {right}
       </div>
+      {action && <div className="mt-3">{action}</div>}
     </Card>
   );
 }
@@ -169,9 +170,10 @@ export function LiteReceived() {
       <div className="px-4 mt-3 space-y-2.5">
         {list.map(c => (
           <CaseRow key={c.id} c={c}
-            right={tab === 'arriving'
-              ? <button onClick={() => setTarget(c)} className="inline-flex items-center gap-1 h-9 px-3 rounded-xl go-grad text-white text-[12.5px] font-semibold flex-shrink-0 active:scale-95 transition"><PackageCheck className="w-4 h-4" />Received</button>
-              : <Pill tone="ok" dot>Received</Pill>} />
+            right={tab === 'received' ? <Pill tone="ok" dot>Received</Pill> : undefined}
+            action={tab === 'arriving'
+              ? <Btn block size="md" icon={<PackageCheck className="w-4 h-4" />} onClick={() => setTarget(c)}>Mark as received</Btn>
+              : undefined} />
         ))}
         {!list.length && (tab === 'arriving'
           ? <EmptyState icon={<PackageCheck className="w-7 h-7" />} title="Nothing on its way" body="Work the lab has shipped will appear here." />
