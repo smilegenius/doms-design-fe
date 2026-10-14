@@ -26,3 +26,23 @@
   border-color: transparent !important;
   font-weight: 500 !important;
 }
+
+/* Website intake drafts (intake-form/IntakeFilesDock.tsx): QuickCreate's
+   "Source email" pane shows the submitted order form instead, and the header
+   pill reads "Website draft". Relies on QuickCreate's pane + pill markup. */
+[data-sf-intake-pane="on"] > *:not(.sf-intake-pane) {
+  display: none !important;
+}
+[data-sf-intake-pill="on"] {
+  display: none !important;
+}
+[data-sf-intake-tab="on"] {
+  font-size: 0 !important;
+}
+[data-sf-intake-tab="on"] > svg {
+  display: none !important;
+}
+[data-sf-intake-tab="on"]::after {
+  content: "Website form";
+  font-size: 12px;
+}

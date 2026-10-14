@@ -166,6 +166,18 @@ Every lab gets a standard, branded new-case form for its website.
   - The bell gets an entry, and opted-in team members are emailed (simulated). Confirming the case through QuickCreate removes the draft.
 - **Notifications:** managed in **Settings → Notifications**, in a "Website Intake Form" category. Each team member opts themselves in for the bell and for email ("New Case Request from Website"). The intake tab only links there. The bell entry follows the signed-in user's In-App setting, and the people to email are fixed when the request arrives.
 
+## Website requests: draft to confirmed case
+- **Example requests:** two are added automatically (`intake-form/intakeDemo.ts`):
+  - **WEB-0005**, a draft that has just come in: a zirconia crown LL6 from an unverified dentist at an unknown practice, with lower and upper arch scans and a pre-op photo.
+  - **WEB-0004**, already confirmed as case **SG-2026-0519**: six e.max veneers 13–23 from Dr. Murphy, with arch scans, smile and shade-tab photos and a signed mock-up approval PDF.
+- **Draft screen:** the draft opens on the usual draft screen, but its source pane shows what was actually submitted instead of the email mock:
+  - the checks to do first (GDC register, new practice)
+  - the **Smile Genius order form**
+  - the attachments
+  The header pill reads "Website draft" and the tab reads "Website form" (`intake-form/IntakeFilesDock.tsx` + `sandbox.css`).
+- **Confirming:** when the lab confirms with **Create case**, the draft becomes a real case. That case gets an **Order form** item next to Details / Invoice / Shipping, saying who confirmed it and when.
+- **Deep links:** `/growth/cases/<id>?sf=order | design | files` opens that case-page item. What's new links to the draft, the confirmed case and its order form.
+
 ## What's new (change log)
 A sidebar item above Settings, shown only inside Growth Team Feedback (`/growth/updates`). It lists every feature and change in high-level buckets (Cases & intake, Design, Settings & notifications, Navigation), tagged **New** or **Changes the original design**.
 
@@ -207,3 +219,6 @@ Under Settings → Notifications, the **Prescription Email Inbox** and **Website
 - **The intake form reads the Prescription Builder in the same tab:** edits in Prescription Builder live in memory, so a form opened in a new tab uses the default fields.
 - **Embedding:** the snippet works on any site that allows iframes, but the prototype's URL is localhost.
 - **"Request files" item:** it uses the same runtime slot as Design review, and depends on the same Details / Invoice / Shipping markup. It has no floating fallback.
+- **Website drafts reuse the email-draft screen:** a website request is saved like an email draft (status Draft, source Email), so it follows the portal's draft rules unchanged. It shows "Need Attention", nothing goes into production until the lab confirms it in QuickCreate, and confirming removes the draft. The existing screens also label it with the "AI" chip and an "enriched using AI" banner, and QuickCreate shows its built-in prescription mock, which can't be changed without editing `src/`. The **From your website** panel has the real details, including the "Sender not verified" check (GDC register link). The sender's name is kept exactly as typed.
+- **Growth cases are saved continuously:** while `/growth` is open, its cases are saved to the Growth store every time the list changes. A page reload therefore restores exactly what's there, and never brings back a draft that was already confirmed.
+- **Generated example scans** are simple lathed tooth shapes laid out as an arch: placeholders for real intra-oral scans.

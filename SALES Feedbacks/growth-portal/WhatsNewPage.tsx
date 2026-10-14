@@ -4,6 +4,8 @@ import { ArrowUpRight, ExternalLink, Pencil, Plus, RotateCcw, Sparkles, Trash2 }
 import Button from '../../src/app/components/Button';
 import Modal from '../../src/app/components/Modal';
 import { linkState, linksForCase } from '../upload-links/uploadStore';
+import { latestIntakeDraft, submissionBehind } from '../intake-form/intakeStore';
+import { getCreatedCases } from '../../src/app/data/createdCases';
 import {
   addUpdate, BUCKETS, isEdited, markAllSeen, removeUpdate, resetNote, setNote, Update, UpdateTag, useUpdates,
 } from './updatesStore';
@@ -18,6 +20,18 @@ const TAG: Record<UpdateTag, { label: string; cls: string }> = {
 
 /** The clinic-page example follows the demo case's current live upload link. */
 function resolveExample(ex: { label: string; to: string; newTab?: boolean }) {
+  if (ex.to === '/intake/latest-draft') {
+    const d = latestIntakeDraft();
+    return d ? { ...ex, to: `/growth/cases/quick-new/${encodeURIComponent(d.caseId)}`, label: `${ex.label} (${d.ref})` } : { ...ex, to: '/intake/smile-genius-lab', newTab: true, label: 'Send a test request first' };
+  }
+  const qn = ex.to.match(/^\/growth\/cases\/quick-new\/(.+)$/);
+  if (qn && !getCreatedCases().some(c => c.id === qn[1] && c.status === 'draft')) {
+    // That draft was confirmed (or removed): show the case it became, else the latest draft.
+    const done = submissionBehind(qn[1])?.confirmedCaseId;
+    if (done) return { ...ex, to: `/growth/cases/${done}?sf=order`, label: `${ex.label}: now case ${done}` };
+    const d = latestIntakeDraft();
+    return d ? { ...ex, to: `/growth/cases/quick-new/${encodeURIComponent(d.caseId)}`, label: `Website draft ${d.ref}` } : { ...ex, to: '/intake/smile-genius-lab', newTab: true, label: 'Send a test request first' };
+  }
   if (ex.to !== '/upload/demo') return ex;
   const live = linksForCase('SG-2026-0481').find(l => linkState(l) === 'active');
   return live ? { ...ex, to: `/upload/${live.token}`, label: live.code ? `${ex.label} (code ${live.code})` : ex.label } : { ...ex, to: '/growth/cases/SG-2026-0481?sf=files', newTab: false, label: 'Create the clinic link' };

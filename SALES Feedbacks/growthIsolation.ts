@@ -46,6 +46,15 @@ export function enterGrowth() {
   [...stash.cases].reverse().forEach(c => { if (!present.has(c.id)) addCreatedCase(c); });
 }
 
+/** While /growth is open: keep the stash in step with the shared list, so a
+ *  reload (which never runs leaveGrowth) restores exactly what's there now. */
+export function saveGrowthStash() {
+  if (!baseline) return;
+  const base = baseline;
+  const mine = getCreatedCases().filter(c => !base.has(c.id));
+  writeStash({ cases: mine, ids: mine.map(c => c.id) });
+}
+
 /** Leaving /growth (and on any load outside it): move its cases (including ones confirmed there) out, and clear its bell entries. */
 export function leaveGrowth() {
   const stash = readStash();

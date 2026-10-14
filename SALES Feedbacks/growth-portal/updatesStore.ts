@@ -39,8 +39,13 @@ export const BUILT_IN: Update[] = [
   },
   {
     id: 'intake-form', bucket: 'Cases & intake', title: 'Website intake form', tag: 'new',
-    note: 'A branded new-case form each lab can link to or embed on its website, with its logo. Each submission becomes a draft case for the lab to check, using the lab\'s own Prescription Builder fields.',
-    examples: [{ label: 'Intake form settings', to: '/growth/settings?tab=intake-form' }, { label: 'The public form', to: '/intake/smile-genius-lab', newTab: true }],
+    note: 'A branded new-case form each lab can link to or embed on its website, with its logo. Each submission becomes a draft case, never a live one: the sender isn\'t verified, so the lab checks the dentist (GDC register), links the practice and confirms. Uses the lab\'s own Prescription Builder fields.',
+    examples: [{ label: 'A website draft to review (WEB-0005)', to: '/growth/cases/quick-new/SF-WEB-DEMO05' }, { label: 'A confirmed website case (SG-2026-0519)', to: '/growth/cases/SG-2026-0519?sf=order' }, { label: 'Intake form settings', to: '/growth/settings?tab=intake-form' }, { label: 'The public form', to: '/intake/smile-genius-lab', newTab: true }],
+  },
+  {
+    id: 'intake-draft-source', bucket: 'Cases & intake', title: 'Website drafts show the order form', tag: 'changed',
+    note: 'A website draft opens on the usual draft screen, but its source pane shows what the dentist actually submitted: the Smile Genius order form, the attached scans, photos and PDFs, and the checks to do first (GDC register, new practice). The header reads "Website draft". Once confirmed, the case gets an "Order form" item next to Details / Invoice / Shipping.',
+    examples: [{ label: 'Website draft WEB-0005', to: '/growth/cases/quick-new/SF-WEB-DEMO05' }, { label: 'Order form on SG-2026-0519', to: '/growth/cases/SG-2026-0519?sf=order' }],
   },
   {
     id: 'design-studio', bucket: 'Design', title: 'Design Studio', tag: 'new',

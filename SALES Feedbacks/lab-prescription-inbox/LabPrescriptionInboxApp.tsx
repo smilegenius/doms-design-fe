@@ -11,7 +11,7 @@ import QuickCreateCasePage from '../../src/app/pages/QuickCreateCasePage';
 import InvoicesPage from '../../src/app/pages/InvoicesPage';
 import MessagesPage from '../../src/app/pages/MessagesPage';
 import NotificationsPage from '../../src/app/pages/NotificationsPage';
-import { getCreatedCases } from '../../src/app/data/createdCases';
+import { getCreatedCases, useCreatedCases } from '../../src/app/data/createdCases';
 import PrescriptionInboxBar from './components/PrescriptionInboxBar';
 import RxPhotoDock from './components/RxPhotoDock';
 import LabSettingsWithInbox from './settings/LabSettingsWithInbox';
@@ -21,9 +21,10 @@ import { DesignStudioBar } from '../design-studio/studio/StudioEntryPoints';
 import CaseDesignReviewSlot, { pendingOpen } from '../design-studio/studio/CaseDesignReviewSlot';
 import { ensureDesignStudioDemo, syncStudioNotifications, useStudio } from '../design-studio/store/studioStore';
 import { ensureUploadDemo, syncUploadNotifications, useUploadLinks } from '../upload-links/uploadStore';
-import { removeIntakeDraft, syncIntakeNotifications, useIntake } from '../intake-form/intakeStore';
+import { INTAKE_ID_PREFIX, linkConfirmedCase, removeIntakeDraft, syncIntakeNotifications, useIntake } from '../intake-form/intakeStore';
+import { ensureIntakeDemo } from '../intake-form/intakeDemo';
 import IntakeFilesDock from '../intake-form/IntakeFilesDock';
-import { enterGrowth, leaveGrowth } from '../growthIsolation';
+import { enterGrowth, leaveGrowth, saveGrowthStash } from '../growthIsolation';
 import WhatsNewPage from '../growth-portal/WhatsNewPage';
 import WhatsNewNavItem from '../growth-portal/WhatsNewNavItem';
 
@@ -85,6 +86,8 @@ export default function LabPrescriptionInboxApp() {
     syncStudioNotifications(); syncUploadNotifications(); syncIntakeNotifications(meEmail);
     return () => leaveGrowth();
   }, []);
+  const createdCases = useCreatedCases();
+  useEffect(() => { saveGrowthStash(); }, [createdCases]);
 
   // Design Studio demo cases join the real Cases list; submitted reviews reach the bell.
   useEffect(() => { ensureDesignStudioDemo(); syncStudioNotifications(); }, [studio]);
@@ -92,6 +95,7 @@ export default function LabPrescriptionInboxApp() {
   const uploads = useUploadLinks();
   const intake = useIntake();
   useEffect(() => { ensureUploadDemo(); syncUploadNotifications(); }, [uploads]);
+  useEffect(() => { ensureIntakeDemo(); }, []);
   useEffect(() => { syncIntakeNotifications(meEmail); }, [intake, meEmail]);
 
   const parsed = useMemo(() => {
@@ -136,11 +140,20 @@ export default function LabPrescriptionInboxApp() {
       tries += 1;
       if (document.querySelector('.sf-design-tab') || tries > 30) { window.clearInterval(t); return; }
       const el = [...document.querySelectorAll<HTMLElement>('main *')].find(e => e.children.length === 0 && e.textContent?.trim() === caseInitialId);
-      if (el) { pendingOpen.value = sf; el.click(); window.clearInterval(t); }
+      if (el) { pendingOpen.value = sf; el.click(); window.clearInterval(t); return; }
+      // Not on the first page of the list: search for it, then click it.
+      const search = document.querySelector<HTMLInputElement>('main input[placeholder*="case ID"]');
+      if (search && tries === 4) {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, caseInitialId);
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      }
     }, 150);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePage, caseInitialId]);
+
+  // Cases that existed when QuickCreate opened: the one that's new after submit is the confirmed case.
+  const casesBeforeConfirm = useMemo(() => new Set(getCreatedCases().map(c => c.id)), [prefillDraft?.id]);
 
   const [invoiceFilter, setInvoiceFilter] = useState<string | undefined>(undefined);
 
@@ -173,6 +186,11 @@ export default function LabPrescriptionInboxApp() {
         onCancel={() => setActivePage('cases')}
         onSubmitted={() => {
           // The reviewed case was saved as a new record, so the inbox draft it came from is done.
+          if (prefillDraft?.id.startsWith(INTAKE_ID_PREFIX)) {
+            // A website draft the lab checked and confirmed: remember the real case it became.
+            const confirmed = getCreatedCases().find(c => !casesBeforeConfirm.has(c.id));
+            if (confirmed) linkConfirmedCase(prefillDraft.id, confirmed.id, teamMemberFor(user?.email)?.name);
+          }
           if (prefillDraft) { removeSandboxDraft(prefillDraft.id); removeIntakeDraft(prefillDraft.id); }
           setActivePage('cases');
         }}

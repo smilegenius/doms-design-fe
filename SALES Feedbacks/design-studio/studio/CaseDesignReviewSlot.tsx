@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Box, CheckCircle2, ExternalLink, Lock, Plus, Share2, UploadCloud } from 'lucide-react';
+import { AlertTriangle, Box, CheckCircle2, ExternalLink, FileText, Globe, Lock, Plus, Share2, UploadCloud } from 'lucide-react';
 import Button from '../../../src/app/components/Button';
 import { getCreatedCases } from '../../../src/app/data/createdCases';
 import { mockCases, upgradeDemoCase, type Case } from '../../../src/app/pages/CasesPage';
@@ -16,6 +16,10 @@ import LinkCard from './LinkCard';
 import { CaptureRow, VERSION_STATUS } from './DesignStudioPage';
 import { StudioCaseDock } from './StudioEntryPoints';
 import RequestFilesPanel, { useRequestFilesChip } from '../../upload-links/RequestFilesPanel';
+import { useIntake } from '../../intake-form/intakeStore';
+import IntakeOrderForm from '../../intake-form/IntakeOrderForm';
+import { withOrder } from '../../intake-form/IntakeFilesDock';
+import { portalDateTime } from '../../lab-prescription-inbox/data';
 
 // ── "Design review" inside the existing case page ────────────────────────────
 // CaseDetailPage's per-service menu (Details / Invoice / Shipping) is internal
@@ -182,7 +186,7 @@ function CaseDesignPanel({ caseId, portalCase, studioCase }: { caseId: string; p
   );
 }
 
-type SandboxItem = 'design' | 'files';
+type SandboxItem = 'design' | 'files' | 'order';
 
 /** Which item to open on arrival; set when a deep link had to click through the Cases list. */
 export const pendingOpen: { value: string | null } = { value: null };
@@ -197,6 +201,8 @@ export default function CaseDesignReviewSlot({ caseId }: { caseId: string }) {
   const slot = useCaseDetailSlot();
   const [active, setActive] = useState<SandboxItem | null>(null);
   const filesChip = useRequestFilesChip(caseId);
+  const { submissions, config: intakeConfig } = useIntake();
+  const websiteOrder = submissions.find(s => s.confirmedCaseId === caseId);
   const [gaveUp, setGaveUp] = useState(false);
   const { cases } = useStudio();
   const studioCase = cases[caseId];
@@ -212,7 +218,8 @@ export default function CaseDesignReviewSlot({ caseId }: { caseId: string }) {
     const sf = new URLSearchParams(window.location.search).get('sf') ?? pendingOpen.value;
     pendingOpen.value = null;
     if (sf === 'files' || (sf === 'design' && eligible)) setActive(sf === 'files' ? 'files' : 'design');
-  }, [slot?.sidebar, caseId, eligible]);
+    else if (sf === 'order' && websiteOrder) setActive('order');
+  }, [slot?.sidebar, caseId, eligible, !!websiteOrder]);
   useEffect(() => { const t = window.setTimeout(() => setGaveUp(true), 2500); return () => window.clearTimeout(t); }, [caseId]);
 
   // Mark the native menu + content while the Design review item is active.
@@ -248,6 +255,13 @@ export default function CaseDesignReviewSlot({ caseId }: { caseId: string }) {
               <span className={`ml-auto px-1.5 py-px rounded-full text-[9px] font-bold ${v ? 'bg-[#E3F2FD] text-[#1565C0]' : 'bg-[#F8F9FC] text-[#717182] border border-[#E0E0E6]'}`}>{chip}</span>
             </button>
           )}
+          {websiteOrder && (
+            <button onClick={() => setActive('order')} className={tabCls(active === 'order')}>
+              <FileText className="w-3.5 h-3.5" />
+              Order form
+              <span className="ml-auto px-1.5 py-px rounded-full text-[9px] font-bold bg-[#EEF4FF] text-[#1565C0]">Website</span>
+            </button>
+          )}
           <button onClick={() => setActive('files')} className={tabCls(active === 'files')}>
             <UploadCloud className="w-3.5 h-3.5" />
             Request files
@@ -260,7 +274,19 @@ export default function CaseDesignReviewSlot({ caseId }: { caseId: string }) {
         <div className="sf-design-panel space-y-4">
           {active === 'design'
             ? <CaseDesignPanel caseId={caseId} portalCase={portalCase} studioCase={studioCase} />
-            : <RequestFilesPanel caseId={caseId} portalCase={portalCase} />}
+            : active === 'order' && websiteOrder
+              ? (
+                <>
+                  <div className="bg-white border border-[#E0E0E6] rounded-xl px-4 py-3 flex flex-wrap items-center gap-2">
+                    <Globe className="w-4 h-4 text-[#4D8EF7]" />
+                    <p className="text-sm font-semibold text-[#030213]">Website order {websiteOrder.ref}</p>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-[#ECFDF5] text-[#047857] border-[#A7F3D0]">Confirmed</span>
+                    <span className="text-xs text-[#717182]">Received {portalDateTime(websiteOrder.at)}{websiteOrder.confirmedAt ? ` · checked and confirmed by ${websiteOrder.confirmedBy ?? 'the lab'} ${portalDateTime(websiteOrder.confirmedAt)}` : ''}</span>
+                  </div>
+                  <div className="max-w-2xl"><IntakeOrderForm sub={withOrder(websiteOrder)} config={intakeConfig} /></div>
+                </>
+              )
+              : <RequestFilesPanel caseId={caseId} portalCase={portalCase} />}
         </div>,
         slot.content,
       )}
