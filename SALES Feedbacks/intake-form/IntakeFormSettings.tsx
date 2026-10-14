@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Code2, Copy, ExternalLink, Globe, ImagePlus, Monitor, RotateCcw, Smartphone, Trash2, Users } from 'lucide-react';
+import { Bell, Code2, Copy, ExternalLink, Globe, ImagePlus, Monitor, RotateCcw, Smartphone, Trash2 } from 'lucide-react';
 import Toggle from '../../src/app/components/Toggle';
 import { useToast } from '../../src/app/context/ToastContext';
 import { DEFAULT_PRESCRIPTION_CONFIG } from '../../src/app/data/prescriptionBuilder';
 import { LAB_TEAM, portalDateTime } from '../lab-prescription-inbox/data';
 import IntakeForm from './IntakeForm';
 import {
-  ACCENTS, buttonSnippet, embedSnippet, intakeEmailRecipients, intakeUrl, resetIntakeDemo, setIntakePref, slugify,
+  ACCENTS, buttonSnippet, embedSnippet, intakeEmailRecipients, intakeUrl, resetIntakeDemo, slugify,
   updateIntakeConfig, useIntake,
 } from './intakeStore';
 
@@ -165,29 +165,15 @@ export default function IntakeFormSettings() {
             </div>
           </div>
 
-          <div className={`${card} overflow-hidden`}>
-            <div className="px-5 pt-4 pb-2">
-              <p className="text-sm font-semibold text-[#030213]">Who's notified</p>
-              <p className="text-xs text-[#717182] mt-0.5">Each new request goes to the bell. Choose who also gets an email. Team members can change this in Notifications too.</p>
+          <div className={`${card} px-5 py-4 flex items-start gap-3`}>
+            <span className="w-9 h-9 rounded-lg bg-[#EEF4FF] flex items-center justify-center flex-shrink-0"><Bell className="w-4 h-4 text-[#1565C0]" /></span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-[#030213]">Notifications</p>
+              <p className="text-xs text-[#717182] mt-0.5">
+                Each team member chooses in <span className="font-medium text-[#5A5568]">Settings → Notifications</span> whether they get the bell alert and an email for new website requests. {emailed.length ? <>Emailing now: <span className="font-medium text-[#5A5568]">{emailed.join(', ')}</span>.</> : 'No one is emailed yet.'}
+              </p>
             </div>
-            <div className="divide-y divide-[#F0EFF6]">
-              {LAB_TEAM.map(m => (
-                <div key={m.email} className="px-5 py-2.5 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm text-[#030213] truncate">{m.name}</p>
-                    <p className="text-[11px] text-[#A0A0B0] truncate">{m.role} · {m.email}</p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="text-[11px] text-[#717182]">Email</span>
-                    <Toggle on={!!prefs[m.email]?.email} onChange={() => setIntakePref(m.email, 'email', !prefs[m.email]?.email)} />
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="px-5 py-2.5 bg-[#F8F9FC] border-t border-[#F0EFF6] flex items-start gap-2">
-              <Users className="w-3.5 h-3.5 text-[#717182] flex-shrink-0 mt-0.5" />
-              <p className="text-[11px] text-[#717182]">{emailed.length ? <>Emailing: <span className="font-medium text-[#5A5568]">{emailed.join(', ')}</span></> : 'No one gets an email yet.'}</p>
-            </div>
+            <button onClick={() => navigate('/growth/settings?tab=notifications&focus=intake-form')} className={btn}>Manage</button>
           </div>
         </div>
 

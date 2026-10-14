@@ -151,7 +151,7 @@ Every lab gets a standard, branded new-case form for its website.
 
 - **Settings → Website Intake Form:**
   - Branding: logo upload (PNG / JPG / SVG / WebP, up to 2MB), the lab name, a welcome line and an accent colour.
-  - Which services the form offers, and who's emailed about new requests.
+  - Which services the form offers.
   - The form link, which you can rename (`/intake/<slug>`), plus copyable **embed code** (an iframe) and **button code**.
   - A live desktop / mobile preview, a list of recent requests, and a "Taking requests" switch.
 - **The form, `/intake/:slug`:** add `?embed=1` for iframe use, which drops the page background. It has four steps:
@@ -164,7 +164,18 @@ Every lab gets a standard, branded new-case form for its website.
   - Each submission becomes a **draft case** (`SF-WEB-…`, reference `WEB-0007` and up) in Cases. It opens in QuickCreate prefilled, with the sender pane filled in.
   - A **From your website** dock shows the dentist's details and attached files, and flags practices that aren't linked yet.
   - The bell gets an entry, and opted-in team members are emailed (simulated). Confirming the case through QuickCreate removes the draft.
-- **Notifications:** there's also a "Website Intake Form" category under Settings → Notifications.
+- **Notifications:** managed in **Settings → Notifications**, in a "Website Intake Form" category. Each team member opts themselves in for the bell and for email ("New Case Request from Website"). The intake tab only links there. The bell entry follows the signed-in user's In-App setting, and the people to email are fixed when the request arrives.
+
+## What's new (change log)
+A sidebar item above Settings, shown only inside Growth Team Feedback (`/growth/updates`). It lists every feature and change in high-level buckets (Cases & intake, Design, Settings & notifications, Navigation), tagged **New** or **Changes the original design**.
+
+- **Notes:** each update has a short note you can edit (pencil) or restore, saved in this browser.
+- **Examples:** each update has buttons that open an example inside the portal (for example a case with `?sf=design` or `?sf=files` opens that case-page item), or the public page in a new tab.
+- **Add update:** add your own entries (title, area, type, note, optional example page) as the work grows. The built-in entries live in `growth-portal/updatesStore.ts`.
+- **Sidebar item:** attached at runtime above the Settings button (`growth-portal/WhatsNewNavItem.tsx`), with a badge for updates you haven't opened yet.
+
+## Notification recipients
+Under Settings → Notifications, the **Prescription Email Inbox** and **Website Intake Form** categories each have a **Notified by default** list. **Add people** picks team members from User Management, which turns the bell and email on for them; ✕ turns both off. Everyone can still adjust their own switches. Website requests start with the lab admin only.
 
 ## Known limitations
 - **Settings sidebar:** `SettingsPage`'s tab list is internal to it, so `LabSettingsWithInbox` draws the same sidebar markup with one extra tab. Existing tabs render the real `SettingsPage`. `sandbox.css` hides that page's own header and sidebar, which depends on its root markup.

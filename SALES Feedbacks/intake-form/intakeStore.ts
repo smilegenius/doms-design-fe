@@ -62,6 +62,7 @@ interface IntakeState {
   submissions: IntakeSubmission[];
   counter: number;
   resetVersion: number;
+  prefsVersion?: number;
 }
 
 const LS_KEY = 'salesFeedbacks.intakeForm.v1';
@@ -78,7 +79,9 @@ const DEFAULT_CONFIG: IntakeConfig = {
 
 const DEFAULT_STATE = (): IntakeState => ({
   config: DEFAULT_CONFIG,
-  prefs: Object.fromEntries(LAB_TEAM.map(m => [m.email, { inApp: true, email: m.email === 'sajid@smilegenius.com' }])),
+  // Only the lab admin is notified by default; others are added in Settings → Notifications.
+  prefs: Object.fromEntries(LAB_TEAM.map(m => [m.email, { inApp: m.email === 'sajid@smilegenius.com', email: m.email === 'sajid@smilegenius.com' }])),
+  prefsVersion: 2,
   submissions: [],
   counter: 6,
   resetVersion: 0,
@@ -87,7 +90,11 @@ const DEFAULT_STATE = (): IntakeState => ({
 function load(): IntakeState {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) { const p = JSON.parse(raw); if (p?.config) return { ...DEFAULT_STATE(), ...p, config: { ...DEFAULT_CONFIG, ...p.config } }; }
+    if (raw) { const p = JSON.parse(raw); if (p?.config) {
+      const d = DEFAULT_STATE();
+      // Older saved prefs had everyone on for the bell: start over from the admin-only default.
+      return { ...d, ...p, config: { ...DEFAULT_CONFIG, ...p.config }, ...(p.prefsVersion === d.prefsVersion ? {} : { prefs: d.prefs, prefsVersion: d.prefsVersion }) };
+    } }
   } catch { /* corrupt or blocked */ }
   return DEFAULT_STATE();
 }
@@ -211,10 +218,14 @@ export function resetIntakeDemo() {
 }
 
 // ── Bell ─────────────────────────────────────────────────────────────────────
-// In-app is a per-user preference; the prototype's bell belongs to whoever is
-// signed in, so it follows the demo account (Sajid).
-export function syncIntakeNotifications(me = 'sajid@smilegenius.com') {
-  if (state.prefs[me]?.inApp === false) return;
+// In-app is a per-user preference: the bell belongs to whoever is signed in,
+// so entries appear when they've opted in and are removed when they opt out.
+export function syncIntakeNotifications(me?: string) {
+  const on = !!me && !!state.prefs[me]?.inApp;
+  if (!on) {
+    for (let i = MOCK_NOTIFICATIONS.length - 1; i >= 0; i--) if (MOCK_NOTIFICATIONS[i].id.startsWith('web-')) MOCK_NOTIFICATIONS.splice(i, 1);
+    return;
+  }
   [...state.submissions].reverse().forEach(s => {
     const id = `web-${s.caseId}`;
     if (MOCK_NOTIFICATIONS.some(n => n.id === id)) return;

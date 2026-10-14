@@ -129,7 +129,7 @@ export default function LabSettingsWithInbox() {
               {activeTab === 'notifications' && subParam !== 'escalations' && (
                 <div className="mt-4">
                   <RxInboxNotificationCategory focus={searchParams.get('focus') === 'rx-inbox'} />
-                  <div className="mt-4"><IntakeNotificationCategory /></div>
+                  <div className="mt-4"><IntakeNotificationCategory focus={searchParams.get('focus') === 'intake-form'} /></div>
                 </div>
               )}
             </>

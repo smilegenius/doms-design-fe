@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from '../../src/app/context/ToastContext';
+import { useAuth } from '../../src/app/context/AuthContext';
+import { teamMemberFor } from './data';
 import Layout from '../../src/app/components/Layout';
 import LabOverviewPage from '../../src/app/pages/LabOverviewPage';
 import LabAnalyticsPage from '../../src/app/pages/LabAnalyticsPage';
-import CasesPage, { draftCases } from '../../src/app/pages/CasesPage';
+import CasesPage, { draftCases, mockCases } from '../../src/app/pages/CasesPage';
 import QuickCreateCasePage from '../../src/app/pages/QuickCreateCasePage';
 import InvoicesPage from '../../src/app/pages/InvoicesPage';
 import MessagesPage from '../../src/app/pages/MessagesPage';
@@ -16,12 +18,14 @@ import LabSettingsWithInbox from './settings/LabSettingsWithInbox';
 import { removeSandboxDraft, useRxInbox } from './inboxStore';
 import DesignStudioPage from '../design-studio/studio/DesignStudioPage';
 import { DesignStudioBar } from '../design-studio/studio/StudioEntryPoints';
-import CaseDesignReviewSlot from '../design-studio/studio/CaseDesignReviewSlot';
+import CaseDesignReviewSlot, { pendingOpen } from '../design-studio/studio/CaseDesignReviewSlot';
 import { ensureDesignStudioDemo, syncStudioNotifications, useStudio } from '../design-studio/store/studioStore';
 import { ensureUploadDemo, syncUploadNotifications, useUploadLinks } from '../upload-links/uploadStore';
 import { removeIntakeDraft, syncIntakeNotifications, useIntake } from '../intake-form/intakeStore';
 import IntakeFilesDock from '../intake-form/IntakeFilesDock';
 import { enterGrowth, leaveGrowth } from '../growthIsolation';
+import WhatsNewPage from '../growth-portal/WhatsNewPage';
+import WhatsNewNavItem from '../growth-portal/WhatsNewNavItem';
 
 // ─── Growth Team Feedback: Lab Portal shell (Sales Feedbacks copy, at /growth) ─
 // Mirrors src/app/LabApp.tsx: same URL ↔ page mapping, same Layout, same
@@ -36,7 +40,7 @@ import { enterGrowth, leaveGrowth } from '../growthIsolation';
 //     website-form drafts a dock with the files the dentist attached.
 //   • Case page: "Design review" and "Request files" items (sandbox overlay).
 
-type LabPage = 'overview' | 'cases' | 'design-studio' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications';
+type LabPage = 'overview' | 'cases' | 'design-studio' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications' | 'updates';
 
 const PAGE_TO_PATH: Record<LabPage, string> = {
   overview: '',
@@ -49,6 +53,7 @@ const PAGE_TO_PATH: Record<LabPage, string> = {
   settings: 'settings',
   messages: 'messages',
   notifications: 'notifications',
+  updates: 'updates',
 };
 const PATH_TO_PAGE: Record<string, LabPage> = {
   '': 'overview',
@@ -60,6 +65,7 @@ const PATH_TO_PAGE: Record<string, LabPage> = {
   settings: 'settings',
   messages: 'messages',
   notifications: 'notifications',
+  updates: 'updates',
 };
 
 export default function LabPrescriptionInboxApp() {
@@ -68,13 +74,15 @@ export default function LabPrescriptionInboxApp() {
   const navigate = useNavigate();
   const { resetVersion } = useRxInbox();
   const studio = useStudio();
+  const { user } = useAuth();
+  const meEmail = teamMemberFor(user?.email)?.email;
   // Growth Team Feedback only: bring its cases into the shared list, and mirror
   // its bell entries before the first render (NotificationsPage reads the bell
   // once on mount). Leaving /growth takes both out again (growthIsolation.ts).
-  useState(() => { enterGrowth(); syncStudioNotifications(); syncUploadNotifications(); syncIntakeNotifications(); return 0; });
+  useState(() => { enterGrowth(); ensureDesignStudioDemo(); syncStudioNotifications(); syncUploadNotifications(); syncIntakeNotifications(meEmail); return 0; });
   useEffect(() => {
     enterGrowth();
-    syncStudioNotifications(); syncUploadNotifications(); syncIntakeNotifications();
+    syncStudioNotifications(); syncUploadNotifications(); syncIntakeNotifications(meEmail);
     return () => leaveGrowth();
   }, []);
 
@@ -84,7 +92,7 @@ export default function LabPrescriptionInboxApp() {
   const uploads = useUploadLinks();
   const intake = useIntake();
   useEffect(() => { ensureUploadDemo(); syncUploadNotifications(); }, [uploads]);
-  useEffect(() => { syncIntakeNotifications(); }, [intake]);
+  useEffect(() => { syncIntakeNotifications(meEmail); }, [intake, meEmail]);
 
   const parsed = useMemo(() => {
     const rest = location.pathname.replace(/^\/growth\/?/, '').replace(/\/$/, '');
@@ -116,6 +124,23 @@ export default function LabPrescriptionInboxApp() {
       : null),
     [parsed.prefillDraftId],
   );
+
+  // CasesPage opens a case from the URL only when it's one of its built-in cases.
+  // Created cases (the Design Studio demos, drafts) open by clicking their row,
+  // so a deep link such as /growth/cases/SG-2026-0481?sf=design clicks it for you.
+  useEffect(() => {
+    if (activePage !== 'cases' || !caseInitialId || mockCases.some(c => c.id === caseInitialId)) return;
+    const sf = new URLSearchParams(location.search).get('sf');
+    let tries = 0;
+    const t = window.setInterval(() => {
+      tries += 1;
+      if (document.querySelector('.sf-design-tab') || tries > 30) { window.clearInterval(t); return; }
+      const el = [...document.querySelectorAll<HTMLElement>('main *')].find(e => e.children.length === 0 && e.textContent?.trim() === caseInitialId);
+      if (el) { pendingOpen.value = sf; el.click(); window.clearInterval(t); }
+    }, 150);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePage, caseInitialId]);
 
   const [invoiceFilter, setInvoiceFilter] = useState<string | undefined>(undefined);
 
@@ -215,6 +240,8 @@ export default function LabPrescriptionInboxApp() {
         />
       )}
       {activePage === 'settings' && <LabSettingsWithInbox />}
+      {activePage === 'updates' && <WhatsNewPage />}
+      <WhatsNewNavItem />
       {activePage === 'notifications' && (
         <NotificationsPage portal="lab" onOpenSettings={() => navigate('/growth/settings?tab=notifications')} />
       )}

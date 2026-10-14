@@ -184,6 +184,9 @@ function CaseDesignPanel({ caseId, portalCase, studioCase }: { caseId: string; p
 
 type SandboxItem = 'design' | 'files';
 
+/** Which item to open on arrival; set when a deep link had to click through the Cases list. */
+export const pendingOpen: { value: string | null } = { value: null };
+
 const tabCls = (on: boolean) => `sf-design-tab w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors ${
   on
     ? 'bg-gradient-to-r from-[#EEF4FF] to-[#F5F3FF] text-[#4D8EF7] font-semibold border border-[#DBEAFE]'
@@ -203,6 +206,13 @@ export default function CaseDesignReviewSlot({ caseId }: { caseId: string }) {
     || !!portalCase?.services.some(s => STUDIO_SERVICES.includes(s));
 
   useEffect(() => { setActive(null); }, [caseId, slot?.sidebar]);
+  // ?sf=design | files opens that item straight away (the What's new examples use it).
+  useEffect(() => {
+    if (!slot) return;
+    const sf = new URLSearchParams(window.location.search).get('sf') ?? pendingOpen.value;
+    pendingOpen.value = null;
+    if (sf === 'files' || (sf === 'design' && eligible)) setActive(sf === 'files' ? 'files' : 'design');
+  }, [slot?.sidebar, caseId, eligible]);
   useEffect(() => { const t = window.setTimeout(() => setGaveUp(true), 2500); return () => window.clearTimeout(t); }, [caseId]);
 
   // Mark the native menu + content while the Design review item is active.
