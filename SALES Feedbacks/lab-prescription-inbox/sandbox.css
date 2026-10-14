@@ -1,0 +1,28 @@
+/* Lab Settings with the Prescription Email Inbox tab: the real SettingsPage
+   renders inside our content column, so hide its own page header and sidebar
+   (LabSettingsWithInbox draws them) and drop its outer padding. Relies on
+   SettingsPage's root markup:
+   div.p-8 > [div.mb-6 header, div.flex > [aside, section]] */
+.sf-embedded-settings > div {
+  padding: 0 !important;
+}
+.sf-embedded-settings > div > div:first-child {
+  display: none;
+}
+.sf-embedded-settings > div > div > aside {
+  display: none;
+}
+
+/* Design review item on the case page (design-studio/studio/CaseDesignReviewSlot.tsx):
+   while it's active, the native sub-tab content is hidden and the native
+   items drop their active styling. Relies on CaseDetailPage's service menu
+   markup: div.w-56 > button × 3, followed by the content column. */
+[data-sf-design-content="on"] > *:not(.sf-design-panel) {
+  display: none !important;
+}
+[data-sf-design-tab="on"] > button:not(.sf-design-tab) {
+  background: transparent !important;
+  color: #5A5568 !important;
+  border-color: transparent !important;
+  font-weight: 500 !important;
+}
