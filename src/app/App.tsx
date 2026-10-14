@@ -19,6 +19,7 @@ import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
 import LabApp from './LabApp';
 import GoApp from './go/GoApp';
+import GoVersionSelect from './go/lite/VersionSelect';
 import SuppliersPage from './pages/SuppliersPage';
 import SupplierDetailPage from './pages/SupplierDetailPage';
 import InvoicesPage from './pages/InvoicesPage';
@@ -435,6 +436,8 @@ export default function App() {
       <Route path="/flows/dentist-contact" element={<DentistContactFlowPage />} />
       {/* Smile Genius Go — clinician / dentist mobile app. Has its own demo
           sign-in, so it sits outside ProtectedRoute. */}
+      <Route path="/go" element={<GoVersionSelect />} />
+      <Route path="/go/lite/*" element={<GoApp variant="lite" />} />
       <Route path="/go/*" element={<GoApp />} />
       <Route
         path="/supplier/*"

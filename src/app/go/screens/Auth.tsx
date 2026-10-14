@@ -11,7 +11,8 @@ const MsLogo = () => (
   <svg width="16" height="16" viewBox="0 0 16 16"><rect width="7.5" height="7.5" fill="#F25022" /><rect x="8.5" width="7.5" height="7.5" fill="#7FBA00" /><rect y="8.5" width="7.5" height="7.5" fill="#00A4EF" /><rect x="8.5" y="8.5" width="7.5" height="7.5" fill="#FFB900" /></svg>
 );
 
-export function SignInScreen() {
+/** base = '/go' (full app) or '/go/lite' (light version). */
+export function SignInScreen({ base = '/go' }: { base?: string }) {
   const { signIn } = useGo();
   const navigate = useNavigate();
   const [email, setEmail] = useState(ME.email);
@@ -21,7 +22,7 @@ export function SignInScreen() {
 
   const go = (via: 'google' | 'microsoft' | 'email') => {
     setBusy(via);
-    setTimeout(() => { signIn(); navigate('/go/home', { replace: true }); }, 900);
+    setTimeout(() => { signIn(); navigate(`${base}/home`, { replace: true }); }, 900);
   };
 
   const sso = (via: 'google' | 'microsoft', icon: React.ReactNode, label: string) => (
@@ -56,7 +57,7 @@ export function SignInScreen() {
             </button>
           </div>
           <div className="flex justify-end">
-            <button type="button" onClick={() => navigate('/go/forgot')} className="text-[12.5px] font-semibold text-go-brand">Forgot password?</button>
+            <button type="button" onClick={() => navigate(`${base}/forgot`)} className="text-[12.5px] font-semibold text-go-brand">Forgot password?</button>
           </div>
           <Btn type="submit" block disabled={!email || !pw || !!busy}>
             {busy === 'email' ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Sign in'}
@@ -80,12 +81,12 @@ export function SignInScreen() {
   );
 }
 
-export function ForgotScreen() {
+export function ForgotScreen({ base = '/go' }: { base?: string }) {
   const [email, setEmail] = useState(ME.email);
   const [sent, setSent] = useState(false);
   const navigate = useNavigate();
   return (
-    <Screen header={<TopBar back fallback="/go/signin" />}>
+    <Screen header={<TopBar back fallback={`${base}/signin`} />}>
       <div className="px-6 pt-2">
         {!sent ? (
           <>
@@ -102,7 +103,7 @@ export function ForgotScreen() {
             <span className={cx('w-20 h-20 rounded-[28px] go-grad go-glow text-white flex items-center justify-center')}><MailCheck className="w-9 h-9" /></span>
             <h1 className="text-[24px] font-bold text-go-ink mt-6">Check your email</h1>
             <p className="text-[14px] text-go-muted mt-2 leading-relaxed">We sent a reset link to <span className="font-semibold text-go-ink">{email}</span>. It expires in 30 minutes.</p>
-            <Btn block className="mt-8" onClick={() => navigate('/go/signin')}>Back to sign in</Btn>
+            <Btn block className="mt-8" onClick={() => navigate(`${base}/signin`)}>Back to sign in</Btn>
             <button onClick={() => setSent(false)} className="mt-4 text-[13px] font-semibold text-go-brand">Didn’t get it? Send again</button>
             <p className="text-[12px] text-go-faint mt-6">Can’t see it? Please check your junk or spam folder.</p>
           </div>

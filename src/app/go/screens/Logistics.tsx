@@ -13,8 +13,8 @@ function useCase() {
   return cases.find(c => c.id === id);
 }
 
-function Missing() {
-  return <Screen header={<TopBar back fallback="/go/work" />}><EmptyState icon={<Info className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
+function Missing({ list = '/go/work' }: { list?: string }) {
+  return <Screen header={<TopBar back fallback={list} />}><EmptyState icon={<Info className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
 }
 
 /** Deterministic QR-ish pattern from the order ID — demo only. */
@@ -38,7 +38,7 @@ function FakeCode({ seed }: { seed: string }) {
 }
 
 /** Physical label — always printed black on white, whatever the app theme. */
-function LabelPreview({ c }: { c: LabCase }) {
+export function LabelPreview({ c }: { c: LabCase }) {
   const lab = LABS.find(l => l.id === c.lab)!;
   return (
     <div className="rounded-2xl bg-white text-[#030213] p-4 shadow-[0_12px_32px_-16px_rgba(16,24,64,.35)] border border-[#E0E0E6] aspect-[100/62] flex flex-col">
@@ -60,7 +60,8 @@ function LabelPreview({ c }: { c: LabCase }) {
   );
 }
 
-export function DispatchScreen() {
+/** list = where Back and "done" return to; the light version passes its To dispatch list. */
+export function DispatchScreen({ list }: { list?: string }) {
   const c = useCase();
   const { updateCase, toast } = useGo();
   const navigate = useNavigate();
@@ -70,15 +71,16 @@ export function DispatchScreen() {
   const [collected, setCollected] = useState(() => new Date().toISOString().slice(0, 10));
   const [bags, setBags] = useState(1);
   const [notes, setNotes] = useState('');
-  if (!c) return <Missing />;
+  if (!c) return <Missing list={list} />;
+  const back = list ?? `/go/work/${c.id}`;
   const lab = labName(c.lab);
   const needsTracking = courier && !["Lab's own courier", 'Hand delivered'].includes(courier);
 
   if (c.stage !== 'ready') {
     return (
-      <Screen header={<TopBar back fallback={`/go/work/${c.id}`} title="Dispatch to lab" sub={c.id} />}>
+      <Screen header={<TopBar back fallback={back} title="Dispatch to lab" sub={c.id} />}>
         <EmptyState icon={<Truck className="w-7 h-7" />} title="Already dispatched" body={`${c.id} left the practice${c.dispatch ? ` with ${c.dispatch.courier}` : ''}.`}
-          action={<Btn variant="secondary" onClick={() => navigate(`/go/work/${c.id}`, { replace: true })}>View case</Btn>} />
+          action={<Btn variant="secondary" onClick={() => navigate(back, { replace: true })}>{list ? 'Back to the list' : 'View case'}</Btn>} />
       </Screen>
     );
   }
@@ -90,11 +92,11 @@ export function DispatchScreen() {
       events: [...x.events, { stage: 'dispatched', at: nowIso(), by: ME.name, text: [courier, tracking].filter(Boolean).join(' · ') }],
     }));
     toast(`Dispatched to ${lab}`);
-    navigate(`/go/work/${c.id}`, { replace: true });
+    navigate(back, { replace: true });
   };
 
   return (
-    <Screen header={<TopBar back fallback={`/go/work/${c.id}`} title="Dispatch to lab" sub={`${c.id} · ${lab}`} />}
+    <Screen header={<TopBar back fallback={back} title="Dispatch to lab" sub={`${c.id} · ${lab}`} />}
       footer={
         <div className="flex gap-2">
           <Btn variant={printed ? 'secondary' : 'soft'} className="!px-4" aria-label={printed ? 'Print label again' : 'Print label'}

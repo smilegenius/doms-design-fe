@@ -18,6 +18,7 @@ import { DispatchScreen, ReceiveScreen } from './screens/Logistics';
 import CaptureScreen from './screens/Capture';
 import ManualCaseScreen from './screens/ManualCase';
 import { FinanceScreen, InvoiceScreen, InvoicesComingSoon, StatementScreen } from './screens/Finance';
+import { LITE, LiteAccount, LiteCreate, LiteDispatch, LiteHome, LiteReceived, LiteToDispatch } from './lite/LiteScreens';
 import { AccountScreen, AppearanceSettings, DashboardSettings, NotificationSettings, NotificationsScreen, PracticesSettings } from './screens/Account';
 
 // Reviewer navigation. Each entry can carry scenarios: variants of the same
@@ -104,6 +105,27 @@ const JUMPS: Jump[] = [
   { group: 'Account', label: 'Account & appearance', to: '/go/account' },
 ];
 
+// Light version: sign in · home · create · received · to dispatch (print)
+const LITE_JUMPS: Jump[] = [
+  { group: 'Start', label: 'Sign in', to: `${LITE}/signin`, scenarios: [
+    { label: 'Email & password', to: `${LITE}/signin` },
+    { label: 'Forgot password', to: `${LITE}/forgot` },
+  ] },
+  { group: 'Start', label: 'Home', to: `${LITE}/home`, scenarios: [
+    { label: 'Multiple practices', to: `${LITE}/home`, practice: 'all' },
+    { label: 'Single practice · no dropdown', to: `${LITE}/home`, solo: 'isc' },
+    { label: 'Empty', to: `${LITE}/home`, fill: 0 },
+  ] },
+  { group: 'Create', label: 'Create from prescription', to: `${LITE}/new` },
+  { group: 'Received', label: 'Received', to: `${LITE}/received` },
+  { group: 'To dispatch', label: 'To dispatch', to: `${LITE}/dispatch`, scenarios: [
+    { label: 'List', to: `${LITE}/dispatch` },
+    { label: 'Print label · crown, private', to: `${LITE}/dispatch/SG-28491` },
+    { label: 'Print label · partial denture, NHS', to: `${LITE}/dispatch/SG-28497` },
+  ] },
+  { group: 'Me', label: 'Me', to: `${LITE}/account` },
+];
+
 function ThemeSwitch() {
   const { themePref, setThemePref } = useGo();
   const opts: { v: ThemePref; icon: React.ReactNode; label: string }[] = [
@@ -124,7 +146,7 @@ function ThemeSwitch() {
   );
 }
 
-function SidePanel() {
+function SidePanel({ lite }: { lite?: boolean }) {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
   const here = pathname + search;
@@ -140,7 +162,7 @@ function SidePanel() {
     setDemoFill(s.fill === undefined || s.fill === 4 ? null : s.fill);
     setPickedFill(!!s.fills);
     setPractice(s.solo ?? s.practice ?? 'all');
-    if (s.to === '/go/signin' || s.to === '/go/forgot') { signOut(); navigate(s.to); return; }
+    if (/[/](signin|forgot)$/.test(s.to)) { signOut(); navigate(s.to); return; }
     signIn();
     // Let the sign-in screen's own redirect run first, then land on the target.
     setTimeout(() => navigate(s.to), 0);
@@ -157,7 +179,7 @@ function SidePanel() {
   const term = q.trim().toLowerCase();
   const hit = (t: string) => t.toLowerCase().includes(term);
   // Hidden features drop out of the reviewer index too
-  const jumps = JUMPS.filter(j => FEATURES.invoices || j.group !== 'Invoices');
+  const jumps = (lite ? LITE_JUMPS : JUMPS).filter(j => FEATURES.invoices || j.group !== 'Invoices');
   const shown = jumps.map(j => {
     if (!term) return { j, scen: j.scenarios ?? [] };
     const self = hit(j.label) || hit(j.group);
@@ -169,14 +191,14 @@ function SidePanel() {
 
   return (
     <aside className="hidden lg:flex flex-col w-[300px] h-[min(844px,calc(100dvh-40px))] relative z-10">
-      <button onClick={() => navigate('/')} className="self-start inline-flex items-center gap-1.5 text-[13px] font-medium text-go-muted hover:text-go-ink mb-6">
-        <ArrowLeft className="w-4 h-4" /> All portals
+      <button onClick={() => navigate('/go')} className="self-start inline-flex items-center gap-1.5 text-[13px] font-medium text-go-muted hover:text-go-ink mb-6">
+        <ArrowLeft className="w-4 h-4" /> All versions
       </button>
       <div className="flex items-center gap-3">
         <GoMark size={44} />
         <div>
           <p className="text-[20px] font-bold text-go-ink leading-tight">Smile Genius <span className="go-grad-text">Go</span></p>
-          <p className="text-[12.5px] text-go-muted">Mobile app for dental practices</p>
+          <p className="text-[12.5px] text-go-muted">{lite ? 'Light version' : 'In development version'}</p>
         </div>
       </div>
       <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted mt-6 mb-2">Appearance</p>
@@ -269,17 +291,36 @@ function StatusBar() {
   );
 }
 
-function RequireAuth() {
+function RequireAuth({ to = '/go/signin' }: { to?: string }) {
   const { signedIn } = useGo();
-  return signedIn ? <Outlet /> : <Navigate to="/go/signin" replace />;
+  return signedIn ? <Outlet /> : <Navigate to={to} replace />;
 }
 
-function GoRoutes() {
+function LiteRoutes() {
+  const { signedIn } = useGo();
+  return (
+    <Routes>
+      <Route path="signin" element={signedIn ? <Navigate to={`${LITE}/home`} replace /> : <SignInScreen base={LITE} />} />
+      <Route path="forgot" element={<ForgotScreen base={LITE} />} />
+      <Route element={<RequireAuth to={`${LITE}/signin`} />}>
+        <Route path="home" element={<LiteHome />} />
+        <Route path="new" element={<LiteCreate />} />
+        <Route path="received" element={<LiteReceived />} />
+        <Route path="dispatch" element={<LiteToDispatch />} />
+        <Route path="dispatch/:id" element={<LiteDispatch />} />
+        <Route path="account" element={<LiteAccount />} />
+      </Route>
+      <Route path="*" element={<Navigate to={signedIn ? `${LITE}/home` : `${LITE}/signin`} replace />} />
+    </Routes>
+  );
+}
+
+function GoRoutes({ lite }: { lite?: boolean }) {
   const { signedIn } = useGo();
   const { pathname, search } = useLocation();
   return (
     <div key={pathname.startsWith('/go/new') ? pathname + search : pathname} className="absolute inset-0 go-fade-in">
-      <Routes>
+      {lite ? <LiteRoutes /> : <Routes>
         <Route path="signin" element={signedIn ? <Navigate to="/go/home" replace /> : <SignInScreen />} />
         <Route path="forgot" element={<ForgotScreen />} />
         <Route element={<RequireAuth />}>
@@ -303,7 +344,7 @@ function GoRoutes() {
           <Route path="account/dashboard" element={<DashboardSettings />} />
         </Route>
         <Route path="*" element={<Navigate to={signedIn ? '/go/home' : '/go/signin'} replace />} />
-      </Routes>
+      </Routes>}
     </div>
   );
 }
@@ -320,13 +361,13 @@ function useFrameScale() {
   return scale;
 }
 
-function GoFrame() {
+function GoFrame({ lite }: { lite?: boolean }) {
   const { theme, setSheetRoot, sheetRoot } = useGo();
   const scale = useFrameScale();
   const { pathname: routePath } = useLocation();
   const kbTarget = useKeyboardTarget(sheetRoot, routePath);
   const navigate = useNavigate();
-  useEffect(() => { document.title = 'Smile Genius Go'; }, []);
+  useEffect(() => { document.title = lite ? 'Smile Genius Go · Light' : 'Smile Genius Go'; }, [lite]);
   // Presentation (backdrop + side panel) stays light; only the phone follows the theme
   return (
     <div className="go-theme font-sans antialiased" data-theme="light">
@@ -338,12 +379,12 @@ function GoFrame() {
           <div className="absolute top-1/3 left-1/2 w-[380px] h-[380px] rounded-full bg-go-teal/10 blur-[110px]" />
         </div>
 
-        <SidePanel />
+        <SidePanel lite={lite} />
 
         {/* Compact controls between sm and lg (no side panel) */}
         <div className="hidden sm:flex lg:hidden absolute top-4 left-4 right-4 z-10 items-center justify-between">
-          <button onClick={() => navigate('/')} className="inline-flex items-center gap-1.5 text-[13px] font-medium text-go-muted hover:text-go-ink">
-            <ArrowLeft className="w-4 h-4" /> All portals
+          <button onClick={() => navigate('/go')} className="inline-flex items-center gap-1.5 text-[13px] font-medium text-go-muted hover:text-go-ink">
+            <ArrowLeft className="w-4 h-4" /> All versions
           </button>
           <div className="w-[260px]"><ThemeSwitch /></div>
         </div>
@@ -361,7 +402,7 @@ function GoFrame() {
               <StatusBar />
               {/* Shrinks by the keyboard height so content + sticky actions ride up */}
               <div className="relative flex-1 min-h-0 transition-[margin] duration-300 ease-[cubic-bezier(.2,.8,.2,1)]" style={{ marginBottom: 'var(--go-kb)' }}>
-                <GoRoutes />
+                <GoRoutes lite={lite} />
               </div>
               <Toaster />
               <SimKeyboard target={kbTarget} theme={theme} />
@@ -374,10 +415,11 @@ function GoFrame() {
   );
 }
 
-export default function GoApp() {
+/** variant 'lite' = the light version at /go/lite; default is the full app in development. */
+export default function GoApp({ variant }: { variant?: 'lite' }) {
   return (
     <GoStoreProvider>
-      <GoFrame />
+      <GoFrame lite={variant === 'lite'} />
     </GoStoreProvider>
   );
 }

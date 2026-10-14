@@ -16,7 +16,7 @@ export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Bool
 
 // bg defaults to transparent so the phone's .go-wash gradient shows behind every screen
 export function Screen({ header, children, footer, tabs, bg = 'bg-transparent' }: {
-  header?: React.ReactNode; children: React.ReactNode; footer?: React.ReactNode; tabs?: boolean; bg?: string;
+  header?: React.ReactNode; children: React.ReactNode; footer?: React.ReactNode; tabs?: boolean | React.ReactNode; bg?: string;
 }) {
   return (
     <div className={cx('absolute inset-0 flex flex-col', bg)}>
@@ -30,7 +30,7 @@ export function Screen({ header, children, footer, tabs, bg = 'bg-transparent' }
           {footer}
         </div>
       )}
-      {tabs && <TabBar />}
+      {tabs && (tabs === true ? <TabBar /> : tabs)}
     </div>
   );
 }
