@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  AlertTriangle, Building2, Check, CheckCircle2, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
+  AlertTriangle, Building2, Check, CheckCircle2, HelpCircle, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
 } from '../icons';
 import { ME, useGo, useScoped } from '../store';
 import {
@@ -199,25 +199,45 @@ function PhotoViewer({ photo, onClose }: { photo: Photo; onClose: () => void }) 
   );
 }
 
-interface Block { uid: string; itemId: string | null; teeth: string[]; returnBy: string }
+interface Block { uid: string; itemId: string | null; teeth: string[]; returnBy: string; /** What the prescription actually says, when the app had to guess the service. */ written?: string }
 let blockSeq = 0;
 const newBlock = (): Block => ({ uid: `b${++blockSeq}`, itemId: null, teeth: [], returnBy: plusDays(14) });
 
 const SERVICE_OPTIONS = SERVICE_CATEGORIES.flatMap(cat => cat.items.map(s => ({ value: s.id, label: s.label, sub: cat.label })));
 
 /** What the scan found on the prescription.
- *  clean = everything read · partial = some details missing · multi = several services detected. */
-export type RxScenario = 'clean' | 'partial' | 'multi';
-interface Read { practice: PracticeId | null; clinician: string | null; lab: string | null; patientId: string | null; blocks: Block[]; instructions: string }
+ *  clean = everything read · partial = some details missing · multi = several services detected ·
+ *  memory = names written differently from our records (the app asks, and can remember the answer). */
+export type RxScenario = 'clean' | 'partial' | 'multi' | 'memory';
+interface Read {
+  practice: PracticeId | null; clinician: string | null; lab: string | null; patientId: string | null; blocks: Block[]; instructions: string;
+  /** What the prescription says for a practice / dentist / lab it only partly matched. */
+  written: Partial<Record<'practice' | 'dentist' | 'lab', string>>;
+}
+
+// What the app has been taught: "Dr Hannah" = Dr Hannah Lee. Kept on this device; the AI reads it next time.
+const MEMORY_KEY = 'sg-go-lite-memory';
+type MemKind = 'practice' | 'dentist' | 'lab' | 'service';
+const memKey = (k: MemKind, text: string) => `${k}:${text.trim().toLowerCase()}`;
+const readMemory = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(MEMORY_KEY) ?? '{}'); } catch { return {}; } };
+const remember = (k: MemKind, text: string, id: string) => { try { localStorage.setItem(MEMORY_KEY, JSON.stringify({ ...readMemory(), [memKey(k, text)]: id })); } catch { /* private mode */ } };
+const forgetAll = () => { try { localStorage.removeItem(MEMORY_KEY); } catch { /* ignore */ } };
 const blockOf = (itemId: string | null, teeth: string[], days: number): Block => ({ uid: `b${++blockSeq}`, itemId, teeth, returnBy: days ? plusDays(days) : '' });
 const readPrescription = (rx: RxScenario): Read => rx === 'partial'
   ? {
     // Handwriting unclear: no dentist, lab or patient, and no teeth or date
-    practice: 'cds', clinician: null, lab: null, patientId: null, instructions: '',
+    practice: 'cds', clinician: null, lab: null, patientId: null, instructions: '', written: {},
     blocks: [blockOf('su-crown', [], 0)],
   }
+  : rx === 'memory'
+  ? {
+    // Everything found, but written differently from our records: "Dr Hannah" is Dr Hannah Lee in the database
+    practice: 'cds', clinician: 'lee', lab: 'northstar', patientId: 'P-10231', instructions: 'Light contacts. Match adjacent LL4 shade.',
+    written: { practice: 'Camden Dental', dentist: 'Dr Hannah', lab: 'Northstar' },
+    blocks: [{ ...blockOf('su-crown', ['LL5'], 14), written: 'PFM crown' }, { ...blockOf('ap-night-guard', ['Upper arch'], 21), written: 'Night splint' }],
+  }
   : {
-    practice: 'cds', clinician: 'reed', lab: 'northstar', patientId: 'P-10231', instructions: 'Light contacts. Match adjacent LL4 shade.',
+    practice: 'cds', clinician: 'reed', lab: 'northstar', patientId: 'P-10231', instructions: 'Light contacts. Match adjacent LL4 shade.', written: {},
     blocks: rx === 'multi'
       ? [blockOf('su-crown', ['LL5'], 14), blockOf('br-pontic', ['LL6'], 14), blockOf('ap-night-guard', ['Upper arch'], 21), blockOf('or-clear-aligners', ['Both arches'], 28)]
       : [blockOf('su-crown', ['LL5'], 14)],
@@ -253,7 +273,7 @@ function Scanning({ photo, onDone }: { photo: Photo; onDone: () => void }) {
 }
 
 /** One line of a card: icon · label · value · tick (or warning) · arrow. Tap to change in a bottom sheet. */
-function DetailRow({ icon, label, value, onClick }: { icon: React.ReactNode; label: string; value: string | null; onClick: () => void }) {
+function DetailRow({ icon, label, value, unsure, onClick }: { icon: React.ReactNode; label: string; value: string | null; unsure?: boolean; onClick: () => void }) {
   return (
     <button onClick={onClick} className="w-full flex items-center gap-3 px-4 py-1.5 text-left active:bg-go-raised transition">
       <span className={cx('w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0', value ? 'bg-go-brand-soft text-go-brand' : 'bg-go-warn-soft text-go-warn')}>{icon}</span>
@@ -261,9 +281,40 @@ function DetailRow({ icon, label, value, onClick }: { icon: React.ReactNode; lab
       {value
         ? <span className="flex-1 min-w-0 truncate text-[14px] font-semibold text-go-ink">{value}</span>
         : <span className="flex-1 min-w-0 inline-flex items-center gap-1 text-[12.5px] font-medium text-go-warn"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />Not found</span>}
-      {value && <CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" />}
-      <ChevronRight className={cx('w-4 h-4 flex-shrink-0', value ? 'text-go-faint' : 'text-go-warn')} />
+      {value && (unsure ? <HelpCircle className="w-[18px] h-[18px] text-go-warn flex-shrink-0" aria-label="Please confirm" /> : <CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" />)}
+      <ChevronRight className={cx('w-4 h-4 flex-shrink-0', value && !unsure ? 'text-go-faint' : 'text-go-warn')} />
     </button>
+  );
+}
+
+/** "Dr Hannah" on the prescription, Dr Hannah Lee in our records: ask once, and offer to remember it. */
+function ConfirmSheet({ info, onRemember, onOnce, onDifferent, onClose }: {
+  info: { kind: string; written: string; matched: string } | null; onRemember: () => void; onOnce: () => void; onDifferent: () => void; onClose: () => void;
+}) {
+  if (!info) return null;
+  return (
+    <Sheet open onClose={onClose} title={`Is this the right ${info.kind}?`} sub="The prescription doesn’t match our records word for word."
+      footer={(
+        <div className="space-y-2">
+          <Btn block icon={<Sparkles className="w-5 h-5" />} onClick={onRemember}>Yes, remember this</Btn>
+          <Btn block variant="secondary" onClick={onOnce}>Yes, just this time</Btn>
+          <Btn block variant="ghost" size="md" onClick={onDifferent}>It’s a different {info.kind}</Btn>
+        </div>
+      )}>
+      <div className="space-y-2">
+        <div className="rounded-2xl border border-go-line bg-go-surface px-4 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">On the prescription</p>
+          <p className="text-[17px] font-semibold text-go-ink mt-0.5">“{info.written}”</p>
+        </div>
+        <div className="rounded-2xl border border-go-brand/40 bg-go-brand-soft px-4 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-brand-ink">We matched it to</p>
+          <p className="text-[17px] font-semibold text-go-ink mt-0.5">{info.matched}</p>
+        </div>
+      </div>
+      <p className="mt-4 text-[13px] text-go-ink2 leading-relaxed">
+        Remember this and next time “{info.written}” will be read as <span className="font-semibold">{info.matched}</span>. It also helps us choose better for you.
+      </p>
+    </Sheet>
   );
 }
 
@@ -342,7 +393,7 @@ type Edit = 'practice' | 'dentist' | 'lab' | 'patient';
 export function LiteCreate() {
   const { addCase, toast } = useGo();
   const rxParam = new URLSearchParams(useLocation().search).get('rx');
-  const rx: RxScenario = rxParam === 'partial' || rxParam === 'multi' ? rxParam : 'clean';
+  const rx: RxScenario = rxParam === 'partial' || rxParam === 'multi' || rxParam === 'memory' ? rxParam : 'clean';
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [scanned, setScanned] = useState(false);
   const [viewing, setViewing] = useState(false);
@@ -356,12 +407,31 @@ export function LiteCreate() {
   const [svc, setSvc] = useState<{ block: Block; isNew: boolean } | null>(null);
   const [tried, setTried] = useState(false);
   const [created, setCreated] = useState<LabCase | null>(null);
+  // Names the scan only partly matched (key = practice | dentist | lab | a service's uid) and what the prescription says
+  const [unsure, setUnsure] = useState<Set<string>>(new Set());
+  const [written, setWritten] = useState<Record<string, string>>({});
+  const [confirm, setConfirm] = useState<string | null>(null);
+  const search = useLocation().search;
 
-  const reset = () => { setCreated(null); setPhoto(null); setScanned(false); setEdit(null); setSvc(null); setTried(false); };
+  const reset = () => { setCreated(null); setPhoto(null); setScanned(false); setEdit(null); setSvc(null); setTried(false); setConfirm(null); };
   const applyRead = () => {
     const r = readPrescription(rx);
+    if (rx === 'memory' && new URLSearchParams(search).get('reset') === '1') forgetAll();
+    const mem = readMemory();
+    const w: Record<string, string> = {}; const guess = new Set<string>(); const known: string[] = [];
+    const check = (key: string, kind: MemKind, text: string | undefined, id: string | null, label: string) => {
+      if (!text || !id) return;
+      w[key] = text;
+      if (mem[memKey(kind, text)] === id) known.push(`“${text}” = ${label}`); else guess.add(key);
+    };
+    check('practice', 'practice', r.written.practice, r.practice, r.practice ? practiceName(r.practice) : '');
+    check('dentist', 'dentist', r.written.dentist, r.clinician, r.clinician ? clinicianName(r.clinician) : '');
+    check('lab', 'lab', r.written.lab, r.lab, r.lab ? labName(r.lab) : '');
+    r.blocks.forEach(b => check(b.uid, 'service', b.written, b.itemId, b.itemId ? serviceLabel(b.itemId) : ''));
+    setUnsure(guess); setWritten(w); setConfirm(null);
     setPractice(r.practice); setClinician(r.clinician); setLab(r.lab); setPatientId(r.patientId); setBlocks(r.blocks); setInstructions(r.instructions);
     setScanned(true);
+    if (known.length) toast(`Read from what you taught us: ${known.join(', ')}`, 'info');
   };
   const doneScanning = useCallback(applyRead, [rx]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -395,8 +465,26 @@ export function LiteCreate() {
   };
 
   const saveService = (b: Block) => {
+    if (blocks.find(x => x.uid === b.uid)?.itemId !== b.itemId) clearUnsure(b.uid); // a different service chosen: nothing left to confirm
     setBlocks(bs => (bs.some(x => x.uid === b.uid) ? bs.map(x => (x.uid === b.uid ? b : x)) : [...bs, b]));
     setSvc(null);
+  };
+  const clearUnsure = (key: string) => setUnsure(s => { const n = new Set(s); n.delete(key); return n; });
+  const confirmBlock = blocks.find(b => b.uid === confirm);
+  const confirmInfo = !confirm ? null
+    : confirm === 'practice' && practice ? { kind: 'practice', matched: practiceName(practice), id: practice, mem: 'practice' as MemKind }
+    : confirm === 'dentist' && clinician ? { kind: 'dentist', matched: clinicianName(clinician), id: clinician, mem: 'dentist' as MemKind }
+    : confirm === 'lab' && lab ? { kind: 'lab', matched: labName(lab), id: lab, mem: 'lab' as MemKind }
+    : confirmBlock?.itemId ? { kind: 'service', matched: serviceLabel(confirmBlock.itemId), id: confirmBlock.itemId, mem: 'service' as MemKind } : null;
+  const settle = (rememberIt: boolean) => {
+    if (!confirm || !confirmInfo) return;
+    if (rememberIt) { remember(confirmInfo.mem, written[confirm], confirmInfo.id); toast(`Remembered: “${written[confirm]}” = ${confirmInfo.matched}`); }
+    clearUnsure(confirm); setConfirm(null);
+  };
+  const differentOne = () => {
+    const key = confirm; setConfirm(null);
+    if (key === 'practice' || key === 'dentist' || key === 'lab') setEdit(key);
+    else if (confirmBlock) setSvc({ block: confirmBlock, isNew: false });
   };
   const unclear = rx === 'partial' && (!patientId || !clinician || !lab);
   const patient = patientId ? patientById(patientId) : null;
@@ -406,7 +494,8 @@ export function LiteCreate() {
       footer={<Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={submit}>Create case</Btn>}>
       {tried && notFound.length > 0
         ? <p className="px-5 pt-1 text-[13px] text-go-warn font-medium">Please fill in the highlighted details.</p>
-        : unclear && <p className="mx-4 mt-1 px-3 py-2 rounded-2xl bg-go-warn-soft text-[12.5px] text-go-warn font-medium">Some details weren’t clear on the prescription. Please check them.</p>}
+        : unclear ? <p className="mx-4 mt-1 px-3 py-2 rounded-2xl bg-go-warn-soft text-[12.5px] text-go-warn font-medium">Some details weren’t clear on the prescription. Please check them.</p>
+        : unsure.size > 0 && <p className="mx-4 mt-1 px-3 py-2 rounded-2xl bg-go-warn-soft text-[12.5px] text-go-warn font-medium">A few names don’t match exactly. Tap the ? to confirm them.</p>}
       <div className="px-4 pt-1.5 space-y-2.5">
         {/* The prescription: tap to view it full size */}
         <Card className="flex items-center gap-3 p-2">
@@ -426,9 +515,9 @@ export function LiteCreate() {
 
         {/* Practice · dentist · lab · patient: one card. Tap a line to change it in a bottom sheet. */}
         <Card className="overflow-hidden py-0.5">
-          <DetailRow icon={<Building2 className="w-4 h-4" />} label="Practice" value={practice ? practiceName(practice) : null} onClick={() => setEdit('practice')} />
-          <DetailRow icon={<User className="w-4 h-4" />} label="Dentist" value={clinician ? clinicianName(clinician) : null} onClick={() => setEdit('dentist')} />
-          <DetailRow icon={<FlaskConical className="w-4 h-4" />} label="Lab" value={lab ? labName(lab) : null} onClick={() => setEdit('lab')} />
+          <DetailRow icon={<Building2 className="w-4 h-4" />} label="Practice" value={practice ? practiceName(practice) : null} unsure={unsure.has('practice')} onClick={() => (unsure.has('practice') ? setConfirm('practice') : setEdit('practice'))} />
+          <DetailRow icon={<User className="w-4 h-4" />} label="Dentist" value={clinician ? clinicianName(clinician) : null} unsure={unsure.has('dentist')} onClick={() => (unsure.has('dentist') ? setConfirm('dentist') : setEdit('dentist'))} />
+          <DetailRow icon={<FlaskConical className="w-4 h-4" />} label="Lab" value={lab ? labName(lab) : null} unsure={unsure.has('lab')} onClick={() => (unsure.has('lab') ? setConfirm('lab') : setEdit('lab'))} />
           <DetailRow icon={patient ? <span className="text-[9.5px] font-bold">{initials(patient.name)}</span> : <User className="w-4 h-4" />} label="Patient"
             value={patient ? patient.name : null} onClick={() => setEdit('patient')} />
         </Card>
@@ -437,7 +526,7 @@ export function LiteCreate() {
         <Card className="overflow-hidden py-0.5">
           <p className="px-4 pt-2 pb-0.5 text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Services{blocks.length > 1 ? ` · ${blocks.length}` : ''}</p>
           {blocks.map((b, i) => (
-            <button key={b.uid} onClick={() => setSvc({ block: b, isNew: false })} className="w-full flex items-center gap-3 px-4 py-2 text-left active:bg-go-raised transition">
+            <button key={b.uid} onClick={() => (unsure.has(b.uid) ? setConfirm(b.uid) : setSvc({ block: b, isNew: false }))} className="w-full flex items-center gap-3 px-4 py-2 text-left active:bg-go-raised transition">
               <span className={cx('w-6 h-6 rounded-lg text-[11px] font-bold flex items-center justify-center flex-shrink-0', b.itemId ? 'bg-go-brand-soft text-go-brand' : 'bg-go-warn-soft text-go-warn')}>{i + 1}</span>
               <span className="flex-1 min-w-0 truncate">
                 {b.itemId
@@ -445,8 +534,8 @@ export function LiteCreate() {
                   : <span className="text-[14px] font-medium text-go-warn">Choose a service</span>}
               </span>
               <span className={cx('text-[12.5px] flex-shrink-0', b.returnBy ? 'text-go-ink2' : 'text-go-warn font-medium')}>{b.returnBy ? shortDate(b.returnBy) : 'No date'}</span>
-              {b.itemId && b.returnBy && <CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" />}
-              <ChevronRight className={cx('w-4 h-4 flex-shrink-0', b.itemId && b.returnBy ? 'text-go-faint' : 'text-go-warn')} />
+              {b.itemId && b.returnBy && (unsure.has(b.uid) ? <HelpCircle className="w-[18px] h-[18px] text-go-warn flex-shrink-0" aria-label="Please confirm" /> : <CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" />)}
+              <ChevronRight className={cx('w-4 h-4 flex-shrink-0', b.itemId && b.returnBy && !unsure.has(b.uid) ? 'text-go-faint' : 'text-go-warn')} />
             </button>
           ))}
           <div className="px-3 pt-1.5 pb-2.5">
@@ -459,12 +548,14 @@ export function LiteCreate() {
 
       {viewing && <PhotoViewer photo={photo} onClose={() => setViewing(false)} />}
 
-      <OptionSheet open={edit === 'practice'} onClose={() => setEdit(null)} title="Practice" value={practice} onChange={v => setPractice(v as PracticeId)}
+      <OptionSheet open={edit === 'practice'} onClose={() => setEdit(null)} title="Practice" value={practice} onChange={v => { setPractice(v as PracticeId); clearUnsure('practice'); }}
         options={PRACTICES.map(p => ({ value: p.id, label: p.name, sub: p.area }))} />
-      <OptionSheet open={edit === 'dentist'} onClose={() => setEdit(null)} title="Dentist" value={clinician} onChange={setClinician}
+      <OptionSheet open={edit === 'dentist'} onClose={() => setEdit(null)} title="Dentist" value={clinician} onChange={v => { setClinician(v); clearUnsure('dentist'); }}
         options={CLINICIANS.map(c => ({ value: c.id, label: c.name, sub: `GDC ${c.gdc}` }))} />
-      <LabPicker bare value={lab} onChange={setLab} open={edit === 'lab'} onOpenChange={o => !o && setEdit(null)} />
+      <LabPicker bare value={lab} onChange={v => { setLab(v); clearUnsure('lab'); }} open={edit === 'lab'} onOpenChange={o => !o && setEdit(null)} />
       <PatientPicker bare value={patientId} onChange={setPatientId} open={edit === 'patient'} onOpenChange={o => !o && setEdit(null)} />
+      <ConfirmSheet info={confirmInfo && confirm ? { kind: confirmInfo.kind, written: written[confirm], matched: confirmInfo.matched } : null}
+        onRemember={() => settle(true)} onOnce={() => settle(false)} onDifferent={differentOne} onClose={() => setConfirm(null)} />
       <ServiceEditSheet block={svc?.block ?? null} isNew={svc?.isNew ?? false} canRemove={blocks.length > 1} onSave={saveService} onClose={() => setSvc(null)}
         onRemove={() => { setBlocks(bs => bs.filter(x => x.uid !== svc!.block.uid)); setSvc(null); }} />
     </Screen>

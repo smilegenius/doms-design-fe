@@ -134,6 +134,8 @@ const LITE_JUMPS: Jump[] = [
     { label: 'Everything read from the prescription', to: `${LITE}/new` },
     { label: 'Some details not found', to: `${LITE}/new?rx=partial` },
     { label: 'Several services detected', to: `${LITE}/new?rx=multi` },
+    { label: 'Names differ · teach the app', to: `${LITE}/new?rx=memory&reset=1` },
+    { label: 'Same prescription again · remembered', to: `${LITE}/new?rx=memory` },
   ] },
   { group: 'Deliveries', label: 'Deliveries', to: `${LITE}/deliveries`, scenarios: [
     { label: 'To dispatch', to: `${LITE}/deliveries` },
