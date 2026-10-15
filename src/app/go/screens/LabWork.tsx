@@ -13,7 +13,7 @@ import {
   ATTENTION, Attention, CLINICIANS, labStatusOf, LABS, LabCase, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
   createdOn, initials, patientById, STAGE_NAMES, StageLine, dueLabel, patchItemStages, phaseName, remainingStages, stagedKindOf, practiceName, readiness, relDay, shortName, stageIndex,
 } from '../data';
-import { Btn, Card, Chips, EmptyState, IconTile, Input, Label, Pill, PickerField, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, cx, useBase } from '../ui';
+import { Btn, Card, Chips, EmptyState, IconTile, Input, Label, Pill, PickerField, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, TeethChips, cx, useBase } from '../ui';
 
 // ─── Rows and cards ─────────────────────────────────────────────────────────
 // Two views of the same cases: a dense list (default) and roomier cards.
@@ -433,7 +433,7 @@ function StageRow({ s, n }: { s: StageLine; n: number }) {
         s.state ? 'bg-go-raised text-go-faint' : 'bg-go-violet-soft text-go-violet')}>{n}</span>
       <span className="flex-1 min-w-0">
         <span className={cx('block text-[13px] font-semibold truncate', s.state ? 'text-go-muted' : 'text-go-ink')}>{s.name}</span>
-        <span className="block text-[11.5px] text-go-muted">{s.date ? fmtDate(s.date) : 'Date not set'}{s.orderedAt ? ` · ordered ${fmtDate(s.orderedAt)}` : ''}</span>
+        <span className="block text-[11.5px] text-go-muted">{s.date ? fmtDate(s.date) : s.state === 'done-earlier' ? 'Done elsewhere' : 'Date not set'}{s.orderedAt ? ` · ordered ${fmtDate(s.orderedAt)}` : ''}</span>
       </span>
       {tag}
     </div>
@@ -452,7 +452,7 @@ function ServicesCard({ c, onOrder }: { c: LabCase; onOrder: (index: number) => 
             <div className="flex items-center gap-3">
               <span className="w-6 h-6 rounded-lg go-grad text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
               <div className="flex-1 min-w-0">
-                <p className="text-[13.5px] font-semibold text-go-ink truncate">{it.service} · {it.teeth.join(', ')}</p>
+                <p className="text-[13.5px] font-semibold text-go-ink truncate">{it.service} · <TeethChips teeth={it.teeth} /></p>
                 <p className="text-[11.5px] text-go-muted truncate">{[it.material, it.shade && `shade ${it.shade}`].filter(Boolean).join(' · ') || '—'}</p>
               </div>
               {!kind && (

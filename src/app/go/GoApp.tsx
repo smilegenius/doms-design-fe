@@ -129,6 +129,8 @@ const LITE_JUMPS: Jump[] = [
     { label: 'Multi-service · on hold', to: `${LITE}/work/SG-28472` },
     { label: 'Arriving from the lab', to: `${LITE}/work/SG-28488` },
     { label: 'Overdue · chase the lab', to: `${LITE}/work/SG-28479` },
+    { label: 'Denture · order the next stage', to: `${LITE}/work/SG-28488` },
+    { label: 'Partial denture · stages ahead', to: `${LITE}/work/SG-28497` },
   ] },
   { group: 'Create', label: 'Create from prescription', to: `${LITE}/new`, scenarios: [
     { label: 'Everything read from the prescription', to: `${LITE}/new` },
@@ -136,6 +138,8 @@ const LITE_JUMPS: Jump[] = [
     { label: 'Several services detected', to: `${LITE}/new?rx=multi` },
     { label: 'Names differ · teach the app', to: `${LITE}/new?rx=memory&reset=1` },
     { label: 'Same prescription again · remembered', to: `${LITE}/new?rx=memory` },
+    { label: 'Denture with stages · done elsewhere', to: `${LITE}/new?rx=denture` },
+    { label: 'Denture next stage · earlier stages matched', to: `${LITE}/new?rx=denture-match` },
   ] },
   { group: 'Deliveries', label: 'Deliveries', to: `${LITE}/deliveries`, scenarios: [
     { label: 'To dispatch', to: `${LITE}/deliveries` },

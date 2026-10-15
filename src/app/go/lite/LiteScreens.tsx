@@ -6,13 +6,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  AlertTriangle, Building2, Check, CheckCircle2, HelpCircle, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
+  AlertTriangle, Building2, Check, CheckCircle2, HelpCircle, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, Link2, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
 } from '../icons';
 import { ME, useGo, useScoped } from '../store';
+import { DENTURE_STAGES, isDentureItem } from '../../data/dentureStages';
 import {
-  CLINICIANS, LabCase, clinicianName, practiceName, PRACTICES, PracticeId, SERVICE_CATEGORIES, caseTitle, fmtDate, initials, labName, patientById, serviceLabel, shortName,
+  CLINICIANS, LabCase, StageLine, allItems, patchItemStages, clinicianName, practiceName, PRACTICES, PracticeId, SERVICE_CATEGORIES, caseTitle, fmtDate, initials, labName, patientById, serviceLabel, shortName,
 } from '../data';
-import { Btn, Card, EmptyState, GoMark, Input, Label, PickerField, Pill, Screen, SearchBox, Segmented, Sheet, TextArea, Toggle, TopBar, cx, useBack } from '../ui';
+import { Btn, Card, EmptyState, GoMark, Input, Label, PickerField, Pill, Screen, SearchBox, Segmented, Sheet, TeethChips, TextArea, Toggle, TopBar, cx, useBack } from '../ui';
 import { CaseForm, FormItem, LabPicker, PatientPicker, ToothPicker, buildCase, emptyForm, newItem } from '../screens/ManualCase';
 import { PaperRx } from '../screens/ReadSource';
 import { PracticeSwitcher, StatusTiles } from '../screens/Home';
@@ -199,16 +200,52 @@ function PhotoViewer({ photo, onClose }: { photo: Photo; onClose: () => void }) 
   );
 }
 
-interface Block { uid: string; itemId: string | null; teeth: string[]; returnBy: string; /** What the prescription actually says, when the app had to guess the service. */ written?: string }
+/** A denture is ordered stage by stage: order it (with a delivery date), say it was done elsewhere, or leave it out. */
+type StageMode = 'order' | 'elsewhere' | 'skip';
+interface BStage { name: string; mode: StageMode; date: string }
+interface Block { uid: string; itemId: string | null; teeth: string[]; returnBy: string; /** Denture only: what to do with each stage. */ stages?: BStage[]; /** What the prescription actually says, when the app had to guess the service. */ written?: string }
+const isDenture = (b: Block) => !!b.itemId && isDentureItem(b.itemId);
+const skipAll = (): BStage[] => DENTURE_STAGES.map(name => ({ name, mode: 'skip', date: '' }));
 let blockSeq = 0;
 const newBlock = (): Block => ({ uid: `b${++blockSeq}`, itemId: null, teeth: [], returnBy: plusDays(14) });
+
+/** Stages the prescription asks for: a number = order it, delivered in that many days; 'elsewhere' = already done somewhere else. */
+const dentureBlock = (itemId: string, teeth: string[], spec: Record<string, number | 'elsewhere'>): Block => ({
+  uid: `b${++blockSeq}`, itemId, teeth, returnBy: '',
+  stages: DENTURE_STAGES.map(name => { const v = spec[name]; return v === undefined ? { name, mode: 'skip' as const, date: '' } : v === 'elsewhere' ? { name, mode: 'elsewhere' as const, date: '' } : { name, mode: 'order' as const, date: plusDays(v) }; }),
+});
+
+/** A follow-up prescription: same patient, practice, dentist and denture service as a case already on the portal. */
+interface FollowUp { c: LabCase; index: number; done: Set<string> }
+function followUpOf(cases: LabCase[], who: { patientId: string | null; practice: string | null; clinician: string | null }, b: Block): FollowUp | null {
+  if (!who.patientId || !who.practice || !who.clinician || !b.itemId || !isDenture(b)) return null;
+  const name = serviceLabel(b.itemId).toLowerCase();
+  for (const c of cases) {
+    if (c.patientId !== who.patientId || c.practice !== who.practice || c.clinician !== who.clinician || c.stage === 'draft') continue;
+    const index = allItems(c).findIndex(it => it.service.toLowerCase() === name && it.stages?.length);
+    if (index >= 0) return { c, index, done: new Set(allItems(c)[index].stages!.map(x => x.name)) };
+  }
+  return null;
+}
+type StageKind = StageMode | 'matched';
+/** What will happen to each stage: matched ones are already on the existing case and are never ordered twice. */
+const stageView = (b: Block, m: FollowUp | null): { name: string; kind: StageKind; date: string }[] =>
+  (b.stages ?? skipAll()).map(s => ({ name: s.name, date: s.date, kind: m?.done.has(s.name) ? 'matched' : s.mode }));
+const stageProblem = (b: Block, m: FollowUp | null) => {
+  const v = stageView(b, m);
+  if (!v.some(s => s.kind === 'order')) return 'Choose a stage to order';
+  return v.some(s => s.kind === 'order' && !s.date) ? 'Choose a delivery date' : null;
+};
+const incomplete = (b: Block, m: FollowUp | null) => !b.itemId || (isDenture(b) ? !!stageProblem(b, m) : !b.returnBy);
+const stageLines = (b: Block): StageLine[] => stageView(b, null).filter(s => s.kind === 'order' || s.kind === 'elsewhere')
+  .map(s => (s.kind === 'order' ? { name: s.name, date: iso(s.date)! } : { name: s.name, date: '', state: 'done-earlier' as const }));
 
 const SERVICE_OPTIONS = SERVICE_CATEGORIES.flatMap(cat => cat.items.map(s => ({ value: s.id, label: s.label, sub: cat.label })));
 
 /** What the scan found on the prescription.
  *  clean = everything read · partial = some details missing · multi = several services detected ·
  *  memory = names written differently from our records (the app asks, and can remember the answer). */
-export type RxScenario = 'clean' | 'partial' | 'multi' | 'memory';
+export type RxScenario = 'clean' | 'partial' | 'multi' | 'memory' | 'denture' | 'denture-match';
 interface Read {
   practice: PracticeId | null; clinician: string | null; lab: string | null; patientId: string | null; blocks: Block[]; instructions: string;
   /** What the prescription says for a practice / dentist / lab it only partly matched. */
@@ -223,7 +260,19 @@ const readMemory = (): Record<string, string> => { try { return JSON.parse(local
 const remember = (k: MemKind, text: string, id: string) => { try { localStorage.setItem(MEMORY_KEY, JSON.stringify({ ...readMemory(), [memKey(k, text)]: id })); } catch { /* private mode */ } };
 const forgetAll = () => { try { localStorage.removeItem(MEMORY_KEY); } catch { /* ignore */ } };
 const blockOf = (itemId: string | null, teeth: string[], days: number): Block => ({ uid: `b${++blockSeq}`, itemId, teeth, returnBy: days ? plusDays(days) : '' });
-const readPrescription = (rx: RxScenario): Read => rx === 'partial'
+const readPrescription = (rx: RxScenario): Read => rx === 'denture'
+  ? {
+    // A full denture with its stages. The Special Tray was done at another lab, and no case here has it
+    practice: 'cds', clinician: 'reed', lab: 'northstar', patientId: 'P-10231', instructions: 'Upper and lower. Patient wants a natural shade.', written: {},
+    blocks: [dentureBlock('de-full-denture', ['Both arches'], { 'Special Tray': 'elsewhere', 'Bite Registration': 7, 'Try In': 14 })],
+  }
+  : rx === 'denture-match'
+  ? {
+    // The next stage of a denture already on the portal (SG-28488): earlier stages are found on that case
+    practice: 'isc', clinician: 'okafor', lab: 'precision', patientId: 'P-10188', instructions: 'Final finish after the try-in.', written: {},
+    blocks: [dentureBlock('de-full-denture', ['Both arches'], { 'Special Tray': 'elsewhere', 'Bite Registration': 'elsewhere', 'Try In': 'elsewhere', Finish: 10 })],
+  }
+  : rx === 'partial'
   ? {
     // Handwriting unclear: no dentist, lab or patient, and no teeth or date
     practice: 'cds', clinician: null, lab: null, patientId: null, instructions: '', written: {},
@@ -363,9 +412,58 @@ function OptionSheet({ open, onClose, title, options, value, onChange, header }:
 const daysUntil = (d: string) => (d ? Math.round((new Date(`${d}T12:00`).getTime() - new Date().setHours(12, 0, 0, 0)) / 864e5) : null);
 const shortDate = (d: string) => new Date(`${d}T12:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 
-/** Edit one service in a bottom sheet: type (searchable), teeth, delivery date or days. */
-function ServiceEditSheet({ block, isNew, canRemove, onSave, onRemove, onClose, header }: {
-  block: Block | null; isNew: boolean; canRemove: boolean; onSave: (b: Block) => void; onRemove: () => void; onClose: () => void; header?: React.ReactNode;
+/** Denture stages: order each one with its delivery date, or say it was done elsewhere. Stages found on the patient's case show as done. */
+function StageEditor({ block, match, onChange }: { block: Block; match: FollowUp | null; onChange: (s: BStage[]) => void }) {
+  const stages = block.stages ?? skipAll();
+  // Tick a stage to order it. A date typed on one stage is copied to every stage after it, ticked or not.
+  const toggle = (k: number) => onChange(stages.map((s, i) => {
+    if (i !== k) return s;
+    if (s.mode === 'order') return { ...s, mode: 'skip' };
+    const before = stages.slice(0, k).reverse().find(x => x.date)?.date;
+    return { ...s, mode: 'order', date: s.date || before || plusDays(14) };
+  }));
+  // A stage cannot be delivered before the ticked stage ahead of it. Stages done elsewhere need no date.
+  const minFor = (k: number) => stages.slice(0, k).filter(x => x.mode === 'order' && x.date).map(x => x.date).concat(plusDays(1)).sort().pop()!;
+  const setDate = (k: number, date: string) => { const d = date && date < minFor(k) ? minFor(k) : date; onChange(stages.map((s, i) => (i < k ? s : { ...s, date: d }))); };
+  const elsewhere = (k: number) => onChange(stages.map((s, i) => (i === k ? { ...s, mode: s.mode === 'elsewhere' ? 'skip' : 'elsewhere' } : s)));
+  return (
+    <div>
+      <Label>Stages to order</Label>
+      {match && <p className="mb-2 rounded-xl bg-go-brand-soft px-3 py-2 text-[12.5px] text-go-brand-ink">Found on <span className="font-semibold">{match.c.id}</span>. New stages are added to that case.</p>}
+      <div className="rounded-2xl border border-go-line bg-go-surface divide-y divide-go-line">
+        {stages.map((s, k) => {
+          const matched = match?.done.has(s.name);
+          const on = !matched && s.mode === 'order';
+          return (
+            <div key={s.name} className="px-3.5 py-2.5">
+              <div className="flex items-center gap-3">
+                {matched
+                  ? <span className="w-6 h-6 rounded-lg bg-go-ok-soft text-go-ok flex items-center justify-center flex-shrink-0"><Check className="w-4 h-4" strokeWidth={3} /></span>
+                  : <button type="button" role="checkbox" aria-checked={on} aria-label={`Order ${s.name}`} onClick={() => toggle(k)}
+                    className={cx('w-6 h-6 rounded-lg border-2 flex items-center justify-center flex-shrink-0 transition', on ? 'go-grad border-transparent text-white' : 'border-go-line bg-go-surface')}>
+                    {on && <Check className="w-4 h-4" strokeWidth={3} />}
+                  </button>}
+                <span className={cx('flex-1 text-[14.5px] font-semibold', matched || s.mode === 'elsewhere' ? 'text-go-muted' : 'text-go-ink')}>{s.name}</span>
+                {matched && <Pill tone="ok">Done · {match!.c.id}</Pill>}
+                {!matched && !on && (
+                  <button type="button" onClick={() => elsewhere(k)}
+                    className={cx('h-7 px-2.5 rounded-full text-[11.5px] font-semibold transition', s.mode === 'elsewhere' ? 'bg-go-raised text-go-ink2 border border-go-line' : 'text-go-brand-ink')}>
+                    {s.mode === 'elsewhere' ? 'Done elsewhere ✓' : 'Done elsewhere?'}
+                  </button>
+                )}
+              </div>
+              {on && <Input type="date" aria-label={`${s.name} delivery date`} className="mt-2 !h-11" value={s.date} min={minFor(k)} onChange={e => setDate(k, e.target.value)} />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Edit one service in a bottom sheet: type (searchable), teeth, delivery date or days. Dentures get a stage list instead of one date. */
+function ServiceEditSheet({ block, isNew, canRemove, matchFor, onSave, onRemove, onClose, header }: {
+  block: Block | null; isNew: boolean; canRemove: boolean; matchFor: (b: Block) => FollowUp | null; onSave: (b: Block) => void; onRemove: () => void; onClose: () => void; header?: React.ReactNode;
 }) {
   const [draft, setDraft] = useState<Block | null>(block);
   const [last, setLast] = useState<Block | null>(null);
@@ -373,18 +471,22 @@ function ServiceEditSheet({ block, isNew, canRemove, onSave, onRemove, onClose, 
   if (!block || !draft) return null;
   const set = (p: Partial<Block>) => setDraft(d => (d ? { ...d, ...p } : d));
   const days = daysUntil(draft.returnBy);
+  const denture = isDenture(draft);
+  const match = matchFor(draft);
+  const problem = denture ? stageProblem(draft, match) : !draft.returnBy ? 'Choose a delivery date' : null;
   return (
-    <Sheet open onClose={onClose} tall title={isNew ? 'Add a service' : 'Edit service'} sub="Service type, teeth and delivery date."
+    <Sheet open onClose={onClose} tall title={isNew ? 'Add a service' : 'Edit service'} sub={denture ? 'Service type, arch and the stages to order.' : 'Service type, teeth and delivery date.'}
       footer={(
         <div className="flex gap-2">
           {canRemove && !isNew && <Btn variant="secondary" className="!px-4" icon={<Trash className="w-5 h-5" />} onClick={onRemove}>Remove</Btn>}
-          <Btn block disabled={!draft.itemId || !draft.returnBy} onClick={() => onSave(draft)}>{!draft.itemId ? 'Choose a service' : !draft.returnBy ? 'Choose a delivery date' : 'Save service'}</Btn>
+          <Btn block disabled={!draft.itemId || !!problem} onClick={() => onSave(draft)}>{!draft.itemId ? 'Choose a service' : problem ?? 'Save service'}</Btn>
         </div>
       )}>
       <div className="space-y-5">
         {header}
-        <PickerField label="Service type" value={draft.itemId} onChange={v => set({ itemId: v })} placeholder="Choose a service" searchable options={SERVICE_OPTIONS} />
-        <div>
+        <PickerField label="Service type" value={draft.itemId} onChange={v => set({ itemId: v, stages: isDentureItem(v) ? draft.stages ?? skipAll() : undefined })} placeholder="Choose a service" searchable options={SERVICE_OPTIONS} />
+        {denture && <StageEditor block={draft} match={match} onChange={stages => set({ stages })} />}
+        {!denture && <div>
           <Label>Delivery date</Label>
           <div className="flex gap-2">
             <Input type="date" aria-label="Delivery date" value={draft.returnBy} min={plusDays(1)} onChange={e => set({ returnBy: e.target.value })} className="flex-1 min-w-0" />
@@ -397,7 +499,7 @@ function ServiceEditSheet({ block, isNew, canRemove, onSave, onRemove, onClose, 
               <span className="text-[13px] text-go-muted">days</span>
             </label>
           </div>
-        </div>
+        </div>}
         <div><Label optional>Teeth or arch</Label><ToothPicker value={draft.teeth} onChange={v => set({ teeth: v })} /></div>
       </div>
     </Sheet>
@@ -407,9 +509,9 @@ function ServiceEditSheet({ block, isNew, canRemove, onSave, onRemove, onClose, 
 type Edit = 'practice' | 'dentist' | 'lab' | 'patient';
 
 export function LiteCreate() {
-  const { addCase, toast } = useGo();
+  const { addCase, updateCase, cases, toast } = useGo();
   const rxParam = new URLSearchParams(useLocation().search).get('rx');
-  const rx: RxScenario = rxParam === 'partial' || rxParam === 'multi' || rxParam === 'memory' ? rxParam : 'clean';
+  const rx: RxScenario = rxParam === 'partial' || rxParam === 'multi' || rxParam === 'memory' || rxParam === 'denture' || rxParam === 'denture-match' ? rxParam : 'clean';
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [scanned, setScanned] = useState(false);
   const [viewing, setViewing] = useState(false);
@@ -422,7 +524,7 @@ export function LiteCreate() {
   const [edit, setEdit] = useState<Edit | null>(null);
   const [svc, setSvc] = useState<{ block: Block; isNew: boolean } | null>(null);
   const [tried, setTried] = useState(false);
-  const [created, setCreated] = useState<LabCase | null>(null);
+  const [created, setCreated] = useState<{ c: LabCase; added?: string[] } | null>(null);
   // Names the scan only partly matched (key = practice | dentist | lab | a service's uid) and what the prescription says
   const [unsure, setUnsure] = useState<Set<string>>(new Set());
   const [written, setWritten] = useState<Record<string, string>>({});
@@ -454,33 +556,51 @@ export function LiteCreate() {
   };
   const doneScanning = useCallback(applyRead, [rx]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (created) return <Created c={created} onAnother={reset} />;
+  if (created) return <Created c={created.c} added={created.added} onAnother={reset} />;
   if (!photo) return <CameraView onShot={setPhoto} />;
   if (!scanned) return <Scanning photo={photo} onDone={doneScanning} />;
 
-  const notFound = [!practice && 'practice', !clinician && 'dentist', !lab && 'lab', !patientId && 'patient', blocks.some(b => !b.itemId || !b.returnBy) && 'service'].filter(Boolean) as string[];
+  // A follow-up denture prescription is matched to the patient's existing case (one denture service only)
+  const matchFor = (b: Block) => (blocks.some(x => x.uid !== b.uid && isDenture(x)) ? null : followUpOf(cases, { patientId, practice, clinician }, b));
+  const followUp = blocks.length === 1 ? matchFor(blocks[0]) : null;
+  const notFound = [!practice && 'practice', !clinician && 'dentist', !lab && 'lab', !patientId && 'patient', blocks.some(b => incomplete(b, matchFor(b))) && 'service'].filter(Boolean) as string[];
 
-  const submit = () => {
-    if (notFound.length) {
+  const submit = (forceNew = false) => {
+    if (notFound.length || (forceNew && blocks.some(b => incomplete(b, null)))) {
       setTried(true);
       const first = !practice ? 'practice' : !clinician ? 'dentist' : !lab ? 'lab' : !patientId ? 'patient' : null;
-      if (first) setEdit(first); else setSvc({ block: blocks.find(b => !b.itemId || !b.returnBy)!, isNew: false });
+      if (first) setEdit(first); else setSvc({ block: blocks.find(b => incomplete(b, forceNew ? null : matchFor(b)))!, isNew: false });
       return;
     }
     const items: FormItem[] = blocks.map(b => newItem(b.itemId!, { teeth: b.teeth, returnBy: b.returnBy }));
     const form: CaseForm = { ...emptyForm(), practice, clinician, patientId, lab, instructions: instructions.trim(), caseSource: 'Photo of lab form', attachments: [photo.name], items };
     const built = buildCase(form, 'photo');
-    // One delivery date per service. A denture would otherwise wait on stage dates the light form doesn't ask for.
-    const dates = blocks.map(b => iso(b.returnBy));
+    // A denture follow-up: the new stages go onto the case that already has the earlier ones
+    const only = !forceNew && blocks.length === 1 ? matchFor(blocks[0]) : null;
+    if (only) {
+      const now = new Date().toISOString();
+      const added = stageView(blocks[0], only).filter(s => s.kind === 'order' || s.kind === 'elsewhere')
+        .map(s => (s.kind === 'order' ? { name: s.name, date: iso(s.date)!, orderedAt: now } : { name: s.name, date: '', state: 'done-earlier' as const }));
+      const ordered = added.filter(s => !s.state).map(s => s.name);
+      updateCase(only.c.id, x => ({
+        ...patchItemStages(x, only.index, [...(allItems(x)[only.index].stages ?? []), ...added].sort((p, q) => DENTURE_STAGES.indexOf(p.name) - DENTURE_STAGES.indexOf(q.name))),
+        events: [...x.events, { stage: 'note', at: now, by: ME.name, text: `Ordered ${ordered.join(', ')} · ${allItems(x)[only.index].service}` }],
+      }));
+      toast(`${ordered.join(', ')} added to ${only.c.id}`);
+      setCreated({ c: only.c, added: ordered });
+      return;
+    }
+    // One delivery date per service; a denture has a date per stage instead
+    const per = blocks.map(b => (isDenture(b) ? { stages: stageLines(b), returnBy: undefined } : { stages: undefined, returnBy: iso(b.returnBy) }));
     const c: LabCase = {
       ...built,
-      firstReturnBy: dates[0], firstStaged: undefined, firstStages: undefined,
-      items: built.items?.map((it, i) => ({ ...it, returnBy: dates[i + 1], staged: undefined, stages: undefined })),
-      returnBy: dates.filter(Boolean).sort()[0] ?? '',
+      firstReturnBy: per[0].returnBy, firstStaged: per[0].stages ? 'stage' : undefined, firstStages: per[0].stages,
+      items: built.items?.map((it, i) => ({ ...it, returnBy: per[i + 1].returnBy, staged: per[i + 1].stages ? 'stage' as const : undefined, stages: per[i + 1].stages })),
+      returnBy: per.flatMap(p => (p.stages ? p.stages.filter(x => !x.state).map(x => x.date) : [p.returnBy ?? ''])).filter(Boolean).sort()[0] ?? '',
     };
     addCase(c);
     toast('Case created. Ready to dispatch');
-    setCreated(c);
+    setCreated({ c });
   };
 
   const saveService = (b: Block) => {
@@ -523,7 +643,10 @@ export function LiteCreate() {
   return (
     <Screen
       header={<TopBar back fallback={`${LITE}/home`} title="Create lab work" sub="From the prescription" />}
-      footer={<Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={submit}>Create case</Btn>}>
+      footer={followUp
+        // The earlier stages are already on a case: adding to it is the main action, a separate case is the alternative
+        ? <div className="flex gap-2"><Btn variant="secondary" className="!px-4 whitespace-nowrap" onClick={() => submit(true)}>Create new</Btn><Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => submit()}>Add to {followUp.c.id}</Btn></div>
+        : <Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => submit()}>Create case</Btn>}>
       {tried && notFound.length > 0
         ? <p className="px-5 pt-1 text-[13px] text-go-warn font-medium">Please fill in the highlighted details.</p>
         : unclear ? <p className="mx-4 mt-1 px-3 py-2 rounded-2xl bg-go-warn-soft text-[12.5px] text-go-warn font-medium">Some details weren’t clear on the prescription. Please check them.</p>
@@ -556,20 +679,53 @@ export function LiteCreate() {
 
         {/* Services: one line each, name and delivery date. Tap to edit in a bottom sheet. */}
         <Card className="overflow-hidden py-0.5">
+          {/* A follow-up denture: say which case it joins */}
+          {followUp && (
+            <div className="mx-2 mt-1.5 mb-1 flex items-start gap-2.5 rounded-xl bg-go-ok-soft px-3 py-2">
+              <Link2 className="w-[18px] h-[18px] text-go-ok flex-shrink-0 mt-0.5" />
+              <p className="text-[12.5px] leading-snug text-go-ok">
+                <span className="font-semibold">Matched to {followUp.c.id}.</span> The earlier stages are already on that case, so the new ones will be added there.
+              </p>
+            </div>
+          )}
           <p className="px-4 pt-2 pb-0.5 text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted">Services{blocks.length > 1 ? ` · ${blocks.length}` : ''}</p>
-          {blocks.map((b, i) => (
-            <button key={b.uid} onClick={() => (unsure.has(b.uid) ? setConfirm(b.uid) : setSvc({ block: b, isNew: false }))} className="w-full flex items-center gap-3 px-4 py-2 text-left active:bg-go-raised transition">
-              <span className={cx('w-6 h-6 rounded-lg text-[11px] font-bold flex items-center justify-center flex-shrink-0', b.itemId ? 'bg-go-brand-soft text-go-brand' : 'bg-go-warn-soft text-go-warn')}>{i + 1}</span>
-              <span className="flex-1 min-w-0 truncate">
-                {b.itemId
-                  ? <><span className="text-[14px] font-semibold text-go-ink">{serviceLabel(b.itemId)}</span>{b.teeth.length > 0 && <span className="text-[12px] text-go-muted"> · {b.teeth.join(', ')}</span>}</>
-                  : <span className="text-[14px] font-medium text-go-warn">Choose a service</span>}
-              </span>
-              <span className={cx('text-[12.5px] flex-shrink-0', b.returnBy ? 'text-go-ink2' : 'text-go-warn font-medium')}>{b.returnBy ? shortDate(b.returnBy) : 'No date'}</span>
-              {b.itemId && b.returnBy && (unsure.has(b.uid) ? <HelpCircle className="w-[18px] h-[18px] text-go-warn flex-shrink-0" aria-label="Please confirm" /> : <CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" />)}
-              <ChevronRight className={cx('w-4 h-4 flex-shrink-0', b.itemId && b.returnBy && !unsure.has(b.uid) ? 'text-go-faint' : 'text-go-warn')} />
-            </button>
-          ))}
+          {blocks.map((b, i) => {
+            const m = matchFor(b);
+            const bad = incomplete(b, m);
+            const dent = isDenture(b);
+            return (
+              <div key={b.uid} onClick={() => (unsure.has(b.uid) ? setConfirm(b.uid) : setSvc({ block: b, isNew: false }))} className="cursor-pointer active:bg-go-raised transition">
+                <button className="w-full flex items-center gap-3 px-4 py-2 text-left">
+                  <span className={cx('w-6 h-6 rounded-lg text-[11px] font-bold flex items-center justify-center flex-shrink-0', b.itemId ? 'bg-go-brand-soft text-go-brand' : 'bg-go-warn-soft text-go-warn')}>{i + 1}</span>
+                  <span className={cx('flex-1 min-w-0', !b.teeth.some(x => /arch/i.test(x)) && 'truncate')}>
+                    {b.itemId
+                      ? <><span className="text-[14px] font-semibold text-go-ink">{serviceLabel(b.itemId)}</span>{b.teeth.length > 0 && <span className="text-[12px] text-go-muted">{b.teeth.some(x => /arch/i.test(x)) ? ' ' : ' · '}<TeethChips teeth={b.teeth} /></span>}</>
+                      : <span className="text-[14px] font-medium text-go-warn">Choose a service</span>}
+                  </span>
+                  {!dent && <span className={cx('text-[12.5px] flex-shrink-0', b.returnBy ? 'text-go-ink2' : 'text-go-warn font-medium')}>{b.returnBy ? shortDate(b.returnBy) : 'No date'}</span>}
+                  {b.itemId && !bad && (unsure.has(b.uid) ? <HelpCircle className="w-[18px] h-[18px] text-go-warn flex-shrink-0" aria-label="Please confirm" /> : <CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" />)}
+                  <ChevronRight className={cx('w-4 h-4 flex-shrink-0', b.itemId && !bad && !unsure.has(b.uid) ? 'text-go-faint' : 'text-go-warn')} />
+                </button>
+                {/* Denture: each stage with its delivery date, or where it was already done */}
+                {dent && (
+                  <div className="ml-[52px] mr-4 mb-2 -mt-0.5">
+                    <div className="divide-y divide-go-line">
+                      {stageView(b, m).filter(s => s.kind !== 'skip').map(s => (
+                        <div key={s.name} className="flex items-center gap-2 py-1.5">
+                          <span className={cx('flex-1 min-w-0 truncate text-[13px] font-medium', s.kind === 'order' ? 'text-go-ink' : 'text-go-muted')}>{s.name}</span>
+                          {s.kind === 'order'
+                            ? <span className={cx('text-[12.5px]', s.date ? 'text-go-ink2' : 'text-go-warn font-medium')}>{s.date ? shortDate(s.date) : 'No date'}</span>
+                            : s.kind === 'matched' ? <Pill tone="ok" className="!h-[22px] !px-2">Done · {m!.c.id}</Pill>
+                            : <Pill tone="neutral" className="!h-[22px] !px-2">Done elsewhere</Pill>}
+                        </div>
+                      ))}
+                      {!stageView(b, m).some(s => s.kind === 'order') && <p className="py-1.5 text-[12.5px] text-go-warn font-medium">Choose a stage to order</p>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
           <div className="px-3 pt-1.5 pb-2.5">
             <Btn block size="md" variant="secondary" icon={<PlusCircle className="w-4 h-4 text-go-brand" />} onClick={() => setSvc({ block: newBlock(), isNew: true })}>Add another service</Btn>
           </div>
@@ -590,31 +746,35 @@ export function LiteCreate() {
       <PatientPicker bare value={patientId} onChange={setPatientId} open={edit === 'patient'} onOpenChange={o => !o && closeEdit()} />
       <ConfirmSheet info={confirmInfo && confirm ? { kind: confirmInfo.kind, written: written[confirm], matched: confirmInfo.matched } : null}
         onRemember={() => settle(true)} onOnce={() => settle(false)} onDifferent={differentOne} onClose={() => setConfirm(null)} />
-      <ServiceEditSheet block={svc?.block ?? null} isNew={svc?.isNew ?? false} canRemove={blocks.length > 1} onSave={saveService} onClose={() => { setSvc(null); setFixing(null); }} header={svc ? fixHeader(svc.block.uid, 'service') : undefined}
+      <ServiceEditSheet matchFor={matchFor} block={svc?.block ?? null} isNew={svc?.isNew ?? false} canRemove={blocks.length > 1} onSave={saveService} onClose={() => { setSvc(null); setFixing(null); }} header={svc ? fixHeader(svc.block.uid, 'service') : undefined}
         onRemove={() => { setBlocks(bs => bs.filter(x => x.uid !== svc!.block.uid)); setSvc(null); }} />
     </Screen>
   );
 }
 
-function Created({ c, onAnother }: { c: LabCase; onAnother: () => void }) {
+function Created({ c, added, onAnother }: { c: LabCase; added?: string[]; onAnother: () => void }) {
   const navigate = useNavigate();
   return (
     <Screen>
       <div className="relative flex flex-col items-center text-center px-6 pt-16">
         <div className="absolute top-0 w-80 h-80 rounded-full bg-go-brand/20 blur-3xl" />
         <div className="relative go-rise"><GoMark size={84} /></div>
-        <span className="relative mt-6 inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-go-ok-soft text-go-ok text-[12px] font-semibold"><CheckCircle2 className="w-4 h-4" />Case created</span>
-        <h1 className="relative text-[26px] font-bold text-go-ink tracking-tight mt-3">Ready to dispatch</h1>
+        <span className="relative mt-6 inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-go-ok-soft text-go-ok text-[12px] font-semibold"><CheckCircle2 className="w-4 h-4" />{added ? 'Stage ordered' : 'Case created'}</span>
+        <h1 className="relative text-[26px] font-bold text-go-ink tracking-tight mt-3">{added ? `Added to ${c.id}` : 'Ready to dispatch'}</h1>
         <p className="relative text-[14px] text-go-muted mt-1.5 leading-relaxed">
-          <span className="font-mono font-semibold text-go-ink">{c.id}</span> for {shortName(patientById(c.patientId).name)} is ready to send to {labName(c.lab)}.
+          {added
+            ? <>{added.join(', ')} for {shortName(patientById(c.patientId).name)} was added to the same case. {labName(c.lab)} will see it there.</>
+            : <><span className="font-mono font-semibold text-go-ink">{c.id}</span> for {shortName(patientById(c.patientId).name)} is ready to send to {labName(c.lab)}.</>}
         </p>
       </div>
       <div className="px-4 mt-8 space-y-2.5">
-        <Btn block icon={<Printer className="w-5 h-5" />} onClick={() => navigate(`${LITE}/dispatch/${c.id}`, { replace: true })}>Print label and dispatch</Btn>
+        {added
+          ? <Btn block onClick={() => navigate(`${LITE}/work/${c.id}`, { replace: true })}>View the case</Btn>
+          : <Btn block icon={<Printer className="w-5 h-5" />} onClick={() => navigate(`${LITE}/dispatch/${c.id}`, { replace: true })}>Print label and dispatch</Btn>}
         <Btn block variant="secondary" icon={<Plus className="w-5 h-5" />} onClick={onAnother}>Create another</Btn>
         <Btn block variant="ghost" size="md" onClick={() => navigate(`${LITE}/home`, { replace: true })}>Back to home</Btn>
       </div>
-      <p className="text-center text-[12px] text-go-faint mt-4">You can also send it later from To dispatch.</p>
+      {!added && <p className="text-center text-[12px] text-go-faint mt-4">You can also send it later from To dispatch.</p>}
     </Screen>
   );
 }

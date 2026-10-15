@@ -625,3 +625,16 @@ export function Toaster() {
     </div>
   );
 }
+
+/** Teeth as text, but a whole arch shows as chips: "Both arches" becomes "Upper Arch" and "Lower Arch". */
+export function TeethChips({ teeth, className }: { teeth: string[]; className?: string }) {
+  const arches = teeth.flatMap(t => (/both arches/i.test(t) ? ['Upper Arch', 'Lower Arch'] : /^(upper|lower) arch$/i.test(t) ? [t.replace(/\b\w/g, c => c.toUpperCase())] : []));
+  const rest = teeth.filter(t => !/arch/i.test(t));
+  if (!arches.length) return <>{teeth.join(', ')}</>;
+  return (
+    <span className={cx('inline-flex flex-wrap items-center gap-1 align-middle', className)}>
+      {arches.map(a => <span key={a} className="inline-flex items-center h-5 px-2 rounded-full bg-go-brand-soft text-go-brand-ink text-[10.5px] font-semibold">{a}</span>)}
+      {rest.length > 0 && <span>{rest.join(', ')}</span>}
+    </span>
+  );
+}
