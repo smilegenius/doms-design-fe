@@ -1,6 +1,7 @@
 // ─── Smile Genius Go — clinician / dentist mobile app (prototype) ────────────
 // Mounted at /go/*. On a phone it runs full-screen; on desktop it sits in a
 // device frame with a side panel for theme + jumping between key screens.
+// Light version (/go/lite) lives in ./lite; denture stage scenarios are listed in LITE_JUMPS below.
 // Requirements came from the "Smile Genius Go" brief; the UI is our own and
 // uses the web portals' palette (light) plus a matching dark theme.
 import { useEffect, useState } from 'react';
