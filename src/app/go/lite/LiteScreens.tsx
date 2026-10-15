@@ -452,7 +452,22 @@ function StageEditor({ block, match, onChange }: { block: Block; match: FollowUp
                   </button>
                 )}
               </div>
-              {on && <Input type="date" aria-label={`${s.name} delivery date`} className="mt-2 !h-11" value={s.date} min={minFor(k)} onChange={e => setDate(k, e.target.value)} />}
+              {on && (() => {
+                const days = daysUntil(s.date);
+                return (
+                  <div className="mt-2 flex gap-2">
+                    <Input type="date" aria-label={`${s.name} delivery date`} className="flex-1 min-w-0 !h-11" value={s.date} min={minFor(k)} onChange={e => setDate(k, e.target.value)} />
+                    <label className="flex items-center gap-1.5 h-11 px-3 rounded-2xl bg-go-surface border border-go-line focus-within:border-go-brand focus-within:ring-4 focus-within:ring-go-brand/15 transition">
+                      <span className="text-[13px] text-go-muted">In</span>
+                      <input type="number" inputMode="numeric" min={1} max={365} aria-label={`${s.name} delivery in how many days`} placeholder="14"
+                        value={days !== null && days > 0 ? days : ''}
+                        onChange={e => { const v = parseInt(e.target.value, 10); setDate(k, v > 0 ? plusDays(Math.min(v, 365)) : ''); }}
+                        className="w-10 bg-transparent outline-none text-[15px] text-go-ink text-center tabular-nums" />
+                      <span className="text-[13px] text-go-muted">days</span>
+                    </label>
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
