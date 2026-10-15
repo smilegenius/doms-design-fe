@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { Case } from '../../src/app/pages/CasesPage';
-import { addCreatedCase, removeCreatedCases } from '../../src/app/data/createdCases';
+import { addCreatedCase, getCreatedCases, removeCreatedCases } from '../../src/app/data/createdCases';
 import { mockPractices } from '../../src/app/data/clinicsData';
 import { MOCK_NOTIFICATIONS } from '../../src/app/pages/NotificationsPage';
 import type { DesignFile } from '../design-studio/data/designStudio';
@@ -52,6 +52,24 @@ export interface IntakeSubmission {
   files: DesignFile[];
   /** Team members emailed when it arrived. */
   notified: string[];
+  /** Everything else the dentist entered: rendered as the order form. */
+  order?: IntakeOrder;
+  /** Set once the lab confirmed the draft: the real case it became. */
+  confirmedCaseId?: string;
+  confirmedAt?: string;
+  confirmedBy?: string;
+}
+
+export interface IntakeOrder {
+  patientDob: string;
+  patientRef: string;
+  teeth: number[];
+  material?: string;
+  shade?: string;
+  orderType?: string;
+  delivery?: string;
+  instructions?: string;
+  extras: Record<string, string>;
 }
 
 export interface IntakePrefs { inApp: boolean; email: boolean }
@@ -62,6 +80,9 @@ interface IntakeState {
   submissions: IntakeSubmission[];
   counter: number;
   resetVersion: number;
+  prefsVersion?: number;
+  /** Which version of the example requests (one draft, one confirmed case) has been added. */
+  seedVersion?: number;
 }
 
 const LS_KEY = 'salesFeedbacks.intakeForm.v1';
@@ -78,7 +99,9 @@ const DEFAULT_CONFIG: IntakeConfig = {
 
 const DEFAULT_STATE = (): IntakeState => ({
   config: DEFAULT_CONFIG,
-  prefs: Object.fromEntries(LAB_TEAM.map(m => [m.email, { inApp: true, email: m.email === 'sajid@smilegenius.com' }])),
+  // Only the lab admin is notified by default; others are added in Settings → Notifications.
+  prefs: Object.fromEntries(LAB_TEAM.map(m => [m.email, { inApp: m.email === 'sajid@smilegenius.com', email: m.email === 'sajid@smilegenius.com' }])),
+  prefsVersion: 2,
   submissions: [],
   counter: 6,
   resetVersion: 0,
@@ -87,7 +110,11 @@ const DEFAULT_STATE = (): IntakeState => ({
 function load(): IntakeState {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) { const p = JSON.parse(raw); if (p?.config) return { ...DEFAULT_STATE(), ...p, config: { ...DEFAULT_CONFIG, ...p.config } }; }
+    if (raw) { const p = JSON.parse(raw); if (p?.config) {
+      const d = DEFAULT_STATE();
+      // Older saved prefs had everyone on for the bell: start over from the admin-only default.
+      return { ...d, ...p, config: { ...DEFAULT_CONFIG, ...p.config }, ...(p.prefsVersion === d.prefsVersion ? {} : { prefs: d.prefs, prefsVersion: d.prefsVersion }) };
+    } }
   } catch { /* corrupt or blocked */ }
   return DEFAULT_STATE();
 }
@@ -128,7 +155,32 @@ export function setIntakePref(email: string, channel: keyof IntakePrefs, value: 
   commit({ ...state, prefs: { ...state.prefs, [email]: { ...cur, [channel]: value } } });
 }
 export const intakeEmailRecipients = (prefs = state.prefs) => LAB_TEAM.filter(m => prefs[m.email]?.email).map(m => m.email);
+export const getIntakeConfig = () => state.config;
+/** Bump to regenerate the example requests (and their files) in browsers that already have them. */
+const SEED_VERSION = 3;
+export const isIntakeSeeded = () => state.seedVersion === SEED_VERSION;
+/** Example requests (intakeDemo.ts): add their cases and submissions once. */
+export function addSeededRequests(subs: IntakeSubmission[], cases: Case[]) {
+  const have = new Set(getCreatedCases().map(c => c.id));
+  [...cases].reverse().forEach(c => { if (!have.has(c.id) || state.seedVersion !== SEED_VERSION) addCreatedCase(c); });
+  // Re-seeding replaces the previous examples (addCreatedCase replaces by id too).
+  const refs = new Set(subs.map(s => s.ref));
+  commit({ ...state, seedVersion: SEED_VERSION, submissions: [...state.submissions.filter(s => !refs.has(s.ref)), ...subs] });
+}
+
+/** The most recent website request whose draft is still waiting in Cases. */
+export function latestIntakeDraft(): IntakeSubmission | undefined {
+  const drafts = new Set(getCreatedCases().filter(c => c.status === 'draft').map(c => c.id));
+  return state.submissions.find(s => drafts.has(s.caseId));
+}
 export const submissionForCase = (caseId: string) => state.submissions.find(s => s.caseId === caseId);
+/** The website request behind a case: its draft, or the real case it was confirmed as. */
+export const submissionBehind = (caseId: string) => state.submissions.find(s => s.caseId === caseId || s.confirmedCaseId === caseId);
+
+/** The lab confirmed a website draft in QuickCreate, which saved it as a new case. */
+export function linkConfirmedCase(draftId: string, caseId: string, by?: string) {
+  commit({ ...state, submissions: state.submissions.map(s => (s.caseId === draftId ? { ...s, confirmedCaseId: caseId, confirmedAt: new Date().toISOString(), confirmedBy: by } : s)) });
+}
 
 // ── Submit ────────────────────────────────────────────────────────────────────
 export interface IntakeInput {
@@ -141,7 +193,6 @@ export interface IntakeInput {
   files: DesignFile[];
 }
 
-const withDr = (n: string) => (/^dr\.?\s/i.test(n.trim()) ? n.trim().replace(/^dr\.?\s*/i, 'Dr. ') : `Dr. ${n.trim()}`);
 const isoToPortal = (iso?: string) => (iso ? portalDate(new Date(`${iso}T12:00:00`)) : null);
 
 export function submitIntake(input: IntakeInput): IntakeSubmission {
@@ -152,7 +203,8 @@ export function submitIntake(input: IntakeInput): IntakeSubmission {
   const today = portalDate();
   const known = mockPractices.find(p => p.name.toLowerCase() === input.practice.trim().toLowerCase());
   const practice = known?.name ?? input.practice.trim();
-  const dentist = withDr(input.dentist);
+  // Kept exactly as typed: the sender isn't verified until the lab checks them.
+  const dentist = input.dentist.trim();
   const scans = input.files.filter(f => f.kind === 'mesh' || f.kind === 'dicom').length;
 
   const extras = Object.entries(input.extras).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`);
@@ -187,7 +239,7 @@ export function submitIntake(input: IntakeInput): IntakeSubmission {
       subject: `Website intake form · ${ref}`,
       receivedAt: 'Just now',
       attachmentName: input.files.length ? `${input.files.length} file${input.files.length === 1 ? '' : 's'} attached` : 'No files attached',
-      bodyPreview: `Submitted through ${state.config.labName}'s website intake form by ${dentist} (GDC ${input.gdc || 'not given'}, ${input.phone}).${known ? '' : ` New practice: "${practice}", ${input.postcode}, isn't linked yet.`}`,
+      bodyPreview: `Submitted through ${state.config.labName}'s website intake form by ${dentist} (GDC ${input.gdc || 'not given'}, ${input.phone}). Sender not verified: check their GDC registration before confirming.${known ? '' : ` New practice: "${practice}", ${input.postcode}, isn't linked yet.`}`,
     },
   };
   addCreatedCase(draft);
@@ -195,6 +247,10 @@ export function submitIntake(input: IntakeInput): IntakeSubmission {
   const sub: IntakeSubmission = {
     caseId, ref, at, dentist, gdc: input.gdc, practice, postcode: input.postcode, email: input.email.trim(), phone: input.phone,
     patientName: draft.patientName, service: input.service, knownPractice: !!known, files: input.files, notified: intakeEmailRecipients(),
+    order: {
+      patientDob: input.patientDob, patientRef: input.patientRef, teeth: input.teeth, material: input.material, shade: input.shade,
+      orderType: input.orderType, delivery: input.delivery, instructions: input.instructions, extras: input.extras,
+    },
   };
   commit({ ...state, counter, submissions: [sub, ...state.submissions] });
   return sub;
@@ -206,15 +262,20 @@ export function removeIntakeDraft(caseId: string) {
 }
 
 export function resetIntakeDemo() {
-  removeCreatedCases(c => c.id.startsWith(INTAKE_ID_PREFIX));
+  const confirmed = new Set(state.submissions.map(s => s.confirmedCaseId).filter(Boolean));
+  removeCreatedCases(c => c.id.startsWith(INTAKE_ID_PREFIX) || confirmed.has(c.id));
   commit({ ...DEFAULT_STATE(), resetVersion: state.resetVersion + 1 });
 }
 
 // ── Bell ─────────────────────────────────────────────────────────────────────
-// In-app is a per-user preference; the prototype's bell belongs to whoever is
-// signed in, so it follows the demo account (Sajid).
-export function syncIntakeNotifications(me = 'sajid@smilegenius.com') {
-  if (state.prefs[me]?.inApp === false) return;
+// In-app is a per-user preference: the bell belongs to whoever is signed in,
+// so entries appear when they've opted in and are removed when they opt out.
+export function syncIntakeNotifications(me?: string) {
+  const on = !!me && !!state.prefs[me]?.inApp;
+  if (!on) {
+    for (let i = MOCK_NOTIFICATIONS.length - 1; i >= 0; i--) if (MOCK_NOTIFICATIONS[i].id.startsWith('web-')) MOCK_NOTIFICATIONS.splice(i, 1);
+    return;
+  }
   [...state.submissions].reverse().forEach(s => {
     const id = `web-${s.caseId}`;
     if (MOCK_NOTIFICATIONS.some(n => n.id === id)) return;

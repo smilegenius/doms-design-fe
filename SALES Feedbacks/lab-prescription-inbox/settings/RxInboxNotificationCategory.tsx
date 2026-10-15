@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Inbox, Users } from 'lucide-react';
+import { ChevronDown, Inbox } from 'lucide-react';
 import Toggle from '../../../src/app/components/Toggle';
 import { useAuth } from '../../../src/app/context/AuthContext';
-import { LAB_TEAM, teamMemberFor } from '../data';
+import { teamMemberFor } from '../data';
 import { Channel, RxPrefKey, setRxPref, useRxInbox } from '../inboxStore';
+import DefaultRecipients from './DefaultRecipients';
 
 // ─── "Prescription Email Inbox" notification category ────────────────────────
 // Shown under the real categories on Settings → Notifications → Notification
@@ -49,7 +50,6 @@ export default function RxInboxNotificationCategory({ focus = false }: { focus?:
     ITEMS.forEach(i => setRxPref(me!.email, i.id, channel, value));
   }
 
-  const others = LAB_TEAM.filter(m => m.email !== me.email && prefs[m.email]?.draftReady.email);
 
   return (
     <div
@@ -139,14 +139,14 @@ export default function RxInboxNotificationCategory({ focus = false }: { focus?:
               </div>
             ))}
           </div>
-          <div className="px-5 py-3 border-t border-[#F0EFF6] bg-[#F8F9FC] flex items-start gap-2">
-            <Users className="w-3.5 h-3.5 text-[#717182] flex-shrink-0 mt-0.5" />
-            <p className="text-[11px] text-[#717182] leading-relaxed">
-              {others.length
-                ? <>Also receiving draft-ready emails: <span className="font-medium text-[#5A5568]">{others.map(m => m.name).join(', ')}</span>. Each team member chooses this in their own Notification Preferences.</>
-                : 'No one else on your team receives draft-ready emails yet. Each team member chooses this in their own Notification Preferences.'}
-            </p>
-          </div>
+          <DefaultRecipients
+            meEmail={me.email}
+            label="Draft-ready alerts by default"
+            isOn={e => !!(prefs[e]?.draftReady.inApp || prefs[e]?.draftReady.email)}
+            channels={e => [prefs[e]?.draftReady.inApp && 'Bell', prefs[e]?.draftReady.email && 'Email'].filter(Boolean).join(' + ')}
+            onAdd={m => { setRxPref(m.email, 'draftReady', 'inApp', true); setRxPref(m.email, 'draftReady', 'email', true); }}
+            onRemove={m => { setRxPref(m.email, 'draftReady', 'inApp', false); setRxPref(m.email, 'draftReady', 'email', false); }}
+          />
         </div>
       )}
     </div>

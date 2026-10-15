@@ -151,7 +151,7 @@ Every lab gets a standard, branded new-case form for its website.
 
 - **Settings → Website Intake Form:**
   - Branding: logo upload (PNG / JPG / SVG / WebP, up to 2MB), the lab name, a welcome line and an accent colour.
-  - Which services the form offers, and who's emailed about new requests.
+  - Which services the form offers.
   - The form link, which you can rename (`/intake/<slug>`), plus copyable **embed code** (an iframe) and **button code**.
   - A live desktop / mobile preview, a list of recent requests, and a "Taking requests" switch.
 - **The form, `/intake/:slug`:** add `?embed=1` for iframe use, which drops the page background. It has four steps:
@@ -164,7 +164,30 @@ Every lab gets a standard, branded new-case form for its website.
   - Each submission becomes a **draft case** (`SF-WEB-…`, reference `WEB-0007` and up) in Cases. It opens in QuickCreate prefilled, with the sender pane filled in.
   - A **From your website** dock shows the dentist's details and attached files, and flags practices that aren't linked yet.
   - The bell gets an entry, and opted-in team members are emailed (simulated). Confirming the case through QuickCreate removes the draft.
-- **Notifications:** there's also a "Website Intake Form" category under Settings → Notifications.
+- **Notifications:** managed in **Settings → Notifications**, in a "Website Intake Form" category. Each team member opts themselves in for the bell and for email ("New Case Request from Website"). The intake tab only links there. The bell entry follows the signed-in user's In-App setting, and the people to email are fixed when the request arrives.
+
+## Website requests: draft to confirmed case
+- **Example requests:** two are added automatically (`intake-form/intakeDemo.ts`):
+  - **WEB-0005**, a draft that has just come in: a zirconia crown LL6 from an unverified dentist at an unknown practice, with lower and upper arch scans and a pre-op photo.
+  - **WEB-0004**, already confirmed as case **SG-2026-0519**: six e.max veneers 13–23 from Dr. Murphy, with arch scans, smile and shade-tab photos and a signed mock-up approval PDF.
+- **Draft screen:** the draft opens on the usual draft screen, but its source pane shows what was actually submitted instead of the email mock:
+  - the checks to do first (GDC register, new practice)
+  - the **Smile Genius order form**
+  - the attachments
+  The header pill reads "Website draft" and the tab reads "Website form" (`intake-form/IntakeFilesDock.tsx` + `sandbox.css`).
+- **Confirming:** when the lab confirms with **Create case**, the draft becomes a real case. That case gets an **Order form** item next to Details / Invoice / Shipping, saying who confirmed it and when.
+- **Deep links:** `/growth/cases/<id>?sf=order | design | files` opens that case-page item. What's new links to the draft, the confirmed case and its order form.
+
+## What's new (change log)
+A sidebar item above Settings, shown only inside Growth Team Feedback (`/growth/updates`). It lists every feature and change in high-level buckets (Cases & intake, Design, Settings & notifications, Navigation), tagged **New** or **Changes the original design**.
+
+- **Notes:** each update has a short note you can edit (pencil) or restore, saved in this browser.
+- **Examples:** each update has buttons that open an example inside the portal (for example a case with `?sf=design` or `?sf=files` opens that case-page item), or the public page in a new tab.
+- **Add update:** add your own entries (title, area, type, note, optional example page) as the work grows. The built-in entries live in `growth-portal/updatesStore.ts`.
+- **Sidebar item:** attached at runtime above the Settings button (`growth-portal/WhatsNewNavItem.tsx`), with a badge for updates you haven't opened yet.
+
+## Notification recipients
+Under Settings → Notifications, the **Prescription Email Inbox** and **Website Intake Form** categories each have a **Notified by default** list. **Add people** picks team members from User Management, which turns the bell and email on for them; ✕ turns both off. Everyone can still adjust their own switches. Website requests start with the lab admin only.
 
 ## Known limitations
 - **Settings sidebar:** `SettingsPage`'s tab list is internal to it, so `LabSettingsWithInbox` draws the same sidebar markup with one extra tab. Existing tabs render the real `SettingsPage`. `sandbox.css` hides that page's own header and sidebar, which depends on its root markup.
@@ -196,3 +219,6 @@ Every lab gets a standard, branded new-case form for its website.
 - **The intake form reads the Prescription Builder in the same tab:** edits in Prescription Builder live in memory, so a form opened in a new tab uses the default fields.
 - **Embedding:** the snippet works on any site that allows iframes, but the prototype's URL is localhost.
 - **"Request files" item:** it uses the same runtime slot as Design review, and depends on the same Details / Invoice / Shipping markup. It has no floating fallback.
+- **Website drafts reuse the email-draft screen:** a website request is saved like an email draft (status Draft, source Email), so it follows the portal's draft rules unchanged. It shows "Need Attention", nothing goes into production until the lab confirms it in QuickCreate, and confirming removes the draft. The existing screens also label it with the "AI" chip and an "enriched using AI" banner, and QuickCreate shows its built-in prescription mock, which can't be changed without editing `src/`. The **From your website** panel has the real details, including the "Sender not verified" check (GDC register link). The sender's name is kept exactly as typed.
+- **Growth cases are saved continuously:** while `/growth` is open, its cases are saved to the Growth store every time the list changes. A page reload therefore restores exactly what's there, and never brings back a draft that was already confirmed.
+- **Generated example scans** are simple lathed tooth shapes laid out as an arch: placeholders for real intra-oral scans.
