@@ -27,9 +27,9 @@
   font-weight: 500 !important;
 }
 
-/* Website intake drafts (intake-form/IntakeFilesDock.tsx): QuickCreate's
+/* LabLink new-case drafts (intake-form/IntakeFilesDock.tsx): QuickCreate's
    "Source email" pane shows the submitted order form instead, and the header
-   pill reads "Website draft". Relies on QuickCreate's pane + pill markup. */
+   pill reads "LabLink draft". Relies on QuickCreate's pane + pill markup. */
 [data-sf-intake-pane="on"] > *:not(.sf-intake-pane) {
   display: none !important;
 }
@@ -43,6 +43,28 @@
   display: none !important;
 }
 [data-sf-intake-tab="on"]::after {
-  content: "Website form";
+  content: "LabLink form";
   font-size: 12px;
+}
+
+/* Case "Attachment files / Scans" card (intake-form/CaseAttachmentsOverlay.tsx):
+   real files + filters replace the placeholder grid. Relies on the card's
+   markup: header first, then the native body. */
+[data-sf-attach="on"] > *:not(:first-child):not(.sf-attach-body) {
+  display: none !important;
+}
+[data-sf-hide="on"] {
+  display: none !important;
+}
+
+/* Extra tabs in the case page's order form panel (intake-form/OrderPanelTab.tsx:
+   LabLink form, Email). While one is active the native body is hidden and the
+   native tabs lose their underline. Relies on the panel's markup: tab bar
+   first, then the body. */
+[data-sf-ptab] > *:not(:first-child):not(.sf-ptab-body) {
+  display: none !important;
+}
+[data-sf-ptab] > :first-child > button:not(.sf-ptab-tab) {
+  border-color: transparent !important;
+  color: #717182 !important;
 }

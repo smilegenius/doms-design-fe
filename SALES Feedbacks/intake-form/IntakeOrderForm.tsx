@@ -4,7 +4,7 @@ import { ToothChips } from '../design-studio/markup/FdiPicker';
 import { FileList } from '../design-studio/components/FileChips';
 import { portalDate, portalDateTime } from '../lab-prescription-inbox/data';
 import { LabMark } from './IntakeForm';
-import { IntakeConfig, IntakeSubmission } from './intakeStore';
+import { addressText, IntakeConfig, IntakeSubmission } from './intakeStore';
 
 // ── The Smile Genius order form for a website request ───────────────────────
 // Everything the dentist entered on the lab's intake form, laid out as the
@@ -31,7 +31,7 @@ function Block({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export default function IntakeOrderForm({ sub, config, showFiles = true }: { sub: IntakeSubmission; config: IntakeConfig; showFiles?: boolean }) {
+export default function IntakeOrderForm({ sub, config, showFiles = true, print = false }: { sub: IntakeSubmission; config: IntakeConfig; showFiles?: boolean; /** Static version for printing: files as names. */ print?: boolean }) {
   const o = sub.order;
   const extras = Object.entries(o?.extras ?? {});
   return (
@@ -40,18 +40,19 @@ export default function IntakeOrderForm({ sub, config, showFiles = true }: { sub
         <LabMark config={config} size={32} />
         <div className="text-right min-w-0">
           <p className="text-xs font-bold text-[#030213] leading-tight">Lab order form</p>
-          <p className="text-[10px] text-[#717182]">Ref <span className="font-mono font-semibold text-[#030213]">{sub.ref}</span> · {portalDateTime(sub.at)}</p>
+          <p className="text-[10px] text-[#717182]">Ref <span className="font-mono font-semibold text-[#030213]">{sub.ref}</span> · {portalDateTime(sub.at)}{sub.fromRef ? ` · from ${sub.fromRef}` : ''}</p>
         </div>
       </div>
       <div className="px-3.5 py-1.5 bg-[#EEF4FF] border-t border-[#DBEAFE] flex items-center gap-1.5">
         <Globe className="w-3 h-3 text-[#1565C0]" />
-        <p className="text-[10px] font-semibold text-[#1565C0]">Submitted on {config.labName}'s website · Smile Genius intake form</p>
+        <p className="text-[10px] font-semibold text-[#1565C0]">Sent through {config.labName}'s LabLink · Smile Genius</p>
       </div>
 
       <Block title="Dentist">
         <Row k="Name">{sub.dentist}</Row>
         <Row k="GDC no.">{sub.gdc}</Row>
-        <Row k="Practice">{sub.practice}{sub.postcode ? `, ${sub.postcode}` : ''}</Row>
+        <Row k="Practice">{sub.practice}{!sub.address && sub.postcode ? `, ${sub.postcode}` : ''}</Row>
+        {sub.address && <Row k="Deliver to">{addressText(sub.address)}</Row>}
         <Row k="Contact">{sub.email} · {sub.phone}</Row>
       </Block>
       <Block title="Patient">
@@ -75,7 +76,9 @@ export default function IntakeOrderForm({ sub, config, showFiles = true }: { sub
       )}
       {showFiles && (
         <Block title={`Attachments (${sub.files.length})`}>
-          {sub.files.length ? <div className="pt-1"><FileList files={sub.files} /></div> : <p className="text-xs text-[#717182]">No files attached.</p>}
+          {!sub.files.length ? <p className="text-xs text-[#717182]">No files attached.</p>
+            : print ? <ul className="text-xs text-[#030213] list-disc pl-4">{sub.files.map(f => <li key={f.id}>{f.name}</li>)}</ul>
+            : <div className="pt-1"><FileList files={sub.files} /></div>}
         </Block>
       )}
       <div className="px-3.5 py-2.5 border-t border-[#F0EFF6] bg-[#F8F9FC] flex items-start gap-1.5">

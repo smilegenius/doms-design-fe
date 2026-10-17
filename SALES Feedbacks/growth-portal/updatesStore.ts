@@ -33,19 +33,48 @@ export const BUILT_IN: Update[] = [
     examples: [{ label: 'Inbox bar on Cases', to: '/growth/cases' }, { label: 'Inbox settings tab', to: '/growth/settings?tab=rx-inbox' }],
   },
   {
-    id: 'upload-links', bucket: 'Cases & intake', title: 'Clinician upload links', tag: 'new',
-    note: 'From a case, the lab creates a link to send by WhatsApp or email. The clinic uploads DICOM, scans and photos without logging in, and sees only the case ref and the patient\'s initials. Optional access code, expiry and revoke.',
-    examples: [{ label: 'Request files on a case', to: '/growth/cases/SG-2026-0481?sf=files' }, { label: 'The clinic\'s page', to: '/upload/demo', newTab: true }],
+    id: 'lablink', bucket: 'Cases & intake', title: 'LabLink', tag: 'new',
+    note: 'One branded link each lab puts on its website, in email signatures and auto-replies, in place of WeTransfer, Dropbox and the old per-case upload links. Dentists send either a new case or files for an existing case. A new case (with a delivery address) becomes a draft that shows the submitted order form, attachments and sender checks; once confirmed, the LabLink form sits as a tab next to the Smile Genius order form. Files quoting the case ID or scanner ref sync straight into the case; otherwise they wait on a Match files screen with the likely cases and why, and if the case can\'t be found the lab creates a new case from them. Everything lands in the case\'s Attachment files / Scans section, filterable by type and source.',
+    examples: [
+      { label: 'New-case draft (WEB-0005)', to: '/growth/cases/quick-new/SF-WEB-DEMO05' },
+      { label: 'Confirmed case + order form (SG-2026-0519)', to: '/growth/cases/SG-2026-0519?sf=order' },
+      { label: 'Files to match (WEB-0009)', to: '/growth/cases/quick-new/SF-WEB-F0009' },
+      { label: 'Files synced into CASE-RS-2002', to: '/growth/cases/CASE-RS-2002?sf=attachments' },
+      { label: 'No case found? Create one (WEB-0009)', to: '/growth/cases/quick-new/SF-WEB-F0009' },
+      { label: 'LabLink form tab (SG-2026-0519)', to: '/growth/cases/SG-2026-0519?sf=order' },
+      { label: 'LabLink settings', to: '/growth/settings?tab=intake-form' },
+      { label: 'Dentist view: new case', to: '/lablink/smile-genius-lab?mode=new', newTab: true },
+      { label: 'Dentist view: files for a case', to: '/lablink/smile-genius-lab?mode=files', newTab: true },
+    ],
   },
   {
-    id: 'intake-form', bucket: 'Cases & intake', title: 'Website intake form', tag: 'new',
-    note: 'A branded new-case form each lab can link to or embed on its website, with its logo. Each submission becomes a draft case, never a live one: the sender isn\'t verified, so the lab checks the dentist (GDC register), links the practice and confirms. Uses the lab\'s own Prescription Builder fields.',
-    examples: [{ label: 'A website draft to review (WEB-0005)', to: '/growth/cases/quick-new/SF-WEB-DEMO05' }, { label: 'A confirmed website case (SG-2026-0519)', to: '/growth/cases/SG-2026-0519?sf=order' }, { label: 'Intake form settings', to: '/growth/settings?tab=intake-form' }, { label: 'The public form', to: '/intake/smile-genius-lab', newTab: true }],
+    id: 'bulk-actions', bucket: 'Cases & intake', title: 'Bulk Actions', tag: 'new',
+    note: 'Everything works on the cases you tick. "Accept" moves ticked cases to In Production through the portal\'s own status update, with its override rules. Drafts can be ticked too, and moved to Received or Accepted in one go. Download files puts only the ticked cases in a ZIP; choose what to include (scans, CBCT, photos, documents, order forms, file list), how folders are named, and one ZIP or one per practice. Print order forms asks once: Smile Genius form, the original (scanner, LabLink or email), or both. Each lab user\'s choices are remembered, and are in Settings → Bulk Actions.',
+    examples: [
+      { label: 'Tick drafts on Cases', to: '/growth/cases?bulk=drafts' },
+      { label: 'Download 2 cases', to: '/growth/cases?bulk=download&ids=CASE-RS-2002,SG-2026-0519' },
+      { label: 'Print scanner + LabLink + email cases', to: '/growth/cases?bulk=print&ids=CASE-RS-2002,SG-2026-0519,SG-2026-0527' },
+      { label: 'Your Bulk Actions defaults', to: '/growth/settings?tab=bulk-actions' },
+    ],
   },
   {
-    id: 'intake-draft-source', bucket: 'Cases & intake', title: 'Website drafts show the order form', tag: 'changed',
-    note: 'A website draft opens on the usual draft screen, but its source pane shows what the dentist actually submitted: the Smile Genius order form, the attached scans, photos and PDFs, and the checks to do first (GDC register, new practice). The header reads "Website draft". Once confirmed, the case gets an "Order form" item next to Details / Invoice / Shipping.',
-    examples: [{ label: 'Website draft WEB-0005', to: '/growth/cases/quick-new/SF-WEB-DEMO05' }, { label: 'Order form on SG-2026-0519', to: '/growth/cases/SG-2026-0519?sf=order' }],
+    id: 'branded-order-form', bucket: 'Cases & intake', title: 'Lab-branded order form', tag: 'changed',
+    note: 'The printed and downloaded Smile Genius order form now carries the lab\'s logo top left and the lab\'s name top right, taken from Settings → LabLink (initials on the lab\'s colour if no logo is uploaded), with a small Smile Genius mark at the bottom. The header and footer repeat on every page, however many pages the form runs to.',
+    examples: [
+      { label: 'Print 2 order forms', to: '/growth/cases?bulk=print&ids=CASE-RS-2002,SG-2026-0519' },
+      { label: 'Upload the lab logo', to: '/growth/settings?tab=intake-form' },
+    ],
+  },
+  {
+    id: 'forwarded-emails', bucket: 'Cases & intake', title: 'Forwarded emails', tag: 'new',
+    note: 'Lab staff forward any dentist email to the same inbox address as prescription photos. Every email becomes a draft in Cases, filled with what was read from it (patient, practice, service, teeth, shade, material, order type, needed-by date). Opening the draft shows the email: create a new case from it, where QuickCreate shows the real email, sets the order type and picks the clinic when only one matches; or add it to an existing case, where its files and text join the case\'s attachments. A case made from an email gets an Email tab next to the order form.',
+    examples: [
+      { label: 'Email draft → new case (Liam Foster)', to: '/growth/cases/quick-new/SF-FE-0005' },
+      { label: 'Email draft → existing case (Isabella Hughes)', to: '/growth/cases/quick-new/SF-FE-0004' },
+      { label: 'Case made from an email (SG-2026-0527)', to: '/growth/cases/SG-2026-0527?sf=email' },
+      { label: 'All email drafts', to: '/growth/cases/emails' },
+      { label: 'Forward an email', to: '/growth/cases?forward=1' },
+    ],
   },
   {
     id: 'design-studio', bucket: 'Design', title: 'Design Studio', tag: 'new',
@@ -59,12 +88,12 @@ export const BUILT_IN: Update[] = [
   },
   {
     id: 'notif-categories', bucket: 'Settings & notifications', title: 'New notification categories', tag: 'changed',
-    note: 'Settings → Notifications gains "Prescription Email Inbox" and "Website Intake Form" categories. Each person sets their own bell and email alerts, and admins can add default recipients from User Management.',
-    examples: [{ label: 'Prescription inbox category', to: '/growth/settings?tab=notifications&focus=rx-inbox' }, { label: 'Website intake category', to: '/growth/settings?tab=notifications&focus=intake-form' }],
+    note: 'Settings → Notifications gains "Prescription Email Inbox" and "LabLink" categories (LabLink has two: new case request, files for an existing case). Each person sets their own bell and email alerts, and admins can add default recipients from User Management.',
+    examples: [{ label: 'Prescription inbox category', to: '/growth/settings?tab=notifications&focus=rx-inbox' }, { label: 'LabLink category', to: '/growth/settings?tab=notifications&focus=intake-form' }],
   },
   {
     id: 'settings-tabs', bucket: 'Settings & notifications', title: 'Two new Settings tabs', tag: 'changed',
-    note: 'The Settings sidebar gets "Prescription Email Inbox" and "Website Intake Form" tabs below the existing ones. Every existing tab is unchanged.',
+    note: 'The Settings sidebar gets "Prescription Email Inbox" and "LabLink (website form)" tabs below the existing ones. Every existing tab is unchanged.',
     examples: [{ label: 'Settings sidebar', to: '/growth/settings?tab=intake-form' }],
   },
   {

@@ -68,7 +68,7 @@ export default function PrescriptionInboxSettings() {
             </button>
           </div>
           <p className="text-xs text-[#717182] leading-relaxed">
-            Any lab user can send a JPG, PNG, HEIC or PDF of a paper prescription to this address. Each photo becomes a draft case in Cases, with patient, practice, dentist, service, teeth, shade and material pre-filled by AI.
+            Any lab user can send a JPG, PNG, HEIC or PDF of a paper prescription to this address. Each photo becomes a draft case in Cases, with patient, practice, dentist, service, teeth, shade and material pre-filled by AI. Forward any other dentist email here too (case updates, new requests, files): it lands in Email triage, where you add it to a case or turn it into a new one.
           </p>
         </div>
       </div>
