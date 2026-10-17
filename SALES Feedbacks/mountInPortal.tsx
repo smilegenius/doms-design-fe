@@ -8,7 +8,6 @@ import { Navigate, Route, useLocation } from 'react-router-dom';
 import { useAuth } from '../src/app/context/AuthContext';
 import LabPrescriptionInboxApp from './lab-prescription-inbox/LabPrescriptionInboxApp';
 import DesignReviewPage from './design-studio/review/DesignReviewPage';
-import PublicUploadPage from './upload-links/PublicUploadPage';
 import PublicIntakePage from './intake-form/PublicIntakePage';
 import PortalSelectWithGrowth from './growth-portal/PortalSelectWithGrowth';
 import { GROWTH_BASE, leaveGrowth } from './growthIsolation';
@@ -52,7 +51,6 @@ export const growthRoutes = (
     {/* Design Studio: the dentist's review link. Public, no sign-in. */}
     <Route path="/review/:token/*" element={<DesignReviewPage />} />
     {/* Clinician upload link + the lab's website intake form. Public too. */}
-    <Route path="/upload/:token" element={<PublicUploadPage />} />
     <Route path="/intake/:slug" element={<PublicIntakePage />} />
     {/* Growth Team Feedback: the Lab portal with the Sales Feedbacks features. */}
     <Route path={`${GROWTH_BASE}/*`} element={<RequireSignIn><LabPrescriptionInboxApp /></RequireSignIn>} />
