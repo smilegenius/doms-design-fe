@@ -2,7 +2,7 @@ import { DesignFile, fileKind } from '../design-studio/data/designStudio';
 import { fid, FileCheck, putBlob } from '../design-studio/store/fileStore';
 
 // ── Clinical files from outside the portal ───────────────────────────────────
-// Upload links and the website intake form take more than the design
+// LabLink (new cases and files for existing cases) takes more than the design
 // formats: CBCT exports (DICOM, usually a folder of extensionless files),
 // zips, plus the usual scans, photos and PDFs. A DICOM folder is stored file
 // by file but listed as one "series". Headers are never parsed or shown —

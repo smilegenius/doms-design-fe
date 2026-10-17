@@ -2,17 +2,22 @@ import type { Case } from '../../src/app/pages/CasesPage';
 import type { DesignFile } from '../design-studio/data/designStudio';
 import { fid, putBlob } from '../design-studio/store/fileStore';
 import { portalDate } from '../lab-prescription-inbox/data';
-import { addSeededRequests, INTAKE_ID_PREFIX, IntakeSubmission, isIntakeSeeded, getIntakeConfig } from './intakeStore';
+import { addSeededRequests, FILES_ID_PREFIX, filesDraftCase, INTAKE_ID_PREFIX, IntakeSubmission, isIntakeSeeded, getIntakeConfig } from './intakeStore';
 
-// ── Example website requests ─────────────────────────────────────────────────
-// Two requests so the flow can be shown without filling the form in:
-//   WEB-0005: a draft that's just come in (unknown practice, unverified sender)
-//   WEB-0004: already confirmed by the lab, now a real case (SG-2026-0519)
+// ── Example LabLink requests ─────────────────────────────────────────────────
+// So every flow can be shown without filling the form in:
+//   WEB-0005: a new-case draft that's just come in (unknown practice, unverified sender)
+//   WEB-0004: a new case already confirmed by the lab, now SG-2026-0519
+//   WEB-0009: files for "Marcus Reid" with no reference: a draft to match
+//             (likely CASE-RS-2004 or CASE-RS-2003, Marcus Reed's night guards)
+//   WEB-0010: files quoting ITR-CASE-55984: synced straight into CASE-RS-2002
 // Attachments are real files (generated STL scans, photos, a PDF) stored like
 // any upload, so they open in the 3D preview, lightbox and PDF tab.
 
 export const CONFIRMED_EXAMPLE_CASE = 'SG-2026-0519';
 export const DRAFT_EXAMPLE_CASE = `${INTAKE_ID_PREFIX}DEMO05`;
+export const FILES_DRAFT_EXAMPLE = `${FILES_ID_PREFIX}0009`;
+export const SYNCED_EXAMPLE_CASE = 'CASE-RS-2002';
 
 // ── Generated files ──────────────────────────────────────────────────────────
 type V = [number, number, number];
@@ -37,7 +42,7 @@ function tooth(cx: number, cz: number, w: number, h: number, prep = false, lower
 }
 
 /** A 14-tooth arch along a parabola; `preps` are FDI positions (1–7 per side) cut as preparations. */
-function arch(preps: (i: number, side: 'L' | 'R') => boolean, lower = false): [V, V, V][] {
+export function arch(preps: (i: number, side: 'L' | 'R') => boolean, lower = false): [V, V, V][] {
   const widths = [8.5, 6.8, 7.6, 7.0, 7.0, 10.5, 10.0];
   const heights = [10.5, 9.5, 11, 9, 8.5, 7.5, 7];
   const out: [V, V, V][] = [];
@@ -54,7 +59,7 @@ function arch(preps: (i: number, side: 'L' | 'R') => boolean, lower = false): [V
   return out;
 }
 
-function stl(tris: [V, V, V][]): Blob {
+export function stl(tris: [V, V, V][]): Blob {
   const buf = new ArrayBuffer(84 + tris.length * 50);
   const dv = new DataView(buf);
   dv.setUint32(80, tris.length, true);
@@ -66,7 +71,7 @@ function stl(tris: [V, V, V][]): Blob {
 }
 
 /** A one-page PDF with a few lines of text. */
-function pdf(lines: string[]): Blob {
+export function pdf(lines: string[]): Blob {
   const esc = (t: string) => t.replace(/[\\()]/g, m => `\\${m}`);
   const text = lines.map((l, i) => `BT /F1 ${i === 0 ? 16 : 11} Tf 56 ${780 - i * 22} Td (${esc(l)}) Tj ET`).join('\n');
   const objs = [
@@ -83,6 +88,19 @@ function pdf(lines: string[]): Blob {
   body += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map(n => `${String(n).padStart(10, '0')} 00000 n \n`).join('')}`;
   body += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
   return new Blob([body], { type: 'application/pdf' });
+}
+
+/** A small fake CBCT series: files with the DICOM marker at byte 128. */
+async function dicomSeries(name: string, count: number, at: string): Promise<DesignFile | null> {
+  const parts: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const bytes = new Uint8Array(4096);
+    bytes.set([68, 73, 67, 77], 128);
+    bytes[300] = i;
+    const id = fid();
+    if (await putBlob(id, new Blob([bytes], { type: 'application/dicom' }))) parts.push(id);
+  }
+  return parts.length ? { id: fid(), name, size: parts.length * 4096, mime: 'application/dicom', kind: 'dicom', uploadedBy: 'clinician', uploadedAt: at, parts } : null;
 }
 
 async function save(name: string, blob: Blob, kind: DesignFile['kind'], at: string): Promise<DesignFile | null> {
@@ -128,15 +146,16 @@ export async function ensureIntakeDemo() {
       status: 'draft', createdAt: portalDate(), updatedAt: portalDate(), requestedDelivery: portalIso(draftDelivery), hasAlert: false,
       scanner: '3Shape', source: 'email', createdBy: 'Priya Raman', createdBySide: 'clinic',
       emailPrescription: {
-        fromName: 'Priya Raman · Harbour Dental Care', fromEmail: 'priya@harbourdental.co.uk', subject: 'Website intake form · WEB-0005', receivedAt: '35 min ago',
+        fromName: 'Priya Raman · Harbour Dental Care', fromEmail: 'priya@harbourdental.co.uk', subject: 'LabLink · new case · WEB-0005', receivedAt: '35 min ago',
         attachmentName: `${draftFiles.length} files attached`,
-        bodyPreview: `Submitted through ${labName}'s website intake form by Priya Raman (GDC 271834, 0117 496 0321). Sender not verified. New practice: "Harbour Dental Care", BS1 4QA, isn't linked yet.`,
+        bodyPreview: `Submitted through ${labName}'s LabLink by Priya Raman (GDC 271834, 0117 496 0321). Sender not verified. New practice: "Harbour Dental Care", BS1 4QA, isn't linked yet.`,
       },
     };
     const draftSub: IntakeSubmission = {
       caseId: DRAFT_EXAMPLE_CASE, ref: 'WEB-0005', at: draftAt, dentist: 'Priya Raman', gdc: '271834', practice: 'Harbour Dental Care', postcode: 'BS1 4QA',
       email: 'priya@harbourdental.co.uk', phone: '0117 496 0321', patientName: 'Thomas Reid', service: 'Crown', knownPractice: false,
       files: draftFiles, notified: ['sajid@smilegenius.com'], order: draftOrder,
+      address: { line: '4 Harbourside Walk', city: 'Bristol', postcode: 'BS1 4QA' },
     };
 
     // WEB-0004: confirmed by the lab yesterday, now a real case
@@ -168,18 +187,57 @@ export async function ensureIntakeDemo() {
       status: 'new', createdAt: portalDate(new Date(confirmedAt)), updatedAt: portalDate(new Date(confirmedAt)), requestedDelivery: portalIso(doneDelivery), hasAlert: false,
       scanner: '3Shape', source: 'email', createdBy: 'Sajid Mahmood', createdBySide: 'clinic',
       emailPrescription: {
-        fromName: 'Dr. Murphy · Smile Genius Manchester', fromEmail: 'dr.murphy@smilegenius.co.uk', subject: 'Website intake form · WEB-0004', receivedAt: portalDate(new Date(doneAt)),
+        fromName: 'Dr. Murphy · Smile Genius Manchester', fromEmail: 'dr.murphy@smilegenius.co.uk', subject: 'LabLink · new case · WEB-0004', receivedAt: portalDate(new Date(doneAt)),
         attachmentName: `${doneFiles.length} files attached`,
-        bodyPreview: `Submitted through ${labName}'s website intake form by Dr. Murphy (GDC 102938). Checked and confirmed by Sajid Mahmood.`,
+        bodyPreview: `Submitted through ${labName}'s LabLink by Dr. Murphy (GDC 102938). Checked and confirmed by Sajid Mahmood.`,
       },
     };
     const doneSub: IntakeSubmission = {
       caseId: `${INTAKE_ID_PREFIX}DEMO04`, ref: 'WEB-0004', at: doneAt, dentist: 'Dr. Murphy', gdc: '102938', practice: 'Smile Genius Manchester', postcode: 'M2 3AW',
       email: 'dr.murphy@smilegenius.co.uk', phone: '0161 496 0112', patientName: 'Hannah Price', service: 'Veneers', knownPractice: true,
       files: doneFiles, notified: ['sajid@smilegenius.com'], order: doneOrder,
+      address: { line: '18 King Street', city: 'Manchester', postcode: 'M2 3AW' },
       confirmedCaseId: CONFIRMED_EXAMPLE_CASE, confirmedAt, confirmedBy: 'Sajid Mahmood',
     };
 
-    addSeededRequests([draftSub, doneSub], [confirmed, draft]);
+    // WEB-0009: files for an existing case, no reference, name typed slightly wrong
+    const fuzzyAt = iso(50 * 60_000);
+    const fuzzyFiles = (await Promise.all([
+      save('lower-arch_rescan.stl', stl(arch(() => false, true)), 'mesh', fuzzyAt),
+      save('bite_registration.stl', stl(arch(() => false)), 'mesh', fuzzyAt),
+      photo && save('sore-spot_lower-left.png', photo, 'image', fuzzyAt),
+    ])).filter(keep);
+    const fuzzySub: IntakeSubmission = {
+      kind: 'files', caseId: FILES_DRAFT_EXAMPLE, ref: 'WEB-0009', at: fuzzyAt, dentist: 'Dr. Webb', gdc: '208117', practice: 'Smile Genius Manchester', postcode: 'M2 3AW',
+      email: 'dr.webb@smilegenius.co.uk', phone: '0161 496 0140', patientName: 'Marcus Reid', service: 'Night Guard', knownPractice: true,
+      files: fuzzyFiles, notified: ['sajid@smilegenius.com'],
+      filesFor: {
+        patientDob: '1979-02-11', reference: '', teeth: [], draftId: FILES_DRAFT_EXAMPLE,
+        comments: 'Patient says the night guard rubs on the lower left, around 36/37. New lower scan and a photo of the sore spot attached. Please relieve that area before delivery.',
+      },
+    };
+
+    // WEB-0010: files quoting the scanner case ref, so they sync straight in
+    const syncAt = iso(3 * 3_600_000);
+    const syncFiles = (await Promise.all([
+      photo && save('shade_daylight_UR6.png', photo, 'image', syncAt),
+      dicomSeries('CBCT_UR6_implant-planning', 24, syncAt),
+      save('shade-notes_UR6.pdf', pdf([
+        'Shade notes: UR6 crown', '', 'Patient: Isabella Hughes', 'Scanner case: ITR-CASE-55984',
+        'Base shade A2, slightly warmer cervical third.', 'Low value; avoid a bright, opaque incisal.', 'Photo taken in daylight with the A2 tab.', '', 'Dr. Webb (GDC 208117)',
+      ]), 'pdf', syncAt),
+    ])).filter(keep);
+    const syncSub: IntakeSubmission = {
+      kind: 'files', caseId: '', ref: 'WEB-0010', at: syncAt, dentist: 'Dr. Webb', gdc: '208117', practice: 'Smile Genius Manchester', postcode: 'M2 3AW',
+      email: 'dr.webb@smilegenius.co.uk', phone: '0161 496 0140', patientName: 'Isabella Hughes', service: 'Crown', knownPractice: true,
+      files: syncFiles, notified: ['sajid@smilegenius.com'],
+      filesFor: {
+        patientDob: '1992-08-30', reference: 'ITR-CASE-55984', teeth: [16],
+        comments: 'Shade photo in daylight with the A2 tab: please go slightly warmer in the cervical third. CBCT attached for reference, as the UR6 site was assessed for an implant first.',
+        attachedCaseId: SYNCED_EXAMPLE_CASE, attachedAt: syncAt, attachedBy: 'LabLink', matchedBy: 'reference',
+      },
+    };
+
+    addSeededRequests([draftSub, doneSub, fuzzySub, syncSub], [confirmed, draft, filesDraftCase(fuzzySub)]);
   } finally { seeding = false; }
 }

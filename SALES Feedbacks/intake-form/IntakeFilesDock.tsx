@@ -6,17 +6,18 @@ import { getCreatedCases } from '../../src/app/data/createdCases';
 import { portalDateTime } from '../lab-prescription-inbox/data';
 import IntakeOrderForm from './IntakeOrderForm';
 import { IntakeSubmission, useIntake } from './intakeStore';
+import { pickClinic, setOrderType } from '../forwarded-email/quickCreateAssist';
 
 // ── Source of a website draft, on the (unchanged) QuickCreate screen ─────────
 // QuickCreate only knows email drafts, so it would show a "Source email" pane
 // with its built-in prescription mock. For website drafts the sandbox puts the
 // real source in that pane at runtime: the order form the dentist submitted,
 // the files, and the checks the lab must do. The header's "Email draft" pill
-// reads "Website draft". If the pane can't be found (QuickCreate's markup
+// reads "LabLink draft". If the pane can't be found (QuickCreate's markup
 // changed), a floating card with the same content appears instead.
 // Relies on QuickCreate markup: the pane title "Source email" and the pill
 // "Email draft" (or "Email · <scanner>"), and the "Email" preview tab, which
-// reads "Website form". sandbox.css hides the native pane content.
+// reads "LabLink form". sandbox.css hides the native pane content.
 
 /** Older requests were saved before the order details were: fill them from the draft case. */
 export function withOrder(sub: IntakeSubmission): IntakeSubmission {
@@ -37,12 +38,16 @@ export function SenderChecks({ sub }: { sub: IntakeSubmission }) {
       <div className="text-[11px] text-[#B45309] bg-[#FFF8E1] border border-[#FDE68A] rounded-xl px-3 py-2.5 flex items-start gap-2">
         <ShieldAlert className="w-4 h-4 flex-shrink-0" />
         <span>
-          <span className="font-semibold">Check before you confirm.</span> Anyone can fill in a website form, so "{sub.dentist}" and GDC {sub.gdc || '(none given)'} are as typed. Look them up on the GDC register{sub.knownPractice ? '' : ', link or add the practice'}, and call the practice if anything looks off.
+          <span className="font-semibold">Check before you confirm.</span> Anyone can use a LabLink, so "{sub.dentist}" and GDC {sub.gdc || '(none given)'} are as typed. Look them up on the GDC register{sub.knownPractice ? '' : ', link or add the practice'}, and call the practice if anything looks off.
           <a href="https://olr.gdc-uk.org/searchregister" target="_blank" rel="noreferrer" className="mt-1 flex items-center gap-1 font-semibold text-[#1565C0] hover:underline">Search the GDC register <ExternalLink className="w-3 h-3" /></a>
         </span>
       </div>
       {!sub.knownPractice && (
-        <p className="text-[11px] text-[#B45309] bg-[#FFF8E1] border border-[#FDE68A] rounded-xl px-3 py-2">New practice: "{sub.practice}"{sub.postcode ? `, ${sub.postcode}` : ''} isn't linked to your account. Pick or add it under Clinic before you create the case.</p>
+        <p className="text-[11px] text-[#B45309] bg-[#FFF8E1] border border-[#FDE68A] rounded-xl px-3 py-2">
+          {sub.practice
+            ? <>New practice: "{sub.practice}"{sub.postcode ? `, ${sub.postcode}` : ''} isn't linked to your account. Pick or add it under Clinic before you create the case.</>
+            : <>No practice given. Check who sent this before you use the files.</>}
+        </p>
       )}
     </div>
   );
@@ -55,7 +60,7 @@ function SourcePane({ sub }: { sub: IntakeSubmission }) {
       <div className="flex-shrink-0 px-4 py-2.5 border-b border-[#F0EFF6] bg-[#F8F9FC] flex items-center gap-2">
         <span className="w-6 h-6 rounded-lg bg-[#EEF4FF] flex items-center justify-center"><Globe className="w-3.5 h-3.5 text-[#1565C0]" /></span>
         <div className="min-w-0">
-          <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider leading-tight">Source: website intake form</p>
+          <p className="text-[11px] font-bold text-[#030213] uppercase tracking-wider leading-tight">Source: LabLink</p>
           <p className="text-[10px] text-[#717182] leading-tight truncate">Submitted on {config.labName}'s website · {portalDateTime(sub.at)}</p>
         </div>
       </div>
@@ -72,11 +77,11 @@ const leaf = (text: string) =>
   [...document.querySelectorAll<HTMLElement>('p, span')].find(e => e.children.length === 0 && e.textContent?.trim() === text);
 
 /** QuickCreate's source pane root (the one titled "Source email"). */
-function findPane(): HTMLElement | null {
+export function findPane(): HTMLElement | null {
   return leaf('Source email')?.closest<HTMLElement>('div.flex-1.min-h-0.flex.flex-col') ?? null;
 }
 /** The header pill that reads "Email draft". */
-function findPill(): HTMLElement | null {
+export function findPill(): HTMLElement | null {
   // "Email draft", or "Email · 3Shape" when the draft has scans.
   const t = [...document.querySelectorAll<HTMLElement>('span, div')].find(e => /^Email( draft| · .+)$/.test(e.textContent?.trim() ?? '') && e.children.length <= 2 && e.querySelector('svg'));
   return t ?? null;
@@ -96,7 +101,7 @@ function Fallback({ sub }: { sub: IntakeSubmission }) {
         <div className="flex items-center gap-2.5">
           <span className="w-9 h-9 rounded-lg bg-white flex items-center justify-center flex-shrink-0"><Globe className="w-4 h-4 text-[#4D8EF7]" /></span>
           <div className="min-w-0">
-            <p className="text-[11px] font-bold text-[#1565C0]">From your website · {sub.ref}</p>
+            <p className="text-[11px] font-bold text-[#1565C0]">From LabLink · {sub.ref}</p>
             <p className="text-[10px] text-[#3B6BAE]">{sub.dentist} (unverified) · {n ? `${n} file${n === 1 ? '' : 's'}` : 'no files'}{sub.knownPractice ? '' : ' · new practice'}</p>
           </div>
           <button onClick={() => setOpen(true)} className="ml-1 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity">
@@ -104,7 +109,7 @@ function Fallback({ sub }: { sub: IntakeSubmission }) {
           </button>
         </div>
       </div>
-      <SideDrawer open={open} onClose={() => setOpen(false)} title={`Website request ${sub.ref}`} subtitle={`Received ${portalDateTime(sub.at)}`} icon={<Globe className="w-4 h-4 text-[#4D8EF7]" />}>
+      <SideDrawer open={open} onClose={() => setOpen(false)} title={`LabLink request ${sub.ref}`} subtitle={`Received ${portalDateTime(sub.at)}`} icon={<Globe className="w-4 h-4 text-[#4D8EF7]" />}>
         <div className="space-y-4"><SenderChecks sub={sub} /><IntakeOrderForm sub={withOrder(sub)} config={config} /></div>
       </SideDrawer>
     </>
@@ -133,6 +138,14 @@ export default function IntakeFilesDock({ caseId }: { caseId: string }) {
     return () => { mo.disconnect(); window.clearTimeout(t); };
   }, [sub?.caseId]);
 
+  // Carry the practice into QuickCreate's clinic picker (once), when it's one the lab has.
+  const [picked, setPicked] = useState<{ picked: string | null } | null>(null);
+  useEffect(() => {
+    if (!pane || !sub || picked !== null) return;
+    const t = window.setTimeout(() => { setOrderType(sub.order?.orderType); pickClinic(sub.practice).then(setPicked); }, 700);
+    return () => window.clearTimeout(t);
+  }, [pane, sub?.ref, picked]);
+
   useEffect(() => {
     if (!pane) return;
     pane.setAttribute('data-sf-intake-pane', 'on');
@@ -156,7 +169,7 @@ export default function IntakeFilesDock({ caseId }: { caseId: string }) {
     <>
       {pane && createPortal(<SourcePane sub={sub} />, pane)}
       {pill && pill.parentElement && createPortal(
-        <span className="sf-intake-pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#EEF4FF] text-[#1565C0] border border-[#DBEAFE]"><Globe className="w-3 h-3" /> Website draft</span>,
+        <span className="sf-intake-pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#EEF4FF] text-[#1565C0] border border-[#DBEAFE]"><Globe className="w-3 h-3" /> LabLink draft</span>,
         pill.parentElement,
       )}
       {!pane && gaveUp && <Fallback sub={sub} />}

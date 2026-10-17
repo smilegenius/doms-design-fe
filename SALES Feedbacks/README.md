@@ -121,52 +121,63 @@ The lab sees them under each capture, plus **Files from Dr. …**. Share next ve
 - `review/`: the dentist page
 - `studio/`: the lab page, the share modal and the link card
 
-## Clinician upload links
-The lab asks a clinic for files on a specific case, without the clinic needing an account.
+## LabLink (the lab's website form)
+LabLink is one branded link that each lab puts on its website, in email signatures and in auto-replies. It replaces the per-case clinician upload links, which have been removed. The aim is to stop dentists using WeTransfer and Dropbox. A dentist first picks what they're sending.
 
-- **Where:** open a case and pick **Request files**, under Details / Invoice / Shipping / Design review. It shows on every case, and its chip reads New / Live / "N new" / Closed.
-- **Creating a link:**
-  - The lab ticks what it needs (CBCT / DICOM, intra-oral scan, clinical photos, X-rays, other).
-  - It can add a short note, which is checked for anything that looks like a name, date of birth, NHS number, phone or email.
-  - It picks an expiry (7, 14 or 30 days) and whether to require a 6-digit access code (on by default).
-- **Sharing:** Copy link, Share on WhatsApp, Email, Copy message and Preview as clinic. The access code is never in the link or the message; it's sent separately.
-- **The clinic's page, `/upload/:token`:** public and mobile-first.
-  - It has a code gate. Five wrong codes lock the link for 15 minutes.
-  - Expired, revoked and locked links show no case details at all.
-  - The page reads only an allow-listed snapshot made when the link is created (`PublicCaseView` in `upload-links/uploadStore.ts`): the case ref, the patient's **initials**, the practice, the dentist, the service and the teeth, plus the lab's checklist, note and expiry date.
-  - It never shows the patient's name, date of birth, contact details, clinical notes, prices or files already sent. The page is write-only.
-- **What the clinic can upload:**
-  - DICOM files or a whole DICOM folder. Extensionless files are detected by the `DICM` marker, and a folder becomes one "DICOM series" row. Headers are never read or shown.
-  - ZIP, STL / PLY / OBJ, images and PDF, up to 500MB each.
-  - The clinic ticks a box confirming it's authorised to share them.
-- **The lab's side:**
-  - Uploads appear in the case panel straight away, grouped by batch with the uploader's name.
-  - The bell gets a "Files received" entry.
-  - DICOM and ZIP files download; images and meshes open in the existing previews.
-  - **New link** replaces (revokes) the old one, and **Revoke** turns it off.
-- **Demo data:** SG-2026-0481 has a seeded link (code `418205`) with one batch already received.
+**A new case** (four steps):
+1. About you: name, GDC number, practice, email and phone, plus the **delivery address** (practice address, town / city and postcode, all required).
+2. Patient: name, date of birth and an optional clinic reference.
+3. Prescription: the service, then the fields that service has turned on in the lab's **Prescription Builder**, plus files.
+4. Review & send, with a consent checkbox.
 
-## Website intake form
-Every lab gets a standard, branded new-case form for its website.
+It becomes a **draft** for the lab to check and confirm (see the next section).
 
-- **Settings → Website Intake Form:**
-  - Branding: logo upload (PNG / JPG / SVG / WebP, up to 2MB), the lab name, a welcome line and an accent colour.
-  - Which services the form offers.
-  - The form link, which you can rename (`/intake/<slug>`), plus copyable **embed code** (an iframe) and **button code**.
-  - A live desktop / mobile preview, a list of recent requests, and a "Taking requests" switch.
-- **The form, `/intake/:slug`:** add `?embed=1` for iframe use, which drops the page background. It has four steps:
-  1. About you: name, GDC number, practice, postcode, email and phone.
-  2. Patient: name, date of birth and an optional clinic reference.
-  3. Prescription: the service, then the fields that service has turned on in the lab's **Prescription Builder**, plus files (the same DICOM-aware drop zone as upload links).
-  4. Review & send, with a consent checkbox.
-  A honeypot field and a 3-second minimum fill time quietly drop bots.
-- **The result:**
-  - Each submission becomes a **draft case** (`SF-WEB-…`, reference `WEB-0007` and up) in Cases. It opens in QuickCreate prefilled, with the sender pane filled in.
-  - A **From your website** dock shows the dentist's details and attached files, and flags practices that aren't linked yet.
-  - The bell gets an entry, and opted-in team members are emailed (simulated). Confirming the case through QuickCreate removes the draft.
-- **Notifications:** managed in **Settings → Notifications**, in a "Website Intake Form" category. Each team member opts themselves in for the bell and for email ("New Case Request from Website"). The intake tab only links there. The bell entry follows the signed-in user's In-App setting, and the people to email are fixed when the request arrives.
+**Files for an existing case** (two short steps):
+1. **Details:** your name and the patient's name are required. Practice, email, a **case or scan reference** and the service are optional.
+2. **Files & notes:** at least one file and a note are both required. Sending confirms the dentist can share them; there's no checkbox.
 
-## Website requests: draft to confirmed case
+**"Other":** both modes always offer it as a service, for something the lab hasn't listed. A new case then asks "What do you need?", which is saved as "Requested item" on the order form.
+
+Where the files go (`intake-form/fileMatching.ts`):
+- **Exact reference:** the files **sync straight into that case**, and the bell says so. If a practice is given it must match; without one, the patient's name must match the case.
+- **Anything less certain:** a **draft** row appears in Cases (`SF-WEB-F…`, service "Additional files"). Opening it shows the **Match files** screen (`intake-form/MatchFilesPage.tsx`):
+  - what was sent, and the sender checks
+  - up to three likely cases, each with its score and "Matched because" reasons. These use the portal's own `RescanMatchCard`, unchanged.
+  - a search box for any other case
+  - **Attach to {case}**, **Not a match**, or **Create a new case from these**. Use the last one when the original case never arrived (e.g. the scan didn't come through). It makes a LabLink new-case draft prefilled with the patient, dentist, practice, notes and files, marked "from WEB-…".
+- **Like rescan detection,** nothing fuzzy is ever attached automatically.
+- **Scoring:**
+  - patient name (typos allowed): 35
+  - practice ("SG Manchester" matches "Smile Genius Manchester"): 20
+  - dentist surname: 15
+  - service: 10
+  - teeth: 10
+  - case still open: 10
+  - Equal scores go to the most recent case.
+
+Applies to both kinds:
+- **Files accepted:** DICOM files or folders, ZIP, STL / PLY / OBJ, images and PDF, up to 500MB each.
+- **Spam checks:** a honeypot field and a 3-second minimum fill time quietly drop bots.
+- **Address:** `/lablink/:slug`; `?mode=files` opens on "files" and `?embed=1` is for iframes. The old `/intake/:slug` redirects.
+
+**Settings → LabLink (website form):**
+- branding: logo, name, welcome line and accent colour
+- which services are offered
+- the link, embed code and button code
+- a live preview
+- recent requests, with their status (Draft, Confirmed, Synced by reference, Matched by the lab, Waiting to be matched)
+
+**Case attachments** (`intake-form/CaseAttachmentsOverlay.tsx`):
+- **What it lists:** the case page's **Attachment files / Scans** card shows the case's own files, labelled by where they came from (e.g. "iTero scanner"), plus everything LabLink added. Each LabLink file is labelled with the sender and how it was matched.
+- **Filters:** by type (Scans · CBCT / DICOM · Photos · Documents) and by source (Scanner · LabLink · Lab).
+- **Notes:** the dentist's notes sit above the list.
+- **Deep link:** `?sf=attachments` scrolls to the card.
+
+**Examples:**
+- **WEB-0009:** files for "Marcus Reid", with no reference, waiting to be matched. The likely cases are CASE-RS-2004 and CASE-RS-2003.
+- **WEB-0010:** files quoting ITR-CASE-55984, synced into **CASE-RS-2002**: a shade photo, a CBCT series and a PDF.
+
+## LabLink new cases: draft to confirmed case
 - **Example requests:** two are added automatically (`intake-form/intakeDemo.ts`):
   - **WEB-0005**, a draft that has just come in: a zirconia crown LL6 from an unverified dentist at an unknown practice, with lower and upper arch scans and a pre-op photo.
   - **WEB-0004**, already confirmed as case **SG-2026-0519**: six e.max veneers 13–23 from Dr. Murphy, with arch scans, smile and shade-tab photos and a signed mock-up approval PDF.
@@ -175,8 +186,40 @@ Every lab gets a standard, branded new-case form for its website.
   - the **Smile Genius order form**
   - the attachments
   The header pill reads "Website draft" and the tab reads "Website form" (`intake-form/IntakeFilesDock.tsx` + `sandbox.css`).
-- **Confirming:** when the lab confirms with **Create case**, the draft becomes a real case. That case gets an **Order form** item next to Details / Invoice / Shipping, saying who confirmed it and when.
+- **Confirming:** when the lab confirms with **Create case**, the draft becomes a real case. On that case, the order form panel gets a **LabLink form** tab next to the Smile Genius **Order form** and **Lab Documents**, with its own Print (`intake-form/CaseOrderFormTab.tsx`).
 - **Deep links:** `/growth/cases/<id>?sf=order | design | files` opens that case-page item. What's new links to the draft, the confirmed case and its order form.
+
+## Bulk Actions (`bulk-actions/`)
+Everything works on what's ticked.
+- **Cases:** tick rows and the list's own blue bulk bar gains three buttons.
+  - **Accept:** opens the portal's own bulk status modal with **In Production** ("Accepted by Lab") picked, so its override reasons, CareStack hooks and confirmation apply.
+  - **Download files.**
+  - **Print order forms.**
+- **Drafts:** the list can't select drafts, so the sandbox adds its own checkbox to draft rows (`DraftCheckboxes.tsx`). Ticked drafts get a blue bar with **Move to Received** / **Accept** (each makes a real case as New or In Production), plus Download and Print. Drafts and cases are never ticked together, and "Select all drafts" is on the top bar.
+- **Download** (`BulkDialogs.tsx`, `zip.ts`): only the ticked cases. Choose:
+  - what to include: scans, CBCT / DICOM, photos, documents, the Smile Genius form, the original form, the file list
+  - folder names: Case ID, Case ID + patient, or Practice / Case ID
+  - one ZIP, or one per practice
+
+  The button shows the file count and approximate size.
+- **Print:** only the ticked cases, with one question: the Smile Genius form, the original order form, or both. The original is the scanner order form (built from the case's scanner details), the LabLink form, the email, or the prescription photo. Cases with no original print their SG form or are skipped, and the order can be set.
+- **Lab-branded SG order form** (`printForms.tsx`): the lab's logo top left and name top right (from Settings → LabLink; initials on the lab's colour without a logo), a small Smile Genius mark at the bottom. It's laid out as a table, so the header and footer repeat on every printed page. The same form goes into downloads.
+- **Saved defaults** (`bulkDefaults.ts`, per lab user): every dialog has "Remember these choices" and opens with them next time. **Settings → Bulk Actions** shows, edits and resets them.
+- **Deep links:** `?bulk=drafts` ticks every draft; `?bulk=download|print&ids=A,B` opens that dialog.
+
+## Forwarded emails (`forwarded-email/`)
+- **Every email becomes a draft:** the prescription inbox address takes any dentist email; photos of paper prescriptions still become AI drafts. Each other email becomes a **draft** in Cases straight away (`SF-FE-…`), filled with what was read from it: patient, practice, service, teeth, shade, material, order type, and a needed-by date from phrases like "end of next week".
+- **Opening the draft** shows the **Email draft** screen (`EmailDraftPage.tsx`):
+  - **Create a new case:** opens QuickCreate, whose source pane shows the **real email** (sender, forwarder, text, attachments, what was read), with no mock prescription and no LabLink. The order type is set from the email. The clinic is picked when exactly one matches the practice; otherwise the pane lists the matches for the lab to choose. On Create case, the case is linked to its email and gets an **Email** tab next to Order form / Lab Documents. The email's files show under Attachment files / Scans → Email, and bulk print uses the email as its original.
+  - **Add to an existing case:** the email's files and text go to that case's attachments and the draft is removed. A reference in the email (case ID or scanner ref) matches the case directly; otherwise suggestions use the LabLink matching.
+  - **Dismiss.**
+- **All email drafts** are listed at `/growth/cases/emails`.
+- **Examples:**
+  - Isabella Hughes: a draft to add to CASE-RS-2002
+  - Liam Foster: a draft to make into a new case
+  - Hannah Price: already added to SG-2026-0519
+  - Chloe Bennett: already made into SG-2026-0527, with its Email tab
+  - "please see attached": search or dismiss
 
 ## What's new (change log)
 A sidebar item above Settings, shown only inside Growth Team Feedback (`/growth/updates`). It lists every feature and change in high-level buckets (Cases & intake, Design, Settings & notifications, Navigation), tagged **New** or **Changes the original design**.
@@ -214,11 +257,15 @@ Under Settings → Notifications, the **Prescription Email Inbox** and **Website
 - **Case status for real cases:** sharing a design on a non-demo case doesn't change its status in the Cases list. Writing it into the created-cases store would duplicate the row. The demo cases still sync.
 - **Uploaded files are stored per browser.** They live in this browser's IndexedDB, so they don't follow the link to another device. The viewer says "file unavailable on this device" when that happens.
 - **Uploaded meshes are flat-shaded** and decimated to about 8k faces, for the canvas renderer.
-- **Upload links are simulated in the browser:** tokens, codes and lockouts all live in localStorage on this origin. A real build needs server-side tokens and code checks, rate limiting, virus scanning, audit logs and expiring storage. The prototype only proves the flow and the data-exposure rules.
+- **LabLink is simulated in the browser:** a real build needs a server for submissions and matching, resumable uploads for multi-GB CBCT, virus scanning, UK data hosting, retention rules and audit logs. Dentist notifications ("we've matched your files") are simulated too.
 - **Upload and intake files stay in this browser:** like design files, they're in IndexedDB, so the clinic's tab and the lab's tab must be the same browser profile. DICOM is stored and listed, not viewed.
 - **The intake form reads the Prescription Builder in the same tab:** edits in Prescription Builder live in memory, so a form opened in a new tab uses the default fields.
 - **Embedding:** the snippet works on any site that allows iframes, but the prototype's URL is localhost.
-- **"Request files" item:** it uses the same runtime slot as Design review, and depends on the same Details / Invoice / Shipping markup. It has no floating fallback.
+- **Attachments card overlay:** it depends on CaseDetailPage's "Attachment files / Scans" markup. The case's own files are still the portal's placeholders (scan-1.stl…) and can't be opened; LabLink files open in the real previews.
 - **Website drafts reuse the email-draft screen:** a website request is saved like an email draft (status Draft, source Email), so it follows the portal's draft rules unchanged. It shows "Need Attention", nothing goes into production until the lab confirms it in QuickCreate, and confirming removes the draft. The existing screens also label it with the "AI" chip and an "enriched using AI" banner, and QuickCreate shows its built-in prescription mock, which can't be changed without editing `src/`. The **From your website** panel has the real details, including the "Sender not verified" check (GDC register link). The sender's name is kept exactly as typed.
 - **Growth cases are saved continuously:** while `/growth` is open, its cases are saved to the Growth store every time the list changes. A page reload therefore restores exactly what's there, and never brings back a draft that was already confirmed.
 - **Generated example scans** are simple lathed tooth shapes laid out as an arch: placeholders for real intra-oral scans.
+- **Bulk selection is read from the page:** the ticked rows in the Cases table view (table view only). Draft checkboxes are added to the table's empty checkbox cells. Seeded drafts turned into cases are hidden only inside `/growth`.
+- **The scanner order form** is built from the case's scanner details, not the scanner's own PDF.
+- **The clinic is picked in QuickCreate only when exactly one clinic matches the practice name,** because the portal's clinic list uses names like "Smile Genius Belfast 1".
+- **Forwarded-email reading is simple pattern matching,** standing in for the real AI step.

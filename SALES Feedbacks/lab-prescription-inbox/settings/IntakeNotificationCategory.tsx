@@ -3,14 +3,19 @@ import { Globe } from 'lucide-react';
 import Toggle from '../../../src/app/components/Toggle';
 import { useAuth } from '../../../src/app/context/AuthContext';
 import { teamMemberFor } from '../data';
-import { IntakePrefs, setIntakePref, useIntake } from '../../intake-form/intakeStore';
+import { IntakePrefs, LabLinkNotice, setIntakePref, useIntake } from '../../intake-form/intakeStore';
 import DefaultRecipients from './DefaultRecipients';
 
-// ─── "Website Intake Form" notification category ─────────────────────────────
+// ─── "LabLink" notification category ─────────────────────────────────────────
 // Same card markup as RxInboxNotificationCategory (copied from
-// src/app/pages/NotificationPreferencesPage.tsx). Each user opts themselves in.
+// src/app/pages/NotificationPreferencesPage.tsx). Two notifications, each with
+// its own bell / email switches per person; admins can add people by default.
 
 const CHANNELS: { id: keyof IntakePrefs; label: string }[] = [{ id: 'inApp', label: 'In-App' }, { id: 'email', label: 'Email' }];
+const ITEMS: { id: LabLinkNotice; label: string; description: string }[] = [
+  { id: 'newCase', label: 'New Case Request', description: 'A dentist sent a new case through LabLink and a draft is ready to check.' },
+  { id: 'files', label: 'Files for an Existing Case', description: 'A dentist sent files or notes for a case: synced by reference, or waiting for you to match.' },
+];
 
 export default function IntakeNotificationCategory({ focus = false }: { focus?: boolean }) {
   const { user } = useAuth();
@@ -20,6 +25,12 @@ export default function IntakeNotificationCategory({ focus = false }: { focus?: 
   useEffect(() => { if (focus) ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, [focus]);
   if (!me) return null;
   const mine = prefs[me.email];
+  const any = (e: string) => ITEMS.some(i => prefs[e]?.[i.id]?.inApp || prefs[e]?.[i.id]?.email);
+  const channels = (e: string) => {
+    const on = (c: keyof IntakePrefs) => ITEMS.some(i => prefs[e]?.[i.id]?.[c]);
+    return [on('inApp') && 'Bell', on('email') && 'Email'].filter(Boolean).join(' + ');
+  };
+  const setAll = (e: string, v: boolean) => ITEMS.forEach(i => CHANNELS.forEach(c => setIntakePref(e, i.id, c.id, v)));
 
   return (
     <div ref={ref} id="intake-notifications" className={`bg-white rounded-xl border overflow-hidden transition-shadow ${focus ? 'border-[#BFDBFE] ring-2 ring-[#4D8EF7]/20' : 'border-[#E0E0E6]'}`}>
@@ -29,10 +40,10 @@ export default function IntakeNotificationCategory({ focus = false }: { focus?: 
         </span>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-[#030213] truncate">Website Intake Form</h3>
-            <span className="px-1.5 py-px rounded-full bg-[#F3F3F5] text-[10px] font-medium text-[#717182] tabular-nums">1</span>
+            <h3 className="text-sm font-semibold text-[#030213] truncate">LabLink</h3>
+            <span className="px-1.5 py-px rounded-full bg-[#F3F3F5] text-[10px] font-medium text-[#717182] tabular-nums">{ITEMS.length}</span>
           </div>
-          <p className="text-xs text-[#717182] truncate">New cases dentists send through the form on your website.</p>
+          <p className="text-xs text-[#717182] truncate">New cases and files dentists send through your LabLink.</p>
         </div>
       </div>
       <div className="border-t border-[#F0EFF6]">
@@ -40,24 +51,22 @@ export default function IntakeNotificationCategory({ focus = false }: { focus?: 
           <span />
           {CHANNELS.map(c => <span key={c.id} className="text-[11px] font-medium text-[#717182] uppercase tracking-wide text-center">{c.label}</span>)}
         </div>
-        <div className="grid grid-cols-[1fr_90px_90px] gap-3 px-5 py-3.5 items-center">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-[#030213]">New Case Request from Website</p>
-            <p className="text-xs text-[#717182] mt-0.5">A dentist sent a case through your website form and a draft is ready to check. Each team member chooses this for themselves.</p>
-          </div>
-          {CHANNELS.map(c => (
-            <div key={c.id} className="flex justify-center">
-              <Toggle on={mine?.[c.id] ?? false} onChange={() => setIntakePref(me.email, c.id, !mine?.[c.id])} />
+        <div className="divide-y divide-[#F0EFF6]">
+          {ITEMS.map(item => (
+            <div key={item.id} className="grid grid-cols-[1fr_90px_90px] gap-3 px-5 py-3.5 items-center">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[#030213]">{item.label}</p>
+                <p className="text-xs text-[#717182] mt-0.5">{item.description}</p>
+              </div>
+              {CHANNELS.map(c => (
+                <div key={c.id} className="flex justify-center">
+                  <Toggle on={mine?.[item.id]?.[c.id] ?? false} onChange={() => setIntakePref(me.email, item.id, c.id, !mine?.[item.id]?.[c.id])} />
+                </div>
+              ))}
             </div>
           ))}
         </div>
-        <DefaultRecipients
-          meEmail={me.email}
-          isOn={e => !!(prefs[e]?.inApp || prefs[e]?.email)}
-          channels={e => [prefs[e]?.inApp && 'Bell', prefs[e]?.email && 'Email'].filter(Boolean).join(' + ')}
-          onAdd={m => { setIntakePref(m.email, 'inApp', true); setIntakePref(m.email, 'email', true); }}
-          onRemove={m => { setIntakePref(m.email, 'inApp', false); setIntakePref(m.email, 'email', false); }}
-        />
+        <DefaultRecipients meEmail={me.email} isOn={any} channels={channels} onAdd={m => setAll(m.email, true)} onRemove={m => setAll(m.email, false)} />
       </div>
     </div>
   );

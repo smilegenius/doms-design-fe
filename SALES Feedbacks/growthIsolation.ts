@@ -1,4 +1,4 @@
-import type { Case } from '../src/app/pages/CasesPage';
+import { mockCases, type Case } from '../src/app/pages/CasesPage';
 import { addCreatedCase, getCreatedCases, removeCreatedCases } from '../src/app/data/createdCases';
 import { MOCK_NOTIFICATIONS } from '../src/app/pages/NotificationsPage';
 import { DEMO_CASE_IDS } from './design-studio/data/designStudio';
@@ -15,8 +15,8 @@ import { INTAKE_ID_PREFIX } from './intake-form/intakeStore';
 export const GROWTH_BASE = '/growth';
 
 const STASH_KEY = 'salesFeedbacks.growthCases.v1';
-/** Bell entries the Growth features add (Design Studio, upload links, website form). */
-const GROWTH_BELL = /^(ds-|ul-|web-)/;
+/** Bell entries the Growth features add (Design Studio, LabLink). */
+const GROWTH_BELL = /^(ds-|web-|lf-|fe-)/;
 
 interface Stash { cases: Case[]; ids: string[] }
 
@@ -32,13 +32,40 @@ function writeStash(s: Stash) {
 }
 
 const isGrowthId = (id: string, known: Set<string>) =>
-  known.has(id) || id.startsWith(SANDBOX_ID_PREFIX) || id.startsWith(INTAKE_ID_PREFIX) || DEMO_CASE_IDS.includes(id);
+  known.has(id) || id.startsWith(SANDBOX_ID_PREFIX) || id.startsWith(INTAKE_ID_PREFIX) || id.startsWith('SF-FE-') || DEMO_CASE_IDS.includes(id);
 
 /** Cases that existed before /growth opened (the other portals' own cases). */
 let baseline: Set<string> | null = null;
 
+// ── Seeded drafts turned into cases (Bulk Actions) ───────────────────────────
+// The portal's own seeded drafts live in its mockCases array. When Growth
+// turns one into a real case, the draft is taken out of that array while
+// /growth is open and put back on the way out, so the real portals still
+// have it.
+const HIDDEN_KEY = 'salesFeedbacks.hiddenDrafts.v1';
+const removed: { index: number; c: Case }[] = [];
+
+function hiddenIds(): string[] {
+  try { return JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]'); } catch { return []; }
+}
+function applyHiddenDrafts() {
+  const hide = new Set(hiddenIds());
+  for (let i = mockCases.length - 1; i >= 0; i--) {
+    if (hide.has(mockCases[i].id)) removed.unshift({ index: i, c: mockCases.splice(i, 1)[0] });
+  }
+}
+function restoreHiddenDrafts() {
+  for (const { index, c } of removed.splice(0)) mockCases.splice(Math.min(index, mockCases.length), 0, c);
+}
+/** Growth turned these seeded drafts into cases: hide them from now on (inside /growth only). */
+export function hideSeededDrafts(ids: string[]) {
+  try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...new Set([...hiddenIds(), ...ids])])); } catch { /* keep going */ }
+  applyHiddenDrafts();
+}
+
 /** Opening /growth: put its cases back into the shared list. */
 export function enterGrowth() {
+  if (!removed.length) applyHiddenDrafts();
   const stash = readStash();
   const known = new Set(stash.ids);
   if (!baseline) baseline = new Set(getCreatedCases().filter(c => !isGrowthId(c.id, known)).map(c => c.id));
@@ -72,6 +99,7 @@ export function leaveGrowth() {
     removeCreatedCases(c => ids.has(c.id));
   }
   baseline = null;
+  restoreHiddenDrafts();
   for (let i = MOCK_NOTIFICATIONS.length - 1; i >= 0; i--) {
     if (GROWTH_BELL.test(MOCK_NOTIFICATIONS[i].id)) MOCK_NOTIFICATIONS.splice(i, 1);
   }

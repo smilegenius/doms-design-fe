@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowUpRight, ExternalLink, Pencil, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import Button from '../../src/app/components/Button';
 import Modal from '../../src/app/components/Modal';
-import { linkState, linksForCase } from '../upload-links/uploadStore';
-import { latestIntakeDraft, submissionBehind } from '../intake-form/intakeStore';
+import { filesSubmissionForDraft, latestIntakeDraft, submissionBehind } from '../intake-form/intakeStore';
 import { getCreatedCases } from '../../src/app/data/createdCases';
 import {
   addUpdate, BUCKETS, isEdited, markAllSeen, removeUpdate, resetNote, setNote, Update, UpdateTag, useUpdates,
@@ -18,7 +17,7 @@ const TAG: Record<UpdateTag, { label: string; cls: string }> = {
   changed: { label: 'Changes the original design', cls: 'bg-[#FFF8E1] text-[#B45309] border-[#FDE68A]' },
 };
 
-/** The clinic-page example follows the demo case's current live upload link. */
+/** Draft examples follow the request if the lab has already acted on it. */
 function resolveExample(ex: { label: string; to: string; newTab?: boolean }) {
   if (ex.to === '/intake/latest-draft') {
     const d = latestIntakeDraft();
@@ -27,14 +26,16 @@ function resolveExample(ex: { label: string; to: string; newTab?: boolean }) {
   const qn = ex.to.match(/^\/growth\/cases\/quick-new\/(.+)$/);
   if (qn && !getCreatedCases().some(c => c.id === qn[1] && c.status === 'draft')) {
     // That draft was confirmed (or removed): show the case it became, else the latest draft.
+    const files = filesSubmissionForDraft(qn[1])?.filesFor;
+    if (files?.attachedCaseId) return { ...ex, to: `/growth/cases/${files.attachedCaseId}?sf=attachments`, label: `${ex.label}: now on ${files.attachedCaseId}` };
+    if (files?.convertedTo) return { ...ex, to: `/growth/cases/quick-new/${encodeURIComponent(files.convertedTo)}`, label: `${ex.label}: now draft ${files.convertedRef}` };
+    if (files?.dismissedAt) return { ...ex, to: '/growth/cases', label: `${ex.label} (dismissed)` };
     const done = submissionBehind(qn[1])?.confirmedCaseId;
     if (done) return { ...ex, to: `/growth/cases/${done}?sf=order`, label: `${ex.label}: now case ${done}` };
     const d = latestIntakeDraft();
-    return d ? { ...ex, to: `/growth/cases/quick-new/${encodeURIComponent(d.caseId)}`, label: `Website draft ${d.ref}` } : { ...ex, to: '/intake/smile-genius-lab', newTab: true, label: 'Send a test request first' };
+    return d ? { ...ex, to: `/growth/cases/quick-new/${encodeURIComponent(d.caseId)}`, label: `LabLink draft ${d.ref}` } : { ...ex, to: '/lablink/smile-genius-lab', newTab: true, label: 'Send a test request first' };
   }
-  if (ex.to !== '/upload/demo') return ex;
-  const live = linksForCase('SG-2026-0481').find(l => linkState(l) === 'active');
-  return live ? { ...ex, to: `/upload/${live.token}`, label: live.code ? `${ex.label} (code ${live.code})` : ex.label } : { ...ex, to: '/growth/cases/SG-2026-0481?sf=files', newTab: false, label: 'Create the clinic link' };
+  return ex;
 }
 
 function UpdateCard({ u }: { u: Update }) {
@@ -101,7 +102,7 @@ function AddModal({ onClose }: { onClose: () => void }) {
         <Button variant="outline" onClick={onClose}>Cancel</Button>
         <Button disabled={!ok} onClick={() => {
           const to = path.trim();
-          addUpdate({ title: title.trim(), bucket, tag, note: note.trim(), examples: to ? [{ label: 'See the example', to: to.startsWith('/') ? to : `/growth/${to}`, newTab: /^\/(upload|review|intake)\//.test(to) }] : [] });
+          addUpdate({ title: title.trim(), bucket, tag, note: note.trim(), examples: to ? [{ label: 'See the example', to: to.startsWith('/') ? to : `/growth/${to}`, newTab: /^\/(review|lablink|intake)\//.test(to) }] : [] });
           onClose();
         }}>Add update</Button>
       </div>

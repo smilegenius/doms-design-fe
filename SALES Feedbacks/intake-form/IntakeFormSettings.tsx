@@ -11,7 +11,7 @@ import {
   updateIntakeConfig, useIntake,
 } from './intakeStore';
 
-// ── Settings → Website Intake Form ───────────────────────────────────────────
+// ── Settings → LabLink (website form) ────────────────────────────────────────
 // Card markup follows PrescriptionInboxSettings (itself modelled on the
 // invoice inbox in SpendSettingsPage).
 
@@ -41,7 +41,7 @@ export default function IntakeFormSettings() {
   const [slugDraft, setSlugDraft] = useState(config.slug);
   const url = intakeUrl(config.slug);
   const allServices = Object.keys(DEFAULT_PRESCRIPTION_CONFIG);
-  const emailed = intakeEmailRecipients(prefs).map(e => LAB_TEAM.find(m => m.email === e)?.name ?? e);
+  const emailed = [...new Set([...intakeEmailRecipients('newCase', prefs), ...intakeEmailRecipients('files', prefs)])].map(e => LAB_TEAM.find(m => m.email === e)?.name ?? e);
 
   function onLogo(f?: File) {
     if (!f) return;
@@ -64,9 +64,9 @@ export default function IntakeFormSettings() {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-[#030213]">Website Intake Form</h2>
+          <h2 className="text-lg font-semibold text-[#030213]">LabLink</h2>
           <p className="text-xs text-[#717182] mt-0.5">
-            A branded new-case form for your website. Every submission becomes a draft case in Cases for your team to check and confirm.
+            One branded link for dentists, on your website or in your email signature. They can send a new case, which becomes a draft for you to confirm, or files and notes for an existing case. Those sync to the case when they quote its reference, and otherwise wait for you to match. Use it instead of WeTransfer or Dropbox.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -91,7 +91,7 @@ export default function IntakeFormSettings() {
             <div className="flex flex-wrap items-center gap-2 mt-2">
               <a href={url} target="_blank" rel="noreferrer" className={btn}><ExternalLink className="w-3.5 h-3.5" /> Open form</a>
               <div className="flex items-center gap-1.5 text-xs text-[#717182]">
-                <span className="font-mono">/intake/</span>
+                <span className="font-mono">/lablink/</span>
                 <input value={slugDraft} onChange={e => setSlugDraft(e.target.value)} onBlur={saveSlug} onKeyDown={e => { if (e.key === 'Enter') saveSlug(); }} aria-label="Form address" className="w-44 px-2 py-1 rounded-md border border-[#E0E0E6] font-mono text-xs text-[#030213] focus:outline-none focus:border-[#4D8EF7]" />
               </div>
             </div>
@@ -148,7 +148,7 @@ export default function IntakeFormSettings() {
 
           <div className={`${card} p-5`}>
             <p className="text-sm font-semibold text-[#030213]">Services on the form</p>
-            <p className="text-xs text-[#717182] mt-0.5 mb-3">Each service asks for the fields you've turned on in <button onClick={() => navigate('/growth/settings?tab=prescription-builder')} className="text-[#4D8EF7] font-medium hover:underline">Prescription Builder</button>.</p>
+            <p className="text-xs text-[#717182] mt-0.5 mb-3">"Other" is always offered too, for anything you haven't listed. Each service asks for the fields you've turned on in <button onClick={() => navigate('/growth/settings?tab=prescription-builder')} className="text-[#4D8EF7] font-medium hover:underline">Prescription Builder</button>.</p>
             <div className="flex flex-wrap gap-1.5">
               {allServices.map(s => {
                 const on = config.services.includes(s);
@@ -170,7 +170,7 @@ export default function IntakeFormSettings() {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-[#030213]">Notifications</p>
               <p className="text-xs text-[#717182] mt-0.5">
-                Each team member chooses in <span className="font-medium text-[#5A5568]">Settings → Notifications</span> whether they get the bell alert and an email for new website requests. {emailed.length ? <>Emailing now: <span className="font-medium text-[#5A5568]">{emailed.join(', ')}</span>.</> : 'No one is emailed yet.'}
+                Each team member chooses in <span className="font-medium text-[#5A5568]">Settings → Notifications</span> whether they get the bell alert and an email for new cases and for files sent to existing cases. {emailed.length ? <>Emailing now: <span className="font-medium text-[#5A5568]">{emailed.join(', ')}</span>.</> : 'No one is emailed yet.'}
               </p>
             </div>
             <button onClick={() => navigate('/growth/settings?tab=notifications&focus=intake-form')} className={btn}>Manage</button>
@@ -203,23 +203,35 @@ export default function IntakeFormSettings() {
         <div className="px-5 py-4 flex items-center justify-between gap-3 border-b border-[#F0EFF6]">
           <div>
             <p className="text-sm font-semibold text-[#030213]">Recent requests</p>
-            <p className="text-xs text-[#717182] mt-0.5">{submissions.length ? `${submissions.length} from your website` : 'Requests appear here, and as draft cases in Cases.'}</p>
+            <p className="text-xs text-[#717182] mt-0.5">{submissions.length ? `${submissions.length} through LabLink` : 'Requests appear here, and as draft cases in Cases.'}</p>
           </div>
           {submissions.length > 0 && (
-            <button onClick={() => { resetIntakeDemo(); setSlugDraft('smile-genius-lab'); toast.success('Intake demo reset'); }} className={btn}><RotateCcw className="w-3.5 h-3.5" /> Reset demo</button>
+            <button onClick={() => { resetIntakeDemo(); setSlugDraft('smile-genius-lab'); toast.success('LabLink demo reset'); }} className={btn}><RotateCcw className="w-3.5 h-3.5" /> Reset demo</button>
           )}
         </div>
         {submissions.length > 0 && (
           <div className="divide-y divide-[#F0EFF6]">
-            {submissions.map(s => (
-              <div key={s.caseId} className="px-5 py-3 flex flex-col sm:flex-row sm:items-center gap-2">
+            {submissions.map(s => {
+              const f = s.filesFor;
+              const action = s.kind === 'files'
+                ? (f?.attachedCaseId ? { label: `Open ${f.attachedCaseId}`, to: `/growth/cases/${f.attachedCaseId}?sf=attachments` } : f?.convertedTo ? { label: `Open ${f.convertedRef}`, to: `/growth/cases/quick-new/${encodeURIComponent(f.convertedTo)}` } : f?.dismissedAt ? null : { label: 'Match files', to: `/growth/cases/quick-new/${encodeURIComponent(s.caseId)}` })
+                : (s.confirmedCaseId ? { label: `Open ${s.confirmedCaseId}`, to: `/growth/cases/${s.confirmedCaseId}?sf=order` } : { label: 'Review draft', to: `/growth/cases/quick-new/${encodeURIComponent(s.caseId)}` });
+              const state = s.kind === 'files'
+                ? (f?.matchedBy === 'reference' ? 'Synced by reference' : f?.attachedCaseId ? 'Matched by the lab' : f?.convertedTo ? `Turned into ${f.convertedRef}` : f?.dismissedAt ? 'Dismissed' : 'Waiting to be matched')
+                : (s.confirmedCaseId ? 'Confirmed' : 'Draft');
+              return (
+              <div key={s.ref} className="px-5 py-3 flex flex-col sm:flex-row sm:items-center gap-2">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-[#030213]"><span className="font-mono font-semibold">{s.ref}</span> · {s.patientName} · {s.service}</p>
+                  <p className="text-sm text-[#030213]">
+                    <span className="font-mono font-semibold">{s.ref}</span> · {s.patientName} · {s.kind === 'files' ? 'Files for an existing case' : s.service}
+                    <span className="ml-2 px-1.5 py-px rounded-full text-[10px] font-semibold bg-[#F3F3F5] text-[#5A5568]">{state}</span>
+                  </p>
                   <p className="text-[11px] text-[#717182]">{s.dentist} · {s.practice}{s.knownPractice ? '' : ' (new practice)'} · {portalDateTime(s.at)}{s.files.length ? ` · ${s.files.length} file${s.files.length === 1 ? '' : 's'}` : ''}{s.notified.length ? ` · emailed ${s.notified.length}` : ''}</p>
                 </div>
-                <button onClick={() => navigate(`/growth/cases/quick-new/${encodeURIComponent(s.caseId)}`)} className={btn}>Review draft</button>
+                {action && <button onClick={() => navigate(action.to)} className={btn}>{action.label}</button>}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -20,10 +20,20 @@ import DesignStudioPage from '../design-studio/studio/DesignStudioPage';
 import { DesignStudioBar } from '../design-studio/studio/StudioEntryPoints';
 import CaseDesignReviewSlot, { pendingOpen } from '../design-studio/studio/CaseDesignReviewSlot';
 import { ensureDesignStudioDemo, syncStudioNotifications, useStudio } from '../design-studio/store/studioStore';
-import { ensureUploadDemo, syncUploadNotifications, useUploadLinks } from '../upload-links/uploadStore';
-import { INTAKE_ID_PREFIX, linkConfirmedCase, removeIntakeDraft, syncIntakeNotifications, useIntake } from '../intake-form/intakeStore';
+import { FILES_ID_PREFIX, INTAKE_ID_PREFIX, linkConfirmedCase, removeIntakeDraft, syncIntakeNotifications, useIntake } from '../intake-form/intakeStore';
 import { ensureIntakeDemo } from '../intake-form/intakeDemo';
 import IntakeFilesDock from '../intake-form/IntakeFilesDock';
+import MatchFilesPage from '../intake-form/MatchFilesPage';
+import CaseAttachmentsOverlay, { pendingAttachments } from '../intake-form/CaseAttachmentsOverlay';
+import CaseOrderFormTab, { pendingOrderTab } from '../intake-form/CaseOrderFormTab';
+import BulkActionsBar from '../bulk-actions/BulkActionsBar';
+import EmailTriagePage from '../forwarded-email/EmailTriagePage';
+import { EMAIL_DRAFT_PREFIX, linkEmailCase, syncEmailNotifications, useForwardedEmails } from '../forwarded-email/emailStore';
+import EmailDraftPage from '../forwarded-email/EmailDraftPage';
+import EmailSourcePane from '../forwarded-email/EmailSourcePane';
+import CaseEmailTab, { pendingEmailTab } from '../forwarded-email/CaseEmailTab';
+import { removeCreatedCases } from '../../src/app/data/createdCases';
+import { ensureEmailDemo } from '../forwarded-email/samples';
 import { enterGrowth, leaveGrowth, saveGrowthStash } from '../growthIsolation';
 import WhatsNewPage from '../growth-portal/WhatsNewPage';
 import WhatsNewNavItem from '../growth-portal/WhatsNewNavItem';
@@ -41,12 +51,13 @@ import WhatsNewNavItem from '../growth-portal/WhatsNewNavItem';
 //     website-form drafts a dock with the files the dentist attached.
 //   • Case page: "Design review" and "Request files" items (sandbox overlay).
 
-type LabPage = 'overview' | 'cases' | 'design-studio' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications' | 'updates';
+type LabPage = 'overview' | 'cases' | 'design-studio' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications' | 'updates' | 'email-triage';
 
 const PAGE_TO_PATH: Record<LabPage, string> = {
   overview: '',
   cases: 'cases',
   'design-studio': 'cases',
+  'email-triage': 'cases/emails',
   'quick-create-case': 'cases/quick-new',
   invoices: 'invoices',
   analytics: 'analytics',
@@ -80,10 +91,10 @@ export default function LabPrescriptionInboxApp() {
   // Growth Team Feedback only: bring its cases into the shared list, and mirror
   // its bell entries before the first render (NotificationsPage reads the bell
   // once on mount). Leaving /growth takes both out again (growthIsolation.ts).
-  useState(() => { enterGrowth(); ensureDesignStudioDemo(); syncStudioNotifications(); syncUploadNotifications(); syncIntakeNotifications(meEmail); return 0; });
+  useState(() => { enterGrowth(); ensureDesignStudioDemo(); syncStudioNotifications(); syncIntakeNotifications(meEmail); syncEmailNotifications(); return 0; });
   useEffect(() => {
     enterGrowth();
-    syncStudioNotifications(); syncUploadNotifications(); syncIntakeNotifications(meEmail);
+    syncStudioNotifications(); syncIntakeNotifications(meEmail);
     return () => leaveGrowth();
   }, []);
   const createdCases = useCreatedCases();
@@ -91,16 +102,24 @@ export default function LabPrescriptionInboxApp() {
 
   // Design Studio demo cases join the real Cases list; submitted reviews reach the bell.
   useEffect(() => { ensureDesignStudioDemo(); syncStudioNotifications(); }, [studio]);
-  // Upload links and website intake submissions reach the bell the same way.
-  const uploads = useUploadLinks();
+  // LabLink submissions (new cases and files for existing cases) reach the bell the same way.
   const intake = useIntake();
-  useEffect(() => { ensureUploadDemo(); syncUploadNotifications(); }, [uploads]);
-  useEffect(() => { ensureIntakeDemo(); }, []);
+  useEffect(() => { ensureIntakeDemo(); ensureEmailDemo(); }, []);
+  // Forwarded emails reach the bell too.
+  const fwd = useForwardedEmails();
+  useEffect(() => { syncEmailNotifications(); }, [fwd]);
+  // Bulk Actions changes cases the list already holds (drafts → cases), which
+  // CasesPage only picks up on a fresh mount.
+  const [casesVersion, setCasesVersion] = useState(0);
   useEffect(() => { syncIntakeNotifications(meEmail); }, [intake, meEmail]);
 
   const parsed = useMemo(() => {
     const rest = location.pathname.replace(/^\/growth\/?/, '').replace(/\/$/, '');
     const [segment = '', detailId, draftId] = rest.split('/');
+    // Email triage: /growth/cases/emails (reserved segment, like quick-new).
+    if (segment === 'cases' && detailId === 'emails') {
+      return { page: 'email-triage' as LabPage, caseId: undefined, invoiceId: undefined, prefillDraftId: undefined };
+    }
     // Design Studio: /growth/cases/<id>/studio (reserved segment, like quick-new).
     if (segment === 'cases' && detailId && draftId === 'studio') {
       return { page: 'design-studio' as LabPage, caseId: decodeURIComponent(detailId), invoiceId: undefined, prefillDraftId: undefined };
@@ -140,7 +159,7 @@ export default function LabPrescriptionInboxApp() {
       tries += 1;
       if (document.querySelector('.sf-design-tab') || tries > 30) { window.clearInterval(t); return; }
       const el = [...document.querySelectorAll<HTMLElement>('main *')].find(e => e.children.length === 0 && e.textContent?.trim() === caseInitialId);
-      if (el) { pendingOpen.value = sf; el.click(); window.clearInterval(t); return; }
+      if (el) { pendingOpen.value = sf; pendingAttachments.value = sf === 'attachments'; pendingOrderTab.value = sf === 'order'; pendingEmailTab.value = sf === 'email'; el.click(); window.clearInterval(t); return; }
       // Not on the first page of the list: search for it, then click it.
       const search = document.querySelector<HTMLInputElement>('main input[placeholder*="case ID"]');
       if (search && tries === 4) {
@@ -171,12 +190,27 @@ export default function LabPrescriptionInboxApp() {
     }
   };
 
+  if (activePage === 'email-triage') {
+    return <EmailTriagePage />;
+  }
+
   if (activePage === 'messages') {
     return <MessagesPage onClose={() => setActivePage('overview')} />;
   }
 
   if (activePage === 'configuration') {
     return <Navigate to="/growth/settings?tab=case-scoring" replace />;
+  }
+
+  // LabLink files for an existing case that didn't match exactly: the Match files screen, not QuickCreate.
+  if (activePage === 'quick-create-case' && parsed.prefillDraftId?.startsWith(FILES_ID_PREFIX)) {
+    return <MatchFilesPage draftId={parsed.prefillDraftId} />;
+  }
+
+  // A forwarded email's draft: first the choice (new case or existing case);
+  // "Create a new case" comes back here with ?create=1 for QuickCreate.
+  if (activePage === 'quick-create-case' && parsed.prefillDraftId?.startsWith(EMAIL_DRAFT_PREFIX) && new URLSearchParams(location.search).get('create') !== '1') {
+    return <EmailDraftPage draftId={parsed.prefillDraftId} />;
   }
 
   if (activePage === 'quick-create-case') {
@@ -191,6 +225,12 @@ export default function LabPrescriptionInboxApp() {
             const confirmed = getCreatedCases().find(c => !casesBeforeConfirm.has(c.id));
             if (confirmed) linkConfirmedCase(prefillDraft.id, confirmed.id, teamMemberFor(user?.email)?.name);
           }
+          if (prefillDraft?.id.startsWith(EMAIL_DRAFT_PREFIX)) {
+            // An email draft became a case: the email (and its files) now belong to it.
+            const confirmed = getCreatedCases().find(c => !casesBeforeConfirm.has(c.id));
+            if (confirmed) linkEmailCase(prefillDraft.id, confirmed.id, teamMemberFor(user?.email)?.name);
+            removeCreatedCases(c => c.id === prefillDraft.id);
+          }
           if (prefillDraft) { removeSandboxDraft(prefillDraft.id); removeIntakeDraft(prefillDraft.id); }
           setActivePage('cases');
         }}
@@ -201,6 +241,8 @@ export default function LabPrescriptionInboxApp() {
       {prefillDraft && <RxPhotoDock caseId={prefillDraft.id} />}
       {/* Website intake drafts: the files the dentist attached to the form. */}
       {prefillDraft && <IntakeFilesDock caseId={prefillDraft.id} />}
+      {/* Email drafts: the real email in place of QuickCreate's mock source pane. */}
+      {prefillDraft && <EmailSourcePane caseId={prefillDraft.id} />}
       </>
     );
   }
@@ -225,9 +267,13 @@ export default function LabPrescriptionInboxApp() {
         <>
           {!caseInitialId && <PrescriptionInboxBar />}
           {!caseInitialId && <DesignStudioBar />}
+          {!caseInitialId && <BulkActionsBar onChanged={() => setCasesVersion(v => v + 1)} />}
           {caseInitialId && <CaseDesignReviewSlot caseId={caseInitialId} />}
+          {caseInitialId && <CaseAttachmentsOverlay caseId={caseInitialId} />}
+          {caseInitialId && <CaseOrderFormTab caseId={caseInitialId} />}
+          {caseInitialId && <CaseEmailTab caseId={caseInitialId} />}
           <CasesPage
-            key={`${resetVersion}-${intake.resetVersion}`}
+            key={`${resetVersion}-${intake.resetVersion}-${casesVersion}`}
             portal="lab"
             initialCaseId={caseInitialId}
             onCreateCase={() => navigate('/growth/cases/quick-new')}
