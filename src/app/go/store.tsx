@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import {
   ATTENTION, HOME_STATUSES, HomeStatus, Invoice, InvoiceStatus, LabCase, PracticeId, SEED_CASES, SEED_INVOICES, SEED_STATEMENTS, Statement, matchesAttention, nowIso,
 } from './data';
+import { LAB_SEEDS } from './lab/labData';
 
 /** Reviewer demo: how many of Home's four statuses have work (1–4), or 0 = a
  *  brand-new practice with no lab work at all. null = the normal seed data. */
@@ -16,11 +17,15 @@ export const FEATURES = {
   invoices: false,
   /** List / card toggle in Lab work (card view). Off: list only. */
   labCardView: false,
+  /** The Clinic / Lab switch in the Light version (the lab side of the same cases). Off: the switch and the lab screens are hidden. */
+  labApp: true,
 };
 
 export type ThemePref = 'light' | 'dark' | 'system';
 export type ToastTone = 'ok' | 'info' | 'bad';
-export interface Toast { id: number; text: string; tone: ToastTone }
+/** Which phone a message is for, when two are showing (clinic and lab). */
+export type PhoneSide = 'clinic' | 'lab';
+export interface Toast { id: number; text: string; tone: ToastTone; side?: PhoneSide }
 export interface Notice { id: string; title: string; body: string; at: string; to: string; read: boolean; kind: 'question' | 'shipped' | 'invoice' | 'overdue' | 'statement' }
 
 // Signed-in user — the app is used mostly by practice managers and nurses.
@@ -75,7 +80,12 @@ interface GoStore {
   notices: Notice[];
   markNoticesRead: () => void;
   toasts: Toast[];
-  toast: (text: string, tone?: ToastTone) => void;
+  /** A message for whoever did the thing (it shows on that phone). */
+  toast: (text: string, tone?: ToastTone, side?: PhoneSide) => void;
+  /** A message for the OTHER side, worded for them ("Northstar accepted SG-28491"). */
+  notify: (side: PhoneSide, text: string, tone?: ToastTone) => void;
+  /** Which side this phone is, when the Light version is showing. */
+  phoneSide?: PhoneSide;
   /** Portal target for sheets so they stay inside the phone frame. */
   sheetRoot: HTMLElement | null;
   setSheetRoot: (el: HTMLElement | null) => void;
@@ -107,7 +117,7 @@ export function GoStoreProvider({ children }: { children: React.ReactNode }) {
   const setDashOrder = useCallback((o: HomeStatus[]) => { setDashOrderState(o); safeSet('sg-go-dash-order', JSON.stringify(o)); }, []);
   const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>({ questions: true, arrivals: true, overdue: true });
   const setNotifyPref = useCallback((k: keyof NotifyPrefs, on: boolean) => setNotifyPrefs(p => ({ ...p, [k]: on })), []);
-  const [cases, setCases] = useState<LabCase[]>(SEED_CASES);
+  const [cases, setCases] = useState<LabCase[]>([...SEED_CASES, ...LAB_SEEDS]);
   const [invoices, setInvoices] = useState<Invoice[]>(SEED_INVOICES);
   const [statements, setStatements] = useState<Statement[]>(SEED_STATEMENTS);
   const [notices, setNotices] = useState<Notice[]>(() => ([
@@ -120,11 +130,12 @@ export function GoStoreProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [sheetRoot, setSheetRoot] = useState<HTMLElement | null>(null);
 
-  const toast = useCallback((text: string, tone: ToastTone = 'ok') => {
+  const toast = useCallback((text: string, tone: ToastTone = 'ok', side?: PhoneSide) => {
     const id = Date.now() + Math.random();
-    setToasts(t => [...t, { id, text, tone }]);
+    setToasts(t => [...t, { id, text, tone, side }]);
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200);
   }, []);
+  const notify = useCallback((side: PhoneSide, text: string, tone: ToastTone = 'info') => toast(text, tone, side), [toast]);
 
   const value = useMemo<GoStore>(() => ({
     themePref, theme, setThemePref, signedIn, signIn, signOut, practice, setPractice, soloPractice, setSoloPractice, demoFill, setDemoFill, dashOrder, setDashOrder, notifyPrefs, setNotifyPref,
@@ -138,9 +149,18 @@ export function GoStoreProvider({ children }: { children: React.ReactNode }) {
     updateStatement: (id, fn) => setStatements(ss => ss.map(s => (s.id === id ? fn(s) : s))),
     notices,
     markNoticesRead: () => setNotices(ns => ns.map(n => ({ ...n, read: true }))),
-    toasts, toast, sheetRoot, setSheetRoot,
-  }), [themePref, theme, setThemePref, signedIn, signIn, signOut, practice, soloPractice, demoFill, dashOrder, setDashOrder, notifyPrefs, setNotifyPref, cases, invoices, statements, notices, toasts, toast, sheetRoot]);
+    toasts, toast, notify, sheetRoot, setSheetRoot,
+  }), [themePref, theme, setThemePref, signedIn, signIn, signOut, practice, soloPractice, demoFill, dashOrder, setDashOrder, notifyPrefs, setNotifyPref, cases, invoices, statements, notices, toasts, toast, notify, sheetRoot]);
 
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/** One phone in the demo: its own sheet / keyboard root, everything else (cases, theme, sign-in) shared with the other phone. */
+export function PhoneScope({ children, side }: { children: React.ReactNode; side?: PhoneSide }) {
+  const parent = useGo();
+  const [sheetRoot, setSheetRoot] = useState<HTMLElement | null>(null);
+  // What this phone's user does shows on this phone; the other phone only gets what notify() sends it
+  const value = useMemo(() => ({ ...parent, sheetRoot, setSheetRoot, phoneSide: side, toast: (text: string, tone?: ToastTone) => parent.toast(text, tone, side) }), [parent, sheetRoot, side]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
@@ -159,7 +179,9 @@ export function useScoped() {
     // Drop the work behind Home's later statuses so only the first N have counts
     // (the demo also hides Not approved / Date changed so "1" really shows one tile)
     const off = demoFill === null ? [] : [...ATTENTION.filter(a => a.home).slice(demoFill).map(a => a.id), 'not-approved' as const, 'date-changed' as const];
-    const shown = off.length ? cases.filter(c => !off.some(a => matchesAttention(c, a))) : cases;
+    // A draft the lab started is the lab's own, so the practice doesn't see it yet
+    const clinicCases = cases.filter(c => !(c.labMade && c.stage === 'draft'));
+    const shown = off.length ? clinicCases.filter(c => !off.some(a => matchesAttention(c, a))) : clinicCases;
     return { cases: inScope(shown), invoices: inScope(invoices), statements: inScope(statements) };
   }, [cases, invoices, statements, practice, demoFill]);
 }

@@ -10,14 +10,21 @@ import {
 import { FEATURES, ME, useGo, useScoped } from '../store';
 import { ReceiveSheet } from './Logistics';
 import {
-  ATTENTION, Attention, CLINICIANS, labStatusOf, LABS, LabCase, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
+  ATTENTION, Attention, CLINICIANS, labStatusOf, LABS, LabCase, LabStatus, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
   createdOn, initials, patientById, STAGE_NAMES, StageLine, dueLabel, patchItemStages, phaseName, remainingStages, stagedKindOf, practiceName, readiness, relDay, shortName, stageIndex,
 } from '../data';
+import { NOTIFIES_CLINIC } from '../lab/labData';
 import { Btn, Card, Chips, EmptyState, IconTile, Input, Label, Pill, PickerField, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, TeethChips, cx, useBase } from '../ui';
 
 // ─── Rows and cards ─────────────────────────────────────────────────────────
 // Two views of the same cases: a dense list (default) and roomier cards.
 // Both show dentist + lab with their icons, since search matches those.
+
+/** A lab "Status changed to X · reason" note, taken apart. */
+function labStatusNote(e: LabCase['events'][number]): { status: string; title: string; reason?: string } | null {
+  const m = /^Status changed to (.+?)(?: · (.*))?$/.exec(e.text ?? '');
+  return m ? { status: m[1], title: `Lab status: ${m[1]}`, reason: m[2] } : null;
+}
 
 const drShort = (c: LabCase) => clinicianName(c.clinician).replace(/^Dr (\S)\S* /, 'Dr $1. ');
 const labShort = (c: LabCase) => labName(c.lab).replace(/ (Dental )?(Lab|Laboratory|Works)$/, '');
@@ -155,7 +162,7 @@ const createdIn = (c: LabCase, b: [string, string] | null) => {
 const fmtYmd = (s: string) => new Date(`${s}T12:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
 /** Soonest delivery date first; cases with no date (e.g. drafts) at the end. */
-const byDelivery = (x: LabCase, y: LabCase) => (x.returnBy || '9').localeCompare(y.returnBy || '9');
+const byDelivery = (x: LabCase, y: LabCase) => (x.pin ?? 99) - (y.pin ?? 99) || (x.returnBy || '9').localeCompare(y.returnBy || '9');
 
 export function LabWorkScreen() {
   const { cases } = useScoped();
@@ -351,7 +358,7 @@ function Stepper({ c }: { c: LabCase }) {
 const QUICK_REPLIES = ['New bite registration posted today', 'Proceed with the current bite', 'Call me to discuss'];
 
 function Messages({ c }: { c: LabCase }) {
-  const { updateCase, toast } = useGo();
+  const { updateCase, toast, notify } = useGo();
   const [text, setText] = useState('');
   const send = () => {
     updateCase(c.id, x => ({
@@ -360,6 +367,7 @@ function Messages({ c }: { c: LabCase }) {
       events: [...x.events, { stage: 'note', at: nowIso(), by: ME.name, text: 'Replied to the lab' }],
     }));
     toast(`Comment sent to ${labName(c.lab)}`);
+    notify('lab', `New comment from ${practiceName(c.practice)} on ${c.id}`, 'info');
     setText('');
   };
   return (
@@ -559,6 +567,12 @@ export function CaseDetailScreen() {
   const r = readiness(c);
   const a = nextAction(c);
   const shipped = c.events.find(e => e.stage === 'shipped');
+  // The lab has more statuses than the practice sees. The practice's timeline keeps the few it is notified about
+  // (Accepted, On Hold (Practice), Shipped, Not Approved) and the stages; the lab's internal ones stay on the lab side.
+  const timeline = [...c.events].filter(e => {
+    if (e.stage === 'note') { const n = labStatusNote(e); return !n || NOTIFIES_CLINIC.has(n.status as LabStatus); }
+    return !c.events.some(n => n.stage === 'note' && n.at === e.at && !!labStatusNote(n));
+  }).reverse();
 
   // One-line next step with its action — reads like a to-do, not a card.
   const step: { icon: React.ReactNode; tone: Tone; title: string; body: string; cta?: { label: string; run: () => void } } = {
@@ -669,10 +683,11 @@ export function CaseDetailScreen() {
               <p className="text-[10.5px] uppercase tracking-wider font-semibold text-go-faint">Case instructions</p>
               <p className="text-[13px] text-go-ink mt-0.5 leading-relaxed">{c.instructions}</p>
             </div>
-            {(c.dispatch || c.receipt) && (
+            {(c.dispatch || c.receipt || c.labShipment) && (
               <div className="rounded-2xl bg-go-surface border border-go-line px-3 py-2.5 mt-2">
                 <p className="text-[10.5px] uppercase tracking-wider font-semibold text-go-faint">Courier and storage</p>
                 {c.dispatch && <p className="text-[13px] text-go-ink mt-0.5">Sent: {c.dispatch.courier}{c.dispatch.tracking ? ` · ${c.dispatch.tracking}` : ''} · {c.dispatch.bags} bag{c.dispatch.bags > 1 ? 's' : ''}</p>}
+                {c.labShipment && <p className="text-[13px] text-go-ink mt-0.5">Shipped by {labName(c.lab)}: {[c.labShipment.courier, c.labShipment.tracking].filter(Boolean).join(' · ') || 'no details given'}{c.labShipment.eta ? ` · arriving ${c.labShipment.eta}` : ''}</p>}
                 {c.receipt && <p className="text-[13px] text-go-ink mt-0.5">Received: stored in {c.receipt.storedIn}{c.receipt.comment ? ` · ${c.receipt.comment}` : ''}</p>}
               </div>
             )}
@@ -682,15 +697,15 @@ export function CaseDetailScreen() {
         {tab === 'activity' && (
           <Card className="p-4">
             <ol className="relative">
-              {[...c.events].reverse().map((e, i, arr) => (
+              {timeline.map((e, i, arr) => (
                 <li key={e.at + i} className="relative flex gap-3 pb-4 last:pb-0">
                   {i < arr.length - 1 && <span className="absolute left-[5px] top-4 bottom-0 w-0.5 bg-go-line" />}
                   <span className={cx('relative z-[1] w-3 h-3 rounded-full mt-1 flex-shrink-0', i === 0 ? 'go-grad ring-4 ring-go-brand/15' : 'bg-go-line')} />
                   <div className="min-w-0">
                     <p className="text-[13.5px] font-semibold text-go-ink">
-                      {e.stage === 'authorised' ? 'Prescription authorised' : e.stage === 'note' ? e.text : STAGES[stageIndex(e.stage)].label}
+                      {e.stage === 'authorised' ? 'Prescription authorised' : e.stage === 'note' ? (labStatusNote(e)?.title ?? e.text) : STAGES[stageIndex(e.stage)].label}
                     </p>
-                    <p className="text-[11.5px] text-go-muted">{fmtDateTime(e.at)} · {e.by}{e.text && e.stage !== 'note' ? ` · ${e.text}` : ''}</p>
+                    <p className="text-[11.5px] text-go-muted">{fmtDateTime(e.at)} · {e.by}{e.stage === 'note' ? (labStatusNote(e)?.reason ? ` · ${labStatusNote(e)!.reason}` : '') : e.text ? ` · ${e.text}` : ''}</p>
                   </div>
                 </li>
               ))}

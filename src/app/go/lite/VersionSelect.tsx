@@ -9,9 +9,9 @@ import { GoMark, cx } from '../ui';
 
 const VERSIONS = [
   {
-    id: 'lite', to: '/go/lite/signin', title: 'Light version', date: '14 Oct 2026', tag: 'Ready to review',
+    id: 'lite', to: '/go/lite/signin', title: 'Light version', date: '19 Oct 2026', tag: 'Ready to review',
     body: 'The short flow for busy practices.',
-    flow: ['Sign in', 'Home', 'Create', 'Received', 'To dispatch'],
+    flow: ['Sign in', 'Home', 'Create', 'Received', 'To dispatch', 'Clinic / Lab view'],
     icon: Sparkles, tone: 'go-grad text-white go-glow',
   },
   {

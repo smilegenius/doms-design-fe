@@ -6,12 +6,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  AlertTriangle, Building2, Check, CheckCircle2, HelpCircle, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, Link2, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
+  AlertTriangle, Bell, Building2, Check, CheckCircle2, HelpCircle, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, Link2, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
 } from '../icons';
 import { ME, useGo, useScoped } from '../store';
+import { LAB_BASE, LAB_ID, LAB_ME, LAB_NAME } from '../lab/labData';
 import { DENTURE_STAGES, isDentureItem } from '../../data/dentureStages';
 import {
-  CLINICIANS, LabCase, StageLine, allItems, patchItemStages, clinicianName, practiceName, PRACTICES, PracticeId, SERVICE_CATEGORIES, caseTitle, fmtDate, initials, labName, patientById, serviceLabel, shortName,
+  CLINICIANS, LabCase, StageLine, allItems, patchItemStages, clinicianName, practiceName, PRACTICES, PracticeId, SERVICE_CATEGORIES, caseTitle, fmtDate, initials, labName, patientById, serviceLabel, shortName, itemIdForLabel,
 } from '../data';
 import { Btn, Card, EmptyState, GoMark, Input, Label, PickerField, Pill, Screen, SearchBox, Segmented, Sheet, TeethChips, TextArea, Toggle, TopBar, cx, useBack } from '../ui';
 import { CaseForm, FormItem, LabPicker, PatientPicker, ToothPicker, buildCase, emptyForm, newItem } from '../screens/ManualCase';
@@ -49,6 +50,7 @@ function CaseRow({ c, onClick, right, action }: { c: LabCase; onClick?: () => vo
 export function LiteHome() {
   const navigate = useNavigate();
   const { cases } = useScoped();
+  const unread = useGo().notices.some(n => !n.read);
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   return (
@@ -60,8 +62,11 @@ export function LiteHome() {
           </p>
           <h1 className="mt-0.5"><PracticeSwitcher inline /></h1>
         </div>
-        <button onClick={() => navigate(`${LITE}/account`)} aria-label="Me"
-          className="go-grad text-white font-bold rounded-full w-10 h-10 flex items-center justify-center text-[13px] flex-shrink-0">{initials(ME.name)}</button>
+        <button onClick={() => navigate(`${LITE}/notifications`)} aria-label="Notifications"
+          className="relative w-10 h-10 rounded-full bg-go-surface border border-go-line flex items-center justify-center text-go-ink flex-shrink-0">
+          <Bell className="w-5 h-5" />
+          {unread && <span className="absolute top-2 right-2.5 w-2.5 h-2.5 rounded-full bg-go-bad ring-2 ring-go-surface" />}
+        </button>
       </div>
 
       <div className="px-4 mt-4">
@@ -523,19 +528,25 @@ function ServiceEditSheet({ block, isNew, canRemove, matchFor, onSave, onRemove,
 
 type Edit = 'practice' | 'dentist' | 'lab' | 'patient';
 
-export function LiteCreate() {
+/** labMode: the same prescription flow, used from the lab side (the lab is always Northstar, the case starts out accepted). */
+export function LiteCreate({ labMode }: { labMode?: boolean } = {}) {
   const { addCase, updateCase, cases, toast } = useGo();
   const rxParam = new URLSearchParams(useLocation().search).get('rx');
   const rx: RxScenario = rxParam === 'partial' || rxParam === 'multi' || rxParam === 'memory' || rxParam === 'denture' || rxParam === 'denture-match' ? rxParam : 'clean';
-  const [photo, setPhoto] = useState<Photo | null>(null);
-  const [scanned, setScanned] = useState(false);
+  // Lab side: finishing a saved draft opens this same review page, already filled in
+  const draftId = new URLSearchParams(useLocation().search).get('draft');
+  const draftCase = labMode && draftId ? cases.find(c => c.id === draftId && c.labMade) : undefined;
+  const [photo, setPhoto] = useState<Photo | null>(draftCase ? { url: null, name: 'Prescription' } : null);
+  const [scanned, setScanned] = useState(!!draftCase);
   const [viewing, setViewing] = useState(false);
-  const [patientId, setPatientId] = useState<string | null>(null);
-  const [practice, setPractice] = useState<PracticeId | null>(null);
-  const [blocks, setBlocks] = useState<Block[]>(() => [newBlock()]);
-  const [instructions, setInstructions] = useState('');
-  const [lab, setLab] = useState<string | null>(null);
-  const [clinician, setClinician] = useState<string | null>(null);
+  const [patientId, setPatientId] = useState<string | null>(draftCase?.patientId ?? null);
+  const [practice, setPractice] = useState<PracticeId | null>(draftCase?.practice ?? null);
+  const [blocks, setBlocks] = useState<Block[]>(() => (draftCase
+    ? allItems(draftCase).map(it => ({ ...newBlock(), itemId: itemIdForLabel(it.service), teeth: it.teeth, returnBy: (it.returnBy ?? draftCase.returnBy ?? '').slice(0, 10) }))
+    : [newBlock()]));
+  const [instructions, setInstructions] = useState(draftCase?.instructions ?? '');
+  const [lab, setLab] = useState<string | null>(labMode ? LAB_ID : null);
+  const [clinician, setClinician] = useState<string | null>(draftCase?.clinician ?? null);
   const [edit, setEdit] = useState<Edit | null>(null);
   const [svc, setSvc] = useState<{ block: Block; isNew: boolean } | null>(null);
   const [tried, setTried] = useState(false);
@@ -548,6 +559,7 @@ export function LiteCreate() {
   const [fixing, setFixing] = useState<string | null>(null);
   const [rememberNext, setRememberNext] = useState(true);
   const search = useLocation().search;
+  const navigate = useNavigate();
 
   const reset = () => { setCreated(null); setPhoto(null); setScanned(false); setEdit(null); setSvc(null); setTried(false); setConfirm(null); };
   const applyRead = () => {
@@ -562,26 +574,31 @@ export function LiteCreate() {
     };
     check('practice', 'practice', r.written.practice, r.practice, r.practice ? practiceName(r.practice) : '');
     check('dentist', 'dentist', r.written.dentist, r.clinician, r.clinician ? clinicianName(r.clinician) : '');
-    check('lab', 'lab', r.written.lab, r.lab, r.lab ? labName(r.lab) : '');
+    if (!labMode) check('lab', 'lab', r.written.lab, r.lab, r.lab ? labName(r.lab) : '');
     r.blocks.forEach(b => check(b.uid, 'service', b.written, b.itemId, b.itemId ? serviceLabel(b.itemId) : ''));
     setUnsure(guess); setWritten(w); setConfirm(null);
-    setPractice(r.practice); setClinician(r.clinician); setLab(r.lab); setPatientId(r.patientId); setBlocks(r.blocks); setInstructions(r.instructions);
+    setPractice(r.practice); setClinician(r.clinician); setLab(labMode ? LAB_ID : r.lab); setPatientId(r.patientId); setBlocks(r.blocks); setInstructions(r.instructions);
     setScanned(true);
     if (known.length) toast(`Read from what you taught us: ${known.join(', ')}`, 'info');
   };
   const doneScanning = useCallback(applyRead, [rx]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (created) return <Created c={created.c} added={created.added} onAnother={reset} />;
+  if (created) return <Created c={created.c} added={created.added} onAnother={reset} labMode={labMode} />;
   if (!photo) return <CameraView onShot={setPhoto} />;
   if (!scanned) return <Scanning photo={photo} onDone={doneScanning} />;
 
   // A follow-up denture prescription is matched to the patient's existing case (one denture service only)
-  const matchFor = (b: Block) => (blocks.some(x => x.uid !== b.uid && isDenture(x)) ? null : followUpOf(cases, { patientId, practice, clinician }, b));
+  const matchFor = (b: Block) => (labMode ? null : blocks.some(x => x.uid !== b.uid && isDenture(x)) ? null : followUpOf(cases, { patientId, practice, clinician }, b));
   const followUp = blocks.length === 1 ? matchFor(blocks[0]) : null;
   const notFound = [!practice && 'practice', !clinician && 'dentist', !lab && 'lab', !patientId && 'patient', blocks.some(b => incomplete(b, matchFor(b))) && 'service'].filter(Boolean) as string[];
 
-  const submit = (forceNew = false) => {
-    if (notFound.length || (forceNew && blocks.some(b => incomplete(b, null)))) {
+  /** Lab side: the lab made this case itself. A draft only needs a patient. */
+  const labOwn = (draft: boolean): Partial<LabCase> => ({
+    createdBy: LAB_ME.name, labMade: true, labSeen: true, practice: practice ?? 'cds', clinician: clinician ?? 'reed',
+    ...(draft ? { stage: 'draft' as const, events: [], attachments: [] } : { stage: 'at-lab' as const, labStatus: 'Accepted' as const, events: [{ stage: 'note' as const, at: new Date().toISOString(), by: LAB_ME.name, text: 'Case created by the lab' }] }),
+  });
+  const submit = (forceNew = false, asDraft = false) => {
+    if (asDraft ? !patientId : (notFound.length || (forceNew && blocks.some(b => incomplete(b, null))))) {
       setTried(true);
       const first = !practice ? 'practice' : !clinician ? 'dentist' : !lab ? 'lab' : !patientId ? 'patient' : null;
       if (first) setEdit(first); else setSvc({ block: blocks.find(b => incomplete(b, forceNew ? null : matchFor(b)))!, isNew: false });
@@ -609,12 +626,14 @@ export function LiteCreate() {
     const per = blocks.map(b => (isDenture(b) ? { stages: stageLines(b), returnBy: undefined } : { stages: undefined, returnBy: iso(b.returnBy) }));
     const c: LabCase = {
       ...built,
+      ...(labMode ? labOwn(asDraft) : {}),
       firstReturnBy: per[0].returnBy, firstStaged: per[0].stages ? 'stage' : undefined, firstStages: per[0].stages,
       items: built.items?.map((it, i) => ({ ...it, returnBy: per[i + 1].returnBy, staged: per[i + 1].stages ? 'stage' as const : undefined, stages: per[i + 1].stages })),
       returnBy: per.flatMap(p => (p.stages ? p.stages.filter(x => !x.state).map(x => x.date) : [p.returnBy ?? ''])).filter(Boolean).sort()[0] ?? '',
     };
-    addCase(c);
-    toast('Case created. Ready to dispatch');
+    if (draftCase) updateCase(draftCase.id, { ...c, id: draftCase.id, createdAt: draftCase.createdAt }); else addCase(c);
+    if (labMode && asDraft) { toast('Draft saved'); navigate(`${LAB_BASE}/cases?f=draft`, { replace: true }); return; }
+    toast(labMode ? `Case created for ${LAB_NAME}` : 'Case created. Ready to dispatch');
     setCreated({ c });
   };
 
@@ -657,10 +676,11 @@ export function LiteCreate() {
   const patient = patientId ? patientById(patientId) : null;
   return (
     <Screen
-      header={<TopBar back fallback={`${LITE}/home`} title="Create lab work" sub="From the prescription" />}
+      header={<TopBar back fallback={`${labMode ? LAB_BASE : LITE}/home`} title={labMode ? 'Create a case' : 'Create lab work'} sub="From the prescription" />}
       footer={followUp
         // The earlier stages are already on a case: adding to it is the main action, a separate case is the alternative
         ? <div className="flex gap-2"><Btn variant="secondary" className="!px-4 whitespace-nowrap" onClick={() => submit(true)}>Create new</Btn><Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => submit()}>Add to {followUp.c.id}</Btn></div>
+        : labMode ? <div className="flex gap-2"><Btn variant="secondary" className="flex-1" onClick={() => submit(false, true)}>Save draft</Btn><Btn className="flex-[1.4]" icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => submit()}>Create case</Btn></div>
         : <Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => submit()}>Create case</Btn>}>
       {tried && notFound.length > 0
         ? <p className="px-5 pt-1 text-[13px] text-go-warn font-medium">Please fill in the highlighted details.</p>
@@ -685,9 +705,10 @@ export function LiteCreate() {
 
         {/* Practice · dentist · lab · patient: one card. Tap a line to change it in a bottom sheet. */}
         <Card className="overflow-hidden py-0.5">
+          {labMode && <div className="w-full flex items-center gap-3 px-4 py-1.5"><span className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 bg-go-brand-soft text-go-brand"><FlaskConical className="w-4 h-4" /></span><span className="w-[58px] text-[12px] text-go-muted flex-shrink-0">Lab</span><span className="flex-1 min-w-0 truncate text-[14px] font-semibold text-go-ink">{labName(LAB_ID)}</span><CheckCircle2 className="w-4 h-4 text-go-ok flex-shrink-0" aria-label="Always Northstar" /><ChevronRight className="w-4 h-4 flex-shrink-0 text-go-faint opacity-40" aria-hidden="true" /></div>}
           <DetailRow icon={<Building2 className="w-4 h-4" />} label="Practice" value={practice ? practiceName(practice) : null} unsure={unsure.has('practice')} onClick={() => (unsure.has('practice') ? setConfirm('practice') : setEdit('practice'))} />
           <DetailRow icon={<User className="w-4 h-4" />} label="Dentist" value={clinician ? clinicianName(clinician) : null} unsure={unsure.has('dentist')} onClick={() => (unsure.has('dentist') ? setConfirm('dentist') : setEdit('dentist'))} />
-          <DetailRow icon={<FlaskConical className="w-4 h-4" />} label="Lab" value={lab ? labName(lab) : null} unsure={unsure.has('lab')} onClick={() => (unsure.has('lab') ? setConfirm('lab') : setEdit('lab'))} />
+          {!labMode && <DetailRow icon={<FlaskConical className="w-4 h-4" />} label="Lab" value={lab ? labName(lab) : null} unsure={unsure.has('lab')} onClick={() => (unsure.has('lab') ? setConfirm('lab') : setEdit('lab'))} />}
           <DetailRow icon={patient ? <span className="text-[9.5px] font-bold">{initials(patient.name)}</span> : <User className="w-4 h-4" />} label="Patient"
             value={patient ? patient.name : null} onClick={() => setEdit('patient')} />
         </Card>
@@ -767,7 +788,7 @@ export function LiteCreate() {
   );
 }
 
-function Created({ c, added, onAnother }: { c: LabCase; added?: string[]; onAnother: () => void }) {
+function Created({ c, added, onAnother, labMode }: { c: LabCase; added?: string[]; onAnother: () => void; labMode?: boolean }) {
   const navigate = useNavigate();
   return (
     <Screen>
@@ -775,21 +796,23 @@ function Created({ c, added, onAnother }: { c: LabCase; added?: string[]; onAnot
         <div className="absolute top-0 w-80 h-80 rounded-full bg-go-brand/20 blur-3xl" />
         <div className="relative go-rise"><GoMark size={84} /></div>
         <span className="relative mt-6 inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-go-ok-soft text-go-ok text-[12px] font-semibold"><CheckCircle2 className="w-4 h-4" />{added ? 'Stage ordered' : 'Case created'}</span>
-        <h1 className="relative text-[26px] font-bold text-go-ink tracking-tight mt-3">{added ? `Added to ${c.id}` : 'Ready to dispatch'}</h1>
+        <h1 className="relative text-[26px] font-bold text-go-ink tracking-tight mt-3">{added ? `Added to ${c.id}` : labMode ? 'Ready to work on' : 'Ready to dispatch'}</h1>
         <p className="relative text-[14px] text-go-muted mt-1.5 leading-relaxed">
           {added
             ? <>{added.join(', ')} for {shortName(patientById(c.patientId).name)} was added to the same case. {labName(c.lab)} will see it there.</>
+            : labMode ? <><span className="font-mono font-semibold text-go-ink">{c.id}</span> for {shortName(patientById(c.patientId).name)} is with {LAB_NAME}. {practiceName(c.practice)} will see it as accepted.</>
             : <><span className="font-mono font-semibold text-go-ink">{c.id}</span> for {shortName(patientById(c.patientId).name)} is ready to send to {labName(c.lab)}.</>}
         </p>
       </div>
       <div className="px-4 mt-8 space-y-2.5">
         {added
           ? <Btn block onClick={() => navigate(`${LITE}/work/${c.id}`, { replace: true })}>View the case</Btn>
+          : labMode ? <Btn block onClick={() => navigate(`${LAB_BASE}/cases/${c.id}`, { replace: true })}>View the case</Btn>
           : <Btn block icon={<Printer className="w-5 h-5" />} onClick={() => navigate(`${LITE}/dispatch/${c.id}`, { replace: true })}>Print label and dispatch</Btn>}
         <Btn block variant="secondary" icon={<Plus className="w-5 h-5" />} onClick={onAnother}>Create another</Btn>
-        <Btn block variant="ghost" size="md" onClick={() => navigate(`${LITE}/home`, { replace: true })}>Back to home</Btn>
+        <Btn block variant="ghost" size="md" onClick={() => navigate(`${labMode ? LAB_BASE : LITE}/home`, { replace: true })}>Back to home</Btn>
       </div>
-      {!added && <p className="text-center text-[12px] text-go-faint mt-4">You can also send it later from To dispatch.</p>}
+      {!added && !labMode && <p className="text-center text-[12px] text-go-faint mt-4">You can also send it later from To dispatch.</p>}
     </Screen>
   );
 }

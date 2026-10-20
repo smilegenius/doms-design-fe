@@ -35,9 +35,10 @@ export function Screen({ header, children, footer, tabs, bg = 'bg-transparent' }
   );
 }
 
-/** '/go' for the full app, '/go/lite' inside the light version. Shared screens build their links from it. */
+/** '/go' for the full app, '/go/lite' in the light version. Shared screens build their links from it. */
 export function useBase() {
-  return useLocation().pathname.startsWith('/go/lite') ? '/go/lite' : '/go';
+  const p = useLocation().pathname;
+  return p.startsWith('/go/lite') ? '/go/lite' : '/go';
 }
 
 /** Back = browser back when there is history inside the app, else `fallback`. */
@@ -47,13 +48,15 @@ export function useBack(fallback = '/go/home') {
   return () => (location.key !== 'default' ? navigate(-1) : navigate(fallback));
 }
 
-export function TopBar({ title, sub, back, fallback, right, large }: {
+export function TopBar({ title, sub, back, fallback, right, large, compact }: {
   title?: React.ReactNode; sub?: React.ReactNode; back?: boolean; fallback?: string; right?: React.ReactNode; large?: boolean;
+  /** Large title with no back button or actions: drop the empty row above it. */
+  compact?: boolean;
 }) {
   const goBack = useBack(fallback);
   return (
     <div className="relative z-10 bg-go-bg/80 backdrop-blur-xl">
-      <div className="flex items-center gap-2 px-3 h-14">
+      <div className={cx('flex items-center gap-2 px-3', large && compact && !back && !right ? 'h-3' : 'h-14')}>
         {back ? (
           <button onClick={goBack} aria-label="Go back" className="w-10 h-10 -ml-1 rounded-full flex items-center justify-center text-go-ink hover:bg-go-raised active:scale-95 transition">
             <ChevronLeft className="w-6 h-6" />
@@ -611,7 +614,9 @@ export function ProgressRail({ stage, className }: { stage: Stage; className?: s
 // ─── Toasts ─────────────────────────────────────────────────────────────────
 
 export function Toaster() {
-  const { toasts } = useGo();
+  const { toasts: all, phoneSide } = useGo();
+  // Each phone shows its own messages (and the ones sent to it)
+  const toasts = all.filter(t => t.side === phoneSide);
   return (
     <div className="absolute top-3 sm:top-[54px] inset-x-3 z-[60] flex flex-col gap-2 pointer-events-none">
       {toasts.map(t => (

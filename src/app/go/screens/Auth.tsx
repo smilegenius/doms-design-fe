@@ -12,10 +12,10 @@ const MsLogo = () => (
 );
 
 /** base = '/go' (full app) or '/go/lite' (light version). */
-export function SignInScreen({ base = '/go' }: { base?: string }) {
+export function SignInScreen({ base = '/go', defaultEmail = ME.email }: { base?: string; defaultEmail?: string }) {
   const { signIn } = useGo();
   const navigate = useNavigate();
-  const [email, setEmail] = useState(ME.email);
+  const [email, setEmail] = useState(defaultEmail);
   const [pw, setPw] = useState('');
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState<null | 'google' | 'microsoft' | 'email'>(null);
@@ -81,8 +81,8 @@ export function SignInScreen({ base = '/go' }: { base?: string }) {
   );
 }
 
-export function ForgotScreen({ base = '/go' }: { base?: string }) {
-  const [email, setEmail] = useState(ME.email);
+export function ForgotScreen({ base = '/go', defaultEmail = ME.email }: { base?: string; defaultEmail?: string }) {
+  const [email, setEmail] = useState(defaultEmail);
   const [sent, setSent] = useState(false);
   const navigate = useNavigate();
   return (

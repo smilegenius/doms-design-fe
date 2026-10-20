@@ -63,7 +63,7 @@ export function LabelPreview({ c }: { c: LabCase }) {
 /** list = where Back and "done" return to; the light version passes its To dispatch list. */
 export function DispatchScreen({ list }: { list?: string }) {
   const c = useCase();
-  const { updateCase, toast } = useGo();
+  const { updateCase, toast, notify } = useGo();
   const navigate = useNavigate();
   const [printed, setPrinted] = useState(false);
   const [courier, setCourier] = useState<string | null>(null);
@@ -92,6 +92,7 @@ export function DispatchScreen({ list }: { list?: string }) {
       events: [...x.events, { stage: 'dispatched', at: nowIso(), by: ME.name, text: [courier, tracking].filter(Boolean).join(' · ') }],
     }));
     toast(`Dispatched to ${lab}`);
+    notify('lab', `New case ${c.id} from ${practiceName(c.practice)}`, 'info');
     navigate(back, { replace: true });
   };
 
@@ -146,7 +147,7 @@ const NOTE_MAX = 1000;
 
 /** Same as the portal: a confirm with optional delivery notes. The lab is notified. */
 export function ReceiveSheet({ c, open, onClose }: { c: LabCase; open: boolean; onClose: () => void }) {
-  const { updateCase, toast } = useGo();
+  const { updateCase, toast, notify } = useGo();
   const [note, setNote] = useState('');
   const lab = labName(c.lab);
   const receive = () => {
@@ -157,6 +158,7 @@ export function ReceiveSheet({ c, open, onClose }: { c: LabCase; open: boolean; 
       events: [...x.events, { stage: 'received', at: nowIso(), by: ME.name, text: text || undefined }],
     }));
     toast(`Marked as received · ${lab} notified`);
+    notify('lab', `${practiceName(c.practice)} received ${c.id}`, 'ok');
     setNote('');
     onClose();
   };

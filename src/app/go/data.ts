@@ -207,6 +207,8 @@ export interface LabCase {
   chasedAt?: string;
   problem?: string;
   dispatch?: { courier: string; tracking?: string; bags: number; notes?: string };
+  /** Lab → practice: the shipping details the lab filled in when it shipped the work back (all optional). */
+  labShipment?: { courier?: string; tracking?: string; link?: string; services?: string; shippedOn?: string; eta?: string };
   receipt?: { storedIn: string; comment?: string };
   source: 'manual' | 'photo';
   /** The patient appointment this work is for — what the clinician plans around. */
@@ -225,6 +227,12 @@ export interface LabCase {
   onHold?: { side: 'Lab' | 'Practice'; reason: string; by: string; since: string };
   /** Saved form for a draft case (CaseForm from ManualCase) so it reopens filled in. */
   draftForm?: unknown;
+  /** Lab app only: created by the lab itself (e.g. from a posted prescription). */
+  labMade?: boolean;
+  /** Lab app only: the lab has opened this new case. */
+  labSeen?: boolean;
+  /** Demo: pinned to the top of the clinic's Lab work and the lab's Cases (1, 2, 3) so the same cases can be compared side by side. */
+  pin?: number;
   /** When the case was created. Falls back to its first event (see createdOn). */
   createdAt?: string;
   /** Per-service delivery for the FIRST service (the others carry theirs on items[]). returnBy above stays the case's soonest open date. */

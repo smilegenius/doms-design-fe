@@ -210,13 +210,14 @@ const NOTICE_ICON: Record<Notice['kind'], { icon: React.ReactNode; tone: Tone }>
 export function NotificationsScreen() {
   const navigate = useNavigate();
   const { notices, markNoticesRead } = useGo();
+  const base = useBase();
   const unread = notices.filter(n => !n.read).length;
   const groups = [
     { title: 'Today', items: notices.filter(n => relDay(n.at) === 'Today') },
     { title: 'Earlier', items: notices.filter(n => relDay(n.at) !== 'Today') },
   ].filter(g => g.items.length);
   return (
-    <Screen header={<TopBar back title="Notifications" right={unread ? <button onClick={markNoticesRead} className="text-[13px] font-semibold text-go-brand pr-1">Mark all read</button> : undefined} />}>
+    <Screen header={<TopBar back fallback={`${base}/home`} title="Notifications" right={unread ? <button onClick={markNoticesRead} className="text-[13px] font-semibold text-go-brand pr-1">Mark all read</button> : undefined} />}>
       {!notices.length && <EmptyState icon={<Bell className="w-7 h-7" />} title="Nothing here yet" body="We’ll let you know when there’s news about your lab work." />}
       {groups.map(g => (
         <Section key={g.title} title={g.title} className="!mt-3">
@@ -224,7 +225,7 @@ export function NotificationsScreen() {
             {g.items.map(n => {
               const s = NOTICE_ICON[n.kind];
               return (
-                <button key={n.id} onClick={() => navigate(n.to)} className={cx('w-full text-left flex items-start gap-3 p-4 transition hover:bg-go-raised', !n.read && 'bg-go-brand-soft/40')}>
+                <button key={n.id} onClick={() => navigate(n.to.replace(/^\/go/, base))} className={cx('w-full text-left flex items-start gap-3 p-4 transition hover:bg-go-raised', !n.read && 'bg-go-brand-soft/40')}>
                   <IconTile icon={s.icon} tone={s.tone} size="sm" />
                   <div className="flex-1 min-w-0">
                     <p className={cx('text-[14px] text-go-ink', !n.read ? 'font-semibold' : 'font-medium')}>{n.title}</p>

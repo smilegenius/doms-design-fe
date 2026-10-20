@@ -5,10 +5,10 @@
 // Requirements came from the "Smile Genius Go" brief; the UI is our own and
 // uses the web portals' palette (light) plus a matching dark theme.
 import { useEffect, useState } from 'react';
-import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ChevronDown, Monitor, Moon, Search, Sun, X } from './icons';
+import { MemoryRouter, Navigate, Outlet, Route, Routes, UNSAFE_LocationContext, useLocation, useNavigate } from 'react-router-dom';
+import { Check, ArrowLeft, Building2, ChevronDown, ChevronLeft, ChevronRight, FlaskConical, Monitor, Moon, Search, Sun, X } from './icons';
 import '../../styles/go.css';
-import { DemoFill, FEATURES, GoStoreProvider, ThemePref, useGo } from './store';
+import { DemoFill, FEATURES, GoStoreProvider, PhoneScope, ThemePref, useGo } from './store';
 import { PracticeId } from './data';
 import { GoMark, Toaster, cx } from './ui';
 import { KB_HEIGHT, SimKeyboard, useKeyboardTarget } from './Keyboard';
@@ -19,6 +19,8 @@ import { DispatchScreen, ReceiveScreen } from './screens/Logistics';
 import CaptureScreen from './screens/Capture';
 import ManualCaseScreen from './screens/ManualCase';
 import { FinanceScreen, InvoiceScreen, InvoicesComingSoon, StatementScreen } from './screens/Finance';
+import { LAB_BASE, LAB_ME } from './lab/labData';
+import { LabAccount, LabCaseDetail, LabCases, LabDeliveries, LabHome, LabNew, LabNotifications } from './lab/LabScreens';
 import { LITE, LiteCreate, LiteDeliveries, LiteDispatch, LiteHome } from './lite/LiteScreens';
 import { AccountScreen, AppearanceSettings, DashboardSettings, NotificationSettings, NotificationsScreen, PracticesSettings } from './screens/Account';
 
@@ -158,6 +160,46 @@ const LITE_JUMPS: Jump[] = [
   ] },
 ];
 
+// Lab version: the lab's side of the same cases
+const LAB_JUMPS: Jump[] = [
+  { group: 'Start', label: 'Sign in', to: `${LAB_BASE}/signin`, scenarios: [
+    { label: 'Email & password', to: `${LAB_BASE}/signin` },
+    { label: 'Forgot password', to: `${LAB_BASE}/forgot` },
+  ] },
+  { group: 'Start', label: 'Dashboard', to: `${LAB_BASE}/home` },
+  { group: 'Cases', label: 'All cases', to: `${LAB_BASE}/cases`, scenarios: [
+    { label: 'All cases', to: `${LAB_BASE}/cases` },
+    { label: 'New cases arrived', to: `${LAB_BASE}/cases?f=new` },
+    { label: 'Draft cases awaiting', to: `${LAB_BASE}/cases?f=draft` },
+    { label: 'Waiting to be accepted', to: `${LAB_BASE}/cases?f=accept` },
+    { label: 'Waiting to be sent back', to: `${LAB_BASE}/cases?f=ship` },
+    { label: 'Due in 3 days', to: `${LAB_BASE}/cases?f=due3` },
+    { label: 'Without a due date', to: `${LAB_BASE}/cases?f=nodate` },
+    { label: 'Overdue', to: `${LAB_BASE}/cases?f=overdue` },
+    { label: 'On hold', to: `${LAB_BASE}/cases?f=hold` },
+  ] },
+  { group: 'Cases', label: 'Case detail', to: `${LAB_BASE}/cases/SG-L101`, scenarios: [
+    { label: 'New case · accept it', to: `${LAB_BASE}/cases/SG-L101` },
+    { label: 'No due date', to: `${LAB_BASE}/cases/SG-L103` },
+    { label: 'In production · ship', to: `${LAB_BASE}/cases/SG-L105` },
+    { label: 'Overdue', to: `${LAB_BASE}/cases/SG-L107` },
+    { label: 'On hold (practice)', to: `${LAB_BASE}/cases/SG-L108` },
+    { label: 'On hold (lab)', to: `${LAB_BASE}/cases/SG-L109` },
+    { label: 'Draft', to: `${LAB_BASE}/cases/SG-L111` },
+    { label: 'Sent back', to: `${LAB_BASE}/cases/SG-L113` },
+  ] },
+  { group: 'Create', label: 'Create a case', to: `${LAB_BASE}/new`, scenarios: [
+    { label: 'New case · lab already selected', to: `${LAB_BASE}/new` },
+    { label: 'Finish a draft', to: `${LAB_BASE}/new?draft=SG-L112` },
+  ] },
+  { group: 'Shipping', label: 'Shipping', to: `${LAB_BASE}/deliveries`, scenarios: [
+    { label: 'To accept', to: `${LAB_BASE}/deliveries` },
+    { label: 'To ship', to: `${LAB_BASE}/deliveries?tab=ship` },
+    { label: 'Shipped', to: `${LAB_BASE}/deliveries?tab=sent` },
+  ] },
+  { group: 'Me', label: 'Me', to: `${LAB_BASE}/account` },
+];
+
 function ThemeSwitch() {
   const { themePref, setThemePref } = useGo();
   const opts: { v: ThemePref; icon: React.ReactNode; label: string }[] = [
@@ -178,11 +220,40 @@ function ThemeSwitch() {
   );
 }
 
-function SidePanel({ lite }: { lite?: boolean }) {
+/** Clinic / Lab: tick one to see that side, or both to see them side by side. They share the same cases, so what you do on one shows on the other. */
+interface Views { clinic: boolean; lab: boolean }
+function ViewSwitch({ views, onChange }: { views: Views; onChange: (v: Views) => void }) {
+  const opts = [
+    { key: 'clinic' as const, label: 'Clinic', icon: <Building2 className="w-4 h-4" /> },
+    { key: 'lab' as const, label: 'Lab', icon: <FlaskConical className="w-4 h-4" /> },
+  ];
+  return (
+    <div role="group" aria-label="Show the clinic view, the lab view, or both" className="flex gap-2">
+      {opts.map(o => {
+        const on = views[o.key];
+        return (
+          <button key={o.key} role="switch" aria-checked={on} onClick={() => onChange({ ...views, [o.key]: !on })}
+            className={cx('flex-1 h-11 pl-3 pr-2.5 rounded-2xl border bg-go-surface flex items-center gap-2 transition', on ? 'border-go-brand/40' : 'border-go-line')}>
+            <span className={cx('flex items-center gap-1.5 text-[12.5px] font-semibold flex-1 text-left', on ? 'text-go-ink' : 'text-go-muted')}>{o.icon}{o.label}</span>
+            <span className={cx('relative w-9 h-5 rounded-full flex-shrink-0 transition', on ? 'go-grad' : 'bg-go-line')}>
+              <span className={cx('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', on ? 'left-[18px]' : 'left-0.5')} />
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The side panel can steer either phone when both are showing. */
+const PHONE_NAVS: Partial<Record<'clinic' | 'lab', (to: string) => void>> = {};
+
+function SidePanel({ lite, dual, viewSwitch, onCollapse }: { lite?: boolean; dual?: boolean; viewSwitch?: React.ReactNode; onCollapse: () => void }) {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
   const here = pathname + search;
   const { signIn, signOut, setPractice, practice: practiceNow, setSoloPractice, demoFill, setDemoFill } = useGo();
+  const lab = !!lite && pathname.startsWith(LAB_BASE);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   // "Filled · All" and "Multiple practices" load the same data; remember which was picked
@@ -194,10 +265,11 @@ function SidePanel({ lite }: { lite?: boolean }) {
     setDemoFill(s.fill === undefined || s.fill === 4 ? null : s.fill);
     setPickedFill(!!s.fills);
     setPractice(s.solo ?? s.practice ?? 'all');
-    if (/[/](signin|forgot)$/.test(s.to)) { signOut(); navigate(s.to); return; }
+    const go = dual ? (PHONE_NAVS[s.to.startsWith(LAB_BASE) ? 'lab' : 'clinic'] ?? navigate) : navigate;
+    if (/[/](signin|forgot)$/.test(s.to)) { signOut(); go(s.to); return; }
     signIn();
     // Let the sign-in screen's own redirect run first, then land on the target.
-    setTimeout(() => navigate(s.to), 0);
+    setTimeout(() => go(s.to), 0);
   };
   const toggle = (k: string) => setOpen(o => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const { soloPractice } = useGo();
@@ -211,7 +283,8 @@ function SidePanel({ lite }: { lite?: boolean }) {
   const term = q.trim().toLowerCase();
   const hit = (t: string) => t.toLowerCase().includes(term);
   // Hidden features drop out of the reviewer index too
-  const jumps = (lite ? LITE_JUMPS : JUMPS).filter(j => FEATURES.invoices || j.group !== 'Invoices');
+  const both: Jump[] = [...LITE_JUMPS.map(j => ({ ...j, group: `Clinic · ${j.group}` })), ...LAB_JUMPS.map(j => ({ ...j, group: `Lab · ${j.group}` }))];
+  const jumps = (lite ? (dual ? both : lab ? LAB_JUMPS : LITE_JUMPS) : JUMPS).filter(j => FEATURES.invoices || j.group !== 'Invoices');
   const shown = jumps.map(j => {
     if (!term) return { j, scen: j.scenarios ?? [] };
     const self = hit(j.label) || hit(j.group);
@@ -223,6 +296,7 @@ function SidePanel({ lite }: { lite?: boolean }) {
 
   return (
     <aside className="hidden lg:flex flex-col w-[300px] h-[min(844px,calc(100dvh-40px))] relative z-10">
+      <button onClick={onCollapse} aria-label="Hide the side panel" title="Hide the side panel" className="absolute top-0 right-0 w-8 h-8 rounded-full bg-go-surface border border-go-line text-go-muted hover:text-go-ink flex items-center justify-center"><ChevronLeft className="w-4 h-4" /></button>
       <button onClick={() => navigate('/go')} className="self-start inline-flex items-center gap-1.5 text-[13px] font-medium text-go-muted hover:text-go-ink mb-6">
         <ArrowLeft className="w-4 h-4" /> All versions
       </button>
@@ -230,9 +304,10 @@ function SidePanel({ lite }: { lite?: boolean }) {
         <GoMark size={44} />
         <div>
           <p className="text-[20px] font-bold text-go-ink leading-tight">Smile Genius <span className="go-grad-text">Go</span></p>
-          <p className="text-[12.5px] text-go-muted">{lite ? 'Light version' : 'In development version'}</p>
+          <p className="text-[12.5px] text-go-muted">{lite ? `Light version${FEATURES.labApp ? (dual ? ' · Clinic + Lab' : lab ? ' · Lab view' : ' · Clinic view') : ''}` : 'In development version'}</p>
         </div>
       </div>
+      {lite && FEATURES.labApp && <><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted mt-6 mb-2">Show</p>{viewSwitch}</>}
       <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-go-muted mt-6 mb-2">Appearance</p>
       <ThemeSwitch />
       <div className="flex items-baseline justify-between mt-6 mb-2">
@@ -250,10 +325,10 @@ function SidePanel({ lite }: { lite?: boolean }) {
           <div key={g} className="mb-3">
             <p className="text-[11px] text-go-faint font-medium px-2 mb-1">{g}</p>
             {shown.filter(x => x.j.group === g).map(({ j, scen }) => {
-              const expanded = !!scen.length && (!!term || open.has(j.label));
+              const expanded = !!scen.length && (!!term || open.has(j.group + j.label));
               const activeChild = !!j.scenarios?.some(isHere);
               return (
-                <div key={j.label}>
+                <div key={j.group + j.label}>
                   <div className={cx('flex items-center rounded-xl transition',
                     here === j.to || (activeChild && !expanded) ? 'bg-go-brand-soft' : 'hover:bg-go-surface')}>
                     <button onClick={() => jump(j)}
@@ -262,7 +337,7 @@ function SidePanel({ lite }: { lite?: boolean }) {
                       {j.label}
                     </button>
                     {!!j.scenarios?.length && (
-                      <button onClick={() => toggle(j.label)} aria-expanded={expanded} aria-label={`${expanded ? 'Hide' : 'Show'} scenarios for ${j.label}`}
+                      <button onClick={() => toggle(j.group + j.label)} aria-expanded={expanded} aria-label={`${expanded ? 'Hide' : 'Show'} scenarios for ${j.label}`}
                         className="h-8 px-2 mr-1 rounded-lg inline-flex items-center gap-1 text-[11px] text-go-faint hover:text-go-ink hover:bg-go-raised">
                         {j.scenarios.length}
                         <ChevronDown className={cx('w-3.5 h-3.5 transition-transform', expanded && 'rotate-180')} />
@@ -328,14 +403,36 @@ function RequireAuth({ to = '/go/signin' }: { to?: string }) {
   return signedIn ? <Outlet /> : <Navigate to={to} replace />;
 }
 
+function LabRoutes() {
+  const { signedIn } = useGo();
+  return (
+    <Routes>
+      <Route path="signin" element={signedIn ? <Navigate to={`${LAB_BASE}/home`} replace /> : <SignInScreen base={LAB_BASE} defaultEmail={LAB_ME.email} />} />
+      <Route path="forgot" element={<ForgotScreen base={LAB_BASE} defaultEmail={LAB_ME.email} />} />
+      <Route element={<RequireAuth to={`${LAB_BASE}/signin`} />}>
+        <Route path="home" element={<LabHome />} />
+        <Route path="notifications" element={<LabNotifications />} />
+        <Route path="cases" element={<LabCases />} />
+        <Route path="cases/:id" element={<LabCaseDetail />} />
+        <Route path="new" element={<LabNew />} />
+        <Route path="deliveries" element={<LabDeliveries />} />
+        <Route path="account" element={<LabAccount />} />
+      </Route>
+      <Route path="*" element={<Navigate to={signedIn ? `${LAB_BASE}/home` : `${LAB_BASE}/signin`} replace />} />
+    </Routes>
+  );
+}
+
 function LiteRoutes() {
   const { signedIn } = useGo();
   return (
     <Routes>
+      {FEATURES.labApp && <Route path="lab/*" element={<LabRoutes />} />}
       <Route path="signin" element={signedIn ? <Navigate to={`${LITE}/home`} replace /> : <SignInScreen base={LITE} />} />
       <Route path="forgot" element={<ForgotScreen base={LITE} />} />
       <Route element={<RequireAuth to={`${LITE}/signin`} />}>
         <Route path="home" element={<LiteHome />} />
+        <Route path="notifications" element={<NotificationsScreen />} />
         <Route path="work" element={<LabWorkScreen />} />
         <Route path="work/:id" element={<CaseDetailScreen />} />
         <Route path="new" element={<LiteCreate />} />
@@ -359,7 +456,7 @@ function GoRoutes({ lite }: { lite?: boolean }) {
   const { pathname, search, key } = useLocation();
   return (
     // Create (light) restarts at the scan screen every time it is opened
-    <div key={pathname.startsWith('/go/new') ? pathname + search : pathname === '/go/lite/new' ? key : pathname} className="absolute inset-0 go-fade-in">
+    <div key={pathname.startsWith('/go/new') ? pathname + search : (pathname === '/go/lite/new' || pathname === `${LAB_BASE}/new`) ? key : pathname} className="absolute inset-0 go-fade-in">
       {lite ? <LiteRoutes /> : <Routes>
         <Route path="signin" element={signedIn ? <Navigate to="/go/home" replace /> : <SignInScreen />} />
         <Route path="forgot" element={<ForgotScreen />} />
@@ -389,29 +486,96 @@ function GoRoutes({ lite }: { lite?: boolean }) {
   );
 }
 
-/** Fit the 844px-tall frame into short laptop screens. */
-function useFrameScale() {
+/** Fit the phone(s) into the window: by height always, and by width when two phones sit next to the side panel. */
+function useFrameScale(phones: number, panel: boolean) {
   const [scale, setScale] = useState(1);
   useEffect(() => {
-    const fit = () => setScale(window.innerWidth < 640 ? 1 : Math.min(1, (window.innerHeight - 40) / 866));
+    const fit = () => {
+      const gap = phones > 1 ? 32 : 64;
+      const byHeight = (window.innerHeight - 40 - (phones > 1 ? 44 : 0)) / 866;
+      const room = window.innerWidth - 40 - (panel && window.innerWidth >= 1024 ? 300 + gap : 0) - gap * (phones - 1);
+      setScale(window.innerWidth < 640 ? 1 : Math.min(1, byHeight, room / (390 * phones)));
+    };
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, []);
+  }, [phones, panel]);
   return scale;
 }
 
-function GoFrame({ lite }: { lite?: boolean }) {
+/** One phone: bezel, status bar, the app's routes. Lives under whichever router it is given. */
+function Phone({ lite, side, scale, caption }: { lite?: boolean; side?: 'clinic' | 'lab'; scale: number; caption?: string }) {
   const { theme, setSheetRoot, sheetRoot } = useGo();
-  const scale = useFrameScale();
   const { pathname: routePath } = useLocation();
   const kbTarget = useKeyboardTarget(sheetRoot, routePath);
   const navigate = useNavigate();
+  useEffect(() => {
+    if (!side) return;
+    PHONE_NAVS[side] = to => navigate(to);
+    return () => { delete PHONE_NAVS[side]; };
+  }, [side, navigate]);
+  return (
+    <div className="flex flex-col items-center gap-3">
+      {caption && <span className="hidden sm:inline-flex items-center h-7 px-3.5 rounded-full bg-go-surface border border-go-line text-[12px] font-bold text-go-ink2">{caption}</span>}
+      <div className="relative sm:flex-shrink-0 sm:overflow-hidden sm:rounded-[58px]" style={scale < 1 ? { width: 390 * scale, height: 844 * scale, borderRadius: 58 * scale } : undefined}>
+        {/* Bezel: dark on the light theme, light grey on the dark theme so the screen edge reads */}
+        <div className={cx('relative w-full h-[100dvh] sm:w-[390px] sm:h-[844px] sm:rounded-[58px] sm:p-[10px] origin-top-left',
+          theme === 'dark'
+            ? 'sm:bg-[#C9CCD4] sm:shadow-[0_40px_100px_-30px_rgba(16,24,64,.45),inset_0_0_0_1.5px_rgba(255,255,255,.7),inset_0_0_0_3px_rgba(16,24,64,.08)]'
+            : 'sm:bg-[#0A0A12] sm:shadow-[0_40px_100px_-30px_rgba(16,24,64,.45),inset_0_0_0_1.5px_rgba(255,255,255,.08)]')}
+          style={scale < 1 ? { transform: `scale(${scale})` } : undefined}>
+          <div data-theme={theme} className={cx('go-theme go-wash relative h-full w-full overflow-clip sm:rounded-[48px] sm:[clip-path:inset(0_round_48px)] flex flex-col', kbTarget && 'go-kb-open')} ref={setSheetRoot}
+            style={{ '--go-kb': kbTarget ? `${KB_HEIGHT}px` : '0px' } as React.CSSProperties}>
+            <StatusBar />
+            {/* Shrinks by the keyboard height so content + sticky actions ride up */}
+            <div className="relative flex-1 min-h-0 transition-[margin] duration-300 ease-[cubic-bezier(.2,.8,.2,1)]" style={{ marginBottom: 'var(--go-kb)' }}>
+              <GoRoutes lite={lite} />
+            </div>
+            <Toaster />
+            <SimKeyboard target={kbTarget} theme={theme} />
+            <span className="hidden sm:block pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 w-[134px] h-[5px] rounded-full bg-go-ink/80 z-[70]" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A phone with its own little router, so two can be on different screens at once (both read the same cases). */
+function SeparatePhone({ side, start, scale, caption }: { side: 'clinic' | 'lab'; start: string; scale: number; caption: string }) {
+  return (
+    <UNSAFE_LocationContext.Provider value={null as never}>
+      <MemoryRouter initialEntries={[start]}>
+        <PhoneScope side={side}><Phone lite side={side} scale={scale} caption={caption} /></PhoneScope>
+      </MemoryRouter>
+    </UNSAFE_LocationContext.Provider>
+  );
+}
+
+function GoFrame({ lite }: { lite?: boolean }) {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const { signedIn } = useGo();
+  const labPath = !!lite && pathname.startsWith(LAB_BASE);
+  // Both phones at once is opt-in from the Show switch; otherwise one phone follows the address bar
+  const [both, setBoth] = useState(false);
+  const dual = !!lite && FEATURES.labApp && both;
+  // The side panel can fold away to give the phones room (starts folded on narrower windows)
+  const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1280);
+  const scale = useFrameScale(dual ? 2 : 1, !collapsed);
   useEffect(() => { document.title = lite ? 'Smile Genius Go · Light' : 'Smile Genius Go'; }, [lite]);
+  const views: Views = dual ? { clinic: true, lab: true } : { clinic: !labPath, lab: labPath };
+  const change = (next: Views) => {
+    if (!next.clinic && !next.lab) return; // keep at least one phone
+    if (next.clinic && next.lab) { setBoth(true); if (window.innerWidth < 1400) setCollapsed(true); return; }
+    setBoth(false);
+    navigate(`${next.lab ? LAB_BASE : LITE}/${signedIn ? 'home' : 'signin'}`);
+  };
+  const switcher = <ViewSwitch views={views} onChange={change} />;
   // Presentation (backdrop + side panel) stays light; only the phone follows the theme
   return (
     <div className="go-theme font-sans antialiased" data-theme="light">
-      <div className="relative min-h-[100dvh] bg-go-bg sm:flex sm:items-center sm:justify-center sm:gap-16 sm:p-5 overflow-hidden">
+      <div className={cx('relative min-h-[100dvh] bg-go-bg sm:flex sm:items-center sm:justify-center sm:p-5 overflow-hidden', dual ? 'sm:gap-8' : 'sm:gap-16')}>
         {/* Desktop backdrop — the portal-select wash, re-tinted per theme */}
         <div className="hidden sm:block pointer-events-none absolute inset-0 overflow-hidden">
           <div className="absolute -top-40 -left-32 w-[560px] h-[560px] rounded-full bg-go-lav/20 blur-[120px]" />
@@ -419,37 +583,29 @@ function GoFrame({ lite }: { lite?: boolean }) {
           <div className="absolute top-1/3 left-1/2 w-[380px] h-[380px] rounded-full bg-go-teal/10 blur-[110px]" />
         </div>
 
-        <SidePanel lite={lite} />
+        {!collapsed && <SidePanel lite={lite} dual={dual} viewSwitch={switcher} onCollapse={() => setCollapsed(true)} />}
 
         {/* Compact controls between sm and lg (no side panel) */}
-        <div className="hidden sm:flex lg:hidden absolute top-4 left-4 right-4 z-10 items-center justify-between">
-          <button onClick={() => navigate('/go')} className="inline-flex items-center gap-1.5 text-[13px] font-medium text-go-muted hover:text-go-ink">
-            <ArrowLeft className="w-4 h-4" /> All versions
-          </button>
-          <div className="w-[260px]"><ThemeSwitch /></div>
+        <div className={cx('hidden sm:flex absolute top-4 left-4 right-4 z-10 items-center justify-between', !collapsed && 'lg:hidden')}>
+          <div className="flex items-center gap-4">
+            <button onClick={() => navigate('/go')} className="inline-flex items-center gap-1.5 text-[13px] font-medium text-go-muted hover:text-go-ink">
+              <ArrowLeft className="w-4 h-4" /> All versions
+            </button>
+            <button onClick={() => setCollapsed(false)} className="hidden lg:inline-flex items-center gap-1 h-8 pl-3 pr-2 rounded-full bg-go-surface border border-go-line text-[12.5px] font-semibold text-go-ink2 hover:text-go-ink">
+              Screens<ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex gap-2">{lite && FEATURES.labApp && <div className="w-[280px]">{switcher}</div>}<div className="w-[260px]"><ThemeSwitch /></div></div>
         </div>
 
-        {/* Device */}
-        <div className="relative sm:flex-shrink-0 sm:overflow-hidden sm:rounded-[58px]" style={scale < 1 ? { width: 390 * scale, height: 844 * scale } : undefined}>
-          {/* Bezel: dark on the light theme, light grey on the dark theme so the screen edge reads */}
-          <div className={cx('relative w-full h-[100dvh] sm:w-[390px] sm:h-[844px] sm:rounded-[58px] sm:p-[10px] origin-top-left',
-            theme === 'dark'
-              ? 'sm:bg-[#C9CCD4] sm:shadow-[0_40px_100px_-30px_rgba(16,24,64,.45),inset_0_0_0_1.5px_rgba(255,255,255,.7),inset_0_0_0_3px_rgba(16,24,64,.08)]'
-              : 'sm:bg-[#0A0A12] sm:shadow-[0_40px_100px_-30px_rgba(16,24,64,.45),inset_0_0_0_1.5px_rgba(255,255,255,.08)]')}
-            style={scale < 1 ? { transform: `scale(${scale})` } : undefined}>
-            <div data-theme={theme} className={cx('go-theme go-wash relative h-full w-full overflow-clip sm:rounded-[48px] sm:[clip-path:inset(0_round_48px)] flex flex-col', kbTarget && 'go-kb-open')} ref={setSheetRoot}
-              style={{ '--go-kb': kbTarget ? `${KB_HEIGHT}px` : '0px' } as React.CSSProperties}>
-              <StatusBar />
-              {/* Shrinks by the keyboard height so content + sticky actions ride up */}
-              <div className="relative flex-1 min-h-0 transition-[margin] duration-300 ease-[cubic-bezier(.2,.8,.2,1)]" style={{ marginBottom: 'var(--go-kb)' }}>
-                <GoRoutes lite={lite} />
-              </div>
-              <Toaster />
-              <SimKeyboard target={kbTarget} theme={theme} />
-              <span className="hidden sm:block pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 w-[134px] h-[5px] rounded-full bg-go-ink/80 z-[70]" />
-            </div>
-          </div>
-        </div>
+        {dual ? (
+          <>
+            <SeparatePhone side="clinic" start={`${LITE}/${signedIn ? 'home' : 'signin'}`} scale={scale} caption="Clinic" />
+            <SeparatePhone side="lab" start={`${LAB_BASE}/${signedIn ? 'home' : 'signin'}`} scale={scale} caption="Lab" />
+          </>
+        ) : (
+          <PhoneScope side={lite ? (labPath ? 'lab' : 'clinic') : undefined}><Phone lite={lite} scale={scale} /></PhoneScope>
+        )}
       </div>
     </div>
   );

@@ -112,7 +112,7 @@ type HeroStatus = HomeStatus;
 /** Tile order: the client's four, then not approved (rejected by lab) and delivery date changed. */
 // (order comes from the store: dashOrder, set in Account › Dashboard)
 // Chip = glossy gradient icon (.go-chip-* in go.css); one consistent filled icon set.
-const HERO: Record<HeroStatus, { wash: string; ring: string; chip: string; glow: string; count: string; icon: React.ComponentType<{ className?: string }> }> = {
+export const HERO: Record<HeroStatus, { wash: string; ring: string; chip: string; glow: string; count: string; icon: React.ComponentType<{ className?: string }> }> = {
   overdue: { icon: Clock, wash: 'from-go-bad-soft', ring: 'border-go-bad/25', chip: 'go-chip-overdue', glow: 'bg-go-bad/30', count: 'text-go-bad' },
   ready: { icon: Truck, wash: 'from-go-warn-soft', ring: 'border-go-warn/25', chip: 'go-chip-ready', glow: 'bg-go-warn/30', count: 'text-go-warn' },
   'on-hold': { icon: Pause, wash: 'from-go-violet-soft', ring: 'border-go-violet/25', chip: 'go-chip-hold', glow: 'bg-go-violet/30', count: 'text-go-violet' },
@@ -143,12 +143,10 @@ function Faces({ list }: { list: LabCase[] }) {
   );
 }
 
-function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?: boolean }) {
-  const navigate = useNavigate();
-  const base = useBase();
-  const a = ATTENTION.find(x => x.id === id)!;
-  const st = STATUS_STYLE[id];
-  const h = HERO[id];
+type HeroStyle = { wash: string; ring: string; chip: string; glow: string; count: string; icon: React.ComponentType<{ className?: string }> };
+
+/** The clinic's hero tile (tinted gradient, glossy chip, big count, patient initials). Also used by the lab dashboard. */
+export function HeroTile({ h, label, list, wide, onClick, aria }: { h: HeroStyle; label: string; list: LabCase[]; wide?: boolean; onClick: () => void; aria: string }) {
   const Icon = h.icon;
   const n = list.length;
   const shell = cx('relative w-full h-full overflow-hidden text-left rounded-[24px] border bg-gradient-to-br to-go-surface go-card-shadow active:scale-[.98] transition', h.wash, h.ring);
@@ -159,22 +157,21 @@ function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?
       <Icon className={cx('pointer-events-none absolute -bottom-3 -right-3 w-20 h-20 opacity-[0.07]', h.count)} />
     </>
   );
-  const label = (
+  const title = (
     <span className="relative flex items-center gap-1">
-      <span className="text-[13.5px] font-semibold text-go-ink">{st.short}</span>
+      <span className="text-[13.5px] font-semibold text-go-ink">{label}</span>
       <ChevronRight className="w-3.5 h-3.5 text-go-faint" />
     </span>
   );
-
   if (wide) {
     return (
-      <button onClick={() => navigate(`${base}/work?f=${id}`)} aria-label={`${a.label}: ${n}`} className={cx(shell, 'flex items-center gap-3.5 p-4')}>
+      <button onClick={onClick} aria-label={aria} className={cx(shell, 'flex items-center gap-3.5 p-4')}>
         {deco}
         <span className={cx('go-chip w-12 h-12 rounded-[16px] flex items-center justify-center flex-shrink-0', h.chip)}>
           <Icon className="w-6 h-6" />
         </span>
         <span className="relative flex-1 min-w-0">
-          {label}
+          {title}
           <span className="block mt-2"><Faces list={list} /></span>
         </span>
         <span className="relative text-[44px] font-bold tabular-nums leading-none tracking-tight text-go-ink pr-1">{n}</span>
@@ -182,7 +179,7 @@ function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?
     );
   }
   return (
-    <button onClick={() => navigate(`${base}/work?f=${id}`)} aria-label={`${a.label}: ${n}`} className={cx(shell, 'p-3.5 pb-3')}>
+    <button onClick={onClick} aria-label={aria} className={cx(shell, 'p-3.5 pb-3')}>
       {deco}
       <span className="relative flex items-center justify-between">
         <span className={cx('go-chip w-10 h-10 rounded-[14px] flex items-center justify-center', h.chip)}>
@@ -191,9 +188,16 @@ function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?
         <Faces list={list} />
       </span>
       <span className="relative block text-[34px] font-bold tabular-nums leading-none tracking-tight mt-3 text-go-ink">{n}</span>
-      <span className="block mt-1.5">{label}</span>
+      <span className="block mt-1.5">{title}</span>
     </button>
   );
+}
+
+function StatusTile({ id, list, wide }: { id: HeroStatus; list: LabCase[]; wide?: boolean }) {
+  const navigate = useNavigate();
+  const base = useBase();
+  const a = ATTENTION.find(x => x.id === id)!;
+  return <HeroTile h={HERO[id]} label={STATUS_STYLE[id].short} list={list} wide={wide} onClick={() => navigate(`${base}/work?f=${id}`)} aria={`${a.label}: ${list.length}`} />;
 }
 
 export function StatusTiles({ cases }: { cases: LabCase[] }) {
