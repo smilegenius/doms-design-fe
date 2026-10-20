@@ -8,7 +8,7 @@ import {
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply, Pencil,
   Copy, Plug, GitBranch, Lock as LockIcon,
-  History as HistoryIcon,
+  History as HistoryIcon, Truck, Package,
 } from 'lucide-react';
 import SideDrawer from '../components/SideDrawer';
 import ActionMenu from '../components/ActionMenu';
@@ -72,7 +72,7 @@ const SHOW_CONVERSATION_HUB = false;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type CaseStatus = 'draft' | 'new' | 'sent-for-review' | 'submitted' | 'in-production' | 'quality-check' | 'shipped' | 'delivered' | 'refinement' | 'on-hold' | 'completed';
+type CaseStatus = 'draft' | 'new' | 'sent-for-review' | 'ready-for-dispatch' | 'submitted' | 'in-production' | 'quality-check' | 'shipped' | 'delivered' | 'refinement' | 'on-hold' | 'completed';
 type Tab = 'prescription' | 'timeline' | 'invoice' | 'shipping';
 type ViewerFormat = '3D' | 'PLY' | 'STL' | 'OBJ';
 
@@ -301,6 +301,7 @@ interface CaseDetailPageProps {
 export const STATUS_MAP: Record<CaseStatus, { label: string; bg: string; color: string; border: string; banner: string; dot: string }> = {
   draft:          { label: 'Draft',         bg: '#F3F3F5', color: '#5A5568', border: '#E0E0E6', banner: '#F8F9FC', dot: '#A0A0B0' },
   new:            { label: 'New',           bg: '#EEF4FF', color: '#1565C0', border: '#BFDBFE', banner: '#EFF6FF', dot: '#4D8EF7' },
+  'ready-for-dispatch':{ label: 'Ready for Dispatch', bg: '#FFF8E1', color: '#B45309', border: '#FDE68A', banner: '#FFFBEB', dot: '#F59E0B' },
   'sent-for-review':{ label: 'Sent for Review', bg: '#EEF2FF', color: '#4338CA', border: '#C7D2FE', banner: '#EEF2FF', dot: '#6366F1' },
   submitted:      { label: 'Submitted',     bg: '#FFF7ED', color: '#C2410C', border: '#FED7AA', banner: '#FFF7ED', dot: '#F97316' },
   'in-production':{ label: 'In Production', bg: '#F5F3FF', color: '#6D28D9', border: '#DDD6FE', banner: '#F5F3FF', dot: '#8B5CF6' },
@@ -406,7 +407,7 @@ const PIPELINE_RANK: Record<CaseStatus, number> = {
   shipped: 4, delivered: 5,
   // Soft states stay where the case currently sits in the pipeline.
   // "Sent for Review" is an early hold — the case is paused waiting on the dentist.
-  'sent-for-review': 1, refinement: 3, 'on-hold': 2, completed: 5,
+  'sent-for-review': 1, 'ready-for-dispatch': 0, refinement: 3, 'on-hold': 2, completed: 5,
 };
 
 function buildCasePipeline(c: CaseForDetail): CaseTimelineStep[] {
@@ -3998,6 +3999,145 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
+// ─── Ready for dispatch · print the order form + label and ship ───────────────
+// A clinic's manual case (Impressions by post) is created as Ready for Dispatch:
+// it is not with the lab yet. The receptionist prints the order form and label,
+// picks a courier and packaging, optionally adds a tracking number, and sends
+// it — which submits the case to the lab.
+const DISPATCH_COURIERS = ['Lab Courier', 'Royal Mail', 'DPD', 'DHL'];
+const OTHER_COURIER = 'Other';
+
+// Deterministic QR-style pattern from the case ID — a stand-in for the real code.
+function FakeQr({ seed }: { seed: string }) {
+  const cells = useMemo(() => {
+    let h = 0;
+    for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return Array.from({ length: 121 }, (_, i) => {
+      const x = i % 11, y = Math.floor(i / 11);
+      if ((x < 3 && y < 3) || (x > 7 && y < 3) || (x < 3 && y > 7)) return !(x === 1 && y === 1) && !(x === 9 && y === 1) && !(x === 1 && y === 9);
+      h = (h * 1103515245 + 12345) >>> 0;
+      return (h >> 16) % 2 === 0;
+    });
+  }, [seed]);
+  return (
+    <div className="grid grid-cols-11 gap-[1.5px] w-[74px] h-[74px] flex-shrink-0" aria-hidden>
+      {cells.map((on, i) => <span key={i} className={`rounded-[1px] ${on ? 'bg-[#030213]' : ''}`} />)}
+    </div>
+  );
+}
+
+function ReadyForDispatchPanel({ lab, caseId, patient, practice, service, delivery, onDispatch }: { lab: string; caseId: string; patient: string; practice: string; service: string; delivery?: string | null; onDispatch: (details: { courier: string; packaging: string; tracking: string }) => void }) {
+  const [open, setOpen] = useState(false);
+  const [courier, setCourier] = useState(DISPATCH_COURIERS[0]);
+  const [packaging, setPackaging] = useState('Bag');
+  const [otherCourier, setOtherCourier] = useState('');
+  const [tracking, setTracking] = useState('');
+  const courierName = courier === OTHER_COURIER ? otherCourier.trim() : courier;
+  const pick = (active: boolean) =>
+    `px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${active ? 'bg-[#EEF4FF] border-[#4D8EF7] text-[#1565C0]' : 'bg-white border-[#E0E0E6] text-[#5A5568] hover:bg-[#F8F9FC]'}`;
+  return (
+    <>
+      <div className="mx-6 mt-1 flex items-center gap-3 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-5 py-3">
+        <Package className="w-4 h-4 text-[#B45309] flex-shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-[#92400E]">Ready for dispatch</p>
+          <p className="text-[11px] text-[#92400E]/80 leading-snug mt-0.5">
+            This case is not with {lab} yet. Print the order form and label, then send the impressions.
+          </p>
+        </div>
+        <button
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity whitespace-nowrap flex-shrink-0"
+        >
+          <Printer className="w-3.5 h-3.5" />
+          Print label &amp; dispatch
+        </button>
+      </div>
+      {open && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6]">
+                <div>
+                  <p className="text-sm font-semibold text-[#030213]">Dispatch to {lab}</p>
+                  <p className="text-[11px] text-[#717182] mt-0.5">Add the shipping details, then print the order form and label.</p>
+                </div>
+                <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                {/* The label that gets printed — always black on white. */}
+                <div className="rounded-xl border border-[#E0E0E6] bg-white p-3.5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-[#717182]">Smile Genius · Lab work</p>
+                    <p className="text-[9px] font-semibold text-[#717182]">Private</p>
+                  </div>
+                  <div className="flex items-center gap-3.5 mt-2">
+                    <FakeQr seed={caseId} />
+                    <div className="min-w-0">
+                      <p className="text-lg font-bold text-[#030213] leading-tight font-mono">{caseId}</p>
+                      <p className="text-xs font-semibold text-[#030213] mt-1 truncate">{patient} · {service}</p>
+                      <p className="text-[11px] text-[#5A5568] truncate">To: {lab}</p>
+                      {delivery && <p className="text-[11px] text-[#5A5568]">Delivery date {delivery}</p>}
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-[#A0A0B0] mt-1.5">From {practice}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Courier</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[...DISPATCH_COURIERS, OTHER_COURIER].map(c => <button key={c} onClick={() => setCourier(c)} className={pick(courier === c)}>{c}</button>)}
+                  </div>
+                  {courier === OTHER_COURIER && (
+                    <input
+                      autoFocus
+                      value={otherCourier}
+                      onChange={e => setOtherCourier(e.target.value)}
+                      placeholder="Enter courier name"
+                      className="w-full mt-2 px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg"
+                    />
+                  )}
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Delivery method</p>
+                  <div className="flex gap-1.5">
+                    {['Bag', 'Box'].map(p => <button key={p} onClick={() => setPackaging(p)} className={pick(packaging === p)}>{p}</button>)}
+                  </div>
+                  <p className="text-[10px] text-[#8B8B9E] mt-1">Collected from the clinic.</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Tracking number <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <input
+                    value={tracking}
+                    onChange={e => setTracking(e.target.value)}
+                    placeholder="e.g. RM123456789GB"
+                    className="w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#F0EFF6]">
+                <button onClick={() => setOpen(false)} className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={() => { setOpen(false); onDispatch({ courier: courierName, packaging, tracking }); }}
+                  disabled={!courierName}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  Print &amp; dispatch
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+    </>
+  );
+}
+
 export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onPickStatus, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onOpenDraftCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach, viewerPortal, listLabel = 'Cases' }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
@@ -4463,6 +4603,21 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         </div>
       )}
 
+      {caseData.status === 'ready-for-dispatch' && (
+        <ReadyForDispatchPanel
+          lab={caseData.lab ?? 'the lab'}
+          caseId={caseData.id}
+          patient={caseData.patientName}
+          practice={caseData.practice}
+          service={caseData.serviceItems?.map(si => si.name).join(', ') || 'Lab work'}
+          delivery={caseData.requestedDelivery}
+          onDispatch={({ courier, packaging, tracking }) => {
+            onSetStatus?.('submitted');
+            toast.success(`Order form and label printed — ${courier} (${packaging.toLowerCase()})${tracking ? `, tracking ${tracking}` : ''}. Case submitted to the lab.`);
+          }}
+        />
+      )}
+
       {/* ── Status timeline strip — mirrors the live portal: each status the
             case has passed through, who did it and when, above the case card.
             Click any step for the full timeline modal. ── */}
@@ -4527,7 +4682,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               menu; the details grid below is always open. */}
           <div className="ml-auto flex items-center gap-2 flex-shrink-0">
             {/* Multi-service / multi-stage cases are received per service or stage on their cards. */}
-            {caseData.status !== 'delivered' && caseData.status !== 'completed'
+            {caseData.status !== 'delivered' && caseData.status !== 'completed' && caseData.status !== 'ready-for-dispatch'
               && (caseData.serviceItems?.length ?? 0) <= 1
               && !caseData.serviceItems?.some(si => (si.stages?.length ?? 0) > 1 || isDentureService(si.name)) && (
               <button

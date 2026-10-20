@@ -1138,7 +1138,7 @@ function IteroUploadPane({ uploadedCount, onUploadZip, onView3D, orderNumber = '
 
 export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraft, counterparty = 'clinic' }: {
   onCancel: () => void;
-  onSubmitted: () => void;
+  onSubmitted: (openCaseId?: string) => void;
   /** No longer rendered — kept on the parent so the route survives, but
       the in-page switch button has been removed. */
   onUseDetailed?: () => void;
@@ -1238,6 +1238,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       caseSource: prefillDraft.source === 'email' ? 'Email' : '',
     };
   }, [prefillDraft]);
+  // New Lab Work in the clinic portal starts on Impressions (By Post) — the
+  // case is then printed and shipped by the clinic rather than sent straight
+  // to the lab. Still editable.
+  const defaultCaseSource = !isLab && !prefillDraft ? 'Impressions (By Post)' : '';
   const [isResumedDraft, setIsResumedDraft] = useState(!!draft);
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(draft?.savedAt ?? null);
 
@@ -1248,7 +1252,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // default so the user explicitly picks Via Scanner / Impressions / SMS
   // / etc. rather than silently committing to "Via Scanner" on every case.
   // Email-sourced drafts default to 'Email' so the lab can see the origin.
-  const [caseSource, setCaseSource]                 = useState(draft?.caseSource ?? prefillDraftSeed?.caseSource ?? '');
+  const [caseSource, setCaseSource]                 = useState(draft?.caseSource ?? prefillDraftSeed?.caseSource ?? defaultCaseSource);
   const [caseSourceFiles, setCaseSourceFiles]       = useState<Record<string, string | null>>(draft?.caseSourceFiles ?? {});
   const [caseSourceExtraFiles, setCaseSourceExtras] = useState<string[]>(draft?.caseSourceExtraFiles ?? []);
   const [caseSourceScanner, setCaseSourceScanner]   = useState(draft?.caseSourceScanner ?? '');
@@ -1681,12 +1685,15 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // freshly created case sits inside the lookback window with the mock data.
   function buildCaseRecord(id: string): Case {
     const created = formatCaseDate(DEMO_TODAY);
+    // A clinic's impressions-by-post case waits for the clinic to print and
+    // ship it; it only becomes Submitted (at the lab) once dispatched.
+    const initialStatus: Case['status'] = !isLab && caseSource === 'Impressions (By Post)' ? 'ready-for-dispatch' : 'submitted';
     // Dates are per service; a denture has none of its own — each stage
     // carries one instead.
     const serviceItems = selections.map((sel, i) => ({
       id: `${id}-s${i + 1}`,
       name: CATALOG_ID_TO_SERVICE_NAME[sel.itemId] ?? getServiceDisplayName(sel),
-      status: 'submitted' as const,
+      status: initialStatus,
       deliveryDate: !isDentureItem(sel.itemId) && sel.requestedDelivery ? isoToCaseDate(sel.requestedDelivery) : null,
       stageDates: isDentureItem(sel.itemId)
         ? Object.fromEntries((sel.stages ?? []).map(s => [s, sel.stageDates?.[s] ? isoToCaseDate(sel.stageDates[s]) : null]))
@@ -1709,7 +1716,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       lab: isLab ? LAB_PORTAL_LAB : (selectedLab?.name ?? LAB_PORTAL_LAB),
       services: serviceItems.map(si => si.name),
       serviceItems,
-      status: 'submitted',
+      status: initialStatus,
       createdAt: created,
       updatedAt: created,
       requestedDelivery: earliestRequestedISO ? isoToCaseDate(earliestRequestedISO) : null,
@@ -1885,7 +1892,9 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         }
       }
     }
-    onSubmitted();
+    // A case waiting to be printed and shipped opens straight away, where the
+    // dispatch step is.
+    onSubmitted(record.status === 'ready-for-dispatch' ? record.id : undefined);
   }
 
   // Snapshot the current form state into localStorage. The next visit to

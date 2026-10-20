@@ -82,12 +82,15 @@ export function DispatchScreen() {
   const { updateCase, toast } = useGo();
   const [printed, setPrinted] = useState(false);
   const [courier, setCourier] = useState<string | null>(null);
+  // "Other" asks for the courier's name, which is what gets recorded.
+  const [otherCourier, setOtherCourier] = useState('');
   const [tracking, setTracking] = useState('');
   const [collected, setCollected] = useState(() => new Date().toISOString().slice(0, 10));
   const [bags, setBags] = useState(1);
   const [notes, setNotes] = useState('');
   if (!c) return <Missing />;
   const lab = labName(c.lab);
+  const courierName = courier === 'Other' ? otherCourier.trim() : courier;
   const needsTracking = courier && !["Lab's own courier", 'Hand delivered'].includes(courier);
 
   if (c.stage !== 'ready') {
@@ -102,8 +105,8 @@ export function DispatchScreen() {
   const submit = () => {
     updateCase(c.id, x => ({
       stage: 'dispatched',
-      dispatch: { courier: courier!, tracking: tracking || undefined, bags, notes: notes || undefined },
-      events: [...x.events, { stage: 'dispatched', at: nowIso(), by: ME.name, text: [courier, tracking].filter(Boolean).join(' · ') }],
+      dispatch: { courier: courierName!, tracking: tracking || undefined, bags, notes: notes || undefined },
+      events: [...x.events, { stage: 'dispatched', at: nowIso(), by: ME.name, text: [courierName, tracking].filter(Boolean).join(' · ') }],
     }));
     toast(`Dispatched to ${lab}`);
     router.replace(`/work/${c.id}` as never);
@@ -118,7 +121,7 @@ export function DispatchScreen() {
             onPress={() => { setPrinted(true); toast('Label sent to the reception printer', 'info'); }}>
             {printed ? 'Printed' : 'Print'}
           </Btn>
-          <Btn className="flex-1 min-w-0" disabled={!courier} onPress={submit} icon={<Truck className="w-5 h-5 text-white" />}>Mark as dispatched</Btn>
+          <Btn className="flex-1 min-w-0" disabled={!courierName} onPress={submit} icon={<Truck className="w-5 h-5 text-white" />}>Mark as dispatched</Btn>
         </View>
       }>
       <Section title="1 · Print label" className="!mt-2">
@@ -135,7 +138,9 @@ export function DispatchScreen() {
 
       <Section title="3 · Courier">
         <View className="gap-5">
-          <View><Label>Courier</Label><Chips options={COURIERS} value={courier} onChange={setCourier} /></View>
+          <View><Label>Courier</Label><Chips options={COURIERS} value={courier} onChange={setCourier} />
+            {courier === 'Other' && <Input className="mt-3" value={otherCourier} onChangeText={setOtherCourier} placeholder="Enter courier name" />}
+          </View>
           {!!needsTracking && (
             <View>
               <Label optional>Tracking number</Label>

@@ -15,6 +15,7 @@ import FlowsPage from './pages/FlowsPage';
 import CareStackFlowPage from './pages/CareStackFlowPage';
 import WhatsAppFlowPage from './pages/WhatsAppFlowPage';
 import HotfixesFlowPage from './pages/HotfixesFlowPage';
+import ManualCaseDispatchFlowPage from './pages/ManualCaseDispatchFlowPage';
 import DentureStagesFlowPage from './pages/DentureStagesFlowPage';
 import DentistContactFlowPage from './pages/DentistContactFlowPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
@@ -438,6 +439,7 @@ export default function App() {
       <Route path="/flows/hotfixes-30-sep" element={<HotfixesFlowPage />} />
       <Route path="/flows/denture-stages" element={<DentureStagesFlowPage />} />
       <Route path="/flows/dentist-contact" element={<DentistContactFlowPage />} />
+      <Route path="/flows/manual-case-dispatch" element={<ManualCaseDispatchFlowPage />} />
       {/* Smile Genius Go — clinician / dentist mobile app. Has its own demo
           sign-in, so it sits outside ProtectedRoute. */}
       <Route path="/go" element={<GoVersionSelect />} />

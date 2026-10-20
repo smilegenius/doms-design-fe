@@ -66,12 +66,15 @@ export function DispatchScreen() {
   const navigate = useNavigate();
   const [printed, setPrinted] = useState(false);
   const [courier, setCourier] = useState<string | null>(null);
+  // "Other" asks for the courier's name, which is what gets recorded.
+  const [otherCourier, setOtherCourier] = useState('');
   const [tracking, setTracking] = useState('');
   const [collected, setCollected] = useState(() => new Date().toISOString().slice(0, 10));
   const [bags, setBags] = useState(1);
   const [notes, setNotes] = useState('');
   if (!c) return <Missing />;
   const lab = labName(c.lab);
+  const courierName = courier === 'Other' ? otherCourier.trim() : courier;
   const needsTracking = courier && !["Lab's own courier", 'Hand delivered'].includes(courier);
 
   if (c.stage !== 'ready') {
@@ -86,8 +89,8 @@ export function DispatchScreen() {
   const submit = () => {
     updateCase(c.id, x => ({
       stage: 'dispatched',
-      dispatch: { courier: courier!, tracking: tracking || undefined, bags, notes: notes || undefined },
-      events: [...x.events, { stage: 'dispatched', at: nowIso(), by: ME.name, text: [courier, tracking].filter(Boolean).join(' · ') }],
+      dispatch: { courier: courierName!, tracking: tracking || undefined, bags, notes: notes || undefined },
+      events: [...x.events, { stage: 'dispatched', at: nowIso(), by: ME.name, text: [courierName, tracking].filter(Boolean).join(' · ') }],
     }));
     toast(`Dispatched to ${lab}`);
     navigate(`/go/work/${c.id}`, { replace: true });
@@ -102,7 +105,7 @@ export function DispatchScreen() {
             onClick={() => { setPrinted(true); toast('Label sent to the reception printer', 'info'); }}>
             {printed ? 'Printed' : 'Print'}
           </Btn>
-          <Btn className="flex-1 min-w-0" disabled={!courier} onClick={submit} icon={<Truck className="w-5 h-5" />}>Mark as dispatched</Btn>
+          <Btn className="flex-1 min-w-0" disabled={!courierName} onClick={submit} icon={<Truck className="w-5 h-5" />}>Mark as dispatched</Btn>
         </div>
       }>
       <Section title="1 · Print label" className="!mt-2">
@@ -119,7 +122,9 @@ export function DispatchScreen() {
 
       <Section title="3 · Courier">
         <div className="space-y-5">
-          <div><Label>Courier</Label><Chips options={COURIERS} value={courier} onChange={setCourier} /></div>
+          <div><Label>Courier</Label><Chips options={COURIERS} value={courier} onChange={setCourier} />
+            {courier === 'Other' && <Input className="mt-3" value={otherCourier} onChange={e => setOtherCourier(e.target.value)} placeholder="Enter courier name" autoFocus />}
+          </div>
           {needsTracking && (
             <div><Label optional>Tracking number</Label><Input value={tracking} onChange={e => setTracking(e.target.value.toUpperCase())} placeholder="e.g. AB123456789GB" className="font-mono" /></div>
           )}

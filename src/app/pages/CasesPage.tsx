@@ -69,6 +69,7 @@ export type CaseStatus =
   | 'draft'
   | 'new'
   | 'sent-for-review'
+  | 'ready-for-dispatch'
   | 'submitted'
   | 'in-production'
   | 'quality-check'
@@ -1183,12 +1184,45 @@ export const whatsappDemoCase: Case = {
 };
 mockCases.unshift(whatsappDemoCase);
 
+// ── Ready-for-dispatch demo case (clinic portal) ─────────────────────────────
+// A manual impressions case waiting to be printed and shipped — the example the
+// "new stage in manual case creation" walkthrough opens. Dispatching it from
+// the case moves it to Submitted for the session. Lab / DSO lists never show it:
+// it is not with the lab yet.
+export const DISPATCH_DEMO_CASE_ID = 'CASE-DISP-4001';
+export const dispatchDemoCase: Case = {
+  id: DISPATCH_DEMO_CASE_ID,
+  patientName: 'Maya Fernandez',
+  practice: 'Smile Genius Belfast',
+  dentist: 'Dr. Webb',
+  lab: 'Smile Genius Lab',
+  services: ['Crown'],
+  serviceItems: [{
+    id: 'disp4001-s1', name: 'Crown', status: 'ready-for-dispatch', deliveryDate: '03-Jul-2026',
+    fdi: [36], material: 'Zirconia', shade: 'A3', orderType: 'Private',
+    instructions: 'Impressions to follow by post.',
+    scanFileCount: 0,
+    attachmentCount: 0,
+  }],
+  status: 'ready-for-dispatch',
+  createdAt: '28-Jun-2026',
+  updatedAt: '28-Jun-2026',
+  requestedDelivery: '03-Jul-2026',
+  hasAlert: false,
+  scanner: 'iTero',
+  source: 'post',
+  createdBy: 'Sana Khan',
+  createdBySide: 'clinic',
+};
+mockCases.unshift(dispatchDemoCase);
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<CaseStatus, string> = {
   draft: 'Draft',
   new: 'New',
   'sent-for-review': 'Sent for Review',
+  'ready-for-dispatch': 'Ready for Dispatch',
   submitted: 'Submitted',
   'in-production': 'In Production',
   'quality-check': 'Quality Check',
@@ -1203,6 +1237,7 @@ const STATUS_STYLE: Record<CaseStatus, { bg: string; text: string; border: strin
   draft:           { bg: '#FFF8E1', text: '#A16207', border: '#FDE68A', icon: PenLine },
   new:             { bg: '#F3F3F5', text: '#5A5568', border: '#E0E0E6', icon: Package },
   'sent-for-review':{ bg: '#EEF2FF', text: '#4338CA', border: '#C7D2FE', icon: Mail },
+  'ready-for-dispatch':{ bg: '#FFF8E1', text: '#B45309', border: '#FDE68A', icon: Package },
   submitted:       { bg: '#EEF4FF', text: '#1565C0', border: '#C8D8FC', icon: Package },
   'in-production': { bg: '#F5F3FF', text: '#7C3AED', border: '#EDE9FE', icon: RefreshCw },
   'quality-check': { bg: '#FFF7ED', text: '#E65100', border: '#FED7AA', icon: CheckCircle2 },
@@ -1851,7 +1886,8 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   const [apptAction, setApptAction] = useState<{ c: Case; kind: 'link' | 'not-required' } | null>(null);
   const [cases, setCases] = useState<Case[]>(() => {
     const base = caseViewLimit != null ? [upgradeDemoCase, ...mockCases] : mockCases;
-    return [...getCreatedCases(), ...base];
+    // A case still waiting to be posted is the clinic's alone.
+    return [...getCreatedCases(), ...base].filter(c => portal === 'clinic' || c.status !== 'ready-for-dispatch');
   });
   // Merge in anything created after mount (the user submitting the creation
   // form) without disturbing edits already made to the cases in state.
@@ -1864,7 +1900,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   const [showArchived, setShowArchived] = useState(false);
   const [selectedCase, setSelectedCase] = useState<Case | null>(() => {
     if (initialCaseId) {
-      const c = mockCases.find(c => c.id === initialCaseId);
+      const c = [...getCreatedCases(), ...mockCases].find(c => c.id === initialCaseId);
       // Drafts go to the creation flow (handled by the effect below), never the
       // read-only detail — so don't seed a draft into selectedCase here.
       if (c && !(c.status === 'draft' && onOpenDraft)) return c;
@@ -1876,7 +1912,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   // navigate the case detail like real pages.
   React.useEffect(() => {
     if (!initialCaseId) { setSelectedCase(null); return; }
-    const c = mockCases.find(c => c.id === initialCaseId);
+    const c = [...getCreatedCases(), ...mockCases].find(c => c.id === initialCaseId);
     if (!c) return;
     // A deep-linked draft opens the prefilled creation flow, matching a click.
     if (c.status === 'draft' && onOpenDraft) { onOpenDraft(c); return; }
@@ -2203,8 +2239,12 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
       case 'created-oldest': arr.sort((a, b) => parseDate(a.createdAt).getTime() - parseDate(b.createdAt).getTime()); break;
       case 'updated-newest': arr.sort((a, b) => parseDate(b.updatedAt).getTime() - parseDate(a.updatedAt).getTime()); break;
     }
+    // Cases waiting to be printed and shipped need the clinic's action — keep
+    // them at the top whatever the sort (the demo clock puts a new case
+    // behind older seeded ones otherwise).
+    if (portal === 'clinic') arr.sort((a, b) => Number(b.status === 'ready-for-dispatch') - Number(a.status === 'ready-for-dispatch'));
     return arr;
-  }, [filtered, sortBy, colSort, colDir]);
+  }, [filtered, sortBy, colSort, colDir, portal]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / itemsPerPage));
   const paginated = sorted.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -2347,12 +2387,14 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   // Apply a status change to a case (from the listing or the detail page),
   // updating both the list and the open detail snapshot. When an override is
   // supplied it's recorded on the case so the reason + who/when shows everywhere.
-  function applyStatusChange(c: Case, toStatus: CaseStatus, override?: StatusOverride) {
+  function applyStatusChange(c: Case, toStatus: CaseStatus, override?: StatusOverride, quiet = false) {
     setCases(prev => prev.map(x => x.id === c.id ? { ...x, status: toStatus, statusOverride: override ?? x.statusOverride } : x));
     setSelectedCase(prev => prev && prev.id === c.id ? { ...prev, status: toStatus, statusOverride: override ?? prev.statusOverride } : prev);
-    if (override) toast.success(`${c.id} → ${STATUS_LABEL[toStatus]} (override recorded)`);
-    else toast.success(`${c.id} → ${STATUS_LABEL[toStatus]}`);
-    if (toStatus !== c.status && (scannerSyncUnsupported(c, toStatus) || (showStatusReachNotice && !reachFor(c).reaches))) {
+    if (!quiet) {
+      if (override) toast.success(`${c.id} → ${STATUS_LABEL[toStatus]} (override recorded)`);
+      else toast.success(`${c.id} → ${STATUS_LABEL[toStatus]}`);
+    }
+    if (!quiet && toStatus !== c.status && (scannerSyncUnsupported(c, toStatus) || (showStatusReachNotice && !reachFor(c).reaches))) {
       toast.info(SCANNER_SYNC_COPY);
     }
     // CareStack milestones — mirrored onto the linked appointment as notes and
@@ -2462,7 +2504,8 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
           // Clinics can't change a status by hand: receiving is their only way.
           onRequestStatusChange={isClinic ? undefined : () => setStatusModalCase(selectedCase)}
           onPickStatus={isClinic ? undefined : (s) => pickStatus(selectedCase, s as CaseStatus)}
-          onSetStatus={(toStatus) => applyStatusChange(selectedCase, toStatus)}
+          // Dispatching a Ready for Dispatch case speaks for itself: the detail page shows its own single confirmation.
+          onSetStatus={(toStatus) => applyStatusChange(selectedCase, toStatus, undefined, selectedCase.status === 'ready-for-dispatch')}
           onDeliveryDateChange={(next) => applyDeliveryDateChange(selectedCase, next)}
           onRequestShipmentDetails={() => setShipmentModalCase(selectedCase)}
           showOfflineLabNotice={showOfflineLabNotice}

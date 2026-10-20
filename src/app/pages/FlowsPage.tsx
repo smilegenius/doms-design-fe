@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX, Truck, Play } from 'lucide-react';
+import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 
 // ─── Flows ───────────────────────────────────────────────────────────────────
@@ -23,9 +24,26 @@ export interface FlowEntry {
   date?: string;
   /** Timeline group, as 'YYYY-MM'. The page lists months newest first. */
   month: string;
+  /** Optional secondary button for flows that are a click-through simulation. */
+  simulate?: { label: string; path: string };
 }
 
 export const FLOWS: FlowEntry[] = [
+  {
+    // Clinic manual creation now ends in print & ship, not a direct hand-off.
+    title: 'Addition of new stage in manual case creation',
+    description: 'A clinic creating New Lab Work starts on Impressions (By Post). The case does not go straight to the lab: it becomes Ready for dispatch, the receptionist prints the order form and label, picks a courier, and only then is it Submitted.',
+    detail: 'Clinic · Simulation',
+    icon: <Truck className="w-5 h-5 text-[#B45309]" />,
+    badge: 'Simulation',
+    accent: '#B45309',
+    accentSoft: '#FFF8E1',
+    path: '/flows/manual-case-dispatch',
+    date: '20 Oct 2026',
+    month: '2026-10',
+    // Straight onto the real clinic screen, signed in as the demo account.
+    simulate: { label: 'Run simulation', path: '/clinic/cases/quick-new' },
+  },
   {
     // Negative scenarios: chasing a dentist who has no email / no number on file.
     title: 'Dentist with no contact on file',
@@ -114,10 +132,15 @@ function flowsByMonth(flows: FlowEntry[]) {
 }
 
 export function FlowCard({ flow, onOpen }: { flow: FlowEntry; onOpen: () => void }) {
+  const navigate = useNavigate();
+  const { user, login } = useAuth();
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
-      className="group relative w-full h-full text-left bg-white border border-[#E0E0E6] rounded-2xl p-5 overflow-hidden hover:shadow-xl hover:border-current transition-all"
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+      className="group relative w-full h-full cursor-pointer text-left bg-white border border-[#E0E0E6] rounded-2xl p-5 overflow-hidden hover:shadow-xl hover:border-current transition-all"
       style={{ color: flow.accent }}
     >
       <div
@@ -148,10 +171,24 @@ export function FlowCard({ flow, onOpen }: { flow: FlowEntry; onOpen: () => void
           <p className="text-[10px] font-semibold uppercase tracking-widest mt-2.5" style={{ color: flow.accent }}>
             {flow.detail}
           </p>
+          {flow.simulate && (
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                if (!user) login(DEMO_ACCOUNT_EMAIL, 'demo');
+                navigate(flow.simulate!.path);
+              }}
+              className="relative mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+              style={{ background: flow.accent }}
+            >
+              <Play className="w-3 h-3 fill-current" />
+              {flow.simulate.label}
+            </button>
+          )}
         </div>
         <ArrowRight className="w-4 h-4 flex-shrink-0 mt-1 group-hover:translate-x-0.5 transition-transform" />
       </div>
-    </button>
+    </div>
   );
 }
 

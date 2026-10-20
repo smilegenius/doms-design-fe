@@ -151,7 +151,7 @@ export default function ClinicApp() {
     return (
       <QuickCreateCasePage
         onCancel={() => setActivePage('cases')}
-        onSubmitted={() => setActivePage('cases')}
+        onSubmitted={(openCaseId) => setActivePage('cases', openCaseId)}
         onUseDetailed={() => setActivePage('create-case')}
         prefillDraft={prefillDraft}
       />
