@@ -37,6 +37,14 @@ import { ensureEmailDemo } from '../forwarded-email/samples';
 import { enterGrowth, leaveGrowth, saveGrowthStash } from '../growthIsolation';
 import WhatsNewPage from '../growth-portal/WhatsNewPage';
 import WhatsNewNavItem from '../growth-portal/WhatsNewNavItem';
+import BillingApp from '../lab-billing/BillingApp';
+import BillingNavItem from '../lab-billing/BillingNavItem';
+import CaseBillingTab, { pendingBillingTab } from '../lab-billing/CaseBillingTab';
+import DesignApp from '../cad-integration/DesignApp';
+import OrderFormPreview from '../bulk-actions/OrderFormPreview';
+import DesignNavItem from '../cad-integration/DesignNavItem';
+import CaseDesignTab, { pendingCadTab } from '../cad-integration/screens/CaseDesignTab';
+import { syncCad, syncCadNotifications, useCad } from '../cad-integration/cadStore';
 
 // ─── Growth Team Feedback: Lab Portal shell (Sales Feedbacks copy, at /growth) ─
 // Mirrors src/app/LabApp.tsx: same URL ↔ page mapping, same Layout, same
@@ -51,7 +59,7 @@ import WhatsNewNavItem from '../growth-portal/WhatsNewNavItem';
 //     website-form drafts a dock with the files the dentist attached.
 //   • Case page: "Design review" and "Request files" items (sandbox overlay).
 
-type LabPage = 'overview' | 'cases' | 'design-studio' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications' | 'updates' | 'email-triage';
+type LabPage = 'overview' | 'cases' | 'design-studio' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications' | 'updates' | 'email-triage' | 'billing' | 'design' | 'order-form';
 
 const PAGE_TO_PATH: Record<LabPage, string> = {
   overview: '',
@@ -66,6 +74,9 @@ const PAGE_TO_PATH: Record<LabPage, string> = {
   messages: 'messages',
   notifications: 'notifications',
   updates: 'updates',
+  billing: 'billing',
+  design: 'design',
+  'order-form': 'order-form',
 };
 const PATH_TO_PAGE: Record<string, LabPage> = {
   '': 'overview',
@@ -78,6 +89,9 @@ const PATH_TO_PAGE: Record<string, LabPage> = {
   messages: 'messages',
   notifications: 'notifications',
   updates: 'updates',
+  billing: 'billing',
+  design: 'design',
+  'order-form': 'order-form',
 };
 
 export default function LabPrescriptionInboxApp() {
@@ -108,6 +122,10 @@ export default function LabPrescriptionInboxApp() {
   // Forwarded emails reach the bell too.
   const fwd = useForwardedEmails();
   useEffect(() => { syncEmailNotifications(); }, [fwd]);
+  // CAD integration: orders for newly accepted cases, dentist decisions, reminders; events reach the bell.
+  const cad = useCad();
+  useEffect(() => { syncCad(); }, [studio]);
+  useEffect(() => { syncCadNotifications(); }, [cad]);
   // Bulk Actions changes cases the list already holds (drafts → cases), which
   // CasesPage only picks up on a fresh mount.
   const [casesVersion, setCasesVersion] = useState(0);
@@ -131,7 +149,7 @@ export default function LabPrescriptionInboxApp() {
     return {
       page,
       caseId:    page === 'cases'    && detailId ? decodeURIComponent(detailId) : undefined,
-      invoiceId: page === 'invoices' && detailId ? decodeURIComponent(detailId) : undefined,
+      invoiceId: page === 'invoices' && detailId ? decodeURIComponent(detailId) : page === 'order-form' && detailId ? decodeURIComponent(detailId) : undefined,
       prefillDraftId: undefined,
     };
   }, [location.pathname]);
@@ -159,7 +177,7 @@ export default function LabPrescriptionInboxApp() {
       tries += 1;
       if (document.querySelector('.sf-design-tab') || tries > 30) { window.clearInterval(t); return; }
       const el = [...document.querySelectorAll<HTMLElement>('main *')].find(e => e.children.length === 0 && e.textContent?.trim() === caseInitialId);
-      if (el) { pendingOpen.value = sf; pendingAttachments.value = sf === 'attachments'; pendingOrderTab.value = sf === 'order'; pendingEmailTab.value = sf === 'email'; el.click(); window.clearInterval(t); return; }
+      if (el) { pendingOpen.value = sf; pendingAttachments.value = sf === 'attachments'; pendingOrderTab.value = sf === 'order'; pendingEmailTab.value = sf === 'email'; pendingBillingTab.value = sf === 'billing'; pendingCadTab.value = sf === 'cad'; el.click(); window.clearInterval(t); return; }
       // Not on the first page of the list: search for it, then click it.
       const search = document.querySelector<HTMLInputElement>('main input[placeholder*="case ID"]');
       if (search && tries === 4) {
@@ -272,6 +290,8 @@ export default function LabPrescriptionInboxApp() {
           {caseInitialId && <CaseAttachmentsOverlay caseId={caseInitialId} />}
           {caseInitialId && <CaseOrderFormTab caseId={caseInitialId} />}
           {caseInitialId && <CaseEmailTab caseId={caseInitialId} />}
+          {caseInitialId && <CaseBillingTab caseId={caseInitialId} />}
+          {caseInitialId && <CaseDesignTab caseId={caseInitialId} />}
           <CasesPage
             key={`${resetVersion}-${intake.resetVersion}-${casesVersion}`}
             portal="lab"
@@ -305,7 +325,12 @@ export default function LabPrescriptionInboxApp() {
       )}
       {activePage === 'settings' && <LabSettingsWithInbox />}
       {activePage === 'updates' && <WhatsNewPage />}
+      {activePage === 'billing' && <BillingApp />}
+      {activePage === 'design' && <DesignApp />}
+      {activePage === 'order-form' && invoiceInitialId && <OrderFormPreview caseId={invoiceInitialId} />}
       <WhatsNewNavItem />
+      <BillingNavItem />
+      <DesignNavItem />
       {activePage === 'notifications' && (
         <NotificationsPage portal="lab" onOpenSettings={() => navigate('/growth/settings?tab=notifications')} />
       )}

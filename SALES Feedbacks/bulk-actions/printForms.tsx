@@ -6,7 +6,7 @@ import { accentFor, getIntakeConfig } from '../intake-form/intakeStore';
 // The Smile Genius smile mark, inlined so it shows in downloaded (offline) forms too.
 import sgMark from '../../public/favicon.svg?raw';
 
-const sgMarkSrc = `data:image/svg+xml;utf8,${encodeURIComponent(sgMark)}`;
+export const sgMarkSrc = `data:image/svg+xml;utf8,${encodeURIComponent(sgMark)}`;
 
 // ── Printing order forms ─────────────────────────────────────────────────────
 // One print window for any number of forms: each page is rendered to static
@@ -56,7 +56,7 @@ function KV({ k, v }: { k: string; v?: ReactNode }) {
 }
 
 /** The lab's logo from Settings → LabLink, or its initials on the lab's accent colour. */
-function LabLogo({ name, logo, accent }: { name: string; logo: string | null; accent: ReturnType<typeof accentFor> }) {
+export function LabLogo({ name, logo, accent }: { name: string; logo: string | null; accent: ReturnType<typeof accentFor> }) {
   if (logo) return <img src={logo} alt={name} style={{ height: 40, maxWidth: 160, objectFit: 'contain', objectPosition: 'left' }} />;
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase()).join('');
   return (
@@ -103,7 +103,7 @@ export function SgOrderFormPrint({ c }: { c: Case }) {
       <tbody>
         <tr><td style={{ padding: 0 }}>
           <Sec title="Details">
-            <KV k="Lab name" v={c.lab} />
+            <KV k="Lab name" v={labName} />
             <KV k="Practice name" v={c.practice} />
             <KV k="Dentist name" v={c.dentist} />
             <KV k="Patient name" v={c.patientName} />

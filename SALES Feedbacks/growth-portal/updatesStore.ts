@@ -12,6 +12,8 @@ export interface UpdateExample {
   /** In-app path (stays in Growth Team Feedback), or a public page opened in a new tab. */
   to: string;
   newTab?: boolean;
+  /** Subsection the link is listed under; worked out from the link when not set. */
+  group?: string;
 }
 
 export interface Update {
@@ -20,11 +22,13 @@ export interface Update {
   title: string;
   tag: UpdateTag;
   note: string;
+  /** One short line shown on the page; the note sits behind "Details". */
+  summary?: string;
   examples: UpdateExample[];
   custom?: boolean;
 }
 
-export const BUCKETS = ['Cases & intake', 'Design', 'Settings & notifications', 'Navigation'] as const;
+export const BUCKETS = ['Cases & intake', 'Billing', 'Design & CAD', 'Settings & notifications', 'Navigation'] as const;
 
 export const BUILT_IN: Update[] = [
   {
@@ -61,6 +65,8 @@ export const BUILT_IN: Update[] = [
     id: 'branded-order-form', bucket: 'Cases & intake', title: 'Lab-branded order form', tag: 'changed',
     note: 'The printed and downloaded Smile Genius order form now carries the lab\'s logo top left and the lab\'s name top right, taken from Settings → LabLink (initials on the lab\'s colour if no logo is uploaded), with a small Smile Genius mark at the bottom. The header and footer repeat on every page, however many pages the form runs to.',
     examples: [
+      { label: 'Branded form: CASE-RS-2002 (scanner case)', to: '/growth/order-form/CASE-RS-2002' },
+      { label: 'Branded form: SG-2026-0519 (LabLink case)', to: '/growth/order-form/SG-2026-0519' },
       { label: 'Print 2 order forms', to: '/growth/cases?bulk=print&ids=CASE-RS-2002,SG-2026-0519' },
       { label: 'Upload the lab logo', to: '/growth/settings?tab=intake-form' },
     ],
@@ -77,12 +83,89 @@ export const BUILT_IN: Update[] = [
     ],
   },
   {
-    id: 'design-studio', bucket: 'Design', title: 'Design Studio', tag: 'new',
+    id: 'billing-home', bucket: 'Billing', title: 'Billing: lab invoicing and Xero sync', tag: 'new',
+    note: 'A new Billing item in the sidebar. Every case is invoiced on dispatch, posted to Xero and emailed; payments are read back from Xero; one statement per account goes out at month end. Billing home is the admin\'s daily inbox: paid, pending and overdue totals, flagged invoices with bulk approve, the On hold queue, smart-assist nudges and the month-end countdown. Admins only. Xero and QuickBooks are simulated.',
+    examples: [
+      { label: 'Billing home', to: '/growth/billing' },
+      { label: 'Flagged invoices', to: '/growth/billing?filter=pending' },
+      { label: 'An invoice (PDF, payments, credit note, void)', to: '/growth/billing/invoices/INV-2418' },
+    ],
+  },
+  {
+    id: 'billing-case', bucket: 'Billing', title: 'Billing tab on the case', tag: 'new',
+    note: 'Next to Order form and Lab Documents: the lines with where each price came from (one click explains it), the NHS / private toggle, stages billed so far for staged work, bought-in parts priced by the item\'s rule, the invoice status, "Bill now", a possible-remake question and the on-hold banner.',
+    examples: [
+      { label: 'Staged denture (billed each stage)', to: '/growth/cases/CASE-DN-3001?sf=billing' },
+      { label: 'Possible remake', to: '/growth/cases/CASE-RS-2002?sf=billing' },
+    ],
+  },
+  {
+    id: 'billing-accounts', bucket: 'Billing', title: 'Billing accounts, dentists, limits and holds', tag: 'new',
+    note: 'Add accounts in three shapes: a practice, a dentist at one practice who pays their own bills, or a dentist who floats across several practices. Map dentists to practices from either side (practice page: add a dentist, who pays; dentist page: practices); cases not yet invoiced move to whoever now pays, and dentists sending cases from a practice they aren\'t linked to show as "Unlinked". Each account has its price list, emails, Xero contact (matched or created), currency, statement of manufacture, balance and ageing, statements and old-system balances. Optional limits count unpaid invoices plus work in progress, warn early, and can pause new cases; a payment in Xero lifts the hold.',
+    examples: [
+      { label: 'Add an account', to: '/growth/billing/accounts' },
+      { label: 'Dentist across practices (Dr. Campbell)', to: '/growth/billing/accounts/acc-d-dr-campbell' },
+      { label: 'Practice with its dentists (Manchester)', to: '/growth/billing/accounts/acc-p-smile-genius-manchester' },
+      { label: 'Account on hold (Birmingham 2)', to: '/growth/billing/accounts/acc-p-smile-genius-birmingham-2' },
+      { label: 'Overseas practice in EUR', to: '/growth/billing/accounts/acc-p-smile-genius-dublin' },
+    ],
+  },
+  {
+    id: 'billing-pricing', bucket: 'Billing', title: 'Catalog, promotions and tiers', tag: 'new',
+    note: 'Add catalog items and edit them in full (code, department, unit, NHS and private prices, billing per stage, component pricing, VAT), archive items without touching old invoices, and change prices from a date: today, back-dated, or scheduled for later, with a price history per item. "Change prices" raises or lowers a department or the whole catalog by a percentage with rounding and a preview. Cases are always priced as of the day they were received. Plus CSV import, order types mapped once, and optional promotions and volume tiers.',
+    examples: [
+      { label: 'Catalog', to: '/growth/billing/catalog' },
+      { label: 'Promotions and tiers', to: '/growth/billing/pricing' },
+    ],
+  },
+  {
+    id: 'billing-setup', bucket: 'Billing', title: 'Billing settings and reports', tag: 'new',
+    note: 'The lab settings with their defaults, connecting or disconnecting Xero or QuickBooks, email templates with the lab logo, the sync and email logs, and six reports Xero can\'t give (unbilled work, account trends, given away, remakes, product mix, cash forecast) with CSV export and the Monday email.',
+    examples: [
+      { label: 'Billing settings', to: '/growth/billing/settings' },
+      { label: 'Reports', to: '/growth/billing/reports' },
+    ],
+  },
+  {
+    id: 'cad-board', bucket: 'Design & CAD', title: 'Design board (exocad & 3Shape)', tag: 'new',
+    note: 'A new Design item in the sidebar. Every digital case becomes a CAD order in exocad or 3Shape (by restoration type), with the case details and scans filled in, and moves across the board: CAD order created, In design, With a partner, Awaiting dentist, Ready to manufacture, Manufacturing, Finishing, Dispatched. Cards show patient, teeth, due date, technician or partner and CAD, with overdue, waiting-on-dentist, queued and duplicate flags. Drag a card onto a technician to assign it, or along the lab columns (Dispatched starts the invoice). The connector is simulated until exocad and 3Shape partner access is agreed.',
+    examples: [
+      { label: 'Design board', to: '/growth/design' },
+      { label: 'Partners', to: '/growth/design/partners' },
+    ],
+  },
+  {
+    id: 'cad-case', bucket: 'Design & CAD', title: 'CAD design tab on the case', tag: 'new',
+    note: 'Next to Order form and Billing: the order as sent to CAD (reference, patient, client, due date, teeth, indication and material from the mapping, shade, implant), the scans with a one-click scan pack, and Open in CAD. Finished designs come back by hand for now: paste the exocad webview or 3Shape Communicate link, or upload the STL and screenshots, and confirm what was designed. Differences from the case (an extra unit, a crown that became an onlay) reprice the invoice draft and flag it. Send for approval creates a Design Studio review link; the dentist\'s answer moves the case on, with reminders, round history and the approved version on record.',
+    examples: [
+      { label: 'Veneers waiting on the dentist', to: '/growth/cases/SG-2026-0481?sf=cad' },
+      { label: 'Possible duplicate order', to: '/growth/cases/CASE-051?sf=cad' },
+      { label: 'Design differs from the case', to: '/growth/cases/CASE-001?sf=cad' },
+    ],
+  },
+  {
+    id: 'cad-partners', bucket: 'Design & CAD', title: 'Outsourced design and milling partners', tag: 'new',
+    note: 'Send any case to a design or milling partner from the case. They get a secure link (no account) to download the scans and order details and upload the design, or confirm dispatch with a tracking number; the result lands on the same case. Late partners are flagged and reminded, and the case can be reassigned.',
+    examples: [
+      { label: 'Partners and late jobs', to: '/growth/design/partners' },
+      { label: 'Partner\'s page (design, late)', to: '/partner/pt_demo01', newTab: true },
+      { label: 'Partner\'s page (milling, shipped)', to: '/partner/pt_demo02', newTab: true },
+    ],
+  },
+  {
+    id: 'cad-settings', bucket: 'Design & CAD', title: 'Settings: CAD & design', tag: 'new',
+    note: 'The ten CAD settings with defaults (CAD per restoration type, when to create the order, patient details, approval rules, reminder, partners, assignment), the indication and material mapping table, and the desktop connector: a guided setup (download, sign in, find exocad / 3Shape folders, where it runs, test order) and health per connector, with offline orders queued and delivered on reconnect.',
+    examples: [
+      { label: 'CAD & design settings', to: '/growth/settings?tab=cad' },
+    ],
+  },
+  {
+    id: 'design-studio', bucket: 'Design & CAD', title: 'Design Studio', tag: 'new',
     note: 'The lab shares a design with the dentist through a link. The dentist turns the 3D model, captures views, marks up and comments, then approves or requests changes. The lab replies point by point and shares the next version.',
     examples: [{ label: 'Lab\'s Design Studio', to: '/growth/cases/SG-2026-0481/studio?demo=1' }, { label: 'The dentist\'s review link', to: '/review/rv_8kq2m4x9', newTab: true }],
   },
   {
-    id: 'design-on-case', bucket: 'Design', title: 'Design review inside the case', tag: 'changed',
+    id: 'design-on-case', bucket: 'Design & CAD', title: 'Design review inside the case', tag: 'changed',
     note: 'A new "Design review" item next to Details / Invoice / Shipping on the case page. Cases with no design get a button to share one, by link or by uploading files. Dentists can attach their own files for the lab.',
     examples: [{ label: 'A case with a design', to: '/growth/cases/SG-2026-0481?sf=design' }],
   },
@@ -92,9 +175,14 @@ export const BUILT_IN: Update[] = [
     examples: [{ label: 'Prescription inbox category', to: '/growth/settings?tab=notifications&focus=rx-inbox' }, { label: 'LabLink category', to: '/growth/settings?tab=notifications&focus=intake-form' }],
   },
   {
-    id: 'settings-tabs', bucket: 'Settings & notifications', title: 'Two new Settings tabs', tag: 'changed',
-    note: 'The Settings sidebar gets "Prescription Email Inbox" and "LabLink (website form)" tabs below the existing ones. Every existing tab is unchanged.',
-    examples: [{ label: 'Settings sidebar', to: '/growth/settings?tab=intake-form' }],
+    id: 'settings-tabs', bucket: 'Settings & notifications', title: 'New Settings tabs', tag: 'changed',
+    note: 'The Settings sidebar gets "Prescription Email Inbox", "LabLink (website form)", "Bulk Actions" and "CAD & design" tabs below the existing ones. Every existing tab is unchanged.',
+    examples: [
+      { label: 'Prescription Email Inbox', to: '/growth/settings?tab=rx-inbox' },
+      { label: 'LabLink', to: '/growth/settings?tab=intake-form' },
+      { label: 'Bulk Actions', to: '/growth/settings?tab=bulk-actions' },
+      { label: 'CAD & design', to: '/growth/settings?tab=cad' },
+    ],
   },
   {
     id: 'growth-portal', bucket: 'Navigation', title: 'Growth Team Feedback portal', tag: 'new',
@@ -107,6 +195,30 @@ export const BUILT_IN: Update[] = [
     examples: [{ label: 'You are here', to: '/growth/updates' }],
   },
 ];
+
+/** The one-liners shown on the page (the full notes stay behind "Details"). */
+const SUMMARY: Record<string, string> = {
+  'rx-inbox': 'Email a photo of a paper prescription; AI makes a pre-filled draft case.',
+  lablink: 'One link on the lab website for new cases and files; files match to the right case.',
+  'bulk-actions': 'Tick cases or drafts to accept, download or print them, with saved defaults.',
+  'branded-order-form': 'Printed order forms carry the lab logo and name, with a small Smile Genius mark.',
+  'forwarded-emails': 'Forwarded emails become drafts: make a new case or add to an existing one.',
+  'billing-home': 'Every case invoiced on dispatch, posted to Xero, statements at month end.',
+  'billing-case': 'Prices, NHS/private, stages and parts on the case, with Bill now.',
+  'billing-accounts': 'Practices or dentists as accounts, who pays, limits and holds.',
+  'billing-pricing': 'Add and edit items, prices from a date, bulk changes, promotions and tiers.',
+  'billing-setup': 'Billing settings, Xero connection, email templates and six reports.',
+  'cad-board': 'Every digital case as a CAD order, tracked across a drag-and-drop board.',
+  'cad-case': 'The CAD order on the case: bring the design back, send it for approval.',
+  'cad-partners': 'Send a case to a design or milling partner through a no-login link.',
+  'cad-settings': 'CAD choices, approval rules, mapping table and the desktop connector.',
+  'design-studio': 'Share a design with the dentist; they mark it up, approve or ask for changes.',
+  'design-on-case': 'The design review sits on the case page, next to the case details.',
+  'notif-categories': 'Notification categories for the inbox and LabLink, with default recipients.',
+  'settings-tabs': 'New Settings tabs for the sandbox features.',
+  'growth-portal': 'A separate copy of the Lab portal; the real portals never show this work.',
+  'whats-new': 'This page.',
+};
 
 interface State { notes: Record<string, string>; custom: Update[]; seen: string[] }
 const LS_KEY = 'salesFeedbacks.updates.v1';
@@ -128,7 +240,7 @@ function commit(next: State) {
 function subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; }
 export function useUpdates() {
   const s = useSyncExternalStore(subscribe, () => state);
-  const all: Update[] = [...BUILT_IN.map(u => ({ ...u, note: s.notes[u.id] ?? u.note })), ...s.custom];
+  const all: Update[] = [...BUILT_IN.map(u => ({ ...u, summary: u.summary ?? SUMMARY[u.id], note: s.notes[u.id] ?? u.note })), ...s.custom];
   return { all, seen: s.seen, unseen: all.filter(u => !s.seen.includes(u.id)).length };
 }
 export function setNote(id: string, note: string) {

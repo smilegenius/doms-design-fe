@@ -1,11 +1,12 @@
 import { useSearchParams } from 'react-router-dom';
-import { Bell, Building2, CheckCircle2, Circle, FileText, FlaskConical, Globe, Inbox, Layers, Plug, Sliders, User, Users } from 'lucide-react';
+import { Bell, Building2, CheckCircle2, Circle, FileText, FlaskConical, Globe, Inbox, Layers, PenTool, Plug, Sliders, User, Users } from 'lucide-react';
 import SettingsPage from '../../../src/app/pages/SettingsPage';
 import PrescriptionInboxSettings from './PrescriptionInboxSettings';
 import RxInboxNotificationCategory from './RxInboxNotificationCategory';
 import IntakeNotificationCategory from './IntakeNotificationCategory';
 import IntakeFormSettings from '../../intake-form/IntakeFormSettings';
 import BulkSettings from '../../bulk-actions/BulkSettings';
+import CadSettings from '../../cad-integration/screens/CadSettings';
 
 // ─── Lab Settings + "Prescription Email Inbox" tab ───────────────────────────
 // SettingsPage's tab list is internal to it, so this page draws the same
@@ -15,7 +16,7 @@ import BulkSettings from '../../bulk-actions/BulkSettings';
 // header and sidebar so only one of each shows. Notification Preferences
 // also get the "Prescription Email Inbox" category appended below the real ones.
 
-type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners' | 'rx-inbox' | 'intake-form' | 'bulk-actions';
+type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners' | 'rx-inbox' | 'intake-form' | 'bulk-actions' | 'cad';
 
 // Same order, labels and icons as SettingsPage's LAB_TABS, plus the new tab.
 const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
@@ -30,10 +31,11 @@ const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'rx-inbox',             label: 'Prescription Email Inbox', description: 'Photo Rx → AI draft cases',     icon: Inbox },
   { id: 'intake-form',          label: 'LabLink (website form)',   description: 'New cases & files from dentists', icon: Globe },
   { id: 'bulk-actions',         label: 'Bulk Actions',             description: 'Your download & print defaults', icon: Layers },
+  { id: 'cad',                  label: 'CAD & design',             description: 'exocad, 3Shape, partners',       icon: PenTool },
 ];
 
 // Matches SettingsPage's CONFIGURED set, plus the inbox and intake form (both exist from day one).
-const CONFIGURED: TabId[] = ['personal', 'dso', 'prescription-builder', 'case-scoring', 'rx-inbox', 'intake-form', 'bulk-actions'];
+const CONFIGURED: TabId[] = ['personal', 'dso', 'prescription-builder', 'case-scoring', 'rx-inbox', 'intake-form', 'bulk-actions', 'cad'];
 
 export default function LabSettingsWithInbox() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -125,6 +127,8 @@ export default function LabSettingsWithInbox() {
             <IntakeFormSettings />
           ) : activeTab === 'bulk-actions' ? (
             <BulkSettings />
+          ) : activeTab === 'cad' ? (
+            <CadSettings />
           ) : (
             <>
               <div className="sf-embedded-settings">
