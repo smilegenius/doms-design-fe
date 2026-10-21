@@ -46,10 +46,12 @@ import RelatedCasesCard, { RelationshipPill } from '../components/RelatedCasesCa
 import RescanDecisionModal from '../components/RescanDecisionModal';
 import type { Case as RescanCase } from './CasesPage';
 import { CURRENT_USER } from './CasesPage';
+import { recordDispatch, updateDispatch, useDispatchRecord } from '../data/dispatchRecords';
+import type { DispatchRecord } from '../data/dispatchRecords';
 import CreatedByIcon from '../components/CreatedByIcon';
 import { AiReviewNotice } from '../components/AiReviewNotice';
 import { SCANNER_SYNC_COPY, caseCreatedBy, needsReview, type CreatedSide, type StatusReach, type ViewerPortal } from '../data/caseProvenance';
-import { ensureCaseValidation, latestDueDateChange, recordDueDateChange, recordReceipt, summariseCase, summaryLabel, SUMMARY_META, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
+import { COURIERS as LAB_COURIERS, updateShipment, ensureCaseValidation, latestDueDateChange, recordDueDateChange, recordReceipt, summariseCase, summaryLabel, SUMMARY_META, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
 import type { CaseCareStack, CaseLike as CareStackCaseLike } from '../data/carestack';
 import CareStackCaseSection from '../components/carestack/CareStackCaseSection';
 import { MappingIcon } from '../components/carestack/shared';
@@ -2984,7 +2986,7 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived,
   );
 }
 
-function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onMarkReceived, shipment }: {
+function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onMarkReceived, shipment, dispatch, canEditDispatch, canEditShipment }: {
   service: ServiceItem;
   caseData: CaseForDetail;
   onOpenNotes: () => void;
@@ -2993,8 +2995,15 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   onMarkReceived?: (label: string) => void;
   /** Shipment recorded through the CareStack flow — fills the Shipping sub-tab. */
   shipment?: CaseCareStack['shipment'];
+  /** What the clinic posted to the lab when it dispatched the case. */
+  dispatch?: DispatchRecord;
+  /** Only the clinic that dispatched the case can edit the dispatch details. */
+  canEditDispatch?: boolean;
+  /** Only the lab that shipped the work can edit its shipment details. */
+  canEditShipment?: boolean;
 }) {
-  const [subTab, setSubTab] = useState<ServiceSubTab>('details');
+  // ?sub=shipping opens straight on the Shipping tab (walkthrough links).
+  const [subTab, setSubTab] = useState<ServiceSubTab>(() => new URLSearchParams(window.location.search).get('sub') === 'shipping' ? 'shipping' : 'details');
   // ── Stage / phase orders (denture catalog · aligner phasing) ────────────
   // Denture: one flat vertical list of stages, each with its own status and
   // date; "New Stage Order" picks from the remaining catalog. Aligners
@@ -3578,7 +3587,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
           </div>
         )}
         {subTab === 'invoice'  && <InvoiceTab  caseId={caseData.id} />}
-        {subTab === 'shipping' && <ShippingTab shipment={shipment} serviceName={activeOrderLabel ? `${service.name} · ${activeOrderLabel}` : service.name} />}
+        {subTab === 'shipping' && <ShippingTab caseId={caseData.id} canEdit={canEditDispatch} canEditShipment={canEditShipment} shipment={shipment} dispatch={dispatch} dispatchServices={(caseData.serviceItems?.length ?? 0) > 1 ? caseData.serviceItems?.map(si => si.name).join(', ') : undefined} serviceName={activeOrderLabel ? `${service.name} · ${activeOrderLabel}` : service.name} />}
       </div>
       </div>
 
@@ -3965,17 +3974,45 @@ function InvoiceTab({ caseId }: { caseId: string }) {
 
 // ─── Shipping Tab ─────────────────────────────────────────────────────────────
 
-function ShippingTab({ shipment, serviceName }: { shipment?: CaseCareStack['shipment']; serviceName?: string }) {
+// Who sent the parcel, so clinic and lab can both tell which way it travelled.
+function SentByPill({ from }: { from: 'clinic' | 'lab' }) {
+  return from === 'clinic'
+    ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC] whitespace-nowrap">Clinic <ArrowRight className="w-2.5 h-2.5" /> Lab</span>
+    : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F5F3FF] text-[#6D28D9] border border-[#DDD6FE] whitespace-nowrap">Lab <ArrowRight className="w-2.5 h-2.5" /> Clinic</span>;
+}
+
+function ShippingTab({ shipment, dispatch, dispatchServices, serviceName, caseId, canEdit, canEditShipment }: { shipment?: CaseCareStack['shipment']; dispatch?: DispatchRecord; /** Every service in the parcel the clinic posted. */ dispatchServices?: string; serviceName?: string; caseId?: string; /** Only the clinic that dispatched the case can edit it. */ canEdit?: boolean; /** Only the lab that shipped the work can edit its shipment. */ canEditShipment?: boolean }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [shipmentOpen, setShipmentOpen] = useState(false);
+  const fmtDay = (d: string) => new Date(`${d}T12:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const fmtAt = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   return (
     <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
-      <div className="grid grid-cols-5 px-5 py-3 border-b border-[#F0EFF6] bg-[#F8F9FC]">
-        {['Tracking ID', 'Service(s)', 'Courier', 'Tracking Link', 'Shipment Date'].map(h => (
+      <div className="grid grid-cols-6 px-5 py-3 border-b border-[#F0EFF6] bg-[#F8F9FC]">
+        {['Sent by', 'Tracking ID', 'Service(s)', 'Courier', 'Tracking Link', 'Shipment Date'].map(h => (
           <p key={h} className="text-[10px] font-semibold text-[#A0A0B0] uppercase tracking-wider">{h}</p>
         ))}
       </div>
-      {shipment ? (
+      {dispatch && (
         <>
-          <div className="grid grid-cols-5 px-5 py-3 items-center">
+          <button onClick={() => setDetailsOpen(true)} title="Open dispatch details" className="grid grid-cols-6 w-full text-left px-5 py-3 items-center hover:bg-[#F8F9FC] transition-colors">
+            <div><SentByPill from="clinic" /></div>
+            <p className="text-xs font-semibold text-[#030213] font-mono">{dispatch.tracking || '—'}</p>
+            <p className="text-xs text-[#5A5568]">{dispatchServices ?? serviceName ?? '—'}</p>
+            <p className="text-xs text-[#5A5568]">{dispatch.courier}</p>
+            <p className="text-xs"><span className="text-[#A0A0B0]">—</span></p>
+            <p className="text-xs text-[#030213] tabular-nums">{fmtDay(dispatch.dispatchedOn)}</p>
+          </button>
+          <p className="px-5 py-2.5 border-t border-[#F0EFF6] text-[10px] text-[#A0A0B0]">
+            Dispatched by the clinic · {dispatch.packaging.toLowerCase()} · recorded by {dispatch.by} · {fmtAt(dispatch.at)}{dispatch.editedAt && ` · edited by ${dispatch.editedBy} · ${fmtAt(dispatch.editedAt)}`}{dispatch.comment && <> · <span className="text-[#030213]"><span className="font-semibold">Comment:</span> {dispatch.comment}</span></>}
+          </p>
+          {detailsOpen && caseId && <DispatchDetailsModal caseId={caseId} record={dispatch} canEdit={!!canEdit} onClose={() => setDetailsOpen(false)} />}
+        </>
+      )}
+      {shipment && (
+        <>
+          <button onClick={() => setShipmentOpen(true)} title="Open shipment details" className={`grid grid-cols-6 w-full text-left px-5 py-3 items-center hover:bg-[#F8F9FC] transition-colors ${dispatch ? 'border-t border-[#F0EFF6]' : ''}`}>
+            <div><SentByPill from="lab" /></div>
             <p className="text-xs font-semibold text-[#030213] font-mono">{shipment.trackingNumber || '—'}</p>
             <p className="text-xs text-[#5A5568]">{serviceName ?? '—'}</p>
             <p className="text-xs text-[#5A5568]">{shipment.courier}</p>
@@ -3985,12 +4022,14 @@ function ShippingTab({ shipment, serviceName }: { shipment?: CaseCareStack['ship
                 : <span className="text-[#A0A0B0]">—</span>}
             </p>
             <p className="text-xs text-[#030213] tabular-nums">{shipment.shipmentDate}</p>
-          </div>
+          </button>
           <p className="px-5 py-2.5 border-t border-[#F0EFF6] text-[10px] text-[#A0A0B0]">
-            Expected delivery {shipment.expectedDelivery || '—'} · recorded by {shipment.by} · {new Date(shipment.at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            Expected delivery {shipment.expectedDelivery || '—'} · recorded by {shipment.by} · {fmtAt(shipment.at)}{shipment.editedAt && ` · edited by ${shipment.editedBy} · ${fmtAt(shipment.editedAt)}`}{shipment.comment && <> · <span className="text-[#030213]"><span className="font-semibold">Comment:</span> {shipment.comment}</span></>}
           </p>
+          {shipmentOpen && caseId && <ShipmentDetailsView caseId={caseId} shipment={shipment} canEdit={!!canEditShipment} onClose={() => setShipmentOpen(false)} />}
         </>
-      ) : (
+      )}
+      {!shipment && !dispatch && (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
           <div className="w-16 h-16 rounded-2xl bg-[#F0EFF6] flex items-center justify-center">
             <MapPin className="w-8 h-8 text-[#C8C0F0]" />
@@ -4019,7 +4058,172 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 const DISPATCH_COURIERS = ['Lab Courier', 'Royal Mail', 'DPD', 'DHL'];
 const OTHER_COURIER = 'Other';
 
-function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline, orderCase, onDispatch }: { lab: string; caseId: string; patient: string; dentist: string; clinic: string; offline?: boolean; orderCase: CaseForDetail; onDispatch: (details: { courier: string; packaging: string; tracking: string; dispatchedOn: string }) => void }) {
+// Dispatch details: opened from the Shipping tab. Everyone who can see the case can read
+// them; only the clinic that dispatched it can edit.
+function DispatchDetailsModal({ caseId, record, canEdit, onClose }: { caseId: string; record: DispatchRecord; canEdit: boolean; onClose: () => void }) {
+  const { toast } = useToast();
+  const known = DISPATCH_COURIERS.includes(record.courier);
+  const [courier, setCourier] = useState(known ? record.courier : OTHER_COURIER);
+  const [otherCourier, setOtherCourier] = useState(known ? '' : record.courier);
+  const [packaging, setPackaging] = useState(record.packaging);
+  const [tracking, setTracking] = useState(record.tracking);
+  const [dispatchedOn, setDispatchedOn] = useState(record.dispatchedOn);
+  const [comment, setComment] = useState(record.comment ?? '');
+  const courierName = courier === OTHER_COURIER ? otherCourier.trim() : courier;
+  const pick = (active: boolean) =>
+    `px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${active ? 'bg-[#EEF4FF] border-[#4D8EF7] text-[#1565C0]' : 'bg-white border-[#E0E0E6] text-[#5A5568] hover:bg-[#F8F9FC]'}`;
+  const field = 'w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg';
+  const save = () => {
+    updateDispatch(caseId, { courier: courierName, packaging, tracking: tracking.trim(), comment: comment.trim() || undefined, dispatchedOn, editedBy: CURRENT_USER, editedAt: new Date().toISOString() });
+    toast.success('Dispatch details updated');
+    onClose();
+  };
+  const readOnly = (label: string, value: string) => (
+    <div><p className="text-[11px] font-semibold text-[#5A5568] mb-1">{label}</p><p className="text-xs text-[#030213] font-medium">{value || '—'}</p></div>
+  );
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6]">
+            <div>
+              <p className="text-sm font-semibold text-[#030213]">Dispatch details · {caseId}</p>
+              <p className="text-[11px] text-[#717182] mt-0.5">{canEdit ? 'Only you, as the clinic that sent it, can edit these.' : 'Only the clinic that sent this can edit it.'}</p>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            {canEdit ? (
+              <>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Courier</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[...DISPATCH_COURIERS, OTHER_COURIER].map(c => <button key={c} onClick={() => setCourier(c)} className={pick(courier === c)}>{c}</button>)}
+                  </div>
+                  {courier === OTHER_COURIER && <input value={otherCourier} onChange={e => setOtherCourier(e.target.value)} placeholder="Enter courier name" className={`${field} mt-2`} />}
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Delivery method</p>
+                  <div className="flex gap-1.5">{['Bag', 'Box'].map(p => <button key={p} onClick={() => setPackaging(p.toLowerCase())} className={pick(packaging.toLowerCase() === p.toLowerCase())}>{p}</button>)}</div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Tracking number <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <input value={tracking} onChange={e => setTracking(e.target.value)} placeholder="e.g. RM123456789GB" className={field} />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Dispatched on</p>
+                  <input type="date" value={dispatchedOn} onChange={e => setDispatchedOn(e.target.value)} className={field} />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Comment <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <textarea rows={2} value={comment} onChange={e => setComment(e.target.value)} placeholder="e.g. impressions and bite registration" className={`${field} resize-none`} />
+                </div>
+              </>
+            ) : (
+              <>
+                {readOnly('Courier', record.courier)}
+                {readOnly('Delivery method', record.packaging.charAt(0).toUpperCase() + record.packaging.slice(1))}
+                {readOnly('Tracking number', record.tracking)}
+                {readOnly('Dispatched on', new Date(`${record.dispatchedOn}T12:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }))}
+                {readOnly('Comment', record.comment ?? '')}
+                {readOnly('Recorded by', record.by)}
+              </>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#F0EFF6]">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">{canEdit ? 'Cancel' : 'Close'}</button>
+            {canEdit && (
+              <button
+                onClick={save}
+                disabled={!courierName || !dispatchedOn}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save changes
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+// The lab's shipment details: open to everyone, editable only by the lab that recorded them.
+function ShipmentDetailsView({ caseId, shipment, canEdit, onClose }: { caseId: string; shipment: NonNullable<CaseCareStack['shipment']>; canEdit: boolean; onClose: () => void }) {
+  const { toast } = useToast();
+  const [courier, setCourier] = useState(shipment.courier);
+  const [tracking, setTracking] = useState(shipment.trackingNumber);
+  const [trackingUrl, setTrackingUrl] = useState(shipment.trackingUrl ?? '');
+  const [comment, setComment] = useState(shipment.comment ?? '');
+  const field = 'w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg';
+  const row = (label: string, value?: string) => (
+    <div><p className="text-[11px] font-semibold text-[#5A5568] mb-1">{label}</p><p className="text-xs text-[#030213] font-medium">{value || '—'}</p></div>
+  );
+  const save = () => {
+    updateShipment(caseId, { courier, trackingNumber: tracking.trim(), trackingUrl: trackingUrl.trim() || undefined, comment: comment.trim() || undefined }, CURRENT_USER);
+    toast.success('Shipment details updated');
+    onClose();
+  };
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6]">
+            <div>
+              <p className="text-sm font-semibold text-[#030213]">Shipment details · {caseId}</p>
+              <p className="text-[11px] text-[#717182] mt-0.5">{canEdit ? 'Only you, as the lab that shipped it, can edit these.' : 'Only the lab that shipped this can edit it.'}</p>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            {canEdit ? (
+              <>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Courier</p>
+                  <select value={courier} onChange={e => setCourier(e.target.value)} className={field}>
+                    {(LAB_COURIERS.includes(courier) ? LAB_COURIERS : [courier, ...LAB_COURIERS]).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Tracking number</p>
+                  <input value={tracking} onChange={e => setTracking(e.target.value)} className={field} />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Tracking link <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <input value={trackingUrl} onChange={e => setTrackingUrl(e.target.value)} placeholder="https://" className={field} />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Comment <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <textarea rows={2} value={comment} onChange={e => setComment(e.target.value)} className={`${field} resize-none`} />
+                </div>
+              </>
+            ) : (
+              <>
+                {row('Courier', shipment.courier)}
+                {row('Tracking number', shipment.trackingNumber)}
+                {row('Tracking link', shipment.trackingUrl)}
+                {row('Shipment date', shipment.shipmentDate)}
+                {row('Expected delivery', shipment.expectedDelivery)}
+                {row('Comment', shipment.comment)}
+                {row('Recorded by', shipment.by)}
+              </>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#F0EFF6]">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">{canEdit ? 'Cancel' : 'Close'}</button>
+            {canEdit && <button onClick={save} disabled={!courier} className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50">Save changes</button>}
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline, orderCase, onDispatch }: { lab: string; caseId: string; patient: string; dentist: string; clinic: string; offline?: boolean; orderCase: CaseForDetail; onDispatch: (details: { courier: string; packaging: string; tracking: string; dispatchedOn: string; comment: string }) => void }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
@@ -4028,6 +4232,7 @@ function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline,
   const [otherCourier, setOtherCourier] = useState('');
   const [tracking, setTracking] = useState('');
   const [dispatchedOn, setDispatchedOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [comment, setComment] = useState('');
   const courierName = courier === OTHER_COURIER ? otherCourier.trim() : courier;
   const pick = (active: boolean) =>
     `px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${active ? 'bg-[#EEF4FF] border-[#4D8EF7] text-[#1565C0]' : 'bg-white border-[#E0E0E6] text-[#5A5568] hover:bg-[#F8F9FC]'}`;
@@ -4107,6 +4312,16 @@ function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline,
                   />
                 </div>
                 <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Comment <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <textarea
+                    rows={2}
+                    value={comment}
+                    onChange={e => setComment(e.target.value)}
+                    placeholder="e.g. impressions and bite registration"
+                    className="w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg resize-none"
+                  />
+                </div>
+                <div>
                   <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Tracking number <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
                   <input
                     value={tracking}
@@ -4121,7 +4336,7 @@ function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline,
                   Cancel
                 </button>
                 <button
-                  onClick={() => { setOpen(false); onDispatch({ courier: courierName, packaging, tracking, dispatchedOn }); }}
+                  onClick={() => { setOpen(false); onDispatch({ courier: courierName, packaging, tracking, dispatchedOn, comment: comment.trim() }); }}
                   disabled={!courierName || !dispatchedOn}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -4261,6 +4476,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // captures receipt details before the case moves to Delivered.
   const csEnabled = useCareStackEnabled();
   const csRecord = useCaseCareStack(caseData.id);
+  const dispatchRecord = useDispatchRecord(caseData.id);
   const csCase: CareStackCaseLike = {
     id: caseData.id, patientName: caseData.patientName, practice: caseData.practice, dentist: caseData.dentist,
     lab: caseData.lab ?? '', services: caseData.services, createdAt: caseData.createdAt,
@@ -4613,7 +4829,8 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           clinic={caseData.practice}
           offline={!!offlineLabStatusFor(caseData.lab)}
           orderCase={caseData}
-          onDispatch={({ courier, packaging, tracking }) => {
+          onDispatch={({ courier, packaging, tracking, dispatchedOn, comment }) => {
+            recordDispatch(caseData.id, { courier, packaging, tracking, comment: comment || undefined, dispatchedOn, by: CURRENT_USER, at: new Date().toISOString() });
             onSetStatus?.('submitted');
             toast.success(`${caseData.id} marked as dispatched — ${courier} (${packaging.toLowerCase()})${tracking ? `, tracking ${tracking}` : ''}. Case submitted to the lab.`);
           }}
@@ -4946,6 +5163,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 onOpenFullView={() => setFullViewOpen(true)}
                 onMarkReceived={(label) => setReceivedModal({ label })}
                 shipment={csRecord?.shipment}
+                dispatch={dispatchRecord}
+                canEditDispatch={viewerPortal === 'clinic'}
+                canEditShipment={viewerPortal === 'lab'}
               />
             : null;
         })()

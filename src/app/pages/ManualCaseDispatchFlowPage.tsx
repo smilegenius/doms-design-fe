@@ -42,6 +42,30 @@ const STEPS: { label: string; blurb: string; navs: Nav[] }[] = [
     ],
   },
   {
+    label: 'After posting — dispatch information on the case',
+    blurb: 'Once a case is marked as dispatched, what was posted is recorded on its Shipping tab: courier, delivery method, tracking number and date. A Sent by column shows which way the parcel went, Clinic to Lab for the impressions and Lab to Clinic for the finished work, so both sides can see it. The lab sees the same record in its own portal. On a case with several services the dispatch shows under each service’s Shipping tab and lists every service in the parcel.',
+    navs: [
+      {
+        title: 'Clinic — Shipping tab',
+        note: 'CASE-054 · Royal Mail · Clinic → Lab',
+        icon: <Truck className="w-4 h-4" />,
+        path: '/clinic/cases/CASE-054?sub=shipping',
+      },
+      {
+        title: 'Lab — Shipping tab',
+        note: 'The same dispatch, as the lab sees it',
+        icon: <Truck className="w-4 h-4" />,
+        path: '/lab/cases/CASE-054?sub=shipping',
+      },
+      {
+        title: 'Multi-service case — each service tab',
+        note: 'CASE-DISP-4006 · Crown + Veneers in one box · open either service, then Shipping',
+        icon: <Truck className="w-4 h-4" />,
+        path: '/clinic/cases/CASE-DISP-4006?sub=shipping',
+      },
+    ],
+  },
+  {
     label: 'Receptionist — several cases at once',
     blurb: 'In Lab Work, filter to Ready for Dispatch, tick the cases (or select all) and use Print labels for one A4 sheet per case. Each case is still marked as dispatched from its own page.',
     navs: [

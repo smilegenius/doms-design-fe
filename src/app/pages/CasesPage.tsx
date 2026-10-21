@@ -1254,7 +1254,16 @@ export const multiDispatchDemoCase: Case = {
     { ...dispatchDemoCase.serviceItems[0], id: 'disp4005-s2', name: 'Veneers', fdi: [11, 21], deliveryDate: '05-Jul-2026' },
   ],
 };
-mockCases.unshift(offlineDispatchDemoCase, multiDispatchDemoCase, ...dispatchDemoExtras, dispatchDemoCase);
+// Already dispatched multi-service case (one box, two services) for the Shipping tab.
+export const multiDispatchedDemoCase: Case = {
+  ...multiDispatchDemoCase,
+  id: 'CASE-DISP-4006',
+  patientName: 'Tom Reeves',
+  dentist: 'Dr. Campbell',
+  status: 'submitted',
+  serviceItems: multiDispatchDemoCase.serviceItems.map((si, i) => ({ ...si, id: 'disp4006-s' + (i + 1), status: 'submitted' as const })),
+};
+mockCases.unshift(multiDispatchedDemoCase, offlineDispatchDemoCase, multiDispatchDemoCase, ...dispatchDemoExtras, dispatchDemoCase);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

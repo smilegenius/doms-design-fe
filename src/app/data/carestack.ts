@@ -122,8 +122,12 @@ export interface CaseCareStack {
     trackingNumber: string;
     trackingUrl?: string;
     expectedDelivery: string;
+    /** Optional note for the practice. */
+    comment?: string;
     by: string;
     at: string;
+    editedBy?: string;
+    editedAt?: string;
   };
   receipt?: { receivedAt: string; receivedBy: string; notes?: string; at: string };
   /** The queued end-of-day "Appointment Required" email. */
@@ -987,7 +991,7 @@ export function recordDueDateChange(c: CaseLike, change: { previous: string | nu
 
 export function recordShipment(
   c: CaseLike,
-  shipment: { shipmentDate: string; courier: string; trackingNumber: string; trackingUrl?: string; expectedDelivery: string },
+  shipment: { shipmentDate: string; courier: string; trackingNumber: string; trackingUrl?: string; expectedDelivery: string; comment?: string },
   by: string,
 ) {
   ensureRecord(c);
@@ -1002,6 +1006,11 @@ export function recordShipment(
   };
   postAppointmentNote(c, 'Lab Work Shipped', fillCsTemplate(CARESTACK_NOTE_TEMPLATES.shipped, { ...vars, 'Case Link': caseLink(c.id) }), by);
   sendCareStackEmail(c, 'shipped', vars);
+}
+
+/** Correct a recorded shipment. Offered only on the side that recorded it — the lab. */
+export function updateShipment(caseId: string, patch: { courier?: string; trackingNumber?: string; trackingUrl?: string; comment?: string }, by: string) {
+  patchCase(caseId, prev => (prev.shipment ? { shipment: { ...prev.shipment, ...patch, editedBy: by, editedAt: nowIso() } } : {}));
 }
 
 export function recordReceipt(c: CaseLike, receipt: { receivedAt: string; receivedBy: string; notes?: string }) {
