@@ -16,7 +16,7 @@ export const GROWTH_BASE = '/growth';
 
 const STASH_KEY = 'salesFeedbacks.growthCases.v1';
 /** Bell entries the Growth features add (Design Studio, LabLink). */
-const GROWTH_BELL = /^(ds-|web-|lf-|fe-)/;
+const GROWTH_BELL = /^(ds-|web-|lf-|fe-|cad-)/;
 
 interface Stash { cases: Case[]; ids: string[] }
 

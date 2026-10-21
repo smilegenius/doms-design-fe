@@ -9,6 +9,7 @@ import { CaseScoringProvider } from '../src/app/context/CaseScoringContext';
 import LabPrescriptionInboxApp from './lab-prescription-inbox/LabPrescriptionInboxApp';
 import DesignReviewPage from './design-studio/review/DesignReviewPage';
 import PublicIntakePage from './intake-form/PublicIntakePage';
+import PartnerPage from './cad-integration/public/PartnerPage';
 import PortalSelectWithGrowth from './growth-portal/PortalSelectWithGrowth';
 import { GROWTH_BASE, leaveGrowth } from './growthIsolation';
 import '../src/styles/index.css';
@@ -65,6 +66,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     /intake/ was its first address, so old links and embed codes redirect. */}
                 <Route path="/lablink/:slug" element={<PublicIntakePage />} />
                 <Route path="/intake/:slug" element={<LegacyIntakeRedirect />} />
+                {/* CAD integration: an outside design or milling partner's link. Public, no account. */}
+                <Route path="/partner/:token" element={<PartnerPage />} />
                 {/* Growth Team Feedback: the Lab portal with the Sales Feedbacks features. */}
                 <Route path={`${GROWTH_BASE}/*`} element={<RequireSignIn><LabPrescriptionInboxApp /></RequireSignIn>} />
                 {/* Portal select, with the Growth Team Feedback card added. */}

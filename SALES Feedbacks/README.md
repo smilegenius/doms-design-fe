@@ -221,8 +221,48 @@ Everything works on what's ticked.
   - Chloe Bennett: already made into SG-2026-0527, with its Email tab
   - "please see attached": search or dismiss
 
+## Billing: lab invoicing and accounting sync (`lab-billing/`)
+A **Billing** sidebar item (after Invoices, which stays the payables inbox) at `/growth/billing`, built from the "Lab Invoicing & Accounting Sync" spec. Every case is invoiced on dispatch, posted to Xero and emailed, payments are read back from Xero, and one statement per billing account goes out at month end. Admins only (Super Admin / Admin).
+
+- **Billing home:** paid, pending and owed totals; flagged invoices with bulk approve; the On hold queue (release one case or lift the account's hold); smart-assist nudges; the month-end countdown with statement preview and send.
+- **Case billing panel:** a **Billing** tab next to Order form / Lab Documents (`?sf=billing`). It shows the lines and where each price came from, the NHS / private toggle, stages billed so far, bought-in parts, the invoice, "Bill now", the remake question and the on-hold banner.
+- **Invoice detail:** a lab-branded PDF preview (logo and name from Settings → LabLink) with an optional statement of manufacture. It has the timeline, Xero payments, a typed price with a reason, credit notes (partial or full), void & reissue (only when nothing is paid), resend and print.
+- **Accounts:** three shapes of billing account: a practice, a dentist at one practice, or a dentist who floats across several practices (`practices[]`, `scope`).
+  - **Add account** (practice or dentist; Xero contact matched or created), and on each account: who pays, the dentist's practices / the practice's dentists (add, remove), price list, emails, currency, statement of manufacture, staged billing overrides, limit with forecast and pause, balance and ageing, invoices, statements, bounced emails.
+  - Cases not invoiced yet follow whoever pays (`reassignCases` in `ops.ts`); a dentist who pays directly takes the cases from their linked practices only. "Unlinked dentists" lists cases from practices a dentist isn't linked to.
+- **Catalog:** add and edit items in full, archive them, and change prices from a date (today, back-dated or scheduled) with a price history (`priceHistory`); "Change prices" applies a % to a department or everything with rounding and a preview. Cases are priced as of their received date. Also VAT treatment (when VAT-registered), staged and component pricing, account codes per department, CSV import with a gap preview, and order types mapped once.
+- **Promotions and tiers:** optional, with a who-qualifies preview. Which price wins: typed price, then the price list, promotion, volume tier, and finally the catalog price.
+- **Billing settings:**
+  - connect or disconnect Xero / QuickBooks (simulated sign-in); invoices approved while disconnected post on reconnecting
+  - the nine lab settings with the spec's defaults, plus the advanced thresholds
+  - email templates with the lab logo
+  - the Xero connection, sync log and email log
+- **Reports:** unbilled work, account trends, given away, remakes, product and price mix, and cash forecast. They share filters and export to CSV, plus a Monday email preview.
+- **Engine:**
+  - `engine.ts`: pricing, invoice lines, flags, limits, statements
+  - `ops.ts`: create, approve, pay, holds, sync with the case list
+  - `insights.ts`: assists and reports
+  - `billingStore.ts`: state and actions in localStorage, under `salesFeedbacks.billing.v1`
+- **Demo data:** `seed.ts`.
+  - **Timeline:** the lab went live 90 days ago. Five months of completed cases (no longer in the case list) give the history, and the Growth case list gives the current work.
+  - **Exceptions:** an unusual price, an unclear NHS/private case, an unmapped order type, two dispatched cases not yet billed, two possible remakes, an account on hold, one approaching its limit, a slow payer, a declining account, a dentist who pays directly, a EUR practice and a bounced email.
+  - **Reset demo:** reseeds everything.
+
+## CAD integration: exocad & 3Shape (`cad-integration/`)
+From the "CAD Integration (exocad & 3Shape)" spec. Every digital case becomes a CAD order with its details and scans, and is tracked through design, dentist approval (through Design Studio) and manufacture. It's only in Growth Team Feedback.
+
+- **Design board** (`/growth/design`, a new **Design** sidebar item after Cases): status columns, cards with patient, teeth, due date, technician or partner and CAD, and attention flags. Drag onto a technician to assign; drag along Ready → Manufacturing → Finishing → Dispatched (Dispatched starts the invoice in Billing). The columns the connector or dentist set aren't drop targets, but every card has a "Set status" override. The offline-connector banner sits above it, and there are demo buttons for Simulate 24h and Reset demo.
+- **CAD design tab on the case** (`?sf=cad`, via `OrderPanelTab`):
+  - the order sheet from the mapping, Open in CAD, scans and a scan-pack ZIP with standard names
+  - edge cases: queued, waiting for scans, 3Shape inbox link, duplicate order (which to keep), unmapped indication (pick it and save it as a rule), call the dentist, cancelled
+  - **Bring in the design** (manual for now): paste the exocad webview / 3Shape Communicate link, or upload files, then confirm what was designed. Differences go to Billing (`applyDesignToBilling` → `designOverride` on the billing case, a `design-diff` flag on the draft).
+  - **Send for approval**: creates a Design Studio review link (`shareDesign`); `syncCad` reads the dentist's decision back (approved → Ready to manufacture; changes → In design with the comments in the CAD order notes; a third round flags a call). Reminders at the set hours, then a lab alert.
+- **Partners** (`/growth/design/partners`) and the public **partner page** (`/partner/:token`, no login): download the pack, upload the design or confirm dispatch, late alerts, remind, reassign.
+- **Settings → CAD & design:** the ten settings, the indication and material mapping table (catalog item → CAD indication and material for each CAD), connectors with health checks, and a guided connector setup.
+- **Engine:** `engine.ts` (order mapping, which CAD, approval rules, design diff), `cadStore.ts` (state in localStorage `salesFeedbacks.cad.v1`, actions, `syncCad`, `cad-` bell events), `seed.ts` (both CADs, one connector offline, about 14 orders across the statuses and edge cases, two partners).
+
 ## What's new (change log)
-A sidebar item above Settings, shown only inside Growth Team Feedback (`/growth/updates`). It lists every feature and change in high-level buckets (Cases & intake, Design, Settings & notifications, Navigation), tagged **New** or **Changes the original design**.
+A sidebar item above Settings, shown only inside Growth Team Feedback (`/growth/updates`). It lists every feature and change in high-level buckets (Cases & intake, Billing, Design & CAD, Design, Settings & notifications, Navigation), tagged **New** or **Changes the original design**.
 
 - **Notes:** each update has a short note you can edit (pencil) or restore, saved in this browser.
 - **Examples:** each update has buttons that open an example inside the portal (for example a case with `?sf=design` or `?sf=files` opens that case-page item), or the public page in a new tab.
@@ -233,6 +273,16 @@ A sidebar item above Settings, shown only inside Growth Team Feedback (`/growth/
 Under Settings → Notifications, the **Prescription Email Inbox** and **Website Intake Form** categories each have a **Notified by default** list. **Add people** picks team members from User Management, which turns the bell and email on for them; ✕ turns both off. Everyone can still adjust their own switches. Website requests start with the lab admin only.
 
 ## Known limitations
+- **CAD integration is simulated:**
+  - **No vendor access yet:** the connector (install, CAD detection, order creation, reading "in design", health) is a mock until exocad and 3Shape partner access is agreed.
+  - **Designs come back by hand:** a share link or uploaded files. Screenshots aren't captured automatically.
+  - **Approval comments:** the dentist approves on the existing Design Studio review page, which has no voice notes, so comments are text and pinned captures.
+  - **Lab statuses stay in the CAD store:** Manufacturing, Finishing and Dispatched on the board don't change the case's status in the case list (that lives in `src/`).
+  - **Scan files:** the scans in the scan pack are placeholders for files that live on the scanner portal; real uploaded files are included.
+- **Billing is simulated:**
+  - **Xero / QuickBooks:** the connection is mocked. Payments arrive with the "Payment arrives in Xero" buttons, and no email or PDF file is produced (Print gives the browser's PDF).
+  - **Practice side:** nothing yet. The practice's invoice view and the on-hold banner are a follow-up.
+  - **Data:** billing history cases aren't in the case list. The lab address on documents is a placeholder, and statement days and the Monday email don't run on a schedule.
 - **Settings sidebar:** `SettingsPage`'s tab list is internal to it, so `LabSettingsWithInbox` draws the same sidebar markup with one extra tab. Existing tabs render the real `SettingsPage`. `sandbox.css` hides that page's own header and sidebar, which depends on its root markup.
 - **Notifications category:** it's appended under the real `NotificationPreferences`, because that catalogue is internal. The page's search box doesn't filter it.
 - **In-App notifications:** the preferences are stored but nothing appears in the header bell. `Layout`'s popover reads a fixed mock list.
