@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, FilePlus2, ListChecks, Truck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, FilePlus2, FileText, ListChecks, Settings, Truck } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 
@@ -19,7 +19,7 @@ interface Nav {
 const STEPS: { label: string; blurb: string; navs: Nav[] }[] = [
   {
     label: 'Dentist — create New Lab Work',
-    blurb: 'The clinic portal’s New Lab Work form opens with the scan source already set to Impressions (By Post), and it can be changed. Add the patient, lab, service (tooth, material, shade), delivery date and any files, then create the case.',
+    blurb: 'The clinic portal’s New Lab Work form opens with the scan source already set to Impressions (By Post), and it can be changed. Add the patient, lab, service (tooth, material, shade), delivery date and any files, then press Ready for Dispatch.',
     navs: [
       {
         title: 'New Lab Work',
@@ -30,20 +30,50 @@ const STEPS: { label: string; blurb: string; navs: Nav[] }[] = [
     ],
   },
   {
-    label: 'Receptionist — print, ship, submit',
-    blurb: 'The case is created as Ready for Dispatch and opens straight away: it is not with the lab yet. The receptionist prints the order form and label, picks Lab Courier, Royal Mail, DPD or DHL, bag or box, and an optional tracking number. Dispatching sets the case to Submitted.',
+    label: 'Receptionist — print the label, post, mark as dispatched',
+    blurb: 'The case is created as Ready for Dispatch and opens straight away: it is not with the lab yet. Print label gives the A4 lab ticket to put in the parcel. Mark as dispatched asks for the courier (Lab Courier, Royal Mail, DPD, DHL or another), bag or box, and an optional tracking number, then submits the case to the lab.',
     navs: [
       {
         title: 'Case detail — Ready for Dispatch',
-        note: 'CASE-DISP-4001 · Print label & dispatch opens the courier dialog',
+        note: 'CASE-DISP-4001 · Print label · Mark as dispatched',
         icon: <Truck className="w-4 h-4" />,
         path: '/clinic/cases/CASE-DISP-4001',
       },
+    ],
+  },
+  {
+    label: 'Receptionist — several cases at once',
+    blurb: 'In Lab Work, filter to Ready for Dispatch, tick the cases (or select all) and use Print labels for one A4 sheet per case. Each case is still marked as dispatched from its own page.',
+    navs: [
       {
         title: 'Lab Work list',
-        note: 'Ready for Dispatch cases are pinned to the top',
+        note: 'Ready for Dispatch cases are pinned to the top · tick to print labels in bulk',
         icon: <ListChecks className="w-4 h-4" />,
         path: '/clinic/cases',
+      },
+    ],
+  },
+  {
+    label: 'Offline lab scenario',
+    blurb: 'When the case is for a lab that is not on Smile Genius, there is no lab ticket to print: the lab cannot look the case up. The banner shows Print Order Form instead of Print label, which prints the order form to post with the impressions. Mark as dispatched works as before. These cases are also left out of the bulk label print.',
+    navs: [
+      {
+        title: 'Case detail — offline lab',
+        note: 'CASE-DISP-4004 · Westport Denture Works · Print Order Form',
+        icon: <FileText className="w-4 h-4" />,
+        path: '/clinic/cases/CASE-DISP-4004',
+      },
+    ],
+  },
+  {
+    label: 'Reception — blank label from Settings',
+    blurb: 'Settings has a Dispatch Label tab with the same A4 lab ticket and no case number. Choose how many copies, print or save as PDF, and keep a stack at reception. When posting, write the case number on the line by hand.',
+    navs: [
+      {
+        title: 'Settings — Dispatch Label',
+        note: 'Download A4 label · choose the number of copies',
+        icon: <Settings className="w-4 h-4" />,
+        path: '/clinic/settings?tab=dispatch-label',
       },
     ],
   },

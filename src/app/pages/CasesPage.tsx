@@ -12,6 +12,7 @@ import {
   Clock,
   Package,
   Truck,
+  Printer,
   AlertTriangle,
   RefreshCw,
   Settings2,
@@ -59,6 +60,8 @@ import {
   summariseCase, useAllCaseCareStack, useCareStackEnabled, useDueDateChanges,
 } from '../data/carestack';
 import CareStackAppointmentCell from '../components/carestack/CareStackAppointmentCell';
+import { PrintLabelsModal } from '../components/DispatchLabel';
+import { offlineLabStatusFor } from '../components/OfflineLabNotice';
 import ShipmentDetailsModal from '../components/carestack/ShipmentDetailsModal';
 import AddAppointmentModal from '../components/carestack/AddAppointmentModal';
 import AppointmentNotRequiredModal from '../components/carestack/AppointmentNotRequiredModal';
@@ -1214,7 +1217,33 @@ export const dispatchDemoCase: Case = {
   createdBy: 'Sana Khan',
   createdBySide: 'clinic',
 };
-mockCases.unshift(dispatchDemoCase);
+// Two more waiting to be posted, so the list's bulk Print labels / Mark as
+// dispatched has something to select.
+const dispatchDemoExtras: Case[] = [
+  { name: 'Oliver Grant', tooth: 14, service: 'Veneers', id: 'CASE-DISP-4002', dentist: 'Dr. Anderson' },
+  { name: 'Priya Nair', tooth: 46, service: 'Crown', id: 'CASE-DISP-4003', dentist: 'Dr. Campbell' },
+].map(x => ({
+  ...dispatchDemoCase,
+  id: x.id,
+  patientName: x.name,
+  dentist: x.dentist,
+  services: [x.service],
+  serviceItems: [{ ...dispatchDemoCase.serviceItems[0], id: x.id + '-s1', name: x.service, fdi: [x.tooth] }],
+}));
+// Offline-lab scenario: the lab isn't on Smile Genius, so there is no label to
+// print — the clinic prints the order form and posts it with the impressions.
+export const OFFLINE_DISPATCH_DEMO_CASE_ID = 'CASE-DISP-4004';
+export const offlineDispatchDemoCase: Case = {
+  ...dispatchDemoCase,
+  id: OFFLINE_DISPATCH_DEMO_CASE_ID,
+  patientName: 'Declan Murphy',
+  dentist: 'Dr. Murphy',
+  lab: 'Westport Denture Works',
+  services: ['Partial Denture'],
+  serviceItems: [{ ...dispatchDemoCase.serviceItems[0], id: 'disp4004-s1', name: 'Partial Denture', fdi: [], material: 'Acrylic', shade: 'A2', deliveryDate: '08-Jul-2026' }],
+  requestedDelivery: '08-Jul-2026',
+};
+mockCases.unshift(offlineDispatchDemoCase, ...dispatchDemoExtras, dispatchDemoCase);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -2136,9 +2165,12 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
   // parent checkbox indeterminate and leaves the case-level status untouched.
   const [selectedSubs, setSelectedSubs] = useState<Map<string, Set<string>>>(new Map());
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkPrintOpen, setBulkPrintOpen] = useState(false);
   // Drafts (no lifecycle status yet) and the plan-limit teaser row can't be
   // bulk-updated — same rule as the single-row "Change status" action.
-  const isSelectable = (c: Case) => !isClinic && c.status !== 'draft' && !c.forceUpgrade;
+  // The clinic can't change statuses by hand, but it can select the cases waiting to be
+  // posted to print their labels / mark them dispatched together.
+  const isSelectable = (c: Case) => isClinic ? c.status === 'ready-for-dispatch' && !offlineLabStatusFor(c.lab) : c.status !== 'draft' && !c.forceUpgrade;
 
   function setCaseSelected(c: Case, on: boolean) {
     setSelectedSubs(prev => {
@@ -2295,7 +2327,7 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
 
   // Filter option lists for the drawer — values are 'all' + every unique value
   // present in the current case list.
-  const statusOptions   = useMemo(() => [{ value: 'all', label: 'All Statuses' }, ...STATUSES.map(s => ({ value: s, label: STATUS_LABEL[s] }))], []);
+  const statusOptions   = useMemo(() => [{ value: 'all', label: 'All Statuses' }, ...(isClinic ? ['ready-for-dispatch' as CaseStatus] : []).concat(STATUSES).map(s => ({ value: s, label: STATUS_LABEL[s] }))], [isClinic]);
   const serviceOptions  = useMemo(() => [{ value: 'all', label: 'All Services' },  ...Array.from(new Set(cases.flatMap(c => c.services))).sort().map(s => ({ value: s, label: s }))], [cases]);
   const practiceOptions = useMemo(() => [{ value: 'all', label: 'All Practices' }, ...Array.from(new Set(cases.map(c => c.practice))).sort().map(p => ({ value: p, label: p }))], [cases]);
   const dentistOptions  = useMemo(() => [{ value: 'all', label: 'All Dentists' },  ...Array.from(new Set(cases.map(c => c.dentist))).sort().map(d => ({ value: d, label: d }))], [cases]);
@@ -2681,15 +2713,21 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
           >
             Clear selection
           </button>
-          <div className="ml-auto">
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<RefreshCw className="w-4 h-4" />}
-              onClick={() => setBulkModalOpen(true)}
-            >
-              Update Status
-            </Button>
+          <div className="ml-auto flex items-center gap-2">
+            {isClinic ? (
+              <Button variant="primary" size="sm" icon={<Printer className="w-4 h-4" />} onClick={() => setBulkPrintOpen(true)}>
+                Print labels
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<RefreshCw className="w-4 h-4" />}
+                onClick={() => setBulkModalOpen(true)}
+              >
+                Update Status
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -3499,6 +3537,17 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
 
       {/* Bulk status update — opened from the bulk action bar. Picks a target
           status, then asks for explicit confirmation before applying. */}
+      {bulkPrintOpen && selectionSummary.caseCount > 0 && (
+        <PrintLabelsModal
+          caseNumbers={selectionSummary.entries.map(e => e.c.id)}
+          labNames={selectionSummary.entries.map(e => e.c.lab)}
+          details={selectionSummary.entries.map(e => ({ patient: e.c.patientName, dentist: e.c.dentist, clinic: e.c.practice }))}
+          title={`Print labels · ${selectionSummary.caseCount} case${selectionSummary.caseCount === 1 ? '' : 's'}`}
+          subtitle="One A4 sheet per case. Put each in its parcel with the impressions."
+          onClose={() => setBulkPrintOpen(false)}
+          onPrinted={clearSelection}
+        />
+      )}
       {bulkModalOpen && selectionSummary.caseCount > 0 && (
         <BulkStatusModal
           selections={selectionSummary.entries}

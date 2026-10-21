@@ -10,6 +10,7 @@ import {
   Copy, Plug, GitBranch, Lock as LockIcon,
   History as HistoryIcon, Truck, Package,
 } from 'lucide-react';
+import { PrintLabelsModal } from '../components/DispatchLabel';
 import SideDrawer from '../components/SideDrawer';
 import ActionMenu from '../components/ActionMenu';
 import ModalPortal from '../components/ModalPortal';
@@ -952,9 +953,11 @@ function ScanViewer({ format, onFormatChange }: { format: ViewerFormat; onFormat
 // Compact centered modal — shows ONLY the Order form + Lab Documents tabs.
 // Opened from the Eye icon in the Cases list so users can scan the form
 // details without leaving the listing or loading the 3D viewer.
-export function OrderFormModal({ caseData, onClose }: {
+export function OrderFormModal({ caseData, onClose, onPrint }: {
   caseData: CaseForDetail;
   onClose: () => void;
+  /** When given, Print is live: a footer Print button runs it (the offline-lab dispatch step). */
+  onPrint?: () => void;
 }) {
   const [orderTab, setOrderTab] = useState<'order-form' | 'lab-documents'>('order-form');
 
@@ -994,7 +997,7 @@ export function OrderFormModal({ caseData, onClose }: {
               <FolderOpen className="w-4 h-4" />
               Lab Documents
             </button>
-            <button className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
+            <button onClick={onPrint} className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
               <Printer className="w-3 h-3" />
               Print
             </button>
@@ -1012,6 +1015,15 @@ export function OrderFormModal({ caseData, onClose }: {
                 <FolderOpen className="w-7 h-7 text-[#C8C0F0]" />
               </div>
               <p className="text-sm text-[#A0A0B0]">No lab documents uploaded for this case yet.</p>
+            </div>
+          )}
+          {onPrint && (
+            <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#F0EFF6]">
+              <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">Close</button>
+              <button onClick={onPrint} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity">
+                <Printer className="w-3.5 h-3.5" />
+                Print order form
+              </button>
             </div>
           )}
         </div>
@@ -4007,31 +4019,15 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 const DISPATCH_COURIERS = ['Lab Courier', 'Royal Mail', 'DPD', 'DHL'];
 const OTHER_COURIER = 'Other';
 
-// Deterministic QR-style pattern from the case ID — a stand-in for the real code.
-function FakeQr({ seed }: { seed: string }) {
-  const cells = useMemo(() => {
-    let h = 0;
-    for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return Array.from({ length: 121 }, (_, i) => {
-      const x = i % 11, y = Math.floor(i / 11);
-      if ((x < 3 && y < 3) || (x > 7 && y < 3) || (x < 3 && y > 7)) return !(x === 1 && y === 1) && !(x === 9 && y === 1) && !(x === 1 && y === 9);
-      h = (h * 1103515245 + 12345) >>> 0;
-      return (h >> 16) % 2 === 0;
-    });
-  }, [seed]);
-  return (
-    <div className="grid grid-cols-11 gap-[1.5px] w-[74px] h-[74px] flex-shrink-0" aria-hidden>
-      {cells.map((on, i) => <span key={i} className={`rounded-[1px] ${on ? 'bg-[#030213]' : ''}`} />)}
-    </div>
-  );
-}
-
-function ReadyForDispatchPanel({ lab, caseId, patient, practice, service, delivery, onDispatch }: { lab: string; caseId: string; patient: string; practice: string; service: string; delivery?: string | null; onDispatch: (details: { courier: string; packaging: string; tracking: string }) => void }) {
+function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline, orderCase, onDispatch }: { lab: string; caseId: string; patient: string; dentist: string; clinic: string; offline?: boolean; orderCase: CaseForDetail; onDispatch: (details: { courier: string; packaging: string; tracking: string; dispatchedOn: string }) => void }) {
+  const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
   const [courier, setCourier] = useState(DISPATCH_COURIERS[0]);
   const [packaging, setPackaging] = useState('Bag');
   const [otherCourier, setOtherCourier] = useState('');
   const [tracking, setTracking] = useState('');
+  const [dispatchedOn, setDispatchedOn] = useState(() => new Date().toISOString().slice(0, 10));
   const courierName = courier === OTHER_COURIER ? otherCourier.trim() : courier;
   const pick = (active: boolean) =>
     `px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${active ? 'bg-[#EEF4FF] border-[#4D8EF7] text-[#1565C0]' : 'bg-white border-[#E0E0E6] text-[#5A5568] hover:bg-[#F8F9FC]'}`;
@@ -4042,16 +4038,27 @@ function ReadyForDispatchPanel({ lab, caseId, patient, practice, service, delive
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-[#92400E]">Ready for dispatch</p>
           <p className="text-[11px] text-[#92400E]/80 leading-snug mt-0.5">
-            This case is not with {lab} yet. Print the order form and label, then send the impressions.
+            {offline
+              ? 'Print the order form and post it with the impressions. This lab doesn’t use Smile Genius, so contact them for progress.'
+              : `This case is not with ${lab} yet. Print the label, post the impressions, then mark it as dispatched.`}
           </p>
         </div>
-        <button
-          onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity whitespace-nowrap flex-shrink-0"
-        >
-          <Printer className="w-3.5 h-3.5" />
-          Print label &amp; dispatch
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => setPrintOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-[#5A5568] bg-white border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors whitespace-nowrap"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            {offline ? 'Print Order Form' : 'Print label'}
+          </button>
+          <button
+            onClick={() => setOpen(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity whitespace-nowrap"
+          >
+            <Truck className="w-3.5 h-3.5" />
+            Mark as dispatched
+          </button>
+        </div>
       </div>
       {open && (
         <ModalPortal>
@@ -4060,31 +4067,14 @@ function ReadyForDispatchPanel({ lab, caseId, patient, practice, service, delive
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
               <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6]">
                 <div>
-                  <p className="text-sm font-semibold text-[#030213]">Dispatch to {lab}</p>
-                  <p className="text-[11px] text-[#717182] mt-0.5">Add the shipping details, then print the order form and label.</p>
+                  <p className="text-sm font-semibold text-[#030213]">Mark as dispatched · {lab}</p>
+                  <p className="text-[11px] text-[#717182] mt-0.5">Add the shipping details. The case is submitted to the lab.</p>
                 </div>
                 <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors">
                   <X className="w-4 h-4" />
                 </button>
               </div>
               <div className="px-6 py-5 space-y-4">
-                {/* The label that gets printed — always black on white. */}
-                <div className="rounded-xl border border-[#E0E0E6] bg-white p-3.5 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-[#717182]">Smile Genius · Lab work</p>
-                    <p className="text-[9px] font-semibold text-[#717182]">Private</p>
-                  </div>
-                  <div className="flex items-center gap-3.5 mt-2">
-                    <FakeQr seed={caseId} />
-                    <div className="min-w-0">
-                      <p className="text-lg font-bold text-[#030213] leading-tight font-mono">{caseId}</p>
-                      <p className="text-xs font-semibold text-[#030213] mt-1 truncate">{patient} · {service}</p>
-                      <p className="text-[11px] text-[#5A5568] truncate">To: {lab}</p>
-                      {delivery && <p className="text-[11px] text-[#5A5568]">Delivery date {delivery}</p>}
-                    </div>
-                  </div>
-                  <p className="text-[9px] text-[#A0A0B0] mt-1.5">From {practice}</p>
-                </div>
                 <div>
                   <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Courier</p>
                   <div className="flex flex-wrap gap-1.5">
@@ -4108,6 +4098,15 @@ function ReadyForDispatchPanel({ lab, caseId, patient, practice, service, delive
                   <p className="text-[10px] text-[#8B8B9E] mt-1">Collected from the clinic.</p>
                 </div>
                 <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Dispatched on</p>
+                  <input
+                    type="date"
+                    value={dispatchedOn}
+                    onChange={e => setDispatchedOn(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg"
+                  />
+                </div>
+                <div>
                   <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Tracking number <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
                   <input
                     value={tracking}
@@ -4122,18 +4121,20 @@ function ReadyForDispatchPanel({ lab, caseId, patient, practice, service, delive
                   Cancel
                 </button>
                 <button
-                  onClick={() => { setOpen(false); onDispatch({ courier: courierName, packaging, tracking }); }}
-                  disabled={!courierName}
+                  onClick={() => { setOpen(false); onDispatch({ courier: courierName, packaging, tracking, dispatchedOn }); }}
+                  disabled={!courierName || !dispatchedOn}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Printer className="w-3.5 h-3.5" />
-                  Print &amp; dispatch
+                  <Truck className="w-3.5 h-3.5" />
+                  Mark as dispatched
                 </button>
               </div>
             </div>
           </div>
         </ModalPortal>
       )}
+      {printOpen && offline && <OrderFormModal caseData={orderCase} onClose={() => setPrintOpen(false)} onPrint={() => { toast.success('Printing order form…'); setPrintOpen(false); }} />}
+      {printOpen && !offline && <PrintLabelsModal caseNumbers={[caseId]} labNames={[lab]} details={[{ patient, dentist, clinic }]} title={`Print label · ${caseId}`} subtitle="Put this sheet in the parcel with the impressions." onClose={() => setPrintOpen(false)} />}
     </>
   );
 }
@@ -4572,7 +4573,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
       {/* ── Offline-lab notice — sits ABOVE the scroll area (like the back nav
           and identity card), so it stays pinned while the case content
           scrolls underneath. ── */}
-      {offlineLabStatus && caseData.lab && (
+      {offlineLabStatus && caseData.lab && caseData.status !== 'ready-for-dispatch' && (
         <div className="mx-6 mt-1">
           <OfflineLabNotice labName={caseData.lab} status={offlineLabStatus} variant="detailed" />
         </div>
@@ -4608,12 +4609,13 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           lab={caseData.lab ?? 'the lab'}
           caseId={caseData.id}
           patient={caseData.patientName}
-          practice={caseData.practice}
-          service={caseData.serviceItems?.map(si => si.name).join(', ') || 'Lab work'}
-          delivery={caseData.requestedDelivery}
+          dentist={caseData.dentist}
+          clinic={caseData.practice}
+          offline={!!offlineLabStatusFor(caseData.lab)}
+          orderCase={caseData}
           onDispatch={({ courier, packaging, tracking }) => {
             onSetStatus?.('submitted');
-            toast.success(`Order form and label printed — ${courier} (${packaging.toLowerCase()})${tracking ? `, tracking ${tracking}` : ''}. Case submitted to the lab.`);
+            toast.success(`${caseData.id} marked as dispatched — ${courier} (${packaging.toLowerCase()})${tracking ? `, tracking ${tracking}` : ''}. Case submitted to the lab.`);
           }}
         />
       )}

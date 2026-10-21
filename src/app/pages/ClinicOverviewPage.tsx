@@ -3,7 +3,7 @@ import {
   Sparkles, ArrowRight, FolderKanban, Plus, Wallet,
   CheckCircle2, FileText, PauseCircle,
   CalendarX2, XCircle, MessageSquare, TrendingUp, Info,
-  Reply, Check, Send, FilePen, AlertTriangle,
+  Reply, Check, Send, FilePen, AlertTriangle, Truck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -107,6 +107,7 @@ export default function ClinicOverviewPage({ onOpenCases, onCreateCase, onOpenIn
   // greyscale ("cleared / on-track") the moment they read 0.
   const caseOps: TileProps[] = [
     { label: 'Draft',               icon: <FilePen className="w-4 h-4" />,     accent: '#7C3AED', value: '6',  sub: '£880 value · oldest draft 3 days',       onClick: onOpenCases },
+    { label: 'Ready for dispatch',  icon: <Truck className="w-4 h-4" />,       accent: '#B45309', value: '3',  sub: 'Print the label and post',               onClick: onOpenCases },
     { label: 'On hold',             icon: <PauseCircle className="w-4 h-4" />,  attention: true, value: '14', sub: '9 awaiting clinic · oldest hold 12 days', onClick: onOpenCases },
     { label: 'Beyond delivery date',icon: <CalendarX2 className="w-4 h-4" />,   attention: true, value: '7',  sub: '£1,850 delayed · avg 4 days delay',       onClick: onOpenCases },
     { label: 'Case not approved',   icon: <XCircle className="w-4 h-4" />,      attention: true, value: '5',  sub: '£950 affected · rejected by lab',         onClick: onOpenCases },

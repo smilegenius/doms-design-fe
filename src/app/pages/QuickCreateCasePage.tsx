@@ -1138,7 +1138,7 @@ function IteroUploadPane({ uploadedCount, onUploadZip, onView3D, orderNumber = '
 
 export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraft, counterparty = 'clinic' }: {
   onCancel: () => void;
-  onSubmitted: (openCaseId?: string) => void;
+  onSubmitted: () => void;
   /** No longer rendered — kept on the parent so the route survives, but
       the in-page switch button has been removed. */
   onUseDetailed?: () => void;
@@ -1892,9 +1892,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         }
       }
     }
-    // A case waiting to be printed and shipped opens straight away, where the
-    // dispatch step is.
-    onSubmitted(record.status === 'ready-for-dispatch' ? record.id : undefined);
+    onSubmitted();
   }
 
   // Snapshot the current form state into localStorage. The next visit to
@@ -3171,7 +3169,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
               className={`inline-flex items-center gap-2 px-7 py-3 rounded-l-xl ${followUpMatch ? "" : "rounded-r-xl"} text-sm font-bold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 shadow-[0_4px_12px_rgba(77,142,247,0.35)] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none`}
             >
               {followUp ? <GitMerge className="w-4 h-4" /> : <Check className="w-4 h-4" strokeWidth={3} />}
-              {followUp ? `Add to ${followUp.case.id}` : 'Create case'}
+              {followUp ? `Add to ${followUp.case.id}` : !isLab && caseSource === 'Impressions (By Post)' ? 'Ready for Dispatch' : 'Create case'}
             </button>
 
                 {followUpMatch && (
@@ -3287,6 +3285,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       {/* ── Case Source popup ── method selector + optional file uploads ── */}
       {caseSourceOpen && (
         <CaseSourcePopup
+          title={isLab ? 'Case Source' : 'Scan Source'}
           method={caseSource}
           files={caseSourceFiles}
           extraFiles={caseSourceExtraFiles}
@@ -4571,8 +4570,9 @@ function ServiceDetailsDrawer({ selection, onUpdate, onClose }: {
 // state until the user clicks Save — that way Cancel truly discards the
 // in-progress edits.
 function CaseSourcePopup({
-  method, files, extraFiles, scanner, courier, onSave, onClose,
+  method, files, extraFiles, scanner, courier, title = 'Case Source', onSave, onClose,
 }: {
+  title?: string;
   method: string;
   files: Record<string, string | null>;
   extraFiles: string[];
@@ -4711,7 +4711,7 @@ function CaseSourcePopup({
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6] flex-shrink-0">
-          <h3 className="text-lg font-bold text-[#030213]">Case Source</h3>
+          <h3 className="text-lg font-bold text-[#030213]">{title}</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#F3F3F5] hover:bg-[#E8E8EC] flex items-center justify-center text-[#717182]">
             <X className="w-4 h-4" />
           </button>

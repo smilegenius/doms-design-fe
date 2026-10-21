@@ -94,29 +94,56 @@ type DeliveryTab = 'dispatch' | 'arriving' | 'received';
 export function LiteDeliveries() {
   const navigate = useNavigate();
   const { cases } = useScoped();
+  const { toast } = useGo();
   const [params, setParams] = useSearchParams();
+  // Bulk print: pick several cases on To dispatch, then print their labels together.
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const tab = (['dispatch', 'arriving', 'received'].includes(params.get('tab') ?? '') ? params.get('tab') : 'dispatch') as DeliveryTab;
   const [target, setTarget] = useState<LabCase | null>(null);
   const toDispatch = cases.filter(c => c.stage === 'ready' && !c.onHold).sort((a, b) => (a.returnBy || '9').localeCompare(b.returnBy || '9'));
   const arriving = cases.filter(c => c.stage === 'shipped');
   const received = cases.filter(c => c.stage === 'received');
   const list = tab === 'dispatch' ? toDispatch : tab === 'arriving' ? arriving : received;
+  const bulk = tab === 'dispatch' && selecting;
+  const stopSelecting = () => { setSelecting(false); setPicked(new Set()); };
+  const toggle = (id: string) => setPicked(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const allPicked = toDispatch.length > 0 && picked.size === toDispatch.length;
+  const printPicked = () => {
+    toast(picked.size === 1 ? 'Printing label…' : `Printing ${picked.size} labels…`, 'info');
+    stopSelecting();
+  };
   const empty = {
     dispatch: { icon: <Truck className="w-7 h-7" />, title: 'Nothing to dispatch', body: 'New lab work you create will appear here, ready to print and send.' },
     arriving: { icon: <PackageCheck className="w-7 h-7" />, title: 'Nothing on its way', body: 'Work the lab has shipped will appear here.' },
     received: { icon: <PackageCheck className="w-7 h-7" />, title: 'Nothing received yet', body: 'Work you mark as received will appear here.' },
   }[tab];
   return (
-    <Screen tabs header={<TopBar large title="Deliveries" />}>
+    <Screen tabs header={<TopBar large title="Deliveries" />}
+      footer={bulk ? (
+        <Btn block disabled={!picked.size} icon={<Printer className="w-5 h-5" />} onClick={printPicked}>
+          {picked.size ? `Print ${picked.size} label${picked.size === 1 ? '' : 's'}` : 'Choose the labels to print'}
+        </Btn>
+      ) : undefined}>
       <div className="px-4">
-        <Segmented value={tab} onChange={t => setParams(t === 'dispatch' ? {} : { tab: t }, { replace: true })}
+        <Segmented value={tab} onChange={t => { stopSelecting(); setParams(t === 'dispatch' ? {} : { tab: t }, { replace: true }); }}
           options={[{ value: 'dispatch', label: 'To dispatch', count: toDispatch.length }, { value: 'arriving', label: 'Arriving', count: arriving.length }, { value: 'received', label: 'Received', count: received.length }]} />
       </div>
+      {tab === 'dispatch' && toDispatch.length > 1 && (
+        <div className="px-5 mt-3 flex items-center justify-between">
+          {bulk
+            ? <button onClick={() => setPicked(allPicked ? new Set() : new Set(toDispatch.map(c => c.id)))} className="text-[13px] font-semibold text-go-brand">{allPicked ? 'Clear all' : 'Select all'}</button>
+            : <span className="text-[12.5px] text-go-muted">Print several labels at once</span>}
+          <button onClick={() => (bulk ? stopSelecting() : setSelecting(true))} className="text-[13px] font-semibold text-go-brand">{bulk ? 'Cancel' : 'Select'}</button>
+        </div>
+      )}
       <div className="px-4 mt-3 space-y-2.5">
         {list.map(c => (
           <CaseRow key={c.id} c={c}
-            onClick={tab === 'dispatch' ? () => navigate(`${LITE}/dispatch/${c.id}`) : undefined}
-            right={tab === 'dispatch'
+            onClick={tab === 'dispatch' ? () => (bulk ? toggle(c.id) : navigate(`${LITE}/dispatch/${c.id}`)) : undefined}
+            right={bulk
+              ? <span aria-hidden className={cx('w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition', picked.has(c.id) ? 'go-grad border-transparent text-white' : 'border-go-line')}>{picked.has(c.id) && <Check className="w-3.5 h-3.5" strokeWidth={3} />}</span>
+              : tab === 'dispatch'
               ? <span className="inline-flex items-center gap-1 h-9 px-3 rounded-xl bg-go-brand-soft text-go-brand-ink text-[12.5px] font-semibold flex-shrink-0"><Printer className="w-4 h-4" />Print</span>
               : tab === 'received' ? <Pill tone="ok" dot>Received</Pill> : undefined}
             action={tab === 'arriving' ? <Btn block size="md" icon={<PackageCheck className="w-4 h-4" />} onClick={() => setTarget(c)}>Mark as received</Btn> : undefined} />
@@ -681,7 +708,7 @@ export function LiteCreate({ labMode }: { labMode?: boolean } = {}) {
         // The earlier stages are already on a case: adding to it is the main action, a separate case is the alternative
         ? <div className="flex gap-2"><Btn variant="secondary" className="!px-4 whitespace-nowrap" onClick={() => submit(true)}>Create new</Btn><Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => submit()}>Add to {followUp.c.id}</Btn></div>
         : labMode ? <div className="flex gap-2"><Btn variant="secondary" className="flex-1" onClick={() => submit(false, true)}>Save draft</Btn><Btn className="flex-[1.4]" icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => submit()}>Create case</Btn></div>
-        : <Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => submit()}>Create case</Btn>}>
+        : <Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => submit()}>Ready for Dispatch</Btn>}>
       {tried && notFound.length > 0
         ? <p className="px-5 pt-1 text-[13px] text-go-warn font-medium">Please fill in the highlighted details.</p>
         : unclear ? <p className="mx-4 mt-1 px-3 py-2 rounded-2xl bg-go-warn-soft text-[12.5px] text-go-warn font-medium">Some details weren’t clear on the prescription. Please check them.</p>

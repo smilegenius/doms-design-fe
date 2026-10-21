@@ -149,7 +149,7 @@ export function DispatchScreen() {
             </View>
           )}
           <View className="flex-row gap-3">
-            <View className="flex-1 min-w-0"><Label>Collected on</Label><DateField value={collected} onChange={setCollected} accessibilityLabel="Collected on" /></View>
+            <View className="flex-1 min-w-0"><Label>Dispatched on</Label><DateField value={collected} onChange={setCollected} accessibilityLabel="Dispatched on" /></View>
             <View><Label>Bags or boxes</Label><Stepper value={bags} onChange={setBags} /></View>
           </View>
           <View><Label optional>Contents or notes</Label><TextArea value={notes} onChangeText={setNotes} placeholder="Impressions, bite registration, models…" /></View>

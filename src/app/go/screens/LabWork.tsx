@@ -159,6 +159,26 @@ const createdIn = (c: LabCase, b: [string, string] | null) => {
   const d = createdOn(c);
   return !!d && ymd(new Date(d)) >= b[0] && ymd(new Date(d)) <= b[1];
 };
+/** Requested delivery date filter: the next few days, then a custom from / to. */
+type DueRange = '7' | '14' | '30' | 'custom';
+const DUE_PRESETS: { id: DueRange | null; label: string }[] = [
+  { id: null, label: 'Any date' }, { id: '7', label: 'Next 7 days' }, { id: '14', label: 'Next 2 weeks' },
+  { id: '30', label: 'Next 30 days' }, { id: 'custom', label: 'Custom' },
+];
+/** Inclusive day range [from, to] as yyyy-mm-dd, starting today; null when no delivery filter. */
+function dueBoundsFor(range: DueRange | null, from: string | null, to: string | null): [string, string] | null {
+  if (!range) return null;
+  if (range === 'custom') return from || to ? [from ?? '0000-01-01', to ?? '9999-12-31'] : null;
+  const end = new Date(); end.setDate(end.getDate() + Number(range) - 1);
+  return [ymd(new Date()), ymd(end)];
+}
+/** A case's requested delivery date is its soonest open one (returnBy); cases without one never match. */
+const dueIn = (c: LabCase, b: [string, string] | null) => {
+  if (!b) return true;
+  if (!c.returnBy) return false;
+  const d = ymd(new Date(c.returnBy));
+  return d >= b[0] && d <= b[1];
+};
 const fmtYmd = (s: string) => new Date(`${s}T12:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
 /** Soonest delivery date first; cases with no date (e.g. drafts) at the end. */
@@ -182,7 +202,12 @@ export function LabWorkScreen() {
   const cFrom = params.get('from');
   const cTo = params.get('to');
   const bounds = createdBounds(created, cFrom, cTo);
-  const nFilters = (status ? 1 : 0) + (dentist ? 1 : 0) + (labF ? 1 : 0) + (bounds ? 1 : 0);
+  // Requested delivery date: ?due=7|14|30|custom (+ ?dfrom=&dto= for custom)
+  const due = (['7', '14', '30', 'custom'] as const).find(x => x === params.get('due')) ?? null;
+  const dFrom = params.get('dfrom');
+  const dTo = params.get('dto');
+  const dueBounds = dueBoundsFor(due, dFrom, dTo);
+  const nFilters = (status ? 1 : 0) + (dentist ? 1 : 0) + (labF ? 1 : 0) + (bounds ? 1 : 0) + (dueBounds ? 1 : 0);
   // Card view is switched off for now (FEATURES.labCardView). When on: list
   // (default) or cards, in the URL so scenarios can deep-link (?view=cards).
   const labCardView = FEATURES.labCardView;
@@ -191,12 +216,12 @@ export function LabWorkScreen() {
   const base = useMemo(() => cases.filter(c => {
     return matchesSearch(c, q) && (day === null || (c.appointment && dayOffset(c.appointment.at) === day))
       && (!status || matchesAttention(c, status))
-      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds);
-  }), [cases, q, day, status, dentist, labF, bounds?.[0], bounds?.[1]]);
+      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds) && dueIn(c, dueBounds);
+  }), [cases, q, day, status, dentist, labF, bounds?.[0], bounds?.[1], dueBounds?.[0], dueBounds?.[1]]);
   const baseNoStatus = useMemo(() => cases.filter(c => {
     return matchesSearch(c, q) && (day === null || (c.appointment && dayOffset(c.appointment.at) === day))
-      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds);
-  }), [cases, q, day, dentist, labF, bounds?.[0], bounds?.[1]]);
+      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds) && dueIn(c, dueBounds);
+  }), [cases, q, day, dentist, labF, bounds?.[0], bounds?.[1], dueBounds?.[0], dueBounds?.[1]]);
   const shown = base.filter(c => rf === 'all' || readiness(c).level === rf);
   // Several keys in one update (two setParam calls in a row would overwrite each other)
   const setMany = (kv: Record<string, string | null>) => {
@@ -208,6 +233,9 @@ export function LabWorkScreen() {
   const createdLabel = created === 'custom'
     ? `Created ${cFrom ? fmtYmd(cFrom) : '…'} – ${cTo ? fmtYmd(cTo) : '…'}`
     : `Created: ${CREATED_PRESETS.find(p => p.id === created)?.label.toLowerCase()}`;
+  const dueLabelText = due === 'custom'
+    ? `Delivery ${dFrom ? fmtYmd(dFrom) : '…'} – ${dTo ? fmtYmd(dTo) : '…'}`
+    : `Delivery: ${DUE_PRESETS.find(p => p.id === due)?.label.toLowerCase()}`;
 
   return (
     <Screen tabs header={
@@ -252,6 +280,11 @@ export function LabWorkScreen() {
                 {createdLabel}<X className="w-3.5 h-3.5" />
               </button>
             )}
+            {dueBounds && (
+              <button onClick={() => setMany({ due: null, dfrom: null, dto: null })} className="h-8 pl-3 pr-2 rounded-full text-[12.5px] font-semibold bg-go-brand text-white inline-flex items-center gap-1 flex-shrink-0 whitespace-nowrap">
+                {dueLabelText}<X className="w-3.5 h-3.5" />
+              </button>
+            )}
             {day !== null && (
               <button onClick={() => setParam('day', null)} className="h-8 pl-3 pr-2 rounded-full text-[12.5px] font-semibold bg-go-brand text-white inline-flex items-center gap-1 flex-shrink-0">
                 {fmtDate(new Date(Date.now() + day * 864e5).toISOString())}<X className="w-3.5 h-3.5" />
@@ -285,7 +318,7 @@ export function LabWorkScreen() {
       <Sheet open={filtersOpen} onClose={() => setFiltersOpen(false)} label="Lab work filters" title={<span className="inline-flex items-center gap-2"><Filter className="w-5 h-5 text-go-brand" />Lab work</span>}
         footer={
           <div className="flex gap-2">
-            <Btn variant="secondary" onClick={() => setMany({ f: null, dentist: null, lab: null, created: null, from: null, to: null })} disabled={!nFilters && !created}>Clear</Btn>
+            <Btn variant="secondary" onClick={() => setMany({ f: null, dentist: null, lab: null, created: null, from: null, to: null, due: null, dfrom: null, dto: null })} disabled={!nFilters && !created && !due}>Clear</Btn>
             <Btn block onClick={() => setFiltersOpen(false)}>Show {base.length} result{base.length === 1 ? '' : 's'}</Btn>
           </div>
         }>
@@ -314,6 +347,25 @@ export function LabWorkScreen() {
                 <label className="block">
                   <span className="block text-[11.5px] text-go-muted mb-1 px-0.5">To</span>
                   <Input type="date" value={cTo ?? ''} min={cFrom ?? undefined} onChange={e => setParam('to', e.target.value || null)} className="h-12 px-3 text-[14px]" />
+                </label>
+              </div>
+            )}
+          </div>
+          <div>
+            <Label>Requested delivery date</Label>
+            <Chips options={DUE_PRESETS.map(p => p.label)} value={DUE_PRESETS.find(p => p.id === due)!.label}
+              onChange={(lbl: string) => { const v = DUE_PRESETS.find(p => p.label === lbl)?.id ?? null; setMany(v === 'custom'
+                ? { due: 'custom', dfrom: dFrom ?? ymd(new Date()), dto: dTo ?? ymd(new Date(Date.now() + 7 * 864e5)) }
+                : { due: v, dfrom: null, dto: null }); }} />
+            {due === 'custom' && (
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <label className="block">
+                  <span className="block text-[11.5px] text-go-muted mb-1 px-0.5">From</span>
+                  <Input type="date" aria-label="Delivery from" value={dFrom ?? ''} max={dTo ?? undefined} onChange={e => setParam('dfrom', e.target.value || null)} className="h-12 px-3 text-[14px]" />
+                </label>
+                <label className="block">
+                  <span className="block text-[11.5px] text-go-muted mb-1 px-0.5">To</span>
+                  <Input type="date" aria-label="Delivery to" value={dTo ?? ''} min={dFrom ?? undefined} onChange={e => setParam('dto', e.target.value || null)} className="h-12 px-3 text-[14px]" />
                 </label>
               </div>
             )}

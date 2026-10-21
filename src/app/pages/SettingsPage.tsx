@@ -24,6 +24,8 @@ import {
   Sliders,
   FileText,
   Plug,
+  Printer,
+  Download,
 } from 'lucide-react';
 import InviteUsersModal, { InviteUserRow } from '../components/InviteUsersModal';
 import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
@@ -41,8 +43,9 @@ import SortDropdown from '../components/SortDropdown';
 import FilterDrawer from '../components/FilterDrawer';
 import Pagination from '../components/Pagination';
 import Button from '../components/Button';
+import { PrintLabelsModal, DispatchLabelPage } from '../components/DispatchLabel';
 
-type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners' | 'integrations';
+type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners' | 'integrations' | 'dispatch-label';
 
 const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'personal',      label: 'Personal Info',   description: 'Your account profile',    icon: User },
@@ -58,6 +61,11 @@ const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
 // lab portal never shows it.
 const INTEGRATIONS_TAB: { id: TabId; label: string; description: string; icon: any } =
   { id: 'integrations', label: 'Integrations', description: 'Dentally, CareStack', icon: Plug };
+
+// Clinic only: the blank A4 lab ticket to keep at reception and write the case
+// number on by hand when posting impressions.
+const DISPATCH_LABEL_TAB: { id: TabId; label: string; description: string; icon: any } =
+  { id: 'dispatch-label', label: 'Dispatch Label', description: 'Blank A4 label to post with work', icon: Printer };
 
 // Lab-only Settings sections — mirrors the live lab portal, where the
 // Prescription Builder and Case Scoring (weights, bands and Case Scoring
@@ -137,7 +145,8 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
   //   /lab/settings?tab=notifications&sub=escalations
   // The portal shells parse only the pathname, so query params pass through.
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabs = portal === 'lab' ? LAB_TABS : [...TABS, INTEGRATIONS_TAB];
+  const tabs = portal === 'lab' ? LAB_TABS : portal === 'clinic' ? [...TABS, DISPATCH_LABEL_TAB, INTEGRATIONS_TAB] : [...TABS, INTEGRATIONS_TAB];
+  const [blankLabelOpen, setBlankLabelOpen] = useState(false);
   // Integrations reads as configured once the group's CareStack flag is on.
   const csEnabled = useCareStackEnabled();
   const configured = useMemo(() => {
@@ -842,6 +851,48 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
             <NotificationPreferences portal={portal === 'lab' ? 'lab' : 'clinic'} />
           )}
         </div>
+      )}
+
+      {/* ─── Dispatch Label (clinic only) ─────────────────────────────────── */}
+      {/* A blank A4 lab ticket, no case number, so reception can keep a stack
+          printed and write the number in by hand when they post the work. */}
+      {activeTab === 'dispatch-label' && portal === 'clinic' && (
+        <SectionCard
+          title="Blank dispatch label"
+          actions={
+            <Button variant="primary" size="sm" icon={<Download className="w-4 h-4" />} onClick={() => setBlankLabelOpen(true)}>
+              Download A4 label
+            </Button>
+          }
+        >
+          <div className="flex flex-col sm:flex-row gap-6">
+            <div className="flex-shrink-0 mx-auto sm:mx-0 border border-[#E0E0E6] shadow-sm" style={{ width: 794 * 0.3, height: 1123 * 0.3 }}>
+              <div style={{ transform: 'scale(0.3)', transformOrigin: 'top left' }}>
+                <DispatchLabelPage caseNumber={null} />
+              </div>
+            </div>
+            <div className="text-sm text-[#5A5568] leading-relaxed space-y-3">
+              <p>
+                The same Digital Rx lab ticket that prints from a case, with the case number left empty. Print a stack and keep it at reception.
+              </p>
+              <ol className="list-decimal pl-5 space-y-1 text-[13px]">
+                <li>Download and print the A4 label, as many copies as you need.</li>
+                <li>When you post impressions, write the case number on the line.</li>
+                <li>Put the sheet in the parcel with the work.</li>
+              </ol>
+              <p className="text-[12px] text-[#717182]">Choose “Save as PDF” in the print window to download it as a file.</p>
+            </div>
+          </div>
+        </SectionCard>
+      )}
+      {blankLabelOpen && (
+        <PrintLabelsModal
+          caseNumbers={[null]}
+          allowCopies
+          title="Blank dispatch label"
+          subtitle="Write the case number on the line when you post the work."
+          onClose={() => setBlankLabelOpen(false)}
+        />
       )}
 
       {/* ─── Prescription Builder (lab only) ──────────────────────────────── */}

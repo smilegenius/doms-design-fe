@@ -129,7 +129,7 @@ export function DispatchScreen() {
             <div><Label optional>Tracking number</Label><Input value={tracking} onChange={e => setTracking(e.target.value.toUpperCase())} placeholder="e.g. AB123456789GB" className="font-mono" /></div>
           )}
           <div className="flex gap-3">
-            <div className="flex-1"><Label>Collected on</Label><Input type="date" value={collected} onChange={e => setCollected(e.target.value)} /></div>
+            <div className="flex-1"><Label>Dispatched on</Label><Input type="date" value={collected} onChange={e => setCollected(e.target.value)} /></div>
             <div><Label>Bags or boxes</Label><Stepper value={bags} onChange={setBags} /></div>
           </div>
           <div><Label optional>Contents or notes</Label><TextArea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Impressions, bite registration, models…" /></div>
