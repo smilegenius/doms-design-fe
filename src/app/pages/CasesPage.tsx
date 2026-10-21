@@ -1243,7 +1243,18 @@ export const offlineDispatchDemoCase: Case = {
   serviceItems: [{ ...dispatchDemoCase.serviceItems[0], id: 'disp4004-s1', name: 'Partial Denture', fdi: [], material: 'Acrylic', shade: 'A2', deliveryDate: '08-Jul-2026' }],
   requestedDelivery: '08-Jul-2026',
 };
-mockCases.unshift(offlineDispatchDemoCase, ...dispatchDemoExtras, dispatchDemoCase);
+export const multiDispatchDemoCase: Case = {
+  ...dispatchDemoCase,
+  id: 'CASE-DISP-4005',
+  patientName: 'Sana Iqbal',
+  dentist: 'Dr. Davies',
+  services: ['Crown', 'Veneers'],
+  serviceItems: [
+    { ...dispatchDemoCase.serviceItems[0], id: 'disp4005-s1', name: 'Crown', fdi: [24] },
+    { ...dispatchDemoCase.serviceItems[0], id: 'disp4005-s2', name: 'Veneers', fdi: [11, 21], deliveryDate: '05-Jul-2026' },
+  ],
+};
+mockCases.unshift(offlineDispatchDemoCase, multiDispatchDemoCase, ...dispatchDemoExtras, dispatchDemoCase);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -2107,7 +2118,15 @@ export default function CasesPage({ portal = 'dso', initialCaseId, onCreateCase,
         onClick={() => openCase(targetFor ? targetFor(r) : c)}
         className="bg-[#FAF8FF] hover:bg-[#F5F3FF] transition-colors cursor-pointer [&>td:first-child]:rounded-l-[4px] [&>td:last-child]:rounded-r-[4px]"
       >
-        <td className="pl-4 pr-1 py-2" />
+        <td className="pl-4 pr-1 py-2" onClick={(e) => e.stopPropagation()}>
+          {isSelectable(c) && (
+            <TriCheckbox
+              checked={(selectedSubs.get(c.id)?.size ?? 0) >= unitIdsOf(c).length}
+              onChange={() => setCaseSelected(c, (selectedSubs.get(c.id)?.size ?? 0) < unitIdsOf(c).length)}
+              title={`Select ${c.id}`}
+            />
+          )}
+        </td>
         <td className="pl-3 pr-2 py-2 relative">
           <TreeGuide depth={nested ? 2 : 1} first={i === 0} last={i === rows.length - 1} parentLast={parentLast} />
         </td>
