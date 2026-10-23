@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX, Truck, Play } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX, Truck, Play, FilePlus2 } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 
@@ -29,6 +29,20 @@ export interface FlowEntry {
 }
 
 export const FLOWS: FlowEntry[] = [
+  {
+    // From scratch: lab first, one question at a time, Send as the prescriber's signature.
+    title: 'New case flow',
+    description: 'The simplest way for a clinic to create lab work, from Add new Case or a scanner draft to Sent: lab first, a step timeline with one question at a time, the Teeth Chart against every service, smart defaults with their source, and Send with a 10-second Undo.',
+    detail: 'Clinic · 3 scripts + 10 checks',
+    icon: <FilePlus2 className="w-5 h-5 text-[#2F62D6]" />,
+    badge: 'Walkthrough',
+    accent: '#2F62D6',
+    accentSoft: '#EEF4FF',
+    path: '/flows/new-case',
+    date: '22 Oct 2026',
+    month: '2026-10',
+    simulate: { label: 'Open Lab Work', path: '/flows/new-case/cases' },
+  },
   {
     // Clinic manual creation now ends in print & ship, not a direct hand-off.
     title: 'Addition of new stage in manual case creation',

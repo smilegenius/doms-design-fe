@@ -18,6 +18,9 @@ import HotfixesFlowPage from './pages/HotfixesFlowPage';
 import ManualCaseDispatchFlowPage from './pages/ManualCaseDispatchFlowPage';
 import DentureStagesFlowPage from './pages/DentureStagesFlowPage';
 import DentistContactFlowPage from './pages/DentistContactFlowPage';
+import NewCaseWalkthroughPage from './pages/NewCaseWalkthroughPage';
+import NewCaseFlowPage from './pages/NewCaseFlowPage';
+import FlowCasesPage from './newCase/FlowCasesPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
 import LabApp from './LabApp';
@@ -440,6 +443,11 @@ export default function App() {
       <Route path="/flows/denture-stages" element={<DentureStagesFlowPage />} />
       <Route path="/flows/dentist-contact" element={<DentistContactFlowPage />} />
       <Route path="/flows/manual-case-dispatch" element={<ManualCaseDispatchFlowPage />} />
+      {/* New case flow (Oct 2026) — its own Lab Work list and case page, so the
+          portal's Cases screens stay as they are. Signs in with the demo account. */}
+      <Route path="/flows/new-case" element={<NewCaseWalkthroughPage />} />
+      <Route path="/flows/new-case/cases" element={<FlowCasesPage />} />
+      <Route path="/flows/new-case/case/:id" element={<NewCaseFlowPage />} />
       {/* Smile Genius Go — clinician / dentist mobile app. Has its own demo
           sign-in, so it sits outside ProtectedRoute. */}
       <Route path="/go" element={<GoVersionSelect />} />
