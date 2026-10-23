@@ -6,9 +6,9 @@
 // rows that go straight to them, and the details sit side by side as small
 // cards. One page ('compact') keeps the plain rows.
 
-import { forwardRef, ForwardedRef, ReactNode } from 'react';
+import { forwardRef, ForwardedRef, ReactNode, useState } from 'react';
 import {
-  ArrowRight, Building2, CalendarClock, ClipboardCheck, Lock, Pencil, ScanLine, ShieldCheck, Stethoscope, Trash2, Truck, UserRound,
+  ArrowRight, Building2, CalendarClock, ChevronDown, ClipboardCheck, Lock, MessageSquareText, Pencil, ScanLine, ShieldCheck, Stethoscope, Trash2, Truck, UserRound,
   type LucideIcon,
 } from 'lucide-react';
 import { useCase } from './CaseContext';
@@ -16,7 +16,7 @@ import { CLINIC } from './data';
 import { fmtCutoff, fmtDay, sameDay } from './dates';
 import {
   PRODUCTS, ServiceItem, StepNode, archCaps, attestation, bridgeParts, fitCheck, fullName, itemTitle, labSees, parseStep, plural,
-  recordsState, sendMode, slotsFor, splitSuggestion, fitLine,
+  recordsState, sendMode, slotsFor, splitSuggestion, fitLine, caseInstructions, instructionsStale,
 } from './rules';
 import { MiniChart } from './TeethChart';
 import { CaseInstructionsBox, ServiceNote } from './Instructions';
@@ -110,10 +110,8 @@ function CompactReview({ hRef }: { hRef: HeadingRef }) {
         />
       </Card>
 
-      {/* Each service's instructions, merged here; still editable. */}
-      <Card className="p-4">
-        <CaseInstructionsBox />
-      </Card>
+      {/* Each service's instructions, merged here; still editable — folded to its first line until opened. */}
+      <InstructionsFold />
 
       {gaps === 0 && prescriber && !readOnly && (
         <p className="text-sm text-[#1F1F2E] leading-relaxed bg-[#F8F9FC] border border-[#ECECF2] rounded-xl px-4 py-3">
@@ -196,7 +194,7 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
   const addFit = !fit && !!dates.earliestFit && dates.route !== 'follow' && !readOnly;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <StepHeading ref={hRef} icon={ClipboardCheck} kicker="Review and Send" title={reviewTitle(api)} />
 
       {/* The case at a glance. */}
@@ -240,7 +238,7 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
 
       <section aria-labelledby="nc-review-services" className="space-y-3">
         <SectionLabel id="nc-review-services">{draft.items.length ? `Services · ${draft.items.length}` : 'Services'}</SectionLabel>
-        {draft.items.map(item => <WideService key={item.id} item={item} />)}
+        {draft.items.map(item => <WideService key={item.id} item={item} startOpen={draft.items.length === 1} />)}
         {draft.items.length === 0 && (
           <div className="flex items-center gap-3 px-4 py-3.5 rounded-2xl border border-dashed border-[#C9C9D6] text-sm text-[#5A5A6A]">
             <PRODUCT_ICON.other className="w-5 h-5 text-[#4A4A5A]" strokeWidth={1.75} aria-hidden />
@@ -265,7 +263,6 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
           <Detail
             icon={Truck}
             label="Delivery"
-            onEdit={edit('delivery')}
             sub={(fit || addFit || draft.split) && <>
               {fit && <span className="block">{fitLine(fit)}</span>}
               {addFit && <span className="block mt-0.5"><LinkButton onClick={() => api.openDrawer({ kind: 'fit' })}>Add Fit Appointment</LinkButton></span>}
@@ -304,7 +301,13 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
 }
 
 /** One service: its chart (or icon), title, its own back-by date, spec sheet, Edit and Remove. */
-function WideService({ item }: { item: ServiceItem }) {
+/**
+ * One service at Review as an accordion: the header always reads it back (chart,
+ * title, a one-line summary, its own back-by date); open, it shows every detail,
+ * Edit / Remove and its instructions. Open by default only when it's the only
+ * service or it still needs something, so Review fits without scrolling.
+ */
+function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boolean }) {
   const api = useCase();
   const { ctx, user, go, removeItem, notes, dismissNote, readOnly } = api;
   const slots = slotsFor(item, ctx);
@@ -316,9 +319,30 @@ function WideService({ item }: { item: ServiceItem }) {
   const title = itemTitle(item, user.notation);
   const Icon = PRODUCT_ICON[item.product];
   const details = itemDetails(item, ctx).filter(d => d.label !== 'Teeth' || item.product === 'bridge');
+  const [open, setOpen] = useState(!!startOpen || (gaps > 0 && !readOnly));
+  const summary = details.filter(d => d.value.length <= 34).map(d => d.value).join(' · ');
+  const bodyId = `nc-review-svc-${item.id}`;
+  if (!open) {
+    return (
+      <Card className="p-0">
+        <button type="button" aria-expanded={false} aria-controls={bodyId} onClick={() => setOpen(true)} className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-left rounded-2xl ${FOCUS}`}>
+          <span className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#F8F9FC] border border-[#ECECF2] flex items-center justify-center overflow-hidden" aria-hidden>
+            {item.teeth.length > 0 || arch ? <MiniChart teeth={item.teeth} arch={arch} pontics={item.bridge ? bridgeParts(item).pontics : undefined} width={32} label={title} /> : <Icon className="w-5 h-5 text-[#2F62D6]" strokeWidth={1.75} />}
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-semibold text-[#030213] truncate">{title}</span>
+            {summary && <span className="block text-xs text-[#5A5A6A] truncate">{summary}</span>}
+          </span>
+          {gaps > 0 && !readOnly && <StateIcon state="gap" size="sm" ripple={false} />}
+          {own && <span className="flex-shrink-0 text-xs font-semibold text-[#030213] whitespace-nowrap">{own.backBy ? `Back by ${fmtDay(own.backBy)}` : own.days}</span>}
+          <ChevronDown className="w-4 h-4 flex-shrink-0 text-[#5A5A6A]" aria-hidden />
+        </button>
+      </Card>
+    );
+  }
   return (
-    <Card className="p-4">
-      <div className="flex gap-4">
+    <Card className="p-4 nc-accordion-in">
+      <div id={bodyId} className="flex gap-4">
         <div className="flex-shrink-0 self-start w-[100px] rounded-xl bg-[#F8F9FC] border border-[#ECECF2] p-2 flex flex-col items-center gap-1">
           {item.teeth.length > 0 || arch
             ? <MiniChart teeth={item.teeth} arch={arch} pontics={item.bridge ? bridgeParts(item).pontics : undefined} width={82} label={title} />
@@ -335,6 +359,9 @@ function WideService({ item }: { item: ServiceItem }) {
                 </p>
               )}
             </div>
+            <button type="button" aria-expanded aria-controls={bodyId} aria-label={`Fold ${title}`} onClick={() => setOpen(false)} className={`order-last p-1 rounded-md text-[#5A5A6A] hover:bg-[#F8F9FC] ${FOCUS}`}>
+              <ChevronDown className="w-4 h-4 rotate-180" aria-hidden />
+            </button>
             {own && (
               <div className="flex-shrink-0 max-w-[180px] text-right">
                 <p className="text-sm font-semibold text-[#030213]">{own.backBy ? `Back by ${fmtDay(own.backBy)}` : own.days}</p>
@@ -392,9 +419,9 @@ function Detail({ icon: Icon, label, children, sub, onEdit, gap }: {
   icon: LucideIcon; label: string; children: ReactNode; sub?: ReactNode; onEdit?: () => void; gap?: boolean;
 }) {
   return (
-    <div className={`min-w-0 rounded-xl border px-3.5 py-3 ${gap ? 'border-[#F5D98B] bg-[#FFFBEB]' : 'border-[#E0E0E6] bg-white'}`}>
+    <div className={`min-w-0 rounded-xl border px-3 py-2.5 ${gap ? 'border-[#F5D98B] bg-[#FFFBEB]' : 'border-[#E0E0E6] bg-white'}`}>
       <div className="flex items-center gap-2">
-        <span aria-hidden className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${gap ? 'bg-[#FFF8E1] text-[#B45309]' : 'bg-[#EEF4FF] text-[#2F62D6]'}`}>
+        <span aria-hidden className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${gap ? 'bg-[#FFF8E1] text-[#B45309]' : 'bg-[#EEF4FF] text-[#2F62D6]'}`}>
           <Icon className="w-4 h-4" strokeWidth={1.75} />
         </span>
         <p className="flex-1 min-w-0 truncate text-[10px] font-bold uppercase tracking-wider text-[#5A5A6A]">{label}</p>
@@ -404,7 +431,7 @@ function Detail({ icon: Icon, label, children, sub, onEdit, gap }: {
           </button>
         )}
       </div>
-      <div className="mt-2 text-sm font-medium text-[#030213] leading-snug">{children}</div>
+      <div className="mt-1.5 text-sm font-medium text-[#030213] leading-snug line-clamp-2">{children}</div>
       {sub && <div className="mt-1 text-xs text-[#4A4A5A] leading-snug">{sub}</div>}
     </div>
   );
@@ -456,3 +483,24 @@ function ownDates(api: Api, itemId: string): { backBy?: Date; days: string } | n
 }
 
 export { parseStep };
+
+/** The merged Case Instructions, folded to its first line; opens to the editable box (Merge Again, Undo). */
+function InstructionsFold() {
+  const { draft, user, readOnly } = useCase();
+  const text = caseInstructions(draft, user.notation).trim();
+  const stale = instructionsStale(draft, user.notation);
+  const [open, setOpen] = useState(stale);
+  if (open) return <Card className="p-4 nc-accordion-in"><CaseInstructionsBox /></Card>;
+  return (
+    <Card className="p-0">
+      <button type="button" aria-expanded={false} onClick={() => setOpen(true)} disabled={readOnly && !text} className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-left rounded-2xl disabled:cursor-default ${FOCUS}`}>
+        <MessageSquareText className="w-4 h-4 text-[#2F62D6] flex-shrink-0" strokeWidth={1.75} aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-sm">
+          <span className="font-medium text-[#030213]">Case Instructions</span>
+          <span className="text-[#5A5A6A]"> · {text ? text.split('\n')[0] : readOnly ? 'None' : 'None yet · optional'}</span>
+        </span>
+        {!readOnly && <ChevronDown className="w-4 h-4 text-[#5A5A6A] flex-shrink-0" aria-hidden />}
+      </button>
+    </Card>
+  );
+}

@@ -23,11 +23,6 @@ import { useCanvas } from './state';
 import { useSpy } from './spy';
 import { backLine } from './summary';
 
-/** Bits of an offer's line that are a price ("£95.00"): the bar shows no prices, only the rest. */
-const PRICE_BIT = /£|\bprice\b|\bbilled\b/i;
-/** "pontic 15 · £405.00 · 10 days" → "pontic 15 · 10 days". */
-const withoutPrice = (line?: string) => line?.split(' · ').filter(s => !PRICE_BIT.test(s)).join(' · ') || undefined;
-
 export default function CanvasFooter() {
   const api = useCase();
   const ui = useCanvas();
@@ -160,7 +155,7 @@ function SelectionBar() {
               const Icon = PRODUCT_ICON[o.product];
               const tone = !o.blocked ? 'pick' : o.hint ? 'hint' : 'off';
               const label = PRODUCTS[o.product].label;
-              const line = o.blocked ?? withoutPrice(o.sub);
+              const line = o.blocked ?? o.sub;
               return (
                 <button
                   key={`${o.product}${o.hint ? '-hint' : ''}`}

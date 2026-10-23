@@ -16,6 +16,7 @@ import { PRODUCTS, ServiceItem, Slot, SlotId, itemTitle, slotGaps, slotStepId, s
 import { NoteView, PRODUCT_ICON, RemoveService, SlotEditor, questionFor } from '../../ServiceSteps';
 import { ServiceNote } from '../../Instructions';
 import { SourceTag, StateIcon, StepHeading, FOCUS } from '../../ui';
+import { ChartWidthContext } from '../../room';
 
 export default function ServiceAccordion({ item, slotId }: { item: ServiceItem; slotId: SlotId }) {
   const { ctx, user, lab, steps, go, notes, dismissNote, readOnly } = useCase();
@@ -41,9 +42,7 @@ export default function ServiceAccordion({ item, slotId }: { item: ServiceItem; 
 
       <ol className="space-y-2">
         {slots.map(s => {
-          const node = steps.find(x => x.id === slotStepId(item.id, s.id));
           const isOpen = s.id === open;
-          const reachable = !!node?.navigable;
           // Notes for this item show in its own section (the editors already show the stump and open-case notes).
           const sectionNotes = notes.filter(x => x.itemId === item.id && x.step === slotStepId(item.id, s.id)
             && !(s.id === 'shade' && x.id.startsWith('stump:')) && !(s.id === 'arch' && x.kind === 'openCase'));
@@ -52,12 +51,14 @@ export default function ServiceAccordion({ item, slotId }: { item: ServiceItem; 
               key={s.id}
               slot={s}
               open={isOpen}
-              disabled={!reachable && !isOpen}
+              // Any item opens when you pick it (an accordion, not a locked wizard); the timeline still says what's next.
+              disabled={false}
               question={questionFor(s, item, n, lab.name, true)}
               headingRef={isOpen ? headingRef : undefined}
               onToggle={() => go(slotStepId(item.id, s.id))}
             >
-              <SlotEditor item={item} slot={s} />
+              {/* The horizontal chart runs across the open section and fills it (up to 600 px, so the step still fits a short window). */}
+              <ChartWidthContext.Provider value={640}><SlotEditor item={item} slot={s} /></ChartWidthContext.Provider>
               {sectionNotes.length > 0 && (
                 <div className="mt-4 space-y-2">
                   {sectionNotes.map(x => <NoteView key={x.id} note={x} onDismiss={() => dismissNote(x.id)} />)}

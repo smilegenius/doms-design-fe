@@ -13,6 +13,7 @@ import { parseStep } from '../rules';
 import { PatientStep, LabStep, RecordsStep, PrescriberStep, DeliveryStep } from '../CaseSteps';
 import { ServicesStep } from '../ServiceSteps';
 import ServiceAccordion from './guided/ServiceAccordion';
+import CreateTabs from './guided/CreateTabs';
 import { ReviewStep } from '../ReviewStep';
 import { Timeline, BottomBar, StepArrows } from '../Shell';
 import { FooterArrowProvider } from '../footerArrow';
@@ -58,6 +59,8 @@ export default function GuidedLayout() {
               <Timeline />
             </div>
             <div className="min-w-0 w-full max-w-[960px]">
+              {/* While the case is being made, the Start page's tabs stay: this is Enter Manually. */}
+              {c.view === 'edit' && !api.readOnly && <CreateTabs />}
               <CaseBanners className="mb-4 space-y-2" />
               <main className="nc-glass rounded-2xl px-6 pt-5 pb-6">
                 {/* Read-only (sent, or waiting for approval): a step shows its answers, its controls can't be used. */}

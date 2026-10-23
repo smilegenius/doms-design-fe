@@ -107,7 +107,7 @@ function seed(): State {
       }),
     },
     { id: 'CAS-2026-131', patientId: 'P-2025-060', status: 'In production', source: 'clinic', service: 'Night guard · UPPER', delivery: '2026-10-27', dentist: 'Dr Tom Ellery', labId: 'northfield', updatedAt: new Date(2026, 9, 20, 15, 2).getTime() },
-    { id: 'CAS-2026-117', patientId: 'P-2025-009', status: 'Delivered', source: 'clinic', service: 'Full denture · UPPER · Bite Blocks', delivery: '2026-10-12', dentist: 'Dr Sarah Khan', labId: 'pennine', updatedAt: new Date(2026, 9, 12, 10, 30).getTime() },
+    { id: 'CAS-2026-117', patientId: 'P-2025-009', status: 'Delivered', source: 'clinic', service: 'Full denture · UPPER · Bite Registration', delivery: '2026-10-12', dentist: 'Dr Sarah Khan', labId: 'pennine', updatedAt: new Date(2026, 9, 12, 10, 30).getTime() },
     { id: 'CAS-2026-098', patientId: 'P-2025-018', status: 'Delivered', source: 'clinic', service: 'Crown · 46', delivery: '2026-10-03', dentist: 'Dr Sarah Khan', labId: 'northfield', updatedAt: new Date(2026, 9, 3, 9, 15).getTime() },
   ];
   return { rows, patients: [], userId: 'khan', logins: {}, events: [], counter: 144, favourites: ['northfield', 'pennine'], ux: 'guided', scanInboxDelivered: false };

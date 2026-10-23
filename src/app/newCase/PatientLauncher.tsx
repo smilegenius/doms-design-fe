@@ -2,18 +2,21 @@
 // Shown on the page itself (never a popup), and nothing inside it scrolls.
 // A tall spotlight search sits on top; under it, a bento of tiles, all visible
 // at a glance:
-//   Waiting Scans    (mode 'new', two of three columns) scanner drafts as
-//                    tickets: scanner badge, patient, time ago, arch
+//   Waiting Scans    (mode 'new', two of three columns, top row) scanner
+//                    drafts as tickets: scanner badge, patient, time ago, arch
 //                    pictograms (upper / lower / bite), what's left. A green
 //                    "listening" dot names the connected scanners; the round
 //                    sync button checks for new scans, and a new arrival
-//                    slides in glowing "Just In". Four show, "+ N more" opens
-//                    the rest in place.
-//   New Patient      a call to action that morphs, in the same tile, into the
-//                    quick-add form (names mirror the search until typed).
-//   Recent Patients  one row of avatar bubbles: a ring = scan waiting, an
-//                    orange count = other open drafts; hover or keyboard focus
-//                    shows a floating detail card (a non-modal tooltip).
+//                    slides into the ghost ticket's cell glowing "Just In"
+//                    (once). Four show, "+ N more" opens the rest in place.
+//   New Patient      (mode 'new': the third column, two rows tall) a call to
+//                    action that morphs, in the same tile, into the quick-add
+//                    form (names mirror the search until typed); the form fits
+//                    the tile, so opening it moves nothing else.
+//   Recent Patients  (under the scans) one row of avatar bubbles: a ring =
+//                    scan waiting, an orange count = other open drafts; hover
+//                    (after a beat) or keyboard focus shows a floating detail
+//                    card (a non-modal tooltip; Esc dismisses it).
 // Typing (two characters or more) turns the bento into results in the same
 // frame: matching tickets, then patient cards (six at most, "6 of N"), with
 // New Patient beside them offering "Add “Jo Smith”". In 'change' mode there
@@ -67,7 +70,9 @@ const WIDE = 760;
 const NAV = 'data-nav';
 const TILE = 'min-w-0 bg-white rounded-2xl border border-[#E0E0E6] shadow-[0_1px_2px_rgba(3,2,19,0.04)]';
 const RISE = 'motion-safe:animate-[pl-rise_0.5s_cubic-bezier(0.16,1,0.3,1)_both]';
-const JUST_IN = 'motion-safe:animate-[pl-in_0.55s_cubic-bezier(0.16,1,0.3,1)_both,pl-glow_1.6s_ease-out_0.4s_2]';
+/** A new ticket's entrance. Its glow plays on a child span, so the ticket's own box-shadow (tint and focus ring) stays put. */
+const JUST_IN = 'motion-safe:animate-[pl-in_0.55s_cubic-bezier(0.16,1,0.3,1)_both]';
+const GLOW = 'motion-safe:animate-[pl-glow_1.6s_ease-out_0.4s_2]';
 /** Keyframes used only here; every use goes through motion-safe:. */
 const KEYFRAMES = `
 @keyframes pl-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
@@ -80,7 +85,10 @@ const KEYFRAMES = `
 type FocusTo = 'first' | 'next' | 'cta';
 interface TipPos { id: string; dx: number; caret: number; above: boolean }
 const TIP_W = 236;
-const TIP_H = 140;
+/** A first guess at the card's height; once it renders, its real height decides the flip. */
+const TIP_H = 160;
+/** Hover waits this long before a card opens, so a pointer passing over the bubbles opens none. */
+const TIP_HOVER_MS = 300;
 
 export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick, autoFocus = true }: LauncherProps) {
   const store = useFlowStore();
@@ -163,6 +171,8 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
   const [checkedAt, setCheckedAt] = useState(() => fmtTime(demoNow()));
   const [said, setSaid] = useState('');
   const [justIn, setJustIn] = useState<string[]>([]);
+  // A Just In ticket keeps its tint and tag, but its arrival plays once: not again when a search clears.
+  const played = useRef(new Set<string>());
   const timer = useRef<number>();
   useEffect(() => () => window.clearTimeout(timer.current), []);
   const refresh = () => {
@@ -191,23 +201,48 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
   const [tip, setTip] = useState<TipPos | null>(null);
   const tipTimer = useRef<number>();
   useEffect(() => () => window.clearTimeout(tipTimer.current), []);
-  const showTip = (id: string, anchor: HTMLElement) => {
+  const showTip = (id: string, anchor: HTMLElement, delay = 0) => {
     window.clearTimeout(tipTimer.current);
-    const root = rootRef.current;
-    if (!root) return;
-    const a = anchor.getBoundingClientRect();
-    const box = root.getBoundingClientRect();
-    // Kept inside the picker's width; flipped above when the page (or a clipping card) ends below.
-    const left = Math.max(box.left, Math.min(a.left + a.width / 2 - TIP_W / 2, box.right - TIP_W));
-    const clip = clipOf(anchor);
-    const above = a.bottom + TIP_H + 8 > clip.bottom && a.top - TIP_H - 8 >= clip.top;
-    setTip({ id, dx: left - a.left, caret: a.left + a.width / 2 - left, above });
+    const place = () => {
+      const root = rootRef.current;
+      if (!root || !anchor.isConnected) return;
+      const a = anchor.getBoundingClientRect();
+      const box = root.getBoundingClientRect();
+      // Kept inside the picker's width; flipped above when the page (or a clipping card) ends below.
+      const left = Math.max(box.left, Math.min(a.left + a.width / 2 - TIP_W / 2, box.right - TIP_W));
+      setTip({ id, dx: left - a.left, caret: a.left + a.width / 2 - left, above: flipAbove(anchor, TIP_H) });
+    };
+    // Hover waits a beat unless a card is already up (then moving along the bubbles switches at once).
+    if (delay && !tip) tipTimer.current = window.setTimeout(place, delay);
+    else place();
   };
   const hideTip = (after = 0) => {
     window.clearTimeout(tipTimer.current);
     if (after) tipTimer.current = window.setTimeout(() => setTip(null), after);
     else setTip(null);
   };
+  // The card's real height (a scan line, drafts, a long "Last:") decides the flip, before it paints.
+  useLayoutEffect(() => {
+    if (!tip) return;
+    const card = document.getElementById(`${uid}-tip-${tip.id}`);
+    const anchor = card?.parentElement;
+    if (!card || !anchor) return;
+    const above = flipAbove(anchor, card.offsetHeight);
+    if (above !== tip.above) setTip({ ...tip, above });
+  }, [tip, uid]);
+  // Esc dismisses a card wherever focus is (WCAG 1.4.13), and does only that.
+  useEffect(() => {
+    if (!tip) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.clearTimeout(tipTimer.current);
+      setTip(null);
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [tip]);
 
   // ── Keyboard: ↓ into the bento, then arrows move spatially between tiles ──
   const intoBento = () => {
@@ -216,7 +251,7 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
   };
   const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); intoBento(); return; }
-    if (e.key === 'Escape' && !onClose && q) { e.preventDefault(); setQ(''); return; }
+    if (e.key === 'Escape' && !onClose && q) { e.preventDefault(); setQ(''); setExpanded(null); setTip(null); return; }
     if (e.key === 'Enter') {
       e.preventDefault();
       if (exact) pick(exact);
@@ -262,13 +297,34 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
   );
 
   const ticketList = (list: CaseRow[], cols: 1 | 2) => {
-    const shown = allScans ? list : list.slice(0, SCAN_CAP);
+    // New arrivals go after the others, into the cell the ghost ticket held: nothing else moves.
+    const fresh = searching ? [] : list.filter(r => justIn.includes(r.id));
+    const base = fresh.length ? list.filter(r => !justIn.includes(r.id)) : list;
+    const shown = allScans
+      ? [...base, ...fresh]
+      : [...base.slice(0, Math.max(0, SCAN_CAP - fresh.length)), ...fresh.slice(0, SCAN_CAP)];
+    // Two tickets side by side in a column under ~860 px leave a tight second row.
+    const tight = cols === 2 && width < 860;
     return (
       <>
         <ul className={`grid gap-2 ${cols === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-          {shown.map(r => (
-            <Ticket key={r.id} row={r} p={byId.get(r.patientId)!} user={user} q={searching ? q : ''} fresh={justIn.includes(r.id)} onOpen={() => onOpenDraft(r)} />
-          ))}
+          {shown.map(r => {
+            const isNew = justIn.includes(r.id);
+            return (
+              <Ticket
+                key={r.id}
+                row={r}
+                p={byId.get(r.patientId)!}
+                user={user}
+                q={searching ? q : ''}
+                fresh={isNew}
+                animate={isNew && !played.current.has(r.id)}
+                onPlayed={() => played.current.add(r.id)}
+                tight={tight}
+                onOpen={() => onOpenDraft(r)}
+              />
+            );
+          })}
           {/* An odd ticket out leaves a cell: it shows where the next scan lands. */}
           {cols === 2 && !searching && shown.length % 2 === 1 && <GhostTicket />}
         </ul>
@@ -282,11 +338,14 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
   };
 
   const leftSpan = wide ? 'col-span-2' : '';
-  // While the form is open, the tile beside it grows; the left tile keeps its own height.
+  // Searching: while the form is open, the tile beside the results grows; the results keep their own height.
   const leftSelf = wide && formOpen ? 'self-start' : '';
+  // Mode 'new' at rest: New Patient takes the third column, two rows tall, beside the scans and the bubbles.
+  // Its form fits that height, so opening it changes nothing around it.
+  const tallTile = wide && mode === 'new' && !searching;
 
   const scansTile = (
-    <section key="scans" aria-labelledby={`${uid}-scans`} className={`${TILE} flex flex-col p-3.5 ${leftSpan} ${leftSelf} ${RISE}`}>
+    <section key="scans" aria-labelledby={`${uid}-scans`} className={`${TILE} flex flex-col p-3.5 ${leftSpan} ${RISE}`}>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-h-7">
         <h3 id={`${uid}-scans`} className="flex items-center gap-1.5 text-sm font-semibold text-[#030213]">
           <ScanLine className="w-4 h-4 text-[#2F62D6]" aria-hidden />Waiting Scans<Count n={scans.length} />
@@ -314,16 +373,17 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
 
   const anyRing = people.some(p => (draftsOf.get(p.id) ?? []).some(r => r.source === 'scanner'));
   const anyBadge = people.some(p => (draftsOf.get(p.id) ?? []).some(r => r.source !== 'scanner'));
-  // z-10 on the strip: a bubble's floating card paints over the tile stacked after it.
+  // z-10 on the strip: a bubble's floating card paints over the tiles around it.
+  // When a taller tile beside it stretches the strip, the bubbles sit centred (my-auto), not on top of a gap.
   const recentStrip = (
     <section
       key="recent"
       aria-labelledby={`${uid}-recent`}
-      className={`${TILE} relative z-10 px-4 py-3 ${wide ? (mode === 'new' ? 'col-span-3' : 'col-span-2') : ''} ${RISE}`}
+      className={`${TILE} relative z-10 flex flex-col px-3.5 py-3 ${leftSpan} ${RISE}`}
       style={{ animationDelay: mode === 'new' ? '140ms' : '0ms' }}
     >
-      <div className="flex items-center gap-2 min-h-5">
-        <h3 id={`${uid}-recent`} className="flex items-center gap-1.5 text-[13px] font-semibold text-[#030213]">
+      <div className="flex items-center gap-2 min-h-7">
+        <h3 id={`${uid}-recent`} className="flex items-center gap-1.5 text-sm font-semibold text-[#030213]">
           <History className="w-4 h-4 text-[#4A4A5A]" aria-hidden />Recent Patients
         </h3>
         {width >= 480 && (anyRing || anyBadge) && (
@@ -336,7 +396,8 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
       {people.length === 0 ? (
         <p className="mt-2 text-sm text-[#4A4A5A]">No patients yet. Add one under New Patient.</p>
       ) : (
-        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-3">
+        // Six bubbles need 6 × 68 + 5 × 12 = 468 px: one row from a 520 px picker up.
+        <ul className="my-auto pt-1.5 flex flex-wrap gap-x-3 gap-y-3">
           {people.map(p => (
             <Bubble
               key={p.id}
@@ -347,7 +408,7 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
               chooserId={chooserId}
               tipId={`${uid}-tip-${p.id}`}
               tip={tip?.id === p.id ? tip : null}
-              onShow={el => showTip(p.id, el)}
+              onShow={(el, delay) => showTip(p.id, el, delay)}
               onHide={hideTip}
               onPick={() => { hideTip(); pick(p); }}
             />
@@ -362,13 +423,13 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
     <section key="results" aria-labelledby={`${uid}-res`} className={`${TILE} p-3.5 ${leftSpan} ${leftSelf} ${RISE}`}>
       {mode === 'new' && scans.length > 0 && (
         <div className="mb-3.5">
-          <h3 className="flex items-center gap-1.5 min-h-6 text-sm font-semibold text-[#030213]">
+          <h3 className="flex items-center gap-1.5 min-h-7 text-sm font-semibold text-[#030213]">
             <ScanLine className="w-4 h-4 text-[#2F62D6]" aria-hidden />Waiting Scans<Count n={scans.length} />
           </h3>
           <div className="mt-2">{ticketList(scans, wide ? 2 : 1)}</div>
         </div>
       )}
-      <h3 id={`${uid}-res`} className="flex items-center gap-1.5 min-h-6 text-sm font-semibold text-[#030213]">
+      <h3 id={`${uid}-res`} className="flex items-center gap-1.5 min-h-7 text-sm font-semibold text-[#030213]">
         <Users className="w-4 h-4 text-[#4A4A5A]" aria-hidden />Patients<Count n={capped ? `${PEOPLE} of ${matched.length}` : matched.length} />
       </h3>
       {people.length === 0 ? (
@@ -395,6 +456,7 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
       matchedCount={matched.length}
       open={formOpen}
       banner={!wide}
+      tall={tallTile}
       cols3={!wide && width >= 480}
       focusReq={focusReq}
       escBack={!onClose}
@@ -402,7 +464,7 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
       onBack={closeForm}
       onCreated={p => onPick(p.id)}
       onUse={pick}
-      className={RISE}
+      className={`${RISE} ${tallTile ? 'row-span-2' : ''}`}
       style={{ animationDelay: '70ms' }}
     />
   );
@@ -440,7 +502,7 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
             {searching && <KeyHint k={<CornerDownLeft className="w-3 h-3" />} label={enterText} />}
           </span>
           {q && (
-            <button type="button" aria-label="Clear search" onClick={() => { setQ(''); setExpanded(null); input.current?.focus(); }} className={`px-2 py-1 rounded-lg text-xs font-semibold text-[#2F62D6] hover:text-[#1E40AF] hover:bg-[#F5F8FF] flex-shrink-0 ${FOCUS}`}>
+            <button type="button" aria-label="Clear search" onClick={() => { setQ(''); setExpanded(null); setTip(null); input.current?.focus(); }} className={`px-2 py-1 rounded-lg text-xs font-semibold text-[#2F62D6] hover:text-[#1E40AF] hover:bg-[#F5F8FF] flex-shrink-0 ${FOCUS}`}>
               Clear
             </button>
           )}
@@ -508,8 +570,8 @@ function Blob({ size }: { size: 'sm' | 'md' | 'lg' }) {
   );
 }
 
-/** The matched part of a name or ID, marked. */
-const MARK = 'bg-[#FFF3C4] text-inherit rounded-sm px-0.5 -mx-0.5';
+/** The matched part of a name or ID, marked in the brand tint (amber stays for what needs you). */
+const MARK = 'bg-[#DCE6FD] text-[#1E40AF] rounded-sm px-0.5 -mx-0.5';
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function Marked({ text, q }: { text: string; q: string }) {
   const query = norm(q);
@@ -561,9 +623,9 @@ const ARCH_NAME = { upper: 'Upper arch', lower: 'Lower arch', bite: 'Bite' } as 
 /** Upper arch · lower arch · bite, lit when the scan has them. */
 function ArchGlyphs({ arches }: { arches: { upper: boolean; lower: boolean; bite: boolean } }) {
   return (
-    <span className="flex items-center gap-0.5">
+    <span className="flex flex-shrink-0 items-center gap-px">
       {(['upper', 'lower', 'bite'] as const).map(k => (
-        <span key={k} title={arches[k] ? ARCH_NAME[k] : `${ARCH_NAME[k]} (not in this scan)`} className={`w-[22px] h-[18px] rounded-md flex items-center justify-center ${arches[k] ? 'bg-[#EEF4FF] text-[#2F62D6]' : 'text-[#C4C4D0]'}`}>
+        <span key={k} title={arches[k] ? ARCH_NAME[k] : `${ARCH_NAME[k]} (not in this scan)`} className={`w-5 h-[18px] rounded-md flex items-center justify-center ${arches[k] ? 'bg-[#EEF4FF] text-[#2F62D6]' : 'text-[#C4C4D0]'}`}>
           <svg viewBox="0 0 16 12" width="15" height="11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             {k === 'upper' && <><path d="M2 11C2 5 4.7 1.5 8 1.5S14 5 14 11" /><path d="M5.2 11C5.2 7.4 6.4 5 8 5s2.8 2.4 2.8 6" opacity=".45" /></>}
             {k === 'lower' && <><path d="M2 1C2 7 4.7 10.5 8 10.5S14 7 14 1" /><path d="M5.2 1C5.2 4.6 6.4 7 8 7s2.8-2.4 2.8-6" opacity=".45" /></>}
@@ -575,7 +637,16 @@ function ArchGlyphs({ arches }: { arches: { upper: boolean; lower: boolean; bite
   );
 }
 
-function Ticket({ row, p, user, q, fresh, onOpen }: { row: CaseRow; p: Patient; user: User; q: string; fresh: boolean; onOpen: () => void }) {
+function Ticket({ row, p, user, q, fresh, animate, tight, onPlayed, onOpen }: {
+  row: CaseRow; p: Patient; user: User; q: string;
+  /** Arrived on this visit: tinted and tagged "Just In". */
+  fresh: boolean;
+  /** Play the arrival (slide-in and glow); true only until it has played once. */
+  animate: boolean;
+  /** Two tickets side by side in a narrow column: a long scanner badge drops the word "Ready". */
+  tight: boolean;
+  onPlayed: () => void; onOpen: () => void;
+}) {
   const draft = row.draft!;
   const scan = draft.scan;
   const gaps = draftGaps(draft, user);
@@ -583,6 +654,11 @@ function Ticket({ row, p, user, q, fresh, onOpen }: { row: CaseRow; p: Patient; 
   const [scanner, time] = scan ? [scan.scanner, scan.time] : (row.scanLabel ?? 'Scan').split(' · ');
   const since = time ? ago(time) : '';
   const arches = scanArchesText(draft);
+  const terse = tight && scanner.length > 5;
+  // Punched notches where the stub tears off; they take the ticket's border colour.
+  const notch = `absolute -right-[5px] w-2.5 h-[5px] bg-white border motion-safe:transition-colors ${
+    fresh ? 'border-[#C8D8FC] group-hover:border-[#3F6FE8]/50' : 'border-[#ECECF2] group-hover:border-[#DCE6FD]'
+  }`;
   return (
     <li className="min-w-0">
       <button
@@ -591,14 +667,25 @@ function Ticket({ row, p, user, q, fresh, onOpen }: { row: CaseRow; p: Patient; 
         data-pid={p.id}
         onClick={onOpen}
         title={time ? `${scanner} · ${time}` : scanner}
-        className={`group w-full h-full flex items-stretch rounded-xl border text-left motion-safe:transition-[background-color,border-color,box-shadow] ${
+        className={`group relative w-full h-full flex items-stretch rounded-xl border text-left motion-safe:transition-[background-color,border-color,box-shadow] ${
           fresh
-            ? `bg-[#F5F8FF] border-[#C8D8FC] shadow-[0_0_0_3px_rgba(63,111,232,0.12)] ${JUST_IN}`
+            ? `bg-[#F5F8FF] border-[#C8D8FC] shadow-[0_0_0_3px_rgba(63,111,232,0.12)] hover:bg-white hover:border-[#3F6FE8]/50 ${animate ? JUST_IN : ''}`
             : 'bg-[#F8F9FC] border-[#ECECF2] hover:bg-white hover:border-[#DCE6FD] hover:shadow-[0_6px_18px_-10px_rgba(63,111,232,0.45)]'
         } ${FOCUS}`}
       >
+        {animate && (
+          <span
+            aria-hidden
+            onAnimationEnd={e => { if (e.animationName === 'pl-glow') onPlayed(); }}
+            className={`pointer-events-none absolute -inset-px rounded-xl ${GLOW}`}
+          />
+        )}
         {/* The stub: who it's for, torn off along a dashed line. */}
-        <span className="flex items-center px-2.5 border-r border-dashed border-[#DCE6FD]"><Avatar p={p} /></span>
+        <span className="relative flex items-center px-2 border-r border-dashed border-[#DCE6FD]">
+          <Avatar p={p} />
+          <span aria-hidden className={`${notch} -top-px border-t-0 rounded-b-full`} />
+          <span aria-hidden className={`${notch} -bottom-px border-b-0 rounded-t-full`} />
+        </span>
         <span className="flex-1 min-w-0 px-2.5 py-2">
           <span className="flex items-center gap-2 h-5">
             <span className="min-w-0 truncate text-sm font-semibold text-[#030213]"><Marked text={name} q={q} /></span>
@@ -609,8 +696,11 @@ function Ticket({ row, p, user, q, fresh, onOpen }: { row: CaseRow; p: Patient; 
             </span>
           </span>
           <span aria-hidden className="mt-1.5 flex items-center gap-2 h-5">
-            <ScannerBadge name={scanner} />
-            {scan && <ArchGlyphs arches={scan.arches} />}
+            {/* Badge and arches give way (clipped) before the status does. */}
+            <span className="min-w-0 flex items-center gap-1.5 overflow-hidden">
+              <ScannerBadge name={scanner} />
+              {scan && <ArchGlyphs arches={scan.arches} />}
+            </span>
             <span className="ml-auto flex-shrink-0">
               {gaps ? (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#8A4B08] whitespace-nowrap">
@@ -618,7 +708,7 @@ function Ticket({ row, p, user, q, fresh, onOpen }: { row: CaseRow; p: Patient; 
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#2E7D32] whitespace-nowrap">
-                  <span className="w-4 h-4 rounded-full bg-[#2E7D32] text-white flex items-center justify-center"><Check className="w-2.5 h-2.5" strokeWidth={3.5} /></span>Ready
+                  <span className="w-4 h-4 rounded-full bg-[#2E7D32] text-white flex items-center justify-center"><Check className="w-2.5 h-2.5" strokeWidth={3.5} /></span>{terse ? null : 'Ready'}
                 </span>
               )}
             </span>
@@ -654,7 +744,8 @@ const isFocusVisible = (el: Element) => { try { return el.matches(':focus-visibl
 
 function Bubble({ p, drafts, mode, expanded, chooserId, tipId, tip, onShow, onHide, onPick }: {
   p: Patient; drafts: CaseRow[]; mode: 'new' | 'change'; expanded: boolean; chooserId: string; tipId: string; tip: TipPos | null;
-  onShow: (anchor: HTMLElement) => void; onHide: (after?: number) => void; onPick: () => void;
+  /** delay: hover waits a beat; keyboard focus shows the card at once. */
+  onShow: (anchor: HTMLElement, delay?: number) => void; onHide: (after?: number) => void; onPick: () => void;
 }) {
   const name = fullName(p);
   const scanRow = drafts.find(r => r.source === 'scanner');
@@ -665,7 +756,8 @@ function Bubble({ p, drafts, mode, expanded, chooserId, tipId, tip, onShow, onHi
     ? 'Select to use this patient'
     : drafts.length === 1 ? (scanRow ? 'Select to continue the scan' : 'Select to continue the draft') : many ? 'Select to choose a draft' : 'Select to start a case';
   return (
-    <li className="relative w-[68px]" onMouseEnter={e => onShow(e.currentTarget)} onMouseLeave={() => onHide(120)}>
+    <li className="relative w-[68px]" onMouseEnter={e => onShow(e.currentTarget, TIP_HOVER_MS)} onMouseLeave={() => onHide(120)}>
+      {/* Esc on an open card is handled by the picker, wherever focus is. */}
       <button
         type="button"
         data-nav="bubbles"
@@ -673,7 +765,6 @@ function Bubble({ p, drafts, mode, expanded, chooserId, tipId, tip, onShow, onHi
         onClick={onPick}
         onFocus={e => { if (isFocusVisible(e.currentTarget)) onShow(e.currentTarget.parentElement as HTMLElement); }}
         onBlur={() => onHide()}
-        onKeyDown={e => { if (e.key === 'Escape' && tip) { e.preventDefault(); e.stopPropagation(); onHide(); } }}
         aria-describedby={tipId}
         aria-expanded={many ? expanded : undefined}
         aria-controls={many && expanded ? chooserId : undefined}
@@ -690,8 +781,9 @@ function Bubble({ p, drafts, mode, expanded, chooserId, tipId, tip, onShow, onHi
             <span aria-hidden className="absolute -top-0.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#FFF8E1] border border-[#E07B00] ring-2 ring-white text-center text-[10px] font-bold leading-4 text-[#8A4B08]">{other}</span>
           )}
         </span>
-        <span aria-hidden className="max-w-full truncate text-xs font-medium text-[#030213]">{p.first} {p.last ? `${p.last[0]}.` : ''}</span>
-        <span className="sr-only">{name}{scanRow ? ', scan waiting' : ''}{other ? `, ${plural(other, 'open draft')}` : ''}</span>
+        {/* The visible label starts the accessible name (WCAG 2.5.3), the full name follows. */}
+        <span className="max-w-full truncate text-xs font-medium text-[#030213]">{p.last ? `${p.first} ${p.last[0]}.` : p.first}</span>
+        <span className="sr-only">, {name}{scanRow ? ', scan waiting' : ''}{other ? `, ${plural(other, 'open draft')}` : ''}</span>
       </button>
       <div
         role="tooltip"
@@ -777,7 +869,13 @@ function DraftChooser({ id, p, drafts, firstRef, onOpenDraft, onSeparate, onDism
   id: string; p: Patient; drafts: CaseRow[]; firstRef: RefObject<HTMLButtonElement>; onOpenDraft: (r: CaseRow) => void; onSeparate: () => void; onDismiss: () => void;
 }) {
   return (
-    <div id={id} role="group" aria-labelledby={`${id}-t`} className="mt-3 p-3 rounded-xl border border-[#F5D98B] bg-[#FFF8E1] motion-safe:animate-[pl-rise_0.3s_ease-out_both]">
+    <div
+      id={id}
+      role="group"
+      aria-labelledby={`${id}-t`}
+      onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDismiss(); } }}
+      className="mt-3 p-3 rounded-xl border border-[#F5D98B] bg-[#FFF8E1] motion-safe:animate-[pl-rise_0.3s_ease-out_both]"
+    >
       <div className="flex items-start gap-2">
         <span className="mt-0.5"><StateIcon state="gap" size="sm" ripple={false} /></span>
         <p id={`${id}-t`} className="flex-1 min-w-0 text-sm text-[#1F1F2E]">
@@ -818,13 +916,15 @@ function nameFromSearch(q: string): Names {
 const FACE_SHOW = 'visible opacity-100 grid-rows-[1fr] motion-safe:[transition:grid-template-rows_340ms_cubic-bezier(0.16,1,0.3,1),opacity_260ms_ease-out_80ms]';
 const FACE_HIDE = 'invisible opacity-0 grid-rows-[0fr] motion-safe:[transition:grid-template-rows_340ms_cubic-bezier(0.16,1,0.3,1),opacity_160ms_ease-out,visibility_0s_linear_340ms]';
 
-function NewPatientTile({ uid, mode, query, exact, searching, matchedCount, open, banner, cols3, focusReq, escBack, onOpen, onBack, onCreated, onUse, className = '', style }: {
+function NewPatientTile({ uid, mode, query, exact, searching, matchedCount, open, banner, tall = false, cols3, focusReq, escBack, onOpen, onBack, onCreated, onUse, className = '', style }: {
   uid: string; mode: 'new' | 'change'; query: string;
   /** The search names an existing patient exactly: no "Add “…”" then. */
   exact: boolean; searching: boolean; matchedCount: number;
   open: boolean;
   /** Full-width row (narrow picker) instead of a tall tile. */
   banner: boolean;
+  /** Two grid rows tall: the call to action also lists what the form will ask. */
+  tall?: boolean;
   /** First, last and date of birth on one line. */
   cols3: boolean;
   focusReq: { to: FocusTo; n: number } | null;
@@ -906,11 +1006,23 @@ function NewPatientTile({ uid, mode, query, exact, searching, matchedCount, open
               {ctaButton}
             </div>
           ) : (
-            <div className="h-full flex flex-col p-4">
+            <div className="h-full flex flex-col p-3.5">
               <Blob size="lg" />
               <h3 className="mt-3 text-[15px] leading-5 font-semibold text-[#030213]">New Patient</h3>
               <p className="mt-1 text-[13px] leading-[18px] text-[#4A4A5A] break-words">{sub}</p>
-              <div className="mt-auto pt-3">{ctaButton}</div>
+              <div className="mt-auto pt-3">
+                {tall && (
+                  <div className="mb-3">
+                    <p className="text-[11px] leading-4 font-semibold text-[#5A5A6A]">You’ll need</p>
+                    <ul className="mt-1.5 space-y-1 text-xs text-[#4A4A5A]">
+                      <NeedItem n="1">First and last name</NeedItem>
+                      <NeedItem n="2">Date of birth</NeedItem>
+                      <NeedItem n="+" optional>Sex, ID{CLINIC.nhsContract ? ', funding' : ''} · optional</NeedItem>
+                    </ul>
+                  </div>
+                )}
+                {ctaButton}
+              </div>
             </div>
           )}
         </div>
@@ -946,6 +1058,15 @@ function NewPatientTile({ uid, mode, query, exact, searching, matchedCount, open
         </div>
       </div>
     </section>
+  );
+}
+
+function NeedItem({ n, optional = false, children }: { n: string; optional?: boolean; children: ReactNode }) {
+  return (
+    <li className={`flex items-center gap-2 min-w-0 ${optional ? 'text-[#5A5A6A]' : ''}`}>
+      <span aria-hidden className={`w-4 h-4 flex-shrink-0 rounded-full border bg-white text-center text-[10px] font-bold leading-[14px] ${optional ? 'border-dashed border-[#C8D8FC] text-[#5A5A6A]' : 'border-[#DCE6FD] text-[#2F62D6]'}`}>{n}</span>
+      <span className="min-w-0 truncate">{children}</span>
+    </li>
   );
 }
 
@@ -1160,4 +1281,10 @@ function clipOf(el: HTMLElement): { top: number; bottom: number } {
     bottom = Math.min(bottom, b.bottom);
   }
   return { top, bottom };
+}
+/** A card h px tall opens above its anchor when it would run past the bottom of its clip and fits above. */
+function flipAbove(anchor: HTMLElement, h: number): boolean {
+  const a = anchor.getBoundingClientRect();
+  const clip = clipOf(anchor);
+  return a.bottom + h + 8 > clip.bottom && a.top - h - 8 >= clip.top;
 }

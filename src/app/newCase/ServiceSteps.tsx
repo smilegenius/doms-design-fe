@@ -6,25 +6,28 @@
 // the editors turn visual (service tiles, swatches, one-line option rows);
 // One page's inline rows ('compact') keep the plain chips.
 
-import { useMemo, useState, forwardRef, KeyboardEvent, ReactNode } from 'react';
+import { useContext, useEffect, useMemo, useState, forwardRef, KeyboardEvent, ReactNode } from 'react';
 import {
   Anchor, ArrowRight, Bolt, Camera, Check, ChevronDown, Crown, Droplet, Gem, Layers, Link, Link2, Moon, MoreHorizontal, PackagePlus,
   Plus, Shapes, Shield, Smile, SmilePlus, Sparkles, Square, Wrench, History, Trash2, X, type LucideIcon,
 } from 'lucide-react';
 import { useCase } from './CaseContext';
-import { useRoom } from './room';
+import { ChartWidthContext, useRoom } from './room';
 import {
   ABUTMENTS, ACRYLIC_OPTIONS, BRIDGE_ERRORS, MATERIAL_GROUP, MOULD_OPTIONS, OPTIONS, PARTIAL_DESIGNS, PARTIAL_STAGES, POSTDAM_OPTIONS,
   PREF_FIELDS, PRODUCTS, REMAKE_REASONS, ServiceItem, Slot, SlotId, TILE_ORDER, archCaps, bridgeIssue, bridgeParts, bridgeReadback,
   effective, implantOnRecord, isFront, itemTitle, jawOf, labMakes, labProducts, labsThatMake, materialOptions,
   optionAvail, optionName, plural, priceOf, remakeCandidate, shadeSwatch, slotGaps, slotsFor, spanBetween, spanText,
   teethText, toothText, unitsOf, usualsFor, palmerOf, patientAge, slotStepId,
+  DENTURE_STAGES, DENTURE_TREATMENTS, DentureStageId, DentureTreatment, StagePlan, dentureStageReady, dentureTreatment,
+  isFollowUp, seedDenturePlan, stageName, stageOption, stagePlan, stagesOutOfOrder, stagesShort, stagesSummary,
+  suggestedStageDates, treatmentName,
 } from './rules';
 import { IMPLANT_SYSTEMS, LABS, ProductId } from './data';
 import { getRow } from './store';
 import { ServiceNote } from './Instructions';
 import { ArrowAction, stepName, useFooterArrow, useHandArrow } from './footerArrow';
-import { fmtDay, fmtShort, fromISO } from './dates';
+import { fmtDay, fmtShort, fromISO, toISO } from './dates';
 import TeethChart, { ChartLegend, MiniChart } from './TeethChart';
 import {
   ChoiceChips, ChipOption, DefaultsPanel, FieldLabel, LinkButton, NextArrow, Notice, PrimaryButton, SecondaryButton, SourceTag,
@@ -76,11 +79,12 @@ export const ServicesStep = forwardRef<HTMLHeadingElement>(function ServicesStep
     });
   }
   const ns = patient.nextStage;
-  if (ns && labMakes(lab, ns.product) && !draft.items.some(i => i.stageSrc === 'Next stage')) {
+  if (ns && labMakes(lab, ns.product) && !draft.items.some(isFollowUp)) {
+    // The case page seeds the plan: the stages before it done on ns.caseId, this one ordered.
     chips.push({
       label: `Next stage: ${optionName('denture', ns.stage)} · ${ns.arch} full denture (${ns.note})`,
-      kind: 'Next stage', product: 'denture', title: `${optionName('denture', ns.stage)} · ${ns.arch} full denture`, sub: ns.note,
-      onPick: () => addService('denture', { arch: ns.arch, archSrc: 'Next stage', stage: ns.stage, stageSrc: 'Next stage' }),
+      kind: 'Next stage', product: 'denture', title: `${optionName('denture', ns.stage)} · ${ns.arch} full denture`, sub: `${ns.note} · continues ${ns.caseId}`,
+      onPick: () => addService('denture', { arch: ns.arch, archSrc: 'Next stage', stageSrc: 'Next stage' }),
     });
   }
 
@@ -136,7 +140,7 @@ export const ServicesStep = forwardRef<HTMLHeadingElement>(function ServicesStep
           )}
         </div>
         {nhs && tiles.some(p => PRODUCTS[p].privateOnly) && (
-          <p className="mt-4 text-xs text-[#5A5A6A]">Items tagged Private are charged privately for this NHS patient.</p>
+          <p className="mt-4 text-xs text-[#5A5A6A]">Items tagged Private go to the lab as private work for this NHS patient.</p>
         )}
       </div>
     );
@@ -175,7 +179,7 @@ export const ServicesStep = forwardRef<HTMLHeadingElement>(function ServicesStep
         )}
       </div>
       {nhs && tiles.some(p => PRODUCTS[p].privateOnly) && (
-        <p className="mt-4 text-xs text-[#5A5A6A]">Items tagged Private are charged privately for this NHS patient.</p>
+        <p className="mt-4 text-xs text-[#5A5A6A]">Items tagged Private go to the lab as private work for this NHS patient.</p>
       )}
     </div>
   );
@@ -186,7 +190,9 @@ export function ServiceTile({ product, nhs, onPick }: { product: ProductId; nhs:
   const wide = useRoom() === 'wide';
   const Icon = PRODUCT_ICON[product];
   // What this lab offers for it, for this patient's funding: "5 materials", "7–10 days".
-  const offered = product === 'other' ? [] : OPTIONS[product].filter(o => optionAvail(lab, product, o.id, ctx.funding).ok);
+  // A full denture counts its stages (Straight to Finish and Immediate aren't stages).
+  const offered = product === 'other' ? []
+    : (product === 'denture' ? DENTURE_STAGES : OPTIONS[product]).filter(o => optionAvail(lab, product, o.id, ctx.funding).ok);
   const days = offered.map(o => lab.prices[`${product}:${o.id}`]![2]);
   const lo = Math.min(...days), hi = Math.max(...days);
   const count = offered.length ? plural(offered.length, OPTION_NOUN[product] ?? 'option') : null;
@@ -260,6 +266,7 @@ export function questionFor(slot: Slot, item: ServiceItem, n: 'fdi' | 'palmer', 
     case 'arch': return 'Which arch?';
     case 'type': return 'Which type?';
     case 'stage': return 'Which stage?';
+    case 'stages': return dentureTreatment(item) === 'staged' ? 'Which stages, and when?' : 'When is it needed back?';
     case 'inlayType': return 'Inlay or onlay?';
     case 'system': return `The implant system for ${teeth}`;
     case 'platform': return 'Which platform?';
@@ -299,8 +306,7 @@ export const SlotStep = forwardRef<HTMLHeadingElement, { item: ServiceItem; slot
   const isChart = CHART_SLOTS.includes(slot.id);
   const panel = slots.slice(0, idx).filter(s => PANEL_SLOTS.includes(s.id));
   // The shade editor shows the stump-shade note itself, and the arch editor the open-case note.
-  // The flow shows no prices, so the "to be confirmed" pricing note never shows here.
-  const itemNotes = notes.filter(x => x.itemId === item.id && x.step === `svc:${item.id}:${slot.id}` && !x.id.startsWith('tbc:')
+  const itemNotes = notes.filter(x => x.itemId === item.id && x.step === `svc:${item.id}:${slot.id}`
     && !(slot.id === 'shade' && x.id.startsWith('stump:')) && !(slot.id === 'arch' && x.kind === 'openCase'));
   const showMini = !isChart && (item.teeth.length > 0 || item.arch);
   const archItem = PRODUCTS[item.product].archItem;
@@ -420,7 +426,7 @@ function OpenCaseSummary({ caseId }: { caseId: string }) {
 
 /** Has the user given this service any answer yet? An empty one goes without asking. */
 const hasWork = (i: ServiceItem) =>
-  i.teeth.length > 0 || !!i.arch || !!i.material || !!i.shade || !!i.type || !!i.stage || !!i.base || !!i.work || !!i.desc || i.photos.length > 0;
+  i.teeth.length > 0 || !!i.arch || !!i.material || !!i.shade || !!i.type || !!i.stage || !!i.stages?.length || !!i.base || !!i.work || !!i.desc || i.photos.length > 0;
 
 /** "Remove Crown" on the step (link) or an × in the left nav (icon), with a quick confirm. */
 export function RemoveService({ item, variant = 'link' }: { item: ServiceItem; variant?: 'link' | 'icon' }) {
@@ -476,6 +482,7 @@ export function SlotEditor({ item, slot, compact }: { item: ServiceItem; slot: S
     case 'under18': return <Under18 item={item} />;
     case 'desc': return <DescEditor item={item} />;
     case 'wings': return <WingsEditor item={item} />;
+    case 'stages': return <StagesEditor item={item} />;
     default: return <ChipSlot item={item} slot={slot} compact={compact} />;
   }
 }
@@ -514,15 +521,12 @@ function ChipSlot({ item, slot, compact }: { item: ServiceItem; slot: Slot; comp
       value = item.reopen?.includes('type') ? undefined : e.type; onChange = id => set({ type: id, typeSrc: 'You' });
       break;
     case 'stage':
-      if (item.product === 'denture') {
-        options = OPTIONS.denture.map(o => { const a = avail('denture', o.id); return { id: o.id, label: o.name, disabled: !a.ok, reason: a.reason, sub: a.ok ? daysSub({ stage: o.id }) : undefined, tag: item.stage === o.id ? item.stageSrc : undefined }; });
-      } else {
-        options = PARTIAL_STAGES.map(o => ({
-          id: o.id, label: o.name,
-          disabled: o.id === 'framework' && item.base !== 'chrome', reason: 'Only for a cobalt-chrome base.',
-          sub: o.id === 'framework' ? '10 working days' : undefined,
-        }));
-      }
+      // Partial dentures only: a full denture plans its stages (StagesEditor).
+      options = PARTIAL_STAGES.map(o => ({
+        id: o.id, label: o.name,
+        disabled: o.id === 'framework' && item.base !== 'chrome', reason: 'Only for a cobalt-chrome base.',
+        sub: o.id === 'framework' ? '10 working days' : undefined,
+      }));
       value = item.stage; onChange = id => set({ stage: id, stageSrc: 'You' });
       break;
     case 'acrylic':
@@ -630,8 +634,10 @@ const WIDE_FORM: Partial<Record<SlotId, 'segment' | 'pills'>> = {
 // ─── Teeth ───────────────────────────────────────────────────────────────────
 
 function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boolean }) {
-  const { user, patient, draft, updateItem, doneAndAdvance, addService, removeItem } = useCase();
+  const { user, patient, draft, readOnly, updateItem, doneAndAdvance, addService, removeItem } = useCase();
   const wide = useRoom() === 'wide';
+  // The chart runs across the top of the step and fills it, up to this.
+  const chartMax = useContext(ChartWidthContext) ?? (wide ? 720 : 600);
   const n = user.notation;
   const [msg, setMsg] = useState<string | null>(null);
   const [allChips, setAllChips] = useState(false);
@@ -730,8 +736,12 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
   const chips = capChips && !allChips ? sorted.slice(0, CHIP_CAP) : sorted;
 
   return (
-    <div className="flex gap-8 items-start">
-      <div className="flex-shrink-0">
+    <div className="space-y-4">
+      {/* The horizontal chart on top at full width, its legend under it; what's picked reads back below. */}
+      <div
+        className={`rounded-xl bg-[#F8F9FC] border border-[#ECECF2] ${wide ? 'mx-auto px-4 pt-3 pb-2.5' : 'px-2.5 pt-2.5 pb-2'}`}
+        style={{ maxWidth: chartMax }}
+      >
         <TeethChart
           selected={teeth}
           pontics={parts?.pontics}
@@ -741,13 +751,25 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
           limitArch={limit}
           onTooth={tap}
           onSetTeeth={!single && !isBridge ? setJaw : undefined}
-          width={260}
           notation={n}
+          // A sent case: the chart is a picture of the answer, nothing to hover or tap.
+          readOnly={readOnly}
+          label={teeth.length ? `Selected teeth: ${teethText(teeth, n)}` : 'No teeth selected'}
         />
+        <div className="mt-2.5 pt-2 border-t border-[#ECECF2]">
+          <ChartLegend items={[
+            'selected',
+            ...(isBridge ? ['pontic' as const] : []),
+            ...(missing.length ? ['missing' as const] : []),
+            ...(implants.length ? ['implant' as const] : []),
+            ...(otherTeeth.length ? ['other' as const] : []),
+          ]} />
+        </div>
       </div>
-      <div className="flex-1 min-w-0 space-y-4 pt-1">
+      <div className="space-y-4">
         {/* No resin-bonded (Maryland) switch and no "tap the other end" line here: the user removed both. */}
-        <div role="status" aria-live="polite" className="min-h-[1.5rem]">
+        {/* In the wide room everything under the chart sits centred with it. */}
+        <div role="status" aria-live="polite" className={`min-h-[1.5rem] ${wide ? 'text-center [&>div>div]:justify-center' : ''}`}>
           {isBridge ? (
             // One end tapped: just that tooth (the arrow's hint says what's next; sr-only says it here too). Both ends: the span read back.
             item.teeth.length > 1 ? <p className="text-sm font-semibold text-[#030213]">{bridgeReadback(item, n)}</p>
@@ -774,7 +796,7 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
               </div>
             </div>
           ) : (
-            <p className="text-sm text-[#5A5A6A]">{single ? 'Tap a tooth.' : 'Tap each tooth, or “Select Arch” for the whole jaw.'}</p>
+            <p className="text-sm text-[#5A5A6A]">{single ? 'Tap a tooth.' : 'Tap each tooth, or “Select Upper Arch” / “Select Lower Arch” for the whole jaw.'}</p>
           )}
         </div>
         {msg && <Notice tone="decision" role="status">{msg}</Notice>}
@@ -795,13 +817,6 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
           <StepArrow show={!single} run={onDone} disabled={!canDone} label={doneText} next={next} hint={isBridge ? 'Tap the other end of the bridge' : 'Tap a tooth first'} />
           {single && teeth.length > 0 && <p className="text-xs text-[#5A5A6A]">Tap another tooth to change it.</p>}
         </div>
-        <ChartLegend items={[
-          'selected',
-          ...(isBridge ? ['pontic' as const] : []),
-          ...(missing.length ? ['missing' as const] : []),
-          ...(implants.length ? ['implant' as const] : []),
-          ...(otherTeeth.length ? ['other' as const] : []),
-        ]} />
         {extraction && <p className="text-xs text-[#5A5A6A]">The lab removes these teeth from the model and sets the denture teeth in their place.</p>}
       </div>
     </div>
@@ -837,13 +852,14 @@ function WingsEditor({ item }: { item: ServiceItem }) {
 // ─── Arch ────────────────────────────────────────────────────────────────────
 
 function ArchEditor({ item }: { item: ServiceItem }) {
-  const { updateItem, notes, dismissNote, doneAndAdvance } = useCase();
+  const { ctx, updateItem, notes, dismissNote, doneAndAdvance } = useCase();
   const wide = useRoom() === 'wide';
   const both = item.product === 'retainer' || item.product === 'whitening';
-  const pick = (jaw: 'upper' | 'lower' | 'both') => updateItem(item.id, i => ({
+  // A full denture for the arch of the patient's next stage picks up that plan (and drops it for another arch).
+  const pick = (jaw: 'upper' | 'lower' | 'both') => updateItem(item.id, i => seedDenturePlan({
     ...i, arch: jaw, archSrc: 'You',
     teeth: i.product === 'partial' || i.product === 'reline' ? i.teeth.filter(t => jaw === 'both' || jawOf(t) === jaw) : i.teeth,
-  }));
+  }, ctx));
   const onArch = (jaw: 'upper' | 'lower') => {
     if (both && item.arch && item.arch !== jaw) {
       if (item.arch === 'both') { pick(jaw === 'upper' ? 'lower' : 'upper'); return; }
@@ -876,7 +892,7 @@ function ArchEditor({ item }: { item: ServiceItem }) {
             options={[{ id: 'upper', label: 'Upper' }, { id: 'lower', label: 'Lower' }, ...(both ? [{ id: 'both', label: 'Both' }] : [])]}
           />
         )}
-        <p className="text-xs text-[#5A5A6A]">{both ? 'Tap “Select Arch” on the chart, or tap the other arch too for both.' : 'Tap “Select Arch” on the chart, or pick it here.'}</p>
+        <p className="text-xs text-[#5A5A6A]">{both ? 'Tap “Select Upper Arch” or “Select Lower Arch” on the chart (both for both), or pick it here.' : 'Tap “Select Upper Arch” or “Select Lower Arch” on the chart, or pick it here.'}</p>
         {open && <NoteView note={open} onDismiss={() => doneAndAdvance(() => dismissNote(open.id))} />}
       </div>
     </div>

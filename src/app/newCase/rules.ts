@@ -11,7 +11,7 @@ import {
 } from './data';
 import {
   addWorkingDays, ageOn, dobFromString, firstClinicDayAfter, fmtCutoff, fmtDay, fmtShort, fromISO,
-  lastWorkingDayBefore, receivedDate, workingDaysBetween, isWorkingDay,
+  lastWorkingDayBefore, receivedDate, toISO, workingDaysBetween, isWorkingDay,
 } from './dates';
 
 // ─── Draft shape ─────────────────────────────────────────────────────────────
@@ -47,8 +47,21 @@ export interface ServiceItem {
   /** Night guard / retainer type. */
   type?: string;
   typeSrc?: string;
+  /**
+   * Partial denture: its one stage. Full denture: never written any more (read
+   * once by seedDenturePlan: 'stf' / 'immediate' → treatment, a stage id →
+   * that stage ordered). stageSrc 'Next stage' stays the full denture's marker
+   * that it continues the patient's earlier case (CaseSteps and the pickers read it).
+   */
   stage?: string;
   stageSrc?: string;
+  /** Full denture: Staged (default, the stage plan) · Straight to Finish · Immediate. */
+  treatment?: DentureTreatment;
+  treatmentSrc?: string;
+  /** Full denture: the stages in play (a stage not listed is "Not now"). Read it through stagePlan(). */
+  stages?: StagePlan[];
+  /** The plan's "that's it" (several rows, like teethDone). */
+  stagesDone?: boolean;
   base?: string;
   design?: string;
   work?: string;
@@ -178,9 +191,11 @@ export const OPTIONS: Record<ProductId, Option[]> = {
   nightguard: [{ id: 'hard', name: 'Hard (Michigan)' }, { id: 'soft', name: 'Soft' }, { id: 'dual', name: 'Dual laminate' }],
   retainer: [{ id: 'essix', name: 'Essix 1.0 mm' }, { id: 'hawley', name: 'Hawley' }],
   whitening: [{ id: 'trays', name: 'Whitening trays' }],
+  // The five stages (DENTURE_STAGES) and the two treatments that skip them.
   denture: [
-    { id: 'tray', name: 'Special Tray' }, { id: 'blocks', name: 'Bite Blocks' }, { id: 'tryin', name: 'Try-In' },
-    { id: 'finish', name: 'Finish' }, { id: 'stf', name: 'Straight to Finish' }, { id: 'immediate', name: 'Immediate' },
+    { id: 'tray', name: 'Special Tray' }, { id: 'blocks', name: 'Bite Registration' }, { id: 'tryin', name: 'Try In' },
+    { id: 'retry', name: 'Retry' }, { id: 'finish', name: 'Finish' },
+    { id: 'stf', name: 'Straight to Finish' }, { id: 'immediate', name: 'Immediate' },
   ],
   partial: [{ id: 'acrylic', name: 'Acrylic' }, { id: 'chrome', name: 'Cobalt-chrome' }, { id: 'flexible', name: 'Flexible' }],
   reline: [
@@ -339,11 +354,6 @@ const PLURALS: Record<string, string> = {
 export function plural(n: number, word: string): string {
   return `${n} ${n === 1 ? word : PLURALS[word] ?? `${word}s`}`;
 }
-/**
- * @deprecated The New Case Flow shows no prices. Nothing in the flow should put
- * this on screen; it stays only so existing imports keep compiling.
- */
-export const money = (n: number) => `£${n.toFixed(2)}`;
 export const initials = (p: Patient) => `${p.first[0]}.${p.last[0]}.`;
 export const fullName = (p: Patient) => `${p.first} ${p.last}`;
 export const sexLabel = (s: Patient['sex']) => (s === 'X' ? 'Not stated' : s);
@@ -503,12 +513,188 @@ export function openCaseFor(item: ServiceItem, patient: Patient): PriorWork | un
 export const isUnder18 = (p: Patient, now: Date) => patientAge(p, now) < 18;
 export const isDentureLike = (p: ProductId) => p === 'denture' || p === 'partial' || p === 'reline';
 
+// ─── Denture stages ──────────────────────────────────────────────────────────
+// The portal's rules (data/dentureStages.ts): five stages in order, picked for
+// an arch. A full denture has no date of its own, only its stages do. A stage
+// in play is ordered (with the day it's needed back: today or later), done
+// elsewhere (done, not on this portal; an optional done-on day) or done here on
+// the patient's earlier case (a follow-up: never ordered twice). A stage not in
+// the plan is "Not now". Straight to Finish and Immediate skip the stages: their
+// plan is one ordered Finish.
+
+export type DentureStageId = 'tray' | 'blocks' | 'tryin' | 'retry' | 'finish';
+export const DENTURE_STAGES: { id: DentureStageId; name: string }[] = [
+  { id: 'tray', name: 'Special Tray' }, { id: 'blocks', name: 'Bite Registration' }, { id: 'tryin', name: 'Try In' },
+  { id: 'retry', name: 'Retry' }, { id: 'finish', name: 'Finish' },
+];
+export type DentureTreatment = 'staged' | 'stf' | 'immediate';
+export const DENTURE_TREATMENTS: { id: DentureTreatment; name: string }[] = [
+  { id: 'staged', name: 'Staged' }, { id: 'stf', name: 'Straight to Finish' }, { id: 'immediate', name: 'Immediate' },
+];
+export interface StagePlan {
+  id: DentureStageId;
+  state: 'order' | 'elsewhere' | 'here';
+  /** ISO yyyy-mm-dd: needed back by ('order'), or the optional day it was done ('elsewhere'). */
+  date?: string;
+  /** 'here': the case it was done on. */
+  caseId?: string;
+  src?: string;
+}
+
+export const isStageId = (id?: string): id is DentureStageId => DENTURE_STAGES.some(s => s.id === id);
+export const stageName = (id: DentureStageId) => DENTURE_STAGES.find(s => s.id === id)?.name ?? id;
+export const treatmentName = (t: DentureTreatment) => DENTURE_TREATMENTS.find(x => x.id === t)!.name;
+const stageRank = (id: DentureStageId) => DENTURE_STAGES.findIndex(s => s.id === id);
+
+export function dentureTreatment(item: ServiceItem): DentureTreatment {
+  if (item.treatment) return item.treatment;
+  return item.stage === 'stf' || item.stage === 'immediate' ? item.stage : 'staged';
+}
+
+/** The stages in play, in stage order. Straight to Finish / Immediate: their one Finish. An older single `stage` reads as that stage ordered. */
+export function stagePlan(item: ServiceItem): StagePlan[] {
+  if (item.product !== 'denture') return [];
+  if (dentureTreatment(item) !== 'staged') {
+    return [item.stages?.find(s => s.id === 'finish' && s.state === 'order') ?? { id: 'finish', state: 'order' }];
+  }
+  const rows = item.stages ?? (isStageId(item.stage) ? [{ id: item.stage, state: 'order' as const, src: item.stageSrc }] : []);
+  return [...rows].sort((a, b) => stageRank(a.id) - stageRank(b.id));
+}
+export const orderedStages = (item: ServiceItem) => stagePlan(item).filter(s => s.state === 'order');
+
+/** The lab's catalogue key for a row: the stage, or the treatment that replaces the stages. */
+export const stageOption = (item: ServiceItem, id: DentureStageId) => {
+  const t = dentureTreatment(item);
+  return t === 'staged' ? id : t;
+};
+/** The lab's working days for a stage (or for the treatment). */
+export function stageDays(item: ServiceItem, id: DentureStageId, lab: Lab): number | null {
+  return lab.prices[`denture:${stageOption(item, id)}`]?.[2] ?? null;
+}
+/** Dentures always go by post: the day the lab counts the case as received. */
+export const dentureReceived = (ctx: Ctx, lab: Lab = ctx.lab) => receivedDate('post', ctx.now, lab.cutoffMin, CLINIC.courierDays);
+
+/**
+ * Every stage's suggested needed-by day (ISO), in order: the previous ordered
+ * stage's day (or the day the lab receives the case) plus this stage's lab
+ * working days. Ordered or not, so ordering a stage can take its suggestion.
+ */
+export function suggestedStageDates(item: ServiceItem, ctx: Ctx, lab: Lab = ctx.lab): Record<DentureStageId, string> {
+  const plan = stagePlan(item);
+  let base = dentureReceived(ctx, lab);
+  const out = {} as Record<DentureStageId, string>;
+  for (const { id } of DENTURE_STAGES) {
+    const sugg = addWorkingDays(base, stageDays(item, id, lab) ?? 5);
+    out[id] = toISO(sugg);
+    const row = plan.find(r => r.id === id && r.state === 'order');
+    if (row) base = row.date ? fromISO(row.date) : sugg;
+  }
+  return out;
+}
+
+/** Is the plan good to go: a stage ordered, and every ordered stage made by the lab and dated today or later. */
+export function dentureStageReady(item: ServiceItem, ctx: Ctx): boolean {
+  const ordered = orderedStages(item);
+  const today = toISO(ctx.now);
+  return ordered.length > 0 && ordered.every(s =>
+    !!s.date && s.date >= today && optionAvail(ctx.lab, 'denture', stageOption(item, s.id), ctx.funding).ok);
+}
+/** Ordered stages dated on or before an earlier ordered stage: warned about, never blocked. */
+export function stagesOutOfOrder(item: ServiceItem): DentureStageId[] {
+  const out: DentureStageId[] = [];
+  let last: string | undefined;
+  for (const s of orderedStages(item)) {
+    if (!s.date) continue;
+    if (last && s.date <= last) out.push(s.id);
+    else last = s.date;
+  }
+  return out;
+}
+/** The ordered stage due back first (the denture's one date for the case's Back by). */
+export function firstStageDue(item: ServiceItem): StagePlan | undefined {
+  return orderedStages(item).filter(s => s.date).sort((a, b) => (a.date! < b.date! ? -1 : 1))[0];
+}
+/** It continues the patient's earlier case: the lab has the models. */
+export const isFollowUp = (item: ServiceItem) =>
+  item.stageSrc === 'Next stage' || stagePlan(item).some(s => s.state === 'here');
+
+/** "Try In · Thu 12 Nov, Finish · Thu 26 Nov · Bite Registration done elsewhere" */
+export function stagesSummary(item: ServiceItem): string {
+  const plan = stagePlan(item);
+  const t = dentureTreatment(item);
+  const day = (iso?: string) => (iso ? fmtDay(fromISO(iso)) : 'date needed');
+  if (t !== 'staged') return `${treatmentName(t)} · ${day(plan[0]?.date)}`;
+  const here = plan.filter(s => s.state === 'here');
+  const away = plan.filter(s => s.state === 'elsewhere');
+  return [
+    plan.filter(s => s.state === 'order').map(s => `${stageName(s.id)} · ${day(s.date)}`).join(', '),
+    here.length ? `${andList(here.map(s => stageName(s.id)))} done here${here[0].caseId ? ` (${here[0].caseId})` : ''}` : '',
+    away.length ? `${andList(away.map(s => stageName(s.id)))} done elsewhere` : '',
+  ].filter(Boolean).join(' · ');
+}
+/** The ordered stages in one short line: "Try In 12 Nov, Finish 26 Nov", "Straight to Finish 6 Nov". */
+export function stagesShort(item: ServiceItem): string {
+  const t = dentureTreatment(item);
+  return orderedStages(item)
+    .map(s => `${t === 'staged' ? stageName(s.id) : treatmentName(t)}${s.date ? ` ${fmtShort(fromISO(s.date))}` : ''}`)
+    .join(', ');
+}
+
+/**
+ * A full denture made ready (idempotent; every way a denture comes in goes
+ * through it): an older single `stage` becomes the treatment or that stage
+ * ordered; a plan for the arch and lab of the patient's next stage starts as
+ * that follow-up — the stages before it done here on the earlier case, the next
+ * one ordered (src 'Next stage', settled); done-here rows that no longer match
+ * the patient, arch or lab go; every ordered stage without a day gets its
+ * suggested one.
+ */
+export function seedDenturePlan(item: ServiceItem, ctx: Ctx): ServiceItem {
+  if (item.product !== 'denture') return item;
+  const it: ServiceItem = { ...item };
+  if (it.stage) {
+    if (it.stage === 'stf' || it.stage === 'immediate') {
+      it.treatment = it.treatment ?? it.stage;
+      it.treatmentSrc = it.treatmentSrc ?? it.stageSrc;
+    } else if (isStageId(it.stage) && !it.stages) {
+      it.stages = [{ id: it.stage, state: 'order', src: it.stageSrc }];
+    }
+    it.stage = undefined;
+  }
+  const ns = ctx.patient.nextStage;
+  const follows = !!ns && ns.product === 'denture' && isStageId(ns.stage) && it.arch === ns.arch && ctx.lab.id === ns.lab
+    && dentureTreatment(it) === 'staged';
+  const stale = (s: StagePlan) => s.state === 'here' && (!follows || s.caseId !== ns!.caseId);
+  if (it.stages?.some(s => stale(s) || (!follows && s.src === 'Next stage'))) {
+    if (it.stages.some(stale)) it.stagesDone = false;
+    it.stages = it.stages.filter(s => !stale(s)).map(s => (!follows && s.src === 'Next stage' ? { ...s, src: undefined } : s));
+  }
+  if (it.stageSrc === 'Next stage' && !follows) it.stageSrc = undefined;
+  // Nothing planned yet, or just that next stage ordered (an older `stage`, or the arch switched back).
+  const only = it.stages?.length === 1 && it.stages[0].state === 'order' && it.stages[0].id === ns?.stage ? it.stages[0] : undefined;
+  if (follows && (!it.stages?.length || only)) {
+    const at = stageRank(ns!.stage as DentureStageId);
+    it.stages = [
+      ...DENTURE_STAGES.slice(0, at).map((s): StagePlan => ({ id: s.id, state: 'here', caseId: ns!.caseId, src: 'Next stage' })),
+      { id: ns!.stage as DentureStageId, state: 'order', date: only?.date, src: 'Next stage' },
+    ];
+    it.stagesDone = true;
+    it.stageSrc = 'Next stage';
+  }
+  if (dentureTreatment(it) !== 'staged') it.stages = stagePlan(it);
+  if (it.stages?.some(s => s.state === 'order' && !s.date)) {
+    const sugg = suggestedStageDates(it, ctx);
+    it.stages = it.stages.map(s => (s.state === 'order' && !s.date ? { ...s, date: sugg[s.id] } : s));
+  }
+  return it;
+}
+
 // ─── Slots ───────────────────────────────────────────────────────────────────
 
 export type SlotId =
   | 'labCheck' | 'teeth' | 'implantRecord' | 'remake' | 'remakeReason' | 'splint' | 'material' | 'shade' | 'photos'
   | 'prefs' | 'wings' | 'system' | 'platform' | 'scanBody' | 'retention' | 'abutment' | 'inlayType' | 'type' | 'arch'
-  | 'under18' | 'stage' | 'acrylic' | 'extract' | 'mould' | 'postdam' | 'base' | 'design' | 'work' | 'desc';
+  | 'under18' | 'stage' | 'stages' | 'acrylic' | 'extract' | 'mould' | 'postdam' | 'base' | 'design' | 'work' | 'desc';
 
 export interface Slot {
   id: SlotId;
@@ -624,17 +810,26 @@ export function slotsFor(item: ServiceItem, ctx: Ctx): Slot[] {
     }
     case 'denture': {
       push({ id: 'arch', label: 'Arch', required: true, answered: !!item.arch, value: archCaps(item.arch), src: item.archSrc });
-      const stageOk = !!item.stage && optionAvail(ctx.lab, 'denture', item.stage, ctx.funding).ok;
-      push({ id: 'stage', label: 'Stage', required: true, answered: stageOk, value: stageOk ? optionName('denture', item.stage) : undefined, src: item.stageSrc });
+      // The plan: answered once it's good to go and the user said that's it (several rows, like teeth).
+      const ordered = orderedStages(item);
+      const srcs = ordered.map(s => s.src);
+      push({
+        id: 'stages', label: 'Stages', required: true,
+        answered: !!item.stagesDone && dentureStageReady(item, ctx) && !reopened('stages'),
+        value: stagesShort(item) || undefined,
+        src: (dentureTreatment(item) !== 'staged' ? item.treatmentSrc : undefined) ?? (srcs.length && srcs.every(x => x === srcs[0]) ? srcs[0] : undefined),
+      });
       push({ id: 'acrylic', label: 'Acrylic', required: false, answered: true, value: e.acrylic, src: e.acrylicSrc });
-      if (item.stage === 'immediate') {
+      const treatment = dentureTreatment(item);
+      if (treatment === 'immediate') {
         push({ id: 'extract', label: 'Teeth to extract', required: true, answered: !!item.extractDone && (item.extract?.length ?? 0) > 0, value: teethText(item.extract ?? [], n) });
       }
-      if (item.stage === 'tryin' || item.stage === 'stf' || item.stage === 'immediate') {
+      // Teeth are set up from the Try In on (and for the treatments that go straight to a finished denture).
+      if (treatment !== 'staged' || ordered.some(s => s.id === 'tryin' || s.id === 'retry' || s.id === 'finish')) {
         push({ id: 'shade', label: 'Tooth shade', required: true, answered: !!item.shade, value: item.shade });
         push({ id: 'mould', label: 'Mould', required: false, answered: true, value: e.mould, src: e.mouldSrc });
       }
-      if (item.stage === 'finish') push({ id: 'postdam', label: 'Post-dam', required: true, answered: !!item.postdam, value: item.postdam });
+      if (ordered.some(s => s.id === 'finish')) push({ id: 'postdam', label: 'Post-dam', required: true, answered: !!item.postdam, value: item.postdam });
       break;
     }
     case 'partial': {
@@ -677,7 +872,8 @@ export function priceKey(item: ServiceItem, ctx: Ctx): string | undefined {
     case 'nightguard': case 'retainer':
       return e.type ? `${item.product}:${e.type}` : undefined;
     case 'whitening': return 'whitening:trays';
-    case 'denture': return item.stage ? `denture:${item.stage}` : undefined;
+    // The first ordered stage (its turnaround is the fallback lead time), or the treatment.
+    case 'denture': { const first = orderedStages(item)[0]; return first ? `denture:${stageOption(item, first.id)}` : undefined; }
     case 'partial': return item.base ? `partial:${item.base}` : undefined;
     case 'reline': return item.work ? `reline:${item.work}` : undefined;
     case 'other': return 'other:tbc';
@@ -744,6 +940,14 @@ export function priceOf(item: ServiceItem, ctx: Ctx, fastTrack: boolean, lab: La
   if (item.product === 'partial' && item.stage && item.stage !== 'finish') {
     return { kind: 'included', total: 0, unit: null, units, ta, label: '' };
   }
+  if (item.product === 'denture') {
+    // Each ordered stage is charged (internal only); stages done here or elsewhere aren't.
+    const fi = itemFunding('denture', ctx.funding) === 'nhs' ? 1 : 0;
+    const each = orderedStages(item).map(s => lab.prices[`denture:${stageOption(item, s.id)}`]?.[fi]);
+    if (each.some(v => v == null)) return { kind: 'none', total: null, unit: null, units, ta, label: '' };
+    const total = each.reduce<number>((a, v) => a + (v ?? 0), 0);
+    return { kind: 'price', total, unit: total, units, ta, label: '' };
+  }
   const entry = lab.prices[key];
   const unit = itemFunding(item.product, ctx.funding) === 'nhs' ? entry[1] : entry[0];
   if (unit == null) return { kind: 'none', total: null, unit: null, units, ta, label: '' };
@@ -763,7 +967,7 @@ export function priceLine(p: PriceInfo): string {
 export type RecordsState = 'scan' | 'nextStage' | 'follow' | 'post' | 'upload' | 'none';
 export function recordsState(d: CaseDraft, ctx: Ctx): RecordsState {
   const dentureOnly = d.items.length > 0 && d.items.every(i => isDentureLike(i.product));
-  if (dentureOnly) return d.items.some(i => i.stageSrc === 'Next stage') ? 'nextStage' : 'post';
+  if (dentureOnly) return d.items.some(isFollowUp) ? 'nextStage' : 'post';
   if (d.scan) return 'scan';
   return d.records.route ?? 'none';
 }
@@ -778,7 +982,7 @@ export function recordsGap(d: CaseDraft, ctx: Ctx): boolean {
 export function defaultBox(d: CaseDraft): Record<string, boolean> {
   const dentures = d.items.some(i => isDentureLike(i.product));
   const reline = d.items.some(i => i.product === 'reline');
-  const next = d.items.some(i => i.stageSrc === 'Next stage');
+  const next = d.items.some(isFollowUp);
   return {
     'Upper impression': !next && !reline,
     'Lower impression': !next && !reline,
@@ -894,12 +1098,19 @@ export function caseDates(d: CaseDraft, ctx: Ctx, opts: { lab?: Lab; fastTrack?:
   const route = dateRoute(d, ctx);
   const received = receivedDate(route === 'post' ? 'post' : 'digital', ctx.now, lab.cutoffMin, CLINIC.courierDays);
   const perItem = items.map(it => {
-    const ta = labMakes(lab, it.product) ? turnaround(it, ctx, fast, lab) : null;
+    if (!labMakes(lab, it.product)) return { id: it.id, ta: null };
+    // A full denture has no date of its own: it's back when its first ordered stage is (else that stage's suggested day).
+    if (it.product === 'denture' && orderedStages(it).length) {
+      const first = firstStageDue(it);
+      const back = first ? fromISO(first.date!) : fromISO(suggestedStageDates(it, ctx, lab)[orderedStages(it)[0].id]);
+      return { id: it.id, ta: workingDaysBetween(received, back), backBy: back };
+    }
+    const ta = turnaround(it, ctx, fast, lab);
     return { id: it.id, ta, backBy: ta != null ? addWorkingDays(received, ta) : undefined };
   });
   if (items.length === 0 || perItem.some(p => p.ta == null)) return { route, received, perItem };
   const ta = Math.max(...perItem.map(p => p.ta!));
-  const backBy = addWorkingDays(received, ta);
+  const backBy = perItem.reduce((a, p) => (p.backBy! > a ? p.backBy! : a), perItem[0].backBy!);
   return { route, received, backBy, earliestFit: firstClinicDayAfter(backBy), ta, perItem };
 }
 
@@ -980,7 +1191,12 @@ export function itemSpec(item: ServiceItem, ctx: Ctx): string {
   if (['crown', 'bridge', 'veneer', 'inlay', 'implant'].includes(item.product) && e.material) parts.push(optionName(item.product, e.material));
   if (item.product === 'implant' && e.retention === 'cement') parts.push('cement-retained');
   if ((item.product === 'nightguard' || item.product === 'retainer') && e.type) parts.push(optionName(item.product, e.type));
-  if (item.product === 'denture' && item.stage) parts.push(optionName('denture', item.stage));
+  if (item.product === 'denture') {
+    const t = dentureTreatment(item);
+    const ordered = orderedStages(item);
+    if (t !== 'staged') parts.push(treatmentName(t));
+    else if (ordered.length) parts.push(ordered.map(s => stageName(s.id)).join(' + '));
+  }
   if (item.product === 'partial' && item.base) parts.push(`${optionName('partial', item.base)}${item.stage ? ` · ${PARTIAL_STAGES.find(s => s.id === item.stage)?.name}` : ''}`);
   if (item.product === 'reline' && item.work) parts.push(optionName('reline', item.work));
   if (item.product === 'inlay' && item.inlayType) parts.push(item.inlayType === 'inlay' ? 'Inlay' : 'Onlay');
@@ -1081,3 +1297,8 @@ export function setLoginLookup(fn: (login: string) => boolean) { LOGIN_UNLINKED 
 
 export const labsThatMake = (product: ProductId) => LABS.filter(l => labMakes(l, product));
 export { labById };
+
+/** "A", "A and B", "A, B and C" */
+function andList(words: string[]): string {
+  return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+}

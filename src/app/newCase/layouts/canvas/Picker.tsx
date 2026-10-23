@@ -110,7 +110,7 @@ export default function Picker() {
         )}
       </div>
       {nhs && tiles.some(p => PRODUCTS[p].privateOnly) && (
-        <p className="mt-3 text-xs text-[#5A5A6A]">Items tagged Private are charged privately for this NHS patient.</p>
+        <p className="mt-3 text-xs text-[#5A5A6A]">Items tagged Private go to the lab as private work for this NHS patient.</p>
       )}
     </section>
   );

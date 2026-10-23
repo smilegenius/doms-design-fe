@@ -9,3 +9,6 @@ export type Room = 'wide' | 'compact';
 const RoomContext = createContext<Room>('compact');
 export const RoomProvider = RoomContext.Provider;
 export const useRoom = () => useContext(RoomContext);
+
+/** The widest a step's Teeth Chart is drawn (px): the horizontal chart fills its step up to this. */
+export const ChartWidthContext = createContext<number | undefined>(undefined);

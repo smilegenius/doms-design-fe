@@ -51,6 +51,8 @@ export default function NewCaseFlowPage() {
 
 function CaseLoader({ id, sessionKey }: { id: string; sessionKey: string }) {
   const [sp] = useSearchParams();
+  // Where to open: the AI page's Details passes a step (or "item:<id>" for a service).
+  const startStep = (useLocation().state as { step?: string } | null)?.step;
   const store = useFlowStore();
   const user = userById(store.userId)!;
   const initial = useMemo(() => {
@@ -70,7 +72,7 @@ function CaseLoader({ id, sessionKey }: { id: string; sessionKey: string }) {
       </div>
     );
   }
-  return <CaseEditor initial={initial.draft} row={initial.row} user={user} sessionKey={sessionKey} />;
+  return <CaseEditor initial={initial.draft} row={initial.row} user={user} sessionKey={sessionKey} startStep={startStep} />;
 }
 
 function initialView(row: CaseRow | undefined, userId: string): View {
@@ -121,8 +123,8 @@ const resetChecks = (i: ServiceItem): ServiceItem => ({
   shade: i.shadeSrc === 'Made the original' ? undefined : i.shade, shadeSrc: i.shadeSrc === 'Made the original' ? undefined : i.shadeSrc,
 });
 
-function CaseEditor({ initial, row: initialRow, user, sessionKey }: {
-  initial: CaseDraft; row?: CaseRow; user: ReturnType<typeof userById> & object; sessionKey: string;
+function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
+  initial: CaseDraft; row?: CaseRow; user: ReturnType<typeof userById> & object; sessionKey: string; startStep?: string;
 }) {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -137,7 +139,17 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey }: {
   const lab = labById(draft.lab);
   const readOnly = view !== 'edit';
 
-  const [step, setStep] = useState<string>(() => (initialView(initialRow, user.id) !== 'edit' ? 'review' : firstGap(buildSteps(initial, ctx, ''))));
+  const [step, setStep] = useState<string>(() => {
+    if (initialView(initialRow, user.id) !== 'edit') return 'review';
+    const steps0 = buildSteps(initial, ctx, '');
+    // A requested start: a step, or a service's first open question (else its first).
+    if (startStep?.startsWith('item:')) {
+      const nodes = steps0.filter(s => s.itemId === startStep.slice(5));
+      const at = nodes.find(s => s.gap && s.navigable) ?? nodes[0];
+      if (at) return at.id;
+    } else if (startStep && steps0.some(s => s.id === startStep && s.navigable)) return startStep;
+    return firstGap(steps0);
+  });
   const steps = useMemo(() => buildSteps(draft, ctx, step), [draft, ctx, step]);
   const dates = useMemo(() => caseDates(draft, ctx), [draft, ctx]);
   const notes = useMemo(() => notesFor(draft, ctx, dates), [draft, ctx, dates]);

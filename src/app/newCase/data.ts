@@ -89,7 +89,7 @@ export const LABS: Lab[] = [
       'nightguard:hard': [50, 50, 5], 'nightguard:soft': [38, 38, 5], 'nightguard:dual': [60, null, 5],
       'retainer:essix': [38, 38, 4],
       'whitening:trays': [24, null, 4],
-      'denture:tray': [18, 15, 5], 'denture:blocks': [22, 18, 5], 'denture:tryin': [35, 28, 5],
+      'denture:tray': [18, 15, 5], 'denture:blocks': [22, 18, 5], 'denture:tryin': [35, 28, 5], 'denture:retry': [35, 28, 5],
       'denture:finish': [135, 95, 5], 'denture:stf': [160, 115, 7], 'denture:immediate': [150, 110, 7],
       'partial:acrylic': [120, 85, 5], 'partial:chrome': [260, 190, 5], 'partial:flexible': [180, null, 5],
       'reline:repair': [35, 28, 1], 'reline:addtooth': [40, 32, 1], 'reline:addclasp': [45, 35, 1],
@@ -162,7 +162,7 @@ export interface Patient {
   implants?: ImplantRecord[];
   lastShade?: string;
   history?: PriorWork[];
-  /** A denture stage that's due next. */
+  /** A denture stage that's due next: the stages before it were done on `caseId` (see seedDenturePlan). */
   nextStage?: { product: 'denture'; arch: Arch; stage: string; lab: LabId; caseId: string; note: string };
   /** Arch-level work to repeat. */
   repeat?: { product: ProductId; arch: Arch; option: string; date: string; label: string };
@@ -196,9 +196,10 @@ export const PATIENTS: Patient[] = [
   },
   {
     id: 'P-2025-009', first: 'Edward', last: 'Thomas', dob: '19/08/1955', sex: 'M', funding: 'nhs',
-    nextStage: { product: 'denture', arch: 'upper', stage: 'tryin', lab: 'pennine', caseId: 'CAS-2026-117', note: 'bite blocks back 12 Oct' },
+    // Special Tray and Bite Registration were made on CAS-2026-117: a new upper denture at Pennine continues it.
+    nextStage: { product: 'denture', arch: 'upper', stage: 'tryin', lab: 'pennine', caseId: 'CAS-2026-117', note: 'bite registration back 12 Oct' },
     history: [{ caseId: 'CAS-2026-117', product: 'denture', arch: 'upper', option: 'blocks', lab: 'pennine', date: '2026-10-12' }],
-    lastLabel: 'Full denture · UPPER bite blocks, Oct 2026',
+    lastLabel: 'Full denture · UPPER bite registration, Oct 2026',
   },
   {
     id: 'P-2025-052', first: 'Hannah', last: 'Lowe', dob: '30/01/2010', sex: 'F', funding: 'private',

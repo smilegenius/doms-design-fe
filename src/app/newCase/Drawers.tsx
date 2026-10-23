@@ -12,7 +12,7 @@ import {
 } from './dates';
 import {
   BLEACH, GROUP_ORDER, MATERIAL_GROUP, MATERIAL_GROUPS, PREF_FIELDS, PRODUCTS, STUMP, VITA_3D, VITA_CLASSICAL, effective,
-  fitCheck, fitFixes, labProducts, materialOptions, money, optionAvail, optionName, plural, priceOf, shadeSwatch,
+  fitCheck, fitFixes, labProducts, materialOptions, optionAvail, optionName, plural, priceOf, shadeSwatch,
   ServiceItem,
 } from './rules';
 import { PrimaryButton, SecondaryButton, Notice, FOCUS, LinkButton } from './ui';
@@ -335,7 +335,7 @@ function Fit({ onClose }: { onClose: () => void }) {
             <div className="space-y-2">
               {fixes.map(f => (
                 <button key={f.label} type="button" onClick={() => (f.kind === 'fast' ? setFit(picked, { fastTrack: true }) : (changeLab(f.labId!), setFit(picked)))} className={`w-full text-left px-3.5 py-2.5 rounded-lg border border-[#C8D8FC] bg-[#F5F8FF] text-sm font-semibold text-[#1E3A8A] hover:bg-[#EEF4FF] ${FOCUS}`}>
-                  {/* The rules' fast-track label carries its per-unit charge; this flow shows the date only. */}
+                  {/* Fast-Track shows only the date it brings the case back by. */}
                   {f.kind === 'fast' ? `Use Fast-Track · back ${fmtDay(f.backBy)}` : f.label}
                 </button>
               ))}
@@ -374,4 +374,4 @@ function Scan({ onClose }: { onClose: () => void }) {
     </SideDrawer>
   );
 }
-export { money, optionName };
+export { optionName };

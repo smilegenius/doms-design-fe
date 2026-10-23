@@ -1,5 +1,5 @@
 // ─── Experience C · the chart panel ──────────────────────────────────────────
-// The portal's own Teeth Chart, on the right beside the case and the only place
+// The horizontal Teeth Chart, on the right beside the case and the only place
 // teeth and arches are picked for a new service. It shows every service's teeth
 // (grey; a whole-arch service greys its arch), bridge pontics, recorded-missing
 // teeth and implants on record. Taps build a pending selection; "What are we
@@ -13,7 +13,7 @@
 // and the lighting goes out while the pointer or keyboard focus is on the
 // chart, so the teeth under the user's hand show only what is really selected.
 
-import { Ref, useEffect, useRef, useState } from 'react';
+import { Ref, RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useCase } from '../../CaseContext';
 import { useController } from '../../controller';
 import { PRODUCTS, archTeethIds, itemTitle, toothText } from '../../rules';
@@ -30,7 +30,10 @@ export default function ChartPanel() {
   const n = user.notation;
   const asideRef = useRef<HTMLElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
+  // The panel's height still fits between the header and the footer; its width no longer follows the chart's
+  // height (the horizontal chart is never the tall part), so it keeps one width and the chart fills it.
   const fit = useChartFit(asideRef, chartRef, ui.footerRef, ui.stickyTop);
+  const panelWidth = usePanelWidth(asideRef);
   const [msg, setMsg] = useState<string | null>(null);
   useEffect(() => {
     if (!msg) return;
@@ -108,7 +111,11 @@ export default function ChartPanel() {
   ];
 
   const hint = ui.pending
-    ? ui.pending.kind === 'arch' ? 'Tap “Select Arch” again to clear it.' : 'Tap more teeth to add them, or tap one again to drop it.'
+    ? ui.pending.kind === 'arch'
+      ? ui.pending.arch === 'both'
+        ? 'Tap “Select Upper Arch” or “Select Lower Arch” again to clear that arch.'
+        : `Tap “Select ${ui.pending.arch === 'lower' ? 'Lower' : 'Upper'} Arch” again to clear it.`
+      : 'Tap more teeth to add them, or tap one again to drop it.'
     : target ? `Then pick ${PRODUCTS[target.product].label} in the bar below.`
     : draft.items.length ? 'Then pick what to make. Grey teeth are already on this case.'
     : 'Then pick what to make. Tap a few teeth for several crowns or a bridge.';
@@ -133,7 +140,7 @@ export default function ChartPanel() {
       ref={asideRef}
       aria-labelledby="nc-chart-title"
       className="sticky self-start flex-shrink-0 bg-white border border-[#E0E0E6] rounded-2xl p-4 overflow-y-auto"
-      style={{ top: ui.stickyTop, width: Math.max(290, fit.width + 34), maxHeight: fit.maxHeight }}
+      style={{ top: ui.stickyTop, width: panelWidth, maxHeight: fit.maxHeight }}
     >
       <h2
         id="nc-chart-title"
@@ -161,12 +168,13 @@ export default function ChartPanel() {
       )}
 
       <div
-        className="mt-2 flex justify-center rounded-xl bg-[#F8F9FC] border border-[#ECECF2] py-2"
+        className="mt-2 rounded-xl bg-[#F8F9FC] border border-[#ECECF2] px-1.5 py-2"
         onPointerEnter={() => setPointerIn(true)}
         onPointerLeave={() => setPointerIn(false)}
       >
         <div
           ref={chartRef}
+          className="w-full"
           onFocus={e => { let kb = true; try { kb = (e.target as Element).matches(':focus-visible'); } catch { /* older engines */ } if (kb) setInChart(true); }}
           onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setInChart(false); }}
         >
@@ -179,7 +187,6 @@ export default function ChartPanel() {
             otherTeeth={chart.other}
             onTooth={onTooth}
             onSetTeeth={onSetTeeth}
-            width={fit.width}
             readOnly={readOnly}
             notation={n}
             label={draft.items.length ? `Teeth on this case: ${draft.items.map(i => itemTitle(i, n)).join(', ')}` : 'No teeth on this case yet'}
@@ -190,6 +197,27 @@ export default function ChartPanel() {
       {legend.length > 0 && <div className="mt-2"><ChartLegend items={legend} /></div>}
     </aside>
   );
+}
+
+/** About 336 px beside the case, 300 px where the page area is narrow (under 860 px), so the case column keeps its room. */
+const PANEL_W = 336;
+const PANEL_W_NARROW = 300;
+function usePanelWidth(asideRef: RefObject<HTMLElement>): number {
+  const [w, setW] = useState(PANEL_W);
+  useLayoutEffect(() => {
+    const row = asideRef.current?.parentElement;
+    if (!row) return;
+    const measure = () => {
+      const next = row.clientWidth < 860 ? PANEL_W_NARROW : PANEL_W;
+      setW(p => (p === next ? p : next));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, [asideRef]);
+  return w;
 }
 
 /** "● Showing Crown · 36 · LL6": which service the chart is lighting. A visual aid only: the card in view says it in words. */

@@ -76,7 +76,7 @@ export function Timeline() {
                   label={sl.label}
                   value={state === 'done' ? sl.value : undefined}
                   current={step === s.id}
-                  disabled={!s.navigable}
+                  disabled={false}
                   onClick={() => go(s.id)}
                   below={subLines[i]}
                 />
