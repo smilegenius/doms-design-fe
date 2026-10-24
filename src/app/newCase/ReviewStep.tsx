@@ -16,11 +16,12 @@ import { CLINIC } from './data';
 import { fmtCutoff, fmtDay, sameDay } from './dates';
 import {
   PRODUCTS, ServiceItem, StepNode, archCaps, attestation, bridgeParts, fitCheck, fullName, itemTitle, labSees, parseStep, plural,
-  recordsState, sendMode, slotsFor, splitSuggestion, fitLine, caseInstructions, instructionsStale,
+  recordsState, sendMode, slotsFor, splitSuggestion, fitLine, caseInstructions, instructionsStale, firstStageDue, stageName,
+  archWord, dentureTreatment, orderedStages, treatmentName,
 } from './rules';
 import { MiniChart } from './TeethChart';
 import { CaseInstructionsBox, ServiceNote } from './Instructions';
-import { PRODUCT_ICON, itemDetails, questionFor, NoteView } from './ServiceSteps';
+import { PRODUCT_ICON, StagePlanView, itemDetails, questionFor, NoteView } from './ServiceSteps';
 import { backByText, recordsSummary } from './CaseSteps';
 import { useRoom } from './room';
 import { Card, GapButton, LinkButton, Notice, SecondaryButton, SourceTag, StateIcon, StepHeading, FOCUS } from './ui';
@@ -37,7 +38,7 @@ export function gapLabel(node: StepNode, api: ReturnType<typeof useCase>): strin
     const s = recordsState(api.draft, api.ctx);
     if (s === 'none') return 'Needs you: how will the lab get the impressions?';
     if (s === 'upload') return 'Needs you: upload the scan files and name each one';
-    return 'Needs you: tick the disinfection line';
+    return 'Needs you: how will the lab get the impressions?';
   }
   if (node.kind === 'prescriber') return api.prescriber && !api.prescriber.gdc ? 'Needs you: a GDC number for the prescriber' : 'Needs you: who is prescribing?';
   if (node.kind === 'slot' && node.slot && node.itemId) {
@@ -142,7 +143,8 @@ function ServiceCard({ item }: { item: ServiceItem }) {
   const firstSlot = slots.find(s => s.required && !s.answered) ?? slots[0];
   const itemNotes = notes.filter(n => n.itemId === item.id);
   const arch = PRODUCTS[item.product].archItem ? item.arch : undefined;
-  const own = ownDates(api, item.id);
+  // A full denture has no date of its own: its stages carry them.
+  const own = item.product === 'denture' ? null : ownDates(api, item.id);
   return (
     <Card className="p-4">
       <div className="flex gap-4">
@@ -163,7 +165,9 @@ function ServiceCard({ item }: { item: ServiceItem }) {
             {itemDetails(item, ctx).filter(d => d.label !== 'Teeth' || item.product === 'bridge').map(d => (
               <div key={d.label} className="contents">
                 <dt className="text-xs text-[#4A4A5A]">{d.label}</dt>
-                <dd className="text-xs text-[#030213] font-medium">{d.value} {d.src && d.src !== 'You' && <SourceTag src={d.src} />}</dd>
+                <dd className="text-xs text-[#030213] font-medium">
+                  {d.id === 'stages' ? <StagePlanView item={item} small /> : <>{d.value} {d.src && d.src !== 'You' && <SourceTag src={d.src} />}</>}
+                </dd>
               </div>
             ))}
             {own && (
@@ -315,12 +319,17 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
   const firstSlot = slots.find(s => s.required && !s.answered) ?? slots[0];
   const itemNotes = notes.filter(n => n.itemId === item.id);
   const arch = PRODUCTS[item.product].archItem ? item.arch : undefined;
-  const own = ownDates(api, item.id);
+  // A full denture has no date of its own: its stages carry them.
+  const own = item.product === 'denture' ? null : ownDates(api, item.id);
   const title = itemTitle(item, user.notation);
   const Icon = PRODUCT_ICON[item.product];
   const details = itemDetails(item, ctx).filter(d => d.label !== 'Teeth' || item.product === 'bridge');
   const [open, setOpen] = useState(!!startOpen || (gaps > 0 && !readOnly));
-  const summary = details.filter(d => d.value.length <= 34).map(d => d.value).join(' · ');
+  // A denture's stages lead (the only dates it has), however long; the rest only if short. The line truncates.
+  const summary = [
+    ...details.filter(d => d.id === 'stages').map(d => d.short ?? d.value),
+    ...details.filter(d => d.id !== 'stages').map(d => d.value).filter(v => v.length <= 34),
+  ].join(' · ');
   const bodyId = `nc-review-svc-${item.id}`;
   if (!open) {
     return (
@@ -372,9 +381,11 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
           {details.length > 0 && (
             <dl className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2.5 rounded-xl border border-[#ECECF2] px-3.5 py-3">
               {details.map(d => (
-                <div key={d.label} className={`min-w-0 ${d.value.length > 34 ? 'col-span-2' : ''}`}>
+                <div key={d.label} className={`min-w-0 ${d.value.length > 34 || d.id === 'stages' ? 'col-span-2' : ''}`}>
                   <dt className="text-[10px] font-bold uppercase tracking-wider text-[#5A5A6A]">{d.label}</dt>
-                  <dd className="mt-0.5 text-sm font-medium text-[#030213] leading-snug">{d.value} {d.src && d.src !== 'You' && <SourceTag src={d.src} />}</dd>
+                  {d.id === 'stages'
+                    ? <dd className="mt-1"><StagePlanView item={item} /></dd>
+                    : <dd className="mt-0.5 text-sm font-medium text-[#030213] leading-snug">{d.value} {d.src && d.src !== 'You' && <SourceTag src={d.src} />}</dd>}
                 </div>
               ))}
             </dl>
@@ -458,9 +469,19 @@ function reviewFacts(api: Api) {
 
 /** The band's back-by cell: the day, and how it's counted. */
 function backFact(api: Api): { value: string; sub: string } {
-  const { dates, lab } = api;
+  const { dates, lab, draft } = api;
   if (dates.route === 'follow' && dates.ta != null) {
     return { value: dates.backBy ? fmtDay(dates.backBy) : plural(dates.ta, 'working day'), sub: dates.backBy ? `if the scan arrives by ${fmtCutoff(lab.cutoffMin)} today` : 'after the scan arrives' };
+  }
+  // Full dentures only: the case is back when the first ordered stage is. Named from the denture that sets the day.
+  const lead = dates.backBy && draft.items.every(i => i.product === 'denture')
+    ? draft.items.find(i => { const p = dates.perItem.find(x => x.id === i.id); return !!p?.backBy && sameDay(p.backBy, dates.backBy!); })
+    : undefined;
+  const first = lead && (firstStageDue(lead) ?? orderedStages(lead)[0]);
+  if (dates.backBy && lead && first) {
+    const t = dentureTreatment(lead);
+    const name = t === 'staged' ? stageName(first.id) : treatmentName(t);
+    return { value: fmtDay(dates.backBy), sub: draft.items.length > 1 && lead.arch ? `${name} (${archWord(lead.arch)}), its first stage back` : `${name}, the first stage back` };
   }
   if (dates.backBy) return { value: fmtDay(dates.backBy), sub: plural(dates.ta ?? 0, 'working day') };
   return { value: '—', sub: 'once every item can be made' };

@@ -10,13 +10,20 @@
 // Nothing is guessed past the rules: an option the lab doesn't offer, a date
 // too soon for the lab or a lab that isn't one of the clinic's stays a gap,
 // so the case opens at what's missing. Words it can't place are listed back.
+//
+// A full denture has no date of its own: its stages do ("try in 12 Nov,
+// finish 26 Nov, bite registration done elsewhere"). A stage's day that has
+// passed reads as done elsewhere; the stages a patient's earlier case made
+// here stay done here (a follow-up, never ordered twice).
 
 import { Arch, CLINIC, DENTISTS, Funding, LABS, Lab, LabId, Patient, ProductId, User, UserId, labById, userById } from './data';
-import { addDays, firstClinicDayAfter, isClinicOpen, parseDOB, startOfDay, toISO } from './dates';
+import { addDays, demoNow, firstClinicDayAfter, fmtDay, fmtFull, fmtShort, fromISO, isClinicOpen, lastWorkingDayBefore, parseDOB, startOfDay, toISO } from './dates';
 import {
-  BRIDGE_ERRORS, BLEACH, CaseDraft, Ctx, LOWER_ORDER, Notation, OPTIONS, PARTIAL_STAGES, PRODUCTS, STUMP, ServiceItem,
-  UPPER_ORDER, VITA_3D, VITA_CLASSICAL, buildSteps, caseDates, fastTrackEligible, firstGap, fitCheck, fullName,
-  gapCount, itemTitle, jawOf, labMakes, optionAvail, optionName, resolvePrescriber, spanBetween,
+  BRIDGE_ERRORS, BLEACH, CaseDraft, Ctx, DENTURE_STAGES, DentureStageId, DentureTreatment, LOWER_ORDER, Notation, OPTIONS,
+  PARTIAL_STAGES, PRODUCTS, STUMP, ServiceItem, StagePlan, UPPER_ORDER, VITA_3D, VITA_CLASSICAL, buildSteps, caseDates,
+  dentureTreatment, fastTrackEligible, firstGap, fitCheck, fullName, gapCount, isStageId, itemTitle, jawOf, labMakes,
+  optionAvail, optionName, orderedStages, resolvePrescriber, seedDenturePlan, spanBetween, stageName, stagePlan,
+  stagesOutOfOrder, stagesSummary, suggestedStageDates, treatmentName,
 } from './rules';
 import { blankDraft, loginMap, newItem } from './store';
 import { stepName } from './footerArrow';
@@ -31,7 +38,7 @@ export const TEMPLATE = 'Patient Name: \nLab Name: \n\nService 1: \nTeeth/Arch: 
 /** One service's lines: what, where, which material and shade, when, and its own instruction for the lab. */
 export const serviceBlock = (n: number) => `Service ${n}: \nTeeth/Arch: \nMaterial/Shade: \nDelivery: \nInstruction: `;
 
-/** Demo examples: real demo patients and labs, one template and two plain sentences. */
+/** Demo examples: real demo patients and labs, one template and three plain sentences (the last a denture's next stages). */
 export const EXAMPLES: { id: string; label: string; text: string }[] = [
   {
     id: 'crown',
@@ -40,6 +47,8 @@ export const EXAMPLES: { id: string; label: string; text: string }[] = [
   },
   { id: 'bridge', label: 'Bridge for Ben', text: 'Bridge 35-37 for Ben Ortiz, monolithic zirconia, shade A3, needed by 13 Nov' },
   { id: 'guard', label: 'Night Guard for Priya', text: 'Upper soft night guard for Priya Shah at Pennine Denture Lab. Patient grinds at night, please keep it 2 mm thick.' },
+  // Edward's special tray and bite registration were made on CAS-2026-117: this carries on from there.
+  { id: 'denture', label: 'Denture for Edward', text: 'Upper full denture for Edward Thomas at Pennine, bite registration done here, try in 30 Oct, finish 13 Nov, shade A3' },
 ];
 
 /** What the mock prescription reader "finds" in an uploaded order form. */
@@ -68,7 +77,9 @@ const FIELD_LINE: Record<'patient' | 'lab' | 'service', RegExp> = {
  * A case written back as the template, so "Describe with AI" can carry on from
  * where the case is: the patient, the lab, then each service's block with its
  * teeth or arch, material/shade, delivery and its own instruction; anything for
- * the whole case after a blank line.
+ * the whole case after a blank line. A full denture's Delivery line is its
+ * stage plan ("Try In 12 Nov, Finish 26 Nov; Bite Registration done elsewhere"),
+ * which reads back as the same plan.
  */
 export function describeDraft(d: CaseDraft, patientName: string, labName: string | undefined): string {
   const lines = [`Patient Name: ${patientName}`, `Lab Name: ${d.labPicked === false ? '' : labName ?? ''}`];
@@ -80,13 +91,14 @@ export function describeDraft(d: CaseDraft, patientName: string, labName: string
       : it.teeth.length ? it.teeth.join(', ')
       : it.arch ? (it.arch === 'both' ? 'both arches' : it.arch) : '';
     const slot = OPT_SLOT[it.product];
-    const opt = slot === 'material' ? it.material : slot === 'type' ? it.type : slot === 'stage' ? it.stage : slot === 'base' ? it.base : slot === 'work' ? it.work : undefined;
+    const opt = slot === 'material' ? it.material : slot === 'type' ? it.type : slot === 'base' ? it.base : slot === 'work' ? it.work : undefined;
     const matShade = [opt ? optionName(it.product, opt) : '', it.shade ?? ''].filter(Boolean).join(' ');
+    const delivery = [it.product === 'denture' ? stagesLine(it) : '', d.fastTrack && k === 0 ? 'Fast-Track' : ''].filter(Boolean).join(', ');
     lines.push(
       `Service ${k + 1}: ${it.product === 'other' ? (it.desc ?? 'Something else') : PRODUCTS[it.product].label}`,
       `Teeth/Arch: ${where}`,
       `Material/Shade: ${matShade}`,
-      `Delivery: ${d.fastTrack && k === 0 ? 'Fast-Track' : ''}`,
+      `Delivery: ${delivery}`,
       `Instruction: ${(it.note ?? '').trim()}`,
     );
   });
@@ -201,11 +213,12 @@ export type LabRead =
   | { kind: 'unknown'; heard: string; lab: Lab; src: string }
   | { kind: 'default'; lab: Lab; src: string };
 
-export type OptSlot = 'material' | 'type' | 'stage' | 'base' | 'work';
-export const SLOT_LABEL: Record<OptSlot, string> = { material: 'Material', type: 'Type', stage: 'Stage', base: 'Base', work: 'Work needed' };
+export type OptSlot = 'material' | 'type' | 'base' | 'work';
+export const SLOT_LABEL: Record<OptSlot, string> = { material: 'Material', type: 'Type', base: 'Base', work: 'Work needed' };
+// A full denture has no one option: its stages (or the treatment) are read as a plan.
 const OPT_SLOT: Partial<Record<ProductId, OptSlot>> = {
   crown: 'material', bridge: 'material', veneer: 'material', inlay: 'material', implant: 'material',
-  nightguard: 'type', retainer: 'type', denture: 'stage', partial: 'base', reline: 'work',
+  nightguard: 'type', retainer: 'type', partial: 'base', reline: 'work',
 };
 export const optSlotOf = (p: ProductId) => OPT_SLOT[p];
 const SHADED: ProductId[] = ['crown', 'bridge', 'implant', 'veneer', 'inlay', 'denture', 'partial'];
@@ -223,6 +236,16 @@ export interface ServiceRead {
   option?: { slot: OptSlot; id: string; name: string; ok: boolean; reason?: string };
   /** A partial denture's stage (its option is the base). */
   stage?: { id: string; name: string };
+  /** Full denture: Staged, or Straight to Finish / Immediate (their plan is one ordered Finish). */
+  treatment?: DentureTreatment;
+  /**
+   * Full denture: the stages in play, in stage order (a stage not listed is Not
+   * now). Undefined when the description names none (a follow-up then starts on
+   * its own). An ordered stage without a date takes the lab's suggested day.
+   */
+  stages?: StageRead[];
+  /** The description settles the plan: something ordered, every ordered stage has its day, nothing changed on reading. */
+  stagesSettled?: boolean;
   inlayType?: 'inlay' | 'onlay';
   shade?: string;
   stump?: string;
@@ -234,6 +257,18 @@ export interface ServiceRead {
   note?: string;
   /** Its own Delivery line: needed by / Fast-Track. */
   delivery?: { fastTrack: boolean; date?: Date; heard?: string };
+}
+
+/** A full denture's stage as read: ordered (needed back by `date`), done elsewhere (done on `date`, optional) or done here on the patient's earlier case. */
+export interface StageRead {
+  id: DentureStageId;
+  state: 'order' | 'elsewhere' | 'here';
+  date?: Date;
+  /** 'here': the case it was done on. */
+  caseId?: string;
+  /** From the patient's earlier case rather than the words. */
+  follow?: boolean;
+  heard?: string;
 }
 
 /** `as`: a fit / appointment date, or the date the work is needed back (Delivery, due, needed by). */
@@ -338,8 +373,9 @@ const PRODUCT_WORDS: [ProductId, RegExp][] = [
 const OPTION_WORDS: { re: RegExp; id: string; implies?: ProductId }[] = [
   { re: /\bstraight[- ]to[- ]finish\b|\bstf\b/gi, id: 'stf', implies: 'denture' },
   { re: /\b(?:special|custom)\s+trays?\b/gi, id: 'tray', implies: 'denture' },
-  { re: /\bbite\s+blocks?\b|\b(?:wax|occlusal|registration)\s+(?:rims?|blocks?)\b/gi, id: 'blocks', implies: 'denture' },
+  { re: /\bbite\s+(?:registrations?|regs?|blocks?|rims?)\b|\b(?:wax|occlusal|registration|record)\s+(?:rims?|blocks?)\b/gi, id: 'blocks', implies: 'denture' },
   { re: /\bframework(?:\s+try[- ]?in)?\b|\bmetal\s+try[- ]?in\b/gi, id: 'framework', implies: 'partial' },
+  { re: /\bre[- ]?try(?:[- ]?ins?)?\b|\b(?:second|2nd)\s+try[- ]?ins?\b/gi, id: 'retry', implies: 'denture' },
   { re: /\b(?:wax\s+)?try[- ]?ins?\b/gi, id: 'tryin', implies: 'denture' },
   { re: /\bimmediate\b|\bimmed\b/gi, id: 'immediate' },
   { re: /\bfinish(?:ed)?\b|\bfinal\b|\bprocess(?:ed)?\b/gi, id: 'finish' },
@@ -377,13 +413,61 @@ const DOW_RE = '(mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)
 const CUE = '(?:(?:deliver(?:y|ed)?|needed|need\\s+it|required|due|back|ready|fit(?:ting)?|appointment|appt|seat(?:ing)?)(?:\\s+(?:by|on|for|before|date))?\\s*:?\\s*|(?:by|on|before|for)\\s+)?';
 const NUMBER_WORD: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
 
-function dayMonth(d: number, m: number, y: number | undefined, now: Date): Date | null {
+/**
+ * Which year a day without one falls in: the next one from today ('ahead', a
+ * delivery date), the closest to today ('near', a stage's day: one just gone
+ * reads as passed), or the last one up to today ('past', a done-on day).
+ */
+type DayMode = 'ahead' | 'near' | 'past';
+const SOON_MS = 60 * 24 * 60 * 60 * 1000;
+function dayMonth(d: number, m: number, y: number | undefined, now: Date, mode: DayMode = 'ahead'): Date | null {
   const yr = y == null ? now.getFullYear() : y < 100 ? 2000 + y : y;
   let date = new Date(yr, m, d);
   if (date.getMonth() !== m || date.getDate() !== d) return null;
-  if (y == null && startOfDay(date) < startOfDay(now)) date = new Date(yr + 1, m, d);
+  if (y == null) {
+    const today = startOfDay(now);
+    const near = [yr - 1, yr, yr + 1].map(x => new Date(x, m, d)).filter(x => x.getDate() === d);
+    if (mode === 'ahead' && date < today) date = new Date(yr + 1, m, d);
+    // A done-on day just ahead stays ahead (so it's warned about and dropped), never a year back unsaid.
+    else if (mode === 'past') date = date > today && date.getTime() - today.getTime() <= SOON_MS ? date : near.filter(x => x <= today).pop() ?? date;
+    else if (mode === 'near') date = near.reduce((a, b) => (Math.abs(b.getTime() - today.getTime()) < Math.abs(a.getTime() - today.getTime()) ? b : a));
+  }
   return startOfDay(date);
 }
+const monthOf = (s: string) => MONTH.indexOf(s.slice(0, 3).toLowerCase());
+
+/** Each way of writing a day (after an optional cue), in the order they're read, with the day it names. */
+const DATE_FORMS: { re: string; day: (m: RegExpExecArray, now: Date, mode: DayMode) => Date | null }[] = [
+  {
+    re: `(?:${DOW_RE},?\\s+)?(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MON_RE}\\.?(?:,?\\s+(\\d{4}))?\\b`,
+    day: (m, now, mode) => dayMonth(Number(m[2]), monthOf(m[3]), m[4] ? Number(m[4]) : undefined, now, mode),
+  },
+  {
+    re: `(?:${DOW_RE},?\\s+)?${MON_RE}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`,
+    day: (m, now, mode) => dayMonth(Number(m[3]), monthOf(m[2]), m[4] ? Number(m[4]) : undefined, now, mode),
+  },
+  {
+    re: `(?:${DOW_RE},?\\s+)?(\\d{1,2})/(\\d{1,2})(?:/(\\d{2,4}))?\\b`,
+    day: (m, now, mode) => dayMonth(Number(m[2]), Number(m[3]) - 1, m[4] ? Number(m[4]) : undefined, now, mode),
+  },
+  { re: '(\\d{1,2})[.-](\\d{1,2})[.-](\\d{4})\\b', day: (m, now) => dayMonth(Number(m[1]), Number(m[2]) - 1, Number(m[3]), now) },
+  { re: '(tomorrow|today)\\b', day: (m, now) => addDays(now, m[1].toLowerCase() === 'tomorrow' ? 1 : 0) },
+  {
+    re: 'in\\s+(\\d+|a|an|one|two|three|four|five|six)\\s+(days?|weeks?)\\b',
+    day: (m, now) => addDays(now, (NUMBER_WORD[m[1].toLowerCase()] ?? Number(m[1])) * (m[2].toLowerCase().startsWith('week') ? 7 : 1)),
+  },
+  {
+    re: '(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(week|month)\\b',
+    day: (m, now) => {
+      if (m[1].toLowerCase() === 'week') return weekday('fri', false, addDays(now, -1));
+      let d = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      while (d.getDay() === 0 || d.getDay() === 6) d = addDays(d, -1);
+      return startOfDay(d);
+    },
+  },
+  { re: 'next\\s+week\\b', day: (_m, now) => addDays(now, 7) },
+  { re: `(?:(this|next)\\s+)?${DOW_RE}\\b`, day: (m, now) => weekday(m[2], (m[1] ?? '').toLowerCase() === 'next', now) },
+];
 function weekday(name: string, next: boolean, now: Date): Date {
   const dow = DOWS.indexOf(name.slice(0, 3).toLowerCase());
   let d = addDays(now, 1);
@@ -436,6 +520,16 @@ interface RawSvc {
   fast?: boolean;
   date?: Date;
   dateHeard?: string;
+  /** Full denture: each stage as it was mentioned, in order. */
+  stages: StageHeard[];
+}
+/** A stage as written: 'done' says it happened without saying where; 'none' leaves it out ("no special tray"). */
+interface StageHeard {
+  id: DentureStageId;
+  state: 'order' | 'done' | 'elsewhere' | 'here' | 'none';
+  date?: Date;
+  treatment?: 'stf' | 'immediate';
+  heard: string;
 }
 interface St {
   ctx: DescribeCtx;
@@ -459,7 +553,7 @@ interface St {
   n: number;
 }
 function newSvc(st: St, label = false): RawSvc {
-  const s: RawSvc = { key: `s${st.n++}`, label, heard: [], teeth: [], ranges: [], pontics: [], opts: [], note: [] };
+  const s: RawSvc = { key: `s${st.n++}`, label, heard: [], teeth: [], ranges: [], pontics: [], opts: [], note: [], stages: [] };
   st.svcs.push(s);
   st.line?.push(s);
   st.cur = s;
@@ -587,34 +681,156 @@ function takeDates(w: Work, st: St) {
     } else st.unplaced.push(cleanText(heard));
     return true;
   };
-  const src = (at: number, len: number) => w.orig(at, len);
-  w.each(new RegExp(`${CUE}(?:${DOW_RE},?\\s+)?(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MON_RE}\\.?(?:,?\\s+(\\d{4}))?\\b`, 'gi'), (m, at) =>
-    found(dayMonth(Number(m[2]), MONTH.indexOf(m[3].slice(0, 3).toLowerCase()), m[4] ? Number(m[4]) : undefined, now), src(at, m[0].length)));
-  w.each(new RegExp(`${CUE}(?:${DOW_RE},?\\s+)?${MON_RE}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, 'gi'), (m, at) =>
-    found(dayMonth(Number(m[3]), MONTH.indexOf(m[2].slice(0, 3).toLowerCase()), m[4] ? Number(m[4]) : undefined, now), src(at, m[0].length)));
-  w.each(new RegExp(`${CUE}(?:${DOW_RE},?\\s+)?(\\d{1,2})/(\\d{1,2})(?:/(\\d{2,4}))?\\b`, 'gi'), (m, at) =>
-    found(dayMonth(Number(m[2]), Number(m[3]) - 1, m[4] ? Number(m[4]) : undefined, now), src(at, m[0].length)));
-  w.each(new RegExp(`${CUE}(\\d{1,2})[.-](\\d{1,2})[.-](\\d{4})\\b`, 'gi'), (m, at) =>
-    found(dayMonth(Number(m[1]), Number(m[2]) - 1, Number(m[3]), now), src(at, m[0].length)));
-  w.each(new RegExp(`${CUE}(tomorrow|today)\\b`, 'gi'), (m, at) =>
-    found(addDays(now, m[1].toLowerCase() === 'tomorrow' ? 1 : 0), src(at, m[0].length)));
-  w.each(new RegExp(`${CUE}in\\s+(\\d+|a|an|one|two|three|four|five|six)\\s+(days?|weeks?)\\b`, 'gi'), (m, at) => {
-    const n = NUMBER_WORD[m[1].toLowerCase()] ?? Number(m[1]);
-    return found(addDays(now, n * (m[2].toLowerCase().startsWith('week') ? 7 : 1)), src(at, m[0].length));
-  });
-  w.each(new RegExp(`${CUE}(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(week|month)\\b`, 'gi'), (m, at) => {
-    if (m[1].toLowerCase() === 'week') return found(weekday('fri', false, addDays(now, -1)), src(at, m[0].length));
-    let d = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    while (d.getDay() === 0 || d.getDay() === 6) d = addDays(d, -1);
-    return found(startOfDay(d), src(at, m[0].length));
-  });
-  w.each(new RegExp(`${CUE}next\\s+week\\b`, 'gi'), (m, at) => found(addDays(now, 7), src(at, m[0].length)));
-  w.each(new RegExp(`${CUE}(?:(this|next)\\s+)?${DOW_RE}\\b`, 'gi'), (m, at) =>
-    found(weekday(m[2], (m[1] ?? '').toLowerCase() === 'next', now), src(at, m[0].length)));
+  for (const f of DATE_FORMS) {
+    w.each(new RegExp(`${CUE}${f.re}`, 'gi'), (m, at) => found(f.day(m, now, 'ahead'), w.orig(at, m[0].length)));
+  }
 }
 
 function takeTimes(w: Work, st: St) {
   w.each(/\b\d{1,2}:\d{2}\s*(?:am|pm)?\b|\b\d{1,2}\s*(?:am|pm)\b/gi, m => { st.unplaced.push(m[0].trim()); });
+}
+
+// ─── Denture stages ──────────────────────────────────────────────────────────
+
+/**
+ * Each stage's words, most specific first. A `weak` word ("tray", "fit") counts
+ * only with a day or a state after it; an `alone` one names a full denture by
+ * itself. A fit is the appointment: the lab delivers the working day before.
+ */
+const STAGE_WORDS: { id: DentureStageId; src: string; weak?: boolean; alone?: boolean; treatment?: 'stf' | 'immediate'; appt?: boolean }[] = [
+  { id: 'finish', src: 'straight[- ]to[- ]finish|stf', treatment: 'stf', alone: true },
+  { id: 'finish', src: 'immediates?|immed', treatment: 'immediate' },
+  { id: 'retry', src: 're[- ]?try(?:[- ]?ins?)?|(?:second|2nd)\\s+try[- ]?ins?', alone: true },
+  { id: 'tray', src: '(?:special|custom|impression)\\s+trays?', alone: true },
+  { id: 'tray', src: 'trays?', weak: true },
+  { id: 'blocks', src: 'bite\\s+(?:registrations?|regs?|blocks?|rims?)|(?:wax|occlusal|registration|record)\\s+(?:rims?|blocks?)', alone: true },
+  { id: 'blocks', src: 'blocks|rims', weak: true },
+  { id: 'tryin', src: '(?:(?:wax|first|1st)\\s+)?try[- ]?ins?', alone: true },
+  { id: 'finish', src: 'finish(?:ed)?|process(?:ed)?' },
+  { id: 'finish', src: 'final', weak: true },
+  { id: 'finish', src: 'fit(?:ting)?', weak: true, appt: true },
+];
+const STAGE_FULL = STAGE_WORDS.map(x => new RegExp(`^(?:${x.src})$`, 'i'));
+const STAGE_SCAN = new RegExp(`\\b(?:${STAGE_WORDS.map(x => x.src).join('|')})\\b`, 'gi');
+const NAMES_DENTURE = new RegExp(`\\b(?:${STAGE_WORDS.filter(x => x.alone).map(x => x.src).join('|')})\\b`, 'i');
+/** Stages named together ("Special Tray and Bite Registration done here"): what follows the last is said of them all. */
+const STAGE_JOIN = /^\s*(?:(?:,|and|&|\+|\/|then)\s*)*$/i;
+const GLUE = '[\\s:(·–—-]*';
+const DONE_VERB = `(?:(?:was|were|is|are|been|has|have|already|previously|also)\\s+)*(?:done|made|completed|taken|had|recorded|finished)`;
+const HERE_TAIL = new RegExp(`^${GLUE}${DONE_VERB}\\s+(?:here|with\\s+(?:you|us)|on\\s+(?:smile\\s+genius|the\\s+portal|this\\s+portal)|on\\s+(?:the\\s+|our\\s+)?(?:last|previous|earlier|first|other)\\s+case|(?:on\\s+)?CAS-\\d{4}-\\d{3})\\b(?:[\\s(·,–—-]*(?:on\\s+|from\\s+)?CAS-\\d{4}-\\d{3}\\)?)?`, 'i');
+const OTHER_PLACE = '(?:an?\\s?other|a\\s+different|other|the\\s+other)\\s+(?:lab(?:oratory)?|practice|clinic|surgery|dentist)';
+const DONE_TAIL = new RegExp(`^${GLUE}(?:${DONE_VERB}(?:\\s+(?:elsewhere|already|before|previously|outside|externally|(?:at|by|with)\\s+${OTHER_PLACE}|(?:at|by|with)\\s+(?:the\\s+)?(?:[\\w&'’.-]+\\s+){0,3}?(?:lab(?:oratory)?s?|ceramics|studio|practice|clinic|surgery)|by\\s+dr\\.?\\s+[\\w'’-]+))?|elsewhere|outside|externally)\\b`, 'i');
+/** Done, and where says it wasn't here. */
+const ELSEWHERE = /elsewhere|outside|externally|\b(?:at|by|with)\b/i;
+const NONE_TAIL = new RegExp(`^${GLUE}(?:not\\s+(?:needed|required|now|wanted|this\\s+time)|skip(?:ped)?|n\\/a)(?![\\w/])`, 'i');
+const DUE_CUE = `^${GLUE}(?:stage${GLUE})?(?:(?:order(?:ed)?|needed|due|back|ready|wanted|required|returned?|appointment|appt|fit(?:ting)?)${GLUE}){0,2}(?:(?:by|on|for|before)\\s+)?`;
+const APPT = /\b(?:appointment|appt|fit(?:ting)?)\b/i;
+type DayForm = { re: RegExp; day: (typeof DATE_FORMS)[number]['day'] };
+/** A stage's needed-by day right after it; a done stage's done-on day. */
+const DUE_DAY: DayForm[] = DATE_FORMS.map(f => ({ re: new RegExp(`${DUE_CUE}(?:${f.re})`, 'i'), day: f.day }));
+const DONE_ON: DayForm[] = DATE_FORMS.map(f => ({ re: new RegExp(`^[\\s,(·–—-]*(?:on\\s+)?(?:${f.re})`, 'i'), day: f.day }));
+
+/** The longest day written at the start of `text`. */
+function dayAt(text: string, forms: DayForm[], now: Date, mode: DayMode): { date: Date; len: number; text: string } | null {
+  let best: { date: Date; len: number; text: string } | null = null;
+  for (const f of forms) {
+    const m = f.re.exec(text);
+    if (!m || (best && m[0].length <= best.len)) continue;
+    const date = f.day(m, now, mode);
+    if (date) best = { date, len: m[0].length, text: m[0] };
+  }
+  return best;
+}
+
+/** What follows a stage: done here, not needed, done (elsewhere, or not said where; maybe on a day), or the day it's needed back. */
+function stageTail(rest: string, now: Date): { state: StageHeard['state']; date?: Date; len: number; appt?: boolean } | null {
+  const here = HERE_TAIL.exec(rest);
+  if (here) return { state: 'here', len: here[0].length };
+  const none = NONE_TAIL.exec(rest);
+  if (none) return { state: 'none', len: none[0].length };
+  const done = DONE_TAIL.exec(rest);
+  if (done) {
+    const on = dayAt(rest.slice(done[0].length), DONE_ON, now, 'past');
+    return { state: ELSEWHERE.test(done[0]) ? 'elsewhere' : 'done', date: on?.date, len: done[0].length + (on?.len ?? 0) };
+  }
+  const due = dayAt(rest, DUE_DAY, now, 'near');
+  return due ? { state: 'order', date: due.date, len: due.len, appt: APPT.test(due.text) } : null;
+}
+
+/** The stages named in what's still unread, each with what follows it; what's read is used up. */
+function readStages(w: Work, now: Date): StageHeard[] {
+  const text = w.s;
+  const hits: { k: number; a: number; b: number }[] = [];
+  const scan = new RegExp(STAGE_SCAN.source, 'gi');
+  for (let m = scan.exec(text); m; m = scan.exec(text)) {
+    const word = m[0];
+    const k = STAGE_FULL.findIndex(re => re.test(word));
+    if (k >= 0) hits.push({ k, a: m.index, b: m.index + word.length });
+  }
+  const out: StageHeard[] = [];
+  for (let i = 0; i < hits.length; i++) {
+    let j = i;
+    while (j + 1 < hits.length && STAGE_JOIN.test(text.slice(hits[j].b, hits[j + 1].a))) j++;
+    const run = hits.slice(i, j + 1);
+    const first = run[0];
+    const last = run[run.length - 1];
+    i = j;
+    const tail = stageTail(text.slice(last.b), now);
+    const no = /\b(?:no|skip|without)\s+$/i.exec(text.slice(0, first.a));
+    if (!tail && !no && run.length === 1 && STAGE_WORDS[first.k].weak) continue;
+    const state: StageHeard['state'] = no ? 'none' : tail?.state ?? 'order';
+    const from = no ? first.a - no[0].length : first.a;
+    const to = last.b + (tail?.len ?? 0);
+    const heard = cleanText(w.orig(from, to - from));
+    run.forEach((h, n) => {
+      const word = STAGE_WORDS[h.k];
+      let date = tail?.date;
+      // "Try In and Finish 26 Nov": the day is the last one's. A fit day: back the working day before.
+      if (state === 'order' && date) date = n < run.length - 1 ? undefined : word.appt || tail?.appt ? lastWorkingDayBefore(date) : date;
+      out.push({ id: word.id, state, date, treatment: word.treatment, heard });
+    });
+    w.eat(from, to);
+  }
+  return out;
+}
+
+/** Is this stretch about a full denture: it names one (and no partial or reline), its service is one, or a stage word says so on its own. */
+function dentureContext(st: St, part: string): boolean {
+  const named = PRODUCT_WORDS.filter(([, re]) => new RegExp(re.source, 'i').test(part)).map(([p]) => p);
+  if (named.length) return named.includes('denture') && !named.includes('partial') && !named.includes('reline');
+  const svc = st.block ?? st.cur;
+  const p = svc ? productOf(svc).product : undefined;
+  return p ? p === 'denture' : NAMES_DENTURE.test(part);
+}
+
+/** The stretch's full denture: the line's, else the block's or the current service. */
+function dentureOf(st: St): RawSvc | undefined {
+  const full = (s?: RawSvc) => !!s && productOf(s).product === 'denture';
+  return [...(st.line ?? [])].reverse().find(full) ?? [st.block, st.cur].find(full);
+}
+/** Names a product other than a full denture. */
+const namesOther = (part: string) => PRODUCT_WORDS.some(([p, re]) => p !== 'denture' && new RegExp(re.source, 'i').test(part));
+/** Names a full denture (or a stage word says so on its own). */
+const namesDenture = (part: string) => PRODUCT_WORDS.some(([p, re]) => p === 'denture' && new RegExp(re.source, 'i').test(part)) || NAMES_DENTURE.test(part);
+
+/** Stages go to the stretch's full denture (made one when nothing else is named: "Special tray 30 Oct for Edward"). */
+function attachStages(st: St, reads: StageHeard[]) {
+  let to = dentureOf(st);
+  if (!to) {
+    to = [st.block, st.cur].find(s => !!s && !productOf(s).product) ?? newSvc(st);
+    to.product = 'denture';
+  }
+  // A line that says a stage is about that denture ("Try in, needed by 12 Nov": the day is the denture's).
+  if (st.line && !st.line.includes(to)) st.line.push(to);
+  to.stages.push(...reads);
+  to.heard.push(...uniq(reads.map(r => r.heard)));
+}
+
+/** A denture block's instruction stays the lab's; a stage it says is done ("bite registration done elsewhere") also goes into the plan. */
+function noteStages(text: string, st: St) {
+  const svc = st.block;
+  if (!svc || productOf(svc).product !== 'denture') return;
+  svc.stages.push(...readStages(new Work(text), st.ctx.now).filter(h => h.state !== 'order'));
 }
 
 /** "patient Sarah Whitfield", "for Priya": a name after a cue. */
@@ -849,6 +1065,16 @@ function readPart(part: string, st: St, scope: 'any' | 'service', instr: string[
     instr.push(cleanText(part.slice(0, end)));
     w.eat(ref.index, end);
   }
+  // A full denture's stages first, each with its own day or state, so no other reader takes those words.
+  const denture = dentureContext(st, part);
+  const stages = denture ? readStages(w, st.ctx.now) : [];
+  // A day with no stage in a stretch (and line) only about a denture is the denture's (its plan decides which stage), not the case's.
+  // Only on the denture's own line or block (a bare date on a later line is the case's).
+  const others = (st.line ?? []).some(s => { const p = productOf(s).product; return !!p && p !== 'denture'; });
+  const full = (s?: RawSvc) => !!s && productOf(s).product === 'denture';
+  const onLine = namesDenture(part) || (st.line ?? []).some(full) || full(st.block);
+  const own = denture && onLine && !others && !namesOther(part) ? { date: st.date, heard: st.dateHeard, as: st.dateAs } : undefined;
+  if (own) { st.date = undefined; st.dateHeard = undefined; }
   if (scope === 'any') {
     takePrescriber(w, st);
     takePatientKnown(w, st);
@@ -861,6 +1087,16 @@ function readPart(part: string, st: St, scope: 'any' | 'service', instr: string[
     takePatientCue(w, st);
   }
   takeServices(w, st);
+  if (stages.length) attachStages(st, stages);
+  if (own) {
+    const got = st.date as Date | undefined;
+    const to = got ? dentureOf(st) : undefined;
+    if (got && to && !to.date) { to.date = got; to.dateHeard = st.dateHeard; }
+    else if (got) st.unplaced.push(st.dateHeard ?? fmtDay(got));
+    st.date = own.date;
+    st.dateHeard = own.heard;
+    st.dateAs = own.as;
+  }
   if (scope === 'any') takePatientBare(w, st);
   leftovers(w, st);
 }
@@ -949,20 +1185,28 @@ function readDeliveryLine(value: string, st: St, fitLabel: boolean) {
 /**
  * A service's own Delivery line: its needed-by date or Fast-Track. The case
  * goes as fast as its fastest ask: Fast-Track if any service wants it, and the
- * earliest needed-by date of them all.
+ * earliest needed-by date of them all. A full denture's line is its stage plan
+ * ("Try In 12 Nov, Finish 26 Nov; Bite Registration done elsewhere"): those
+ * days are the stages' own and never the case's.
  */
 function readServiceDelivery(value: string, st: St, svc: RawSvc) {
+  const w = new Work(value);
+  if (dentureContext(st, value)) {
+    const reads = readStages(w, st.ctx.now);
+    if (reads.length) attachStages(st, reads);
+  }
+  const denture = productOf(svc).product === 'denture';
   const was = { fast: st.fast, date: st.date, heard: st.dateHeard, as: st.dateAs };
   st.fast = false;
   st.date = undefined;
   st.dateHeard = undefined;
-  readDeliveryLine(value, st, false);
+  readDeliveryLine(w.s, st, false);
   // Read back what the line set (the call above changes st).
   const got = st.date as Date | undefined;
   const gotHeard = st.dateHeard as string | undefined;
   if (st.fast) svc.fast = true;
   if (got) { svc.date = got; svc.dateHeard = gotHeard; }
-  const earlier = !!got && (!was.date || got.getTime() < was.date.getTime());
+  const earlier = !denture && !!got && (!was.date || got.getTime() < was.date.getTime());
   st.fast = was.fast || st.fast;
   st.date = earlier ? got : was.date;
   st.dateHeard = earlier ? gotHeard : was.heard;
@@ -1011,7 +1255,7 @@ export function parseDescription(text: string, ctx: DescribeCtx): Parsed {
           if (st.block) readServiceDelivery(value, st, st.block);
           else readDeliveryLine(value, st, /^fit/i.test(lab[1]));
           break;
-        case 'instr': if (value) instrTo().push(value); break;
+        case 'instr': if (value) { instrTo().push(value); noteStages(value, st); } break;
         case 'prescriber': {
           if (!value) break;
           const w = new Work(value);
@@ -1023,7 +1267,7 @@ export function parseDescription(text: string, ctx: DescribeCtx): Parsed {
       if (instr.length) instrTo().push(instr.join(', '));
       continue;
     }
-    if (inInstr) { instrTo().push(line); continue; }
+    if (inInstr) { instrTo().push(line); noteStages(line, st); continue; }
     st.line = [];
     const instr: string[] = [];
     for (const part of clauses(line)) readPart(part, st, 'any', instr);
@@ -1054,7 +1298,9 @@ function defaultLab(products: ProductId[], patient: Patient | undefined, ctx: De
   return { lab: base, src };
 }
 
-function resolveService(r: RawSvc, env: { lab: Lab; funding: Funding; patient?: Patient }): ServiceRead[] {
+interface Env { lab: Lab; funding: Funding; patient?: Patient; now: Date }
+
+function resolveService(r: RawSvc, env: Env): ServiceRead[] {
   const { product, assumed } = productOf(r);
   const missing = env.patient?.missing ?? [];
   const issues: string[] = [];
@@ -1142,6 +1388,12 @@ function resolveService(r: RawSvc, env: { lab: Lab; funding: Funding; patient?: 
       }
     }
   }
+  // A full denture: its plan (the treatment and each stage in play) instead of one option.
+  const plan = product === 'denture' ? resolveStages(r, arch, env) : undefined;
+  if (plan) {
+    issues.push(...plan.issues);
+    for (const o of r.opts) if (isStageId(o.id) || o.id === 'stf' || o.id === 'immediate') used.add(o.heard);
+  }
   for (const o of r.opts) {
     if (used.has(o.heard) || o.implies === product || BENIGN[product]?.includes(o.id)) continue;
     issues.push(`“${o.heard}” doesn't go with a ${PRODUCTS[product].noun}, so it was left out.`);
@@ -1156,6 +1408,7 @@ function resolveService(r: RawSvc, env: { lab: Lab; funding: Funding; patient?: 
     : undefined;
   const base: ServiceRead = {
     key: r.key, product, assumed, heard, teeth: product === 'bridge' ? teeth : byNum(teeth), bridge, arch, option, stage,
+    treatment: plan?.treatment, stages: plan?.stages, stagesSettled: plan?.settled,
     inlayType, shade, stump: r.stump, desc: product === 'other' ? heard : undefined, makes: labMakes(env.lab, product), issues,
   };
   // One site each: implant crowns and inlays are one item per tooth.
@@ -1163,6 +1416,104 @@ function resolveService(r: RawSvc, env: { lab: Lab; funding: Funding; patient?: 
     return base.teeth.map((t, i) => ({ ...base, key: `${r.key}-${i}`, teeth: [t] }));
   }
   return [base];
+}
+
+/**
+ * A full denture's plan from what was written, on the portal's rules: an
+ * ordered stage whose day has passed happened elsewhere; a done stage can't be
+ * dated after today; the stages the patient's earlier case made here (same
+ * arch, same lab) stay done here and are never ordered again, and that
+ * follow-up goes on with its next stage. A day written with no stage goes to
+ * the first ordered stage without one. Straight to Finish and Immediate skip the
+ * stages: one ordered Finish.
+ */
+function resolveStages(r: RawSvc, arch: Arch | undefined, env: Env): { treatment: DentureTreatment; stages?: StageRead[]; settled: boolean; issues: string[] } {
+  const issues: string[] = [];
+  const today = startOfDay(env.now);
+  // Stage words another reader took as options (no day of their own), then what the stage reader heard.
+  const heard: StageHeard[] = [
+    ...r.opts.filter(o => isStageId(o.id) || o.id === 'stf' || o.id === 'immediate').map((o): StageHeard => (
+      o.id === 'stf' || o.id === 'immediate'
+        ? { id: 'finish', state: 'order', treatment: o.id, heard: o.heard }
+        : { id: o.id as DentureStageId, state: 'order', heard: o.heard })),
+    ...r.stages,
+  ];
+  const treatment: DentureTreatment = heard.filter(h => h.treatment).pop()?.treatment ?? 'staged';
+  const ns = env.patient?.nextStage;
+  const next = ns && isStageId(ns.stage) ? ns.stage : undefined;
+  const follow = treatment === 'staged' && !!ns && !!next && ns.product === 'denture' && arch === ns.arch && env.lab.id === ns.lab;
+  const offered = (id: string, name: string) => {
+    const a = optionAvail(env.lab, 'denture', id, env.funding);
+    if (!a.ok && labMakes(env.lab, 'denture')) issues.push(`${name}: ${a.reason}`);
+  };
+
+  if (treatment !== 'staged') {
+    const name = treatmentName(treatment);
+    const left = uniq(heard.filter(h => !h.treatment && !(h.id === 'finish' && h.state === 'order')).map(h => stageName(h.id)));
+    if (left.length) issues.push(`${name} skips the stages, so ${andWords(left)} ${left.length === 1 ? 'was' : 'were'} left out.`);
+    let date = heard.filter(h => h.id === 'finish' && h.state === 'order' && h.date).pop()?.date ?? r.date;
+    if (date && date < today) { issues.push(`${fmtDay(date)} has passed. Pick a day for ${name} on the case.`); date = undefined; }
+    offered(treatment, name);
+    const at = heard.find(h => h.treatment)?.heard;
+    return { treatment, stages: [{ id: 'finish', state: 'order', date, heard: at }], settled: !!date && !issues.length, issues };
+  }
+
+  // Nothing said about the stages: the case asks (a follow-up starts there on its own).
+  if (!heard.length && !(r.date && follow)) {
+    if (r.date) issues.push(whichStage(r.date));
+    return { treatment, settled: false, issues };
+  }
+  const said = new Map<DentureStageId, StageHeard>();
+  for (const h of heard) {
+    if (h.state === 'none') { said.delete(h.id); continue; }
+    // A later bare mention doesn't undo a day or a state said before.
+    if (h.state === 'order' && !h.date && said.has(h.id)) continue;
+    said.set(h.id, h);
+  }
+  // A day written with no stage: the first ordered stage still without one, else a follow-up's next stage.
+  if (r.date) {
+    const open = DENTURE_STAGES.map(s => said.get(s.id)).find(h => h?.state === 'order' && !h.date);
+    if (open) said.set(open.id, { ...open, date: r.date });
+    else if (follow && !Array.from(said.values()).some(h => h.state === 'order') && !said.has(next!)) {
+      said.set(next!, { id: next!, state: 'order', date: r.date, heard: r.dateHeard ?? '' });
+    } else issues.push(whichStage(r.date));
+  }
+
+  const madeHere = follow ? DENTURE_STAGES.slice(0, DENTURE_STAGES.findIndex(s => s.id === next)).map(s => s.id) : [];
+  const out: StageRead[] = [];
+  for (const { id, name } of DENTURE_STAGES) {
+    const h = said.get(id);
+    if (madeHere.includes(id)) {
+      // Made on the patient's earlier case: never ordered twice.
+      if (h?.state === 'order') issues.push(`${name} was done here on ${ns!.caseId}, so it isn’t ordered again.`);
+      else if (h?.state === 'elsewhere') issues.push(`${name} was done here on ${ns!.caseId}, so it shows as done here.`);
+      out.push({ id, state: 'here', caseId: ns!.caseId, follow: true, heard: h?.heard });
+      continue;
+    }
+    if (!h) continue;
+    if (h.state === 'order') {
+      // A day that has passed: the stage happened, just not on Smile Genius.
+      if (h.date && h.date < today) issues.push(`${fmtDay(h.date)} has passed, so ${name} is read as done elsewhere.`);
+      out.push({ id, state: h.date && h.date < today ? 'elsewhere' : 'order', date: h.date, heard: h.heard });
+      continue;
+    }
+    if (h.state === 'here') issues.push(`${name} isn’t on an earlier case here, so it’s read as done elsewhere.`);
+    const ahead = !!h.date && h.date > today;
+    if (ahead) issues.push(`${name} is done, so it can’t be dated ${fmtDay(h.date!)}. That day was left out.`);
+    out.push({ id, state: 'elsewhere', date: ahead ? undefined : h.date, heard: h.heard });
+  }
+  // A follow-up goes on with its next stage when nothing else is ordered.
+  if (follow && !out.some(s => s.state === 'order') && !said.has(next!)) {
+    out.push({ id: next!, state: 'order', follow: true });
+    out.sort((a, b) => DENTURE_STAGES.findIndex(s => s.id === a.id) - DENTURE_STAGES.findIndex(s => s.id === b.id));
+  }
+  const ordered = out.filter(s => s.state === 'order');
+  for (const s of ordered) offered(s.id, stageName(s.id));
+  const settled = ordered.length > 0 && ordered.every(s => s.date || s.follow) && !issues.length;
+  // Out of order is worth a word, not a stop.
+  const late = stagesOutOfOrder(asDenture(out.map(planRow)));
+  if (late.length) issues.push(`${andWords(late.map(stageName))} ${late.length === 1 ? 'is' : 'are'} due on or before an earlier stage. Stages usually come back in order.`);
+  return { treatment, stages: out, settled, issues };
 }
 
 function finish(st: St): Parsed {
@@ -1179,7 +1530,7 @@ function finish(st: St): Parsed {
     : { kind: 'default', lab: fallback.lab, src: fallback.src };
   const funding = st.funding ?? matched?.funding ?? CLINIC.defaultFunding;
   // Each service keeps its own instruction and delivery (an implant split per tooth shares them).
-  const services = raws.flatMap(r => resolveService(r, { lab: lab.lab, funding, patient: matched }).map(s => ({
+  const services = raws.flatMap(r => resolveService(r, { lab: lab.lab, funding, patient: matched, now: ctx.now }).map(s => ({
     ...s,
     note: r.note.join('\n').trim() || undefined,
     delivery: r.fast || r.date ? { fastTrack: !!r.fast, date: r.date, heard: r.dateHeard } : undefined,
@@ -1224,7 +1575,6 @@ export function itemsFor(p: Parsed): ServiceItem[] {
       switch (s.option.slot) {
         case 'material': x.material = id; x.matSrc = AI_SRC; break;
         case 'type': x.type = id; x.typeSrc = AI_SRC; break;
-        case 'stage': x.stage = id; x.stageSrc = AI_SRC; break;
         case 'base': x.base = id; break;
         case 'work': x.work = id; break;
       }
@@ -1233,6 +1583,14 @@ export function itemsFor(p: Parsed): ServiceItem[] {
       x.reopen = [s.option.slot];
     }
     if (s.stage) { x.stage = s.stage.id; x.stageSrc = AI_SRC; }
+    // A full denture's plan; none written leaves it to the case (a follow-up starts there on its own).
+    if (s.treatment && s.treatment !== 'staged') { x.treatment = s.treatment; x.treatmentSrc = AI_SRC; }
+    if (s.stages) {
+      x.stages = s.stages.map(planRow);
+      x.stagesDone = !!s.stagesSettled;
+      // Carrying on from the patient's earlier case: the marker CaseSteps and the pickers read.
+      if (s.stages.some(r => r.follow)) x.stageSrc = 'Next stage';
+    }
     if (s.inlayType) x.inlayType = s.inlayType;
     if (s.shade) { x.shade = s.shade; x.shadeSrc = AI_SRC; }
     if (s.stump) x.stump = s.stump;
@@ -1257,6 +1615,13 @@ function mergeItem(old: ServiceItem, it: ServiceItem): ServiceItem {
   if (it.material) { out.material = it.material; out.matSrc = it.matSrc; out.ambiguous = undefined; }
   if (it.type) { out.type = it.type; out.typeSrc = it.typeSrc; }
   if (it.stage) { out.stage = it.stage; out.stageSrc = it.stageSrc; }
+  if (it.treatment) { out.treatment = it.treatment; out.treatmentSrc = it.treatmentSrc; }
+  if (it.stages) {
+    // The description's plan replaces the draft's (an older single stage included). The same plan read back
+    // (the case written out as text) doesn't settle what the user hadn't.
+    const done = !!it.stagesDone && (!!old.stagesDone || stagesSummary(old) !== stagesSummary(it));
+    Object.assign(out, { stages: it.stages, stagesDone: done, stageSrc: it.stageSrc, stage: undefined, treatment: it.treatment, treatmentSrc: it.treatmentSrc });
+  }
   if (it.base) out.base = it.base;
   if (it.work) out.work = it.work;
   if (it.inlayType) out.inlayType = it.inlayType;
@@ -1322,19 +1687,11 @@ export function buildDraft(p: Parsed, patient: Patient, user: User, now: Date, b
     const same = d.items.find(b => sameSpot(b, it));
     d.items = same ? d.items.map(b => (b === same ? mergeItem(b, it) : b)) : [...d.items, it];
   }
-  // The patient's next denture stage, at the lab that made the last one, is that stage (its records are at the lab).
-  const ns = patient.nextStage;
-  if (ns && d.lab === ns.lab) {
-    let tagged = false;
-    d.items = d.items.map(i => {
-      if (tagged || i.product !== ns.product || i.arch !== ns.arch || (i.stage && i.stage !== ns.stage)) return i;
-      tagged = true;
-      return { ...i, stage: ns.stage, stageSrc: 'Next stage', archSrc: 'Next stage' };
-    });
-  }
   if (p.prescriber) d = { ...d, prescriber: p.prescriber, prescriberSrc: AI_SRC };
   if (p.instructions) d = { ...d, note: [d.note.trim(), p.instructions].filter(Boolean).join('\n\n') };
   const ctx = ctxFor(d, patient, user, now);
+  // Full dentures on the rules: the patient's next stage at the lab that made the last one (the lab has the models), a day for each ordered stage.
+  d = { ...d, items: d.items.map(i => planDenture(i, ctx)) };
   if (p.delivery.fastTrack) d = { ...d, fastTrack: d.items.some(i => fastTrackEligible(i, ctx)) };
   const fit = fitFor(p.delivery, d, ctx);
   if (fit.state === 'ok') d = { ...d, fit: toISO(fit.fit) };
@@ -1369,7 +1726,7 @@ export function previewCase(p: Parsed, user: User, now: Date, opts: { base?: Cas
   const dates = caseDates(draft, ctx);
   return {
     draft, ctx,
-    items: itemsFor(p),
+    items: itemsFor(p).map(i => planDenture(i, ctx)),
     gaps: gapCount(draft, ctx),
     opensAt: stepName(steps, first, draft, user.notation),
     fit: fitFor(p.delivery, draft, ctx),
@@ -1403,4 +1760,48 @@ export function announceText(p: Parsed): string {
   const u = understood(p, 'fdi');
   const who = u.patient ? `${u.patientNew ? 'new patient' : 'patient'} ${u.patient}` : 'no patient yet';
   return `Understood: ${who}, ${u.count} ${u.count === 1 ? 'service' : 'services'}`;
+}
+
+// ─── Small helpers ───────────────────────────────────────────────────────────
+
+/**
+ * A full denture on the rules (seedDenturePlan: an older single stage, the
+ * patient's follow-up, a day for each ordered stage). A day the description
+ * gave that's sooner than the lab can make it leaves the plan open for a look.
+ */
+function planDenture(it: ServiceItem, ctx: Ctx): ServiceItem {
+  if (it.product !== 'denture') return it;
+  const out = seedDenturePlan(it, ctx);
+  if (!out.stagesDone) return out;
+  const sugg = suggestedStageDates(out, ctx);
+  const soon = orderedStages(out).some(s => s.src === AI_SRC && !!s.date && s.date < sugg[s.id]);
+  return soon ? { ...out, stagesDone: false } : out;
+}
+/** A stage as read → the plan row the case keeps. */
+function planRow(s: StageRead): StagePlan {
+  return { id: s.id, state: s.state, date: s.date && toISO(s.date), caseId: s.caseId, src: s.follow ? 'Next stage' : AI_SRC };
+}
+/** Just enough of a full denture for the plan rules. */
+const asDenture = (stages: StagePlan[]): ServiceItem => ({ id: '', product: 'denture', teeth: [], teethDone: false, photos: [], stages });
+const whichStage = (d: Date) => `Which stage is needed by ${fmtDay(d)}? Write the stage with it, for example “Try In ${fmtShort(d)}”.`;
+/** A full denture's Delivery line: "Try In 12 Nov, Finish 26 Nov; Special Tray and Bite Registration done here (CAS-2026-117); Retry done elsewhere 2 Oct". */
+function stagesLine(it: ServiceItem): string {
+  const t = dentureTreatment(it);
+  const plan = stagePlan(it);
+  // A day in another year says its year, so reading the line back lands on the same day.
+  const year = demoNow().getFullYear();
+  const day = (iso?: string) => { if (!iso) return ''; const d = fromISO(iso); return ` ${d.getFullYear() === year ? fmtShort(d) : fmtFull(d)}`; };
+  if (t !== 'staged') return `${treatmentName(t)}${day(plan[0]?.date)}`;
+  const here = plan.filter(s => s.state === 'here');
+  const away = plan.filter(s => s.state === 'elsewhere');
+  return [
+    plan.filter(s => s.state === 'order').map(s => `${stageName(s.id)}${day(s.date)}`).join(', '),
+    here.length ? `${andWords(here.map(s => stageName(s.id)))} done here${here[0].caseId ? ` (${here[0].caseId})` : ''}` : '',
+    away.some(s => !s.date) ? `${andWords(away.filter(s => !s.date).map(s => stageName(s.id)))} done elsewhere` : '',
+    ...away.filter(s => s.date).map(s => `${stageName(s.id)} done elsewhere${day(s.date)}`),
+  ].filter(Boolean).join('; ');
+}
+/** "A", "A and B", "A, B and C" */
+function andWords(words: string[]): string {
+  return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }

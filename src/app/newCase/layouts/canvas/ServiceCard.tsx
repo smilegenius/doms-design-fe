@@ -19,7 +19,7 @@ import { useController } from '../../controller';
 import { fmtDay } from '../../dates';
 import {
   NoteDef, PRODUCTS, ServiceItem, Slot, SlotId, bridgeParts, itemTitle, parseStep, plural, priceOf, slotGaps,
-  slotStepId, slotsFor,
+  slotStepId, slotsFor, stagesShort,
 } from '../../rules';
 import { NoteView, PRODUCT_ICON, SlotEditor, itemDetails, questionFor } from '../../ServiceSteps';
 import { ServiceNote } from '../../Instructions';
@@ -86,7 +86,9 @@ export default function ServiceCard({ item }: { item: ServiceItem }) {
   const bridgeText = bp ? [plural(bp.span.length, 'unit'), bp.pontics.length ? `${bp.pontics.length === 1 ? 'pontic' : 'pontics'} ${[...bp.pontics].sort((a, b) => Number(a) - Number(b)).join(', ')}` : null].filter(Boolean).join(' · ') : null;
   // The lead time once the service is chosen far enough to have one ("7 days"); never its price.
   const lead = p.kind !== 'none' && p.ta != null ? plural(p.ta, 'day') : null;
-  const metaText = [bridgeText, lead, per?.backBy && draft.items.length > 1 ? `back ${fmtDay(per.backBy)} on its own` : null].filter(Boolean).join(' · ');
+  // A full denture has no date of its own: the line reads its ordered stages and their days.
+  const metaText = item.product === 'denture' ? stagesShort(item)
+    : [bridgeText, lead, per?.backBy && draft.items.length > 1 ? `back ${fmtDay(per.backBy)} on its own` : null].filter(Boolean).join(' · ');
 
   // The card glides to its new height when a row opens or folds, or a note comes or goes.
   useHeightMorph(cardRef, `${rows.map(s => `${s.id}:${modes.get(s.id)}`).join(',')}|${itemNotes.length}|${readOnly}`);
@@ -144,7 +146,7 @@ export default function ServiceCard({ item }: { item: ServiceItem }) {
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#8A4B08]"><StateIcon state="gap" size="sm" />{left} left</span>
             )}
           </div>
-          <p className="text-xs text-[#4A4A5A] mt-0.5">{metaText || (left ? 'Lead time once the gaps are filled' : '')}</p>
+          <p className="text-xs text-[#4A4A5A] mt-0.5">{metaText || (item.product === 'denture' ? 'Stage dates once a stage is ordered' : left ? 'Lead time once the gaps are filled' : '')}</p>
         </div>
         {!readOnly && (
           <div className="flex items-center gap-3 flex-shrink-0">

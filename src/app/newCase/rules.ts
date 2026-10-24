@@ -645,9 +645,9 @@ export function stagesShort(item: ServiceItem): string {
  * through it): an older single `stage` becomes the treatment or that stage
  * ordered; a plan for the arch and lab of the patient's next stage starts as
  * that follow-up — the stages before it done here on the earlier case, the next
- * one ordered (src 'Next stage', settled); done-here rows that no longer match
- * the patient, arch or lab go; every ordered stage without a day gets its
- * suggested one.
+ * one ordered (src 'Next stage', settled); the follow-up's rows go once they no
+ * longer match the patient, arch or lab; every ordered stage without a day gets
+ * its suggested one.
  */
 export function seedDenturePlan(item: ServiceItem, ctx: Ctx): ServiceItem {
   if (item.product !== 'denture') return item;
@@ -664,10 +664,11 @@ export function seedDenturePlan(item: ServiceItem, ctx: Ctx): ServiceItem {
   const ns = ctx.patient.nextStage;
   const follows = !!ns && ns.product === 'denture' && isStageId(ns.stage) && it.arch === ns.arch && ctx.lab.id === ns.lab
     && dentureTreatment(it) === 'staged';
-  const stale = (s: StagePlan) => s.state === 'here' && (!follows || s.caseId !== ns!.caseId);
-  if (it.stages?.some(s => stale(s) || (!follows && s.src === 'Next stage'))) {
-    if (it.stages.some(stale)) it.stagesDone = false;
-    it.stages = it.stages.filter(s => !stale(s)).map(s => (!follows && s.src === 'Next stage' ? { ...s, src: undefined } : s));
+  // The follow-up's rows go with it (another arch, lab or patient); the plan starts again.
+  const stale = (s: StagePlan) => (follows ? s.state === 'here' && s.caseId !== ns!.caseId : s.state === 'here' || s.src === 'Next stage');
+  if (it.stages?.some(stale)) {
+    it.stages = it.stages.filter(s => !stale(s));
+    it.stagesDone = false;
   }
   if (it.stageSrc === 'Next stage' && !follows) it.stageSrc = undefined;
   // Nothing planned yet, or just that next stage ordered (an older `stage`, or the arch switched back).
@@ -829,7 +830,8 @@ export function slotsFor(item: ServiceItem, ctx: Ctx): Slot[] {
         push({ id: 'shade', label: 'Tooth shade', required: true, answered: !!item.shade, value: item.shade });
         push({ id: 'mould', label: 'Mould', required: false, answered: true, value: e.mould, src: e.mouldSrc });
       }
-      if (ordered.some(s => s.id === 'finish')) push({ id: 'postdam', label: 'Post-dam', required: true, answered: !!item.postdam, value: item.postdam });
+      // A post-dam (the palatal seal) is an upper denture's only.
+      if (item.arch !== 'lower' && ordered.some(s => s.id === 'finish')) push({ id: 'postdam', label: 'Post-dam', required: true, answered: !!item.postdam, value: item.postdam });
       break;
     }
     case 'partial': {
@@ -975,7 +977,8 @@ export const isPosted = (s: RecordsState) => s === 'post' || s === 'nextStage';
 export function recordsGap(d: CaseDraft, ctx: Ctx): boolean {
   const s = recordsState(d, ctx);
   if (s === 'none') return true;
-  if (isPosted(s)) return !d.records.disinfected;
+  // Impressions by post: nothing to tick here (no disinfection check at Scans Source).
+  if (isPosted(s)) return false;
   if (s === 'upload') return d.records.files.length === 0 || d.records.files.some(f => !f.role);
   return false;
 }

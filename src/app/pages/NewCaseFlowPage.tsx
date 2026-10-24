@@ -19,7 +19,7 @@ import { demoTimeOf, fmtDay, fmtTime, fromISO, toISO } from '../newCase/dates';
 import {
   CaseDraft, PRODUCTS, ServiceItem, SlotId, buildSteps, caseDates, effective, firstGap, fitCheck, gapCount, isPosted,
   itemPhrase, labMakes, nextGap, notesFor, optionAvail, optionName, parseStep, recordsState, sendMode,
-  splitSuggestion, defaultBox, plural, itemTitle, sendLabel, Ctx,
+  splitSuggestion, defaultBox, plural, itemTitle, sendLabel, Ctx, orderedStages, seedDenturePlan, stageOption,
 } from '../newCase/rules';
 import {
   CaseRow, addEvent, blankDraft, getPatient, getRow, learnLogin, loginMap, newItem, nextCaseId, removeRow, restore, saveRow,
@@ -93,7 +93,7 @@ function nhsConflicts(d: CaseDraft, ctx: Ctx): { item: ServiceItem; slot: SlotId
     };
     if (['crown', 'bridge', 'inlay'].includes(it.product)) check('material', e.material);
     if (it.product === 'nightguard' || it.product === 'retainer') check('type', e.type);
-    if (it.product === 'denture') check('stage', it.stage);
+    if (it.product === 'denture') orderedStages(it).forEach(s => check('stages', stageOption(it, s.id)));
     if (it.product === 'partial') check('base', it.base);
     if (it.product === 'reline') check('work', it.work);
   }
@@ -110,6 +110,7 @@ function reopenFor(d: CaseDraft, conflicts: ReturnType<typeof nhsConflicts>): Ca
         if (m.slot === 'material') { n.material = undefined; n.matSrc = undefined; }
         if (m.slot === 'type') { n.type = undefined; n.typeSrc = undefined; }
         if (m.slot === 'stage') n.stage = undefined;
+        if (m.slot === 'stages') n.stagesDone = false;
         if (m.slot === 'base') n.base = undefined;
         if (m.slot === 'work') n.work = undefined;
       }
@@ -129,11 +130,16 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
   const navigate = useNavigate();
   const { toast } = useToast();
   const store = useFlowStore();
-  const [draft, setDraft] = useState<CaseDraft>(initial);
+  // A full denture however it arrived (the AI page, an older draft): its stage plan seeded once.
+  const [draft, setDraft] = useState<CaseDraft>(() => {
+    const b = buildCtx(initial, user);
+    return b ? { ...initial, items: initial.items.map(i => seedDenturePlan(i, b.ctx)) } : initial;
+  });
   const [view, setView] = useState<View>(() => initialView(initialRow, user.id));
   const actingUser = user;
   const derived = buildCtx(draft, actingUser);
   const ctx = derived!.ctx;
+  const ctxRef = useRef(ctx); ctxRef.current = ctx;
   const prescriber = derived!.prescriber;
   const patient = ctx.patient;
   const lab = labById(draft.lab);
@@ -141,7 +147,7 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
 
   const [step, setStep] = useState<string>(() => {
     if (initialView(initialRow, user.id) !== 'edit') return 'review';
-    const steps0 = buildSteps(initial, ctx, '');
+    const steps0 = buildSteps(draft, ctx, '');
     // A requested start: a step, or a service's first open question (else its first).
     if (startStep?.startsWith('item:')) {
       const nodes = steps0.filter(s => s.itemId === startStep.slice(5));
@@ -287,7 +293,8 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const addService = useCallback((product: ProductId, extra: Partial<ServiceItem> = {}) => {
-    const item = newItem(product, extra);
+    // A full denture for the patient's next stage starts as that follow-up (seedDenturePlan).
+    const item = seedDenturePlan(newItem(product, extra), ctxRef.current);
     pending.current = { kind: 'item', id: item.id };
     setDraft(d => ({ ...d, items: [...d.items, item], keepTogether: false }));
   }, []);
@@ -314,7 +321,7 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
         const n = { ...i };
         if (i.material && !optionAvail(nl, i.product, i.material, d.funding, i).ok) { n.material = undefined; n.matSrc = undefined; }
         if (i.type && !optionAvail(nl, i.product, i.type, d.funding).ok) { n.type = undefined; n.typeSrc = undefined; }
-        if (i.product === 'denture' && i.stage && !optionAvail(nl, 'denture', i.stage, d.funding).ok) n.stage = undefined;
+        if (i.product === 'denture' && orderedStages(i).some(s => !optionAvail(nl, 'denture', stageOption(i, s.id), d.funding).ok)) n.stagesDone = false;
         if (i.base && !optionAvail(nl, 'partial', i.base, d.funding).ok) n.base = undefined;
         if (i.work && !optionAvail(nl, 'reline', i.work, d.funding).ok) n.work = undefined;
         return n;
@@ -378,6 +385,9 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
     if (d.labPicked === false) {
       d = { ...d, lab: np.nextStage?.lab ?? CLINIC.usualLab, labSrc: np.nextStage ? 'Made the previous stage' : "Clinic's usual lab" };
     }
+    // A full denture's stages done here belong to the old patient; the new one's next stage may fill them instead.
+    const nctx: Ctx = { ...ctx, patient: np, funding: d.funding, lab: labById(d.lab) };
+    d = { ...d, items: d.items.map(i => seedDenturePlan(i, nctx)) };
     // After picking the patient, move on to the next gap (the lab, on a new case).
     pending.current = { kind: 'nextFrom', id: 'patient' };
     setDraft(d);
@@ -454,7 +464,7 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
       lab,
       patient,
       box: posted ? Object.keys(box).filter(k => box[k]) : undefined,
-      disinfected: posted && d0.records.disinfectedAt ? `Disinfected with ImpressSafe by ${d0.records.disinfectedBy}, ${d0.records.disinfectedAt}` : undefined,
+      dentist: prescriber?.name,
       cases: rows.map(r => {
         const gd = r.draft!;
         const gdates = caseDates(gd, ctx);
@@ -589,7 +599,7 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
         {nhsConfirm && (
           <ConfirmModal
             title="Switch to NHS?"
-            body={nhsConfirm.map(c => `${c.name} isn’t available on the NHS. The ${itemPhrase(c.item, user.notation)} will need a new ${c.slot === 'base' ? 'base' : c.slot === 'type' ? 'type' : c.slot}.`).join(' ')}
+            body={nhsConfirm.map(c => `${c.name} isn’t available on the NHS. The ${itemPhrase(c.item, user.notation)} will need a new ${c.slot === 'base' ? 'base' : c.slot === 'type' ? 'type' : c.slot === 'stages' ? 'stage plan' : c.slot}.`).join(' ')}
             cancel="Keep Private"
             confirm="Switch to NHS"
             onCancel={() => setNhsConfirm(null)}

@@ -2,13 +2,14 @@
 // The Start from Scratch page's default tab, after the portal's "✨ AI ·
 // Describe the case": a big editor pre-filled with the template (Patient
 // Name: / Lab Name: / Service 1: / Teeth/Arch: / Material/Shade: / Delivery:
-// / Instruction:) that also takes plain sentences, three examples, and an
+// / Instruction:) that also takes plain sentences, four examples, and an
 // "Add Prescription / Order Form" drop zone (the reading is mocked, as on the
 // portal). Beside it, "What Smile Genius understood" re-reads the text as you
 // type (250 ms after the last key) and shows, field by field, what it matched:
 // the patient (or a new one, with the date of birth it needs, inline), the
 // lab, each service against that lab's real options, delivery and the
-// instruction, plus anything it couldn't place. No prices; no popups.
+// instruction, plus anything it couldn't place. A full denture shows its stage
+// plan instead of one delivery date. No prices; no popups.
 // "Create Case" builds the draft (describe.ts), saves it as a Draft row and
 // opens it at whatever is still missing. A patient's waiting scan draft is
 // filled instead of starting a second draft, unless the user says otherwise.
@@ -20,8 +21,12 @@ import {
   Stethoscope, Undo2, UploadCloud, UserPlus, UserRound, X, Zap,
 } from 'lucide-react';
 import { CLINIC, Lab, Patient, User, userById } from './data';
-import { demoNow, fmtDay, maskDOB, parseDOB } from './dates';
-import { Ctx, PRODUCTS, ServiceItem, archCaps, caseDates, effective, fullName, isPosted, labsThatMake, optionName, patientAge, plural, recordsState, shadeSwatch, toothText } from './rules';
+import { demoNow, fmtDay, fmtFull, fmtShort, fromISO, maskDOB, parseDOB } from './dates';
+import {
+  Ctx, DENTURE_STAGES, DentureStageId, PRODUCTS, ServiceItem, StagePlan, archCaps, caseDates, dentureTreatment, effective, fullName, isPosted, labsThatMake,
+  optionAvail, optionName, patientAge, plural, recordsState, shadeSwatch, slotsFor, stageName, stageOption, stagePlan, suggestedStageDates,
+  toothText, treatmentName,
+} from './rules';
 import { useDictation } from './dictation';
 import { CaseRow, addPatient, allPatients, nextCaseId, openDraftsFor, saveRow, useFlowStore } from './store';
 import { buildCtx, serviceSummary } from './derive';
@@ -51,6 +56,7 @@ const KEYFRAMES = `
 @keyframes ai-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 @keyframes ai-drift { 0%, 100% { transform: translate3d(0, 0, 0) scale(1); } 50% { transform: translate3d(-1.5%, 1.5%, 0) scale(1.05); } }
 @keyframes ai-dot { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+@keyframes ai-panel-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
 `;
 const AURORA = [
   'radial-gradient(560px 380px at 8% 0%, rgb(199 215 255 / 0.55), transparent 70%)',
@@ -97,6 +103,8 @@ const AiStart = forwardRef<AiStartHandle, { onUnderstood?: (u: AiUnderstood) => 
   // Nothing runs as you type: the description is read only when asked (Read Description, or Ctrl+Enter).
   // `readText` is what the panel shows; once the text differs, the panel says so.
   const [readText, setReadText] = useState(initialText ?? TEMPLATE);
+  // The panel appears once something has been read (straight away when carrying on from a case).
+  const [hasRead, setHasRead] = useState(!!initialText);
   const stale = text !== readText;
   const readTimer = useRef<number>();
   useEffect(() => () => window.clearTimeout(readTimer.current), []);
@@ -107,6 +115,7 @@ const AiStart = forwardRef<AiStartHandle, { onUnderstood?: (u: AiUnderstood) => 
       const t = textRef.current;
       setParsed(parseDescription(t, readCtx()));
       setReadText(t);
+      setHasRead(true);
       setReading(false);
     }, 450);
   };
@@ -378,7 +387,8 @@ const AiStart = forwardRef<AiStartHandle, { onUnderstood?: (u: AiUnderstood) => 
       </div>
 
       {/* A prescription dropped on either card is read. */}
-      <div className="relative h-full grid grid-cols-[minmax(0,58fr)_minmax(0,42fr)] gap-4" {...(busy ? {} : dropProps)}>
+      {/* Until the first read, the description has the page to itself; what was understood slides in once it is read. */}
+      <div className={`relative h-full grid gap-4 ${hasRead ? 'grid-cols-[minmax(0,58fr)_minmax(0,42fr)]' : 'grid-cols-1'}`} {...(busy ? {} : dropProps)}>
         {/* ── Left: the description ── */}
         <section aria-labelledby={`${uid}-title`} className={`${CARD} relative min-h-0 flex flex-col p-4`}>
           <div className="flex items-center gap-2">
@@ -552,8 +562,9 @@ const AiStart = forwardRef<AiStartHandle, { onUnderstood?: (u: AiUnderstood) => 
           {fileError && <p id={`${uid}-file-err`} role="alert" className="mt-1 text-[11px] text-[#B42318]">{fileError}</p>}
         </section>
 
-        {/* ── Right: what was understood ── */}
-        <section aria-labelledby={`${uid}-understood`} className={`${CARD} relative min-h-0 flex flex-col overflow-hidden`}>
+        {/* ── Right: what was understood (after the first read) ── */}
+        {hasRead && (
+        <section aria-labelledby={`${uid}-understood`} className={`${CARD} relative min-h-0 flex flex-col overflow-hidden motion-safe:animate-[ai-panel-in_320ms_ease-out]`}>
           <header className="flex items-center gap-2.5 px-4 pt-3 pb-2.5 border-b border-[#ECECF2]">
             <span aria-hidden className={`w-8 h-8 rounded-xl ${GRADIENT_BTN} flex items-center justify-center flex-shrink-0 shadow-[0_8px_18px_-8px_rgba(106,92,232,0.75)]`}>
               <Sparkles className="w-4 h-4" strokeWidth={2} />
@@ -654,6 +665,7 @@ const AiStart = forwardRef<AiStartHandle, { onUnderstood?: (u: AiUnderstood) => 
             </div>
           )}
         </section>
+        )}
       </div>
     </div>
   );
@@ -966,6 +978,11 @@ function ServiceCard({ s, index, item, ctx, lab, user, backBy, fastOffered }: {
   const archItem = !!s.product && (PRODUCTS[s.product].archItem || s.product === 'partial' || s.product === 'reline');
   const others = s.product && !s.makes ? labsThatMake(s.product).filter(l => l.id !== lab.id) : [];
   const metal = eff?.material === 'metal';
+  // A full denture: its stage plan stands in for the Delivery row; the tooth shade only once teeth are set up (Try In on, or a finished denture).
+  const denture = s.product === 'denture';
+  const shadeAsked = !denture || !!s.shade || (item && ctx
+    ? slotsFor(item, ctx).some(x => x.id === 'shade')
+    : (s.treatment ?? 'staged') !== 'staged' || !!s.stages?.some(r => r.state === 'order' && r.id !== 'tray' && r.id !== 'blocks'));
 
   let optionView: ReactNode = null;
   if (s.product && slot) {
@@ -1020,7 +1037,8 @@ function ServiceCard({ s, index, item, ctx, lab, user, backBy, fastOffered }: {
         {s.product === 'inlay' && (
           <Row label="Type">{s.inlayType ? <span className="text-xs font-semibold text-[#030213]">{s.inlayType === 'inlay' ? 'Inlay' : 'Onlay'}</span> : <Pick />}</Row>
         )}
-        {s.product && takesShade(s.product) && !metal && (
+        {denture && <Row label="Stages"><StageList s={s} item={item} ctx={ctx} /></Row>}
+        {s.product && takesShade(s.product) && !metal && shadeAsked && (
           <Row label="Shade">
             {s.shade
               ? <span className="inline-flex items-center gap-1 h-5 pl-1 pr-1.5 rounded-md border border-[#E0E0E6] bg-white text-[11px] font-semibold text-[#030213]">
@@ -1031,8 +1049,8 @@ function ServiceCard({ s, index, item, ctx, lab, user, backBy, fastOffered }: {
           </Row>
         )}
         {s.product === 'other' && s.desc && <Row label="What"><span className="text-xs text-[#1F1F2E]">{s.desc}</span></Row>}
-        {/* This service's own Delivery and Instruction, as written in its block. */}
-        {s.product && (
+        {/* This service's own Delivery and Instruction, as written in its block (a denture's days are its stages'). */}
+        {s.product && !denture && (
           <Row label="Delivery">
             {s.delivery?.date ? (
               <>
@@ -1066,6 +1084,60 @@ function ServiceCard({ s, index, item, ctx, lab, user, backBy, fastOffered }: {
       {!s.product && <Warn>Add the product on its Service line, e.g. “Crown”, “Bridge” or “Night guard”.</Warn>}
       {s.issues.map(x => <Warn key={x}>{x}</Warn>)}
     </div>
+  );
+}
+
+/**
+ * A full denture's plan, a line for each stage in play: ordered with its
+ * needed-by day (checked against the lab's day for that stage, or the lab's
+ * day itself when none was written), done elsewhere, or done here on the
+ * patient's earlier case. With a patient it's the plan as the case opens.
+ */
+function StageList({ s, item, ctx }: { s: ServiceRead; item?: ServiceItem; ctx?: Ctx }) {
+  const treatment = item ? dentureTreatment(item) : s.treatment ?? 'staged';
+  const rows: { id: DentureStageId; state: StagePlan['state']; date?: Date; caseId?: string }[] = item
+    ? stagePlan(item).map(r => ({ id: r.id, state: r.state, date: r.date ? fromISO(r.date) : undefined, caseId: r.caseId }))
+    : s.stages ?? [];
+  if (!rows.length) return <Need>Which stages?</Need>;
+  const sugg = item && ctx && s.makes ? suggestedStageDates(item, ctx) : undefined;
+  const written = (id: DentureStageId) => !!s.stages?.some(r => r.id === id && r.date);
+  return (
+    <ol className="w-full space-y-1">
+      {rows.map(r => {
+        const name = treatment === 'staged' ? stageName(r.id) : treatmentName(treatment);
+        const lab = item && ctx && s.makes ? optionAvail(ctx.lab, 'denture', stageOption(item, r.id), ctx.funding) : undefined;
+        const due = sugg?.[r.id] ? fromISO(sugg[r.id]) : undefined;
+        return (
+          <li key={r.id} className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-h-5">
+            <StageMark n={treatment === 'staged' ? DENTURE_STAGES.findIndex(x => x.id === r.id) + 1 : 1} state={r.state} />
+            <span className="text-xs font-semibold text-[#030213]">{name}</span>
+            {r.state === 'order' ? (
+              <>
+                {r.date ? <span className="text-[11px] text-[#3A3A4A]">needed by {fmtDay(r.date)}</span> : <Need>Pick a day</Need>}
+                {lab && !lab.ok ? <Need>{lab.reason}</Need>
+                  : !r.date || !due ? null
+                    : !written(r.id) ? <Tag tone="muted">Suggested</Tag>
+                      : r.date >= due ? <Tag tone="ok"><Check className="w-3 h-3" strokeWidth={3} aria-hidden />On time</Tag>
+                        : <Tag tone="warn">Back {fmtDay(due)} at the earliest</Tag>}
+              </>
+            ) : r.state === 'here' ? (
+              <Tag tone="ok">Done here{r.caseId ? ` · ${r.caseId}` : ''}</Tag>
+            ) : (
+              <><Tag tone="muted">Done elsewhere</Tag>{r.date && <span className="text-[11px] text-[#5A5A6A]">on {r.date.getFullYear() === demoNow().getFullYear() ? fmtShort(r.date) : fmtFull(r.date)}</span>}</>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+/** A stage's marker: its number while ordered, a check once done (here: filled). */
+function StageMark({ n, state }: { n: number; state: StagePlan['state'] }) {
+  const tone = state === 'order' ? 'bg-[#3F6FE8] text-white' : state === 'here' ? 'bg-[#2E7D32] text-white' : 'bg-[#E8F5E9] border border-[#A5D6A7] text-[#2E7D32]';
+  return (
+    <span aria-hidden className={`w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center text-[9px] font-bold tabular-nums ${tone}`}>
+      {state === 'order' ? n : <Check className="w-2.5 h-2.5" strokeWidth={3} />}
+    </span>
   );
 }
 

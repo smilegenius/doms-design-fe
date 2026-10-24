@@ -11,7 +11,7 @@ import {
   Anchor, ArrowRight, Bolt, Camera, Check, ChevronDown, Crown, Droplet, Gem, Layers, Link, Link2, Moon, MoreHorizontal, PackagePlus,
   Plus, Shapes, Shield, Smile, SmilePlus, Sparkles, Square, Wrench, History, Trash2, X, type LucideIcon,
 } from 'lucide-react';
-import { useCase } from './CaseContext';
+import { CaseContext, useCase } from './CaseContext';
 import { ChartWidthContext, useRoom } from './room';
 import {
   ABUTMENTS, ACRYLIC_OPTIONS, BRIDGE_ERRORS, MATERIAL_GROUP, MOULD_OPTIONS, OPTIONS, PARTIAL_DESIGNS, PARTIAL_STAGES, POSTDAM_OPTIONS,
@@ -27,11 +27,11 @@ import { IMPLANT_SYSTEMS, LABS, ProductId } from './data';
 import { getRow } from './store';
 import { ServiceNote } from './Instructions';
 import { ArrowAction, stepName, useFooterArrow, useHandArrow } from './footerArrow';
-import { fmtDay, fmtShort, fromISO, toISO } from './dates';
+import { demoNow, fmtDay, fmtShort, fromISO, toISO } from './dates';
 import TeethChart, { ChartLegend, MiniChart } from './TeethChart';
 import {
   ChoiceChips, ChipOption, DefaultsPanel, FieldLabel, LinkButton, NextArrow, Notice, PrimaryButton, SecondaryButton, SourceTag,
-  StepHeading, ToggleChips, FOCUS,
+  StateIcon, StepHeading, ToggleChips, FOCUS,
 } from './ui';
 
 export const PRODUCT_ICON: Record<ProductId, typeof Crown> = {
@@ -196,7 +196,8 @@ export function ServiceTile({ product, nhs, onPick }: { product: ProductId; nhs:
   const days = offered.map(o => lab.prices[`${product}:${o.id}`]![2]);
   const lo = Math.min(...days), hi = Math.max(...days);
   const count = offered.length ? plural(offered.length, OPTION_NOUN[product] ?? 'option') : null;
-  const span = offered.length ? (lo === hi ? plural(lo, 'day') : `${lo}–${hi} days`) : null;
+  // A full denture's days are each stage's, not the whole denture's.
+  const span = offered.length ? (lo === hi ? plural(lo, 'day') : `${lo}–${hi} days`) + (product === 'denture' ? ' a stage' : '') : null;
   // Said instead of the count: Something Else is described, not picked; nothing on offer for an NHS patient.
   const lead = product === 'other' ? 'Describe the work' : !offered.length && ctx.funding === 'nhs' ? 'Not on the NHS' : null;
   if (wide) {
@@ -854,7 +855,8 @@ function WingsEditor({ item }: { item: ServiceItem }) {
 function ArchEditor({ item }: { item: ServiceItem }) {
   const { ctx, updateItem, notes, dismissNote, doneAndAdvance } = useCase();
   const wide = useRoom() === 'wide';
-  const both = item.product === 'retainer' || item.product === 'whitening';
+  // A full denture is picked as Upper, Lower or Both (the portal's rule), like a retainer or whitening trays.
+  const both = item.product === 'retainer' || item.product === 'whitening' || item.product === 'denture';
   // A full denture for the arch of the patient's next stage picks up that plan (and drops it for another arch).
   const pick = (jaw: 'upper' | 'lower' | 'both') => updateItem(item.id, i => seedDenturePlan({
     ...i, arch: jaw, archSrc: 'You',
@@ -896,6 +898,300 @@ function ArchEditor({ item }: { item: ServiceItem }) {
         {open && <NoteView note={open} onDismiss={() => doneAndAdvance(() => dismissNote(open.id))} />}
       </div>
     </div>
+  );
+}
+
+// ─── Denture stages ──────────────────────────────────────────────────────────
+
+type RowState = 'none' | 'order' | 'elsewhere';
+const ROW_STATES: { id: RowState; label: string }[] = [
+  { id: 'none', label: 'Not Now' }, { id: 'order', label: 'Order' }, { id: 'elsewhere', label: 'Done Elsewhere' },
+];
+const TREATMENT_SUB: Record<DentureTreatment, string> = {
+  staged: 'Each stage goes to the lab and comes back for the next visit.',
+  stf: 'From the impressions straight to the finished denture.',
+  immediate: 'Made before the extractions, fitted the day the teeth come out.',
+};
+
+/**
+ * A full denture's plan. Staged: one row per stage, in order, each Not Now ·
+ * Order · Done Elsewhere; an ordered stage takes the day it's needed back
+ * (today or later, the lab's suggestion filled in), a stage done elsewhere an
+ * optional done-on day, and a past day typed for an order flips the stage to
+ * Done Elsewhere. Stages done on the patient's earlier case read "Done here ·
+ * CAS-…" and can't change. Straight to Finish and Immediate: one Finish day.
+ * Several rows, so "that's it" is the round arrow (as for teeth). A sent case
+ * shows the plan without controls.
+ */
+function StagesEditor({ item }: { item: ServiceItem }) {
+  const { ctx, lab, readOnly, updateItem, doneAndAdvance } = useCase();
+  const wide = useRoom() === 'wide';
+  const [notice, setNotice] = useState<string | null>(null);
+  const next = useNextName(item.id, 'stages');
+  if (readOnly) return <StagePlanView item={item} />;
+
+  const treatment = dentureTreatment(item);
+  const plan = stagePlan(item);
+  const today = toISO(ctx.now);
+  const sugg = suggestedStageDates(item, ctx);
+  const ordered = plan.filter(s => s.state === 'order');
+  const ready = dentureStageReady(item, ctx);
+  const late = stagesOutOfOrder(item);
+  const follow = plan.find(s => s.state === 'here');
+  const write = (stages: StagePlan[], patch: Partial<ServiceItem> = {}) => updateItem(item.id, i => ({
+    ...i, ...patch, stage: undefined, stages, stagesDone: false, reopen: i.reopen?.filter(r => r !== 'stages'),
+  }));
+  const day = (iso: string) => fmtDay(fromISO(iso));
+  const rowName = (id: DentureStageId) => (treatment === 'staged' ? stageName(id) : treatmentName(treatment));
+  const fieldId = (id: DentureStageId) => `nc-stage-${item.id}-${id}`;
+
+  const setState = (id: DentureStageId, to: RowState) => {
+    const old = plan.find(s => s.id === id);
+    // Picking the answer a row already has changes nothing (a settled plan stays settled).
+    if ((old?.state ?? 'none') === to) return;
+    setNotice(null);
+    const rest = plan.filter(s => s.id !== id);
+    if (to === 'none') write(rest);
+    // Ordered: the lab's suggested day for its place in the plan; done elsewhere keeps a past day as its done-on day.
+    else if (to === 'order') write([...rest, { id, state: 'order', date: old?.state === 'order' && old.date ? old.date : sugg[id] }]);
+    else write([...rest, { id, state: 'elsewhere', date: old?.date && old.date <= today ? old.date : undefined }]);
+  };
+  /** A typed or picked day; false keeps the field on its old value. */
+  const setDate = (row: StagePlan, iso: string): boolean => {
+    if (iso === (row.date ?? '')) return true;
+    setNotice(null);
+    if (row.state === 'order' && iso && iso < today) {
+      if (treatment !== 'staged') { setNotice(`${day(iso)} has passed. Pick today or later.`); return false; }
+      // A day that's passed: the stage happened, just not on this portal. Focus lands on its Done On field.
+      setNotice(`${day(iso)} has passed, so ${stageName(row.id)} is marked Done Elsewhere.`);
+      write(plan.map(r => (r.id === row.id ? { id: r.id, state: 'elsewhere', date: iso } : r)));
+      refocus(fieldId(row.id));
+      return true;
+    }
+    if (row.state === 'elsewhere' && iso > today) { setNotice('A stage done elsewhere can’t be dated after today.'); return false; }
+    write(plan.map(r => (r.id === row.id ? { ...r, date: iso || undefined, src: undefined } : r)));
+    return true;
+  };
+  /** Every ordered stage on the lab's suggested day, in order. */
+  const suggestAll = () => {
+    setNotice(null);
+    const cleared = plan.map(r => (r.state === 'order' ? { ...r, date: undefined } : r));
+    const s = suggestedStageDates({ ...item, stages: cleared }, ctx);
+    write(cleared.map(r => (r.state === 'order' ? { ...r, date: s[r.id], src: undefined } : r)));
+    // The out-of-order notice (and its button) goes once the days are in order.
+    if (ordered[0]) refocus(fieldId(ordered[0].id));
+  };
+  const setTreatment = (t: DentureTreatment) => {
+    if (t === treatment) return;
+    setNotice(null);
+    const finish = plan.find(s => s.id === 'finish' && s.state === 'order')?.date;
+    const patch: Partial<ServiceItem> = { treatment: t, treatmentSrc: 'You', extract: t === 'immediate' ? item.extract : undefined, extractDone: t === 'immediate' ? item.extractDone : undefined };
+    if (t === 'staged') {
+      // Back to stages: the patient's follow-up if there is one, else the Finish kept.
+      const seeded = seedDenturePlan({ ...item, ...patch, stages: undefined, stageSrc: undefined }, ctx);
+      write(seeded.stages?.length ? seeded.stages : [{ id: 'finish', state: 'order', date: finish }], { ...patch, stageSrc: seeded.stageSrc });
+      return;
+    }
+    const one: ServiceItem = { ...item, ...patch, stages: [] };
+    write([{ id: 'finish', state: 'order', date: finish ?? suggestedStageDates(one, ctx).finish }], { ...patch, stageSrc: undefined });
+    if (follow?.caseId) setNotice(`${treatmentName(t)} starts again from impressions, so ${follow.caseId}’s stages aren’t carried over.`);
+  };
+
+  // What the arrow says while it can't go yet.
+  const unmade = ordered.find(s => !optionAvail(lab, 'denture', stageOption(item, s.id), ctx.funding).ok);
+  const hint = !ordered.length ? 'Order at least one stage'
+    : ordered.some(s => !s.date) ? 'Pick a day for each ordered stage'
+      : ordered.some(s => s.date! < today) ? 'A day has passed: pick today or later'
+        : unmade ? `${lab.name} doesn’t make ${stageName(unmade.id)}` : undefined;
+
+  /** The needed-by field and its hint: the lab's day, and a way back to it. */
+  const orderFields = (row: StagePlan) => {
+    const s = sugg[row.id];
+    const past = !!row.date && row.date < today;
+    const early = !!row.date && !past && row.date < s;
+    const fid = fieldId(row.id);
+    return (
+      <>
+        <DateField
+          id={fid} label="Needed by" stage={rowName(row.id)} value={row.date} min={today} describedBy={`${fid}-hint`}
+          invalid={!row.date || past} onCommit={v => setDate(row, v)}
+        />
+        <span id={`${fid}-hint`} className={`text-[11px] ${!row.date || past ? 'text-[#B45309] font-semibold' : early ? 'text-[#8A4B08]' : 'text-[#5A5A6A]'}`}>
+          {!row.date ? 'Pick a day' : past ? 'This day has passed' : early ? `Before the lab’s ${day(s)}` : `Lab back by ${day(s)}`}
+          {/* The link goes once used: focus moves to the day it filled in. */}
+          {row.date !== s && (
+            <> · <LinkButton onClick={() => { setDate(row, s); refocus(fid); }}>Use {fmtShort(fromISO(s))}<span className="sr-only"> for {rowName(row.id)}</span></LinkButton></>
+          )}
+        </span>
+      </>
+    );
+  };
+  // Name in the first column; the controls (and anything they wrap onto) in the second.
+  const rowGrid = `flex-1 min-w-0 grid ${wide ? 'grid-cols-[132px_minmax(0,1fr)]' : 'grid-cols-[118px_minmax(0,1fr)]'} gap-x-3 items-start`;
+  const rowControls = 'min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1.5';
+
+  return (
+    <div className={wide ? 'space-y-4' : 'space-y-3'}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <WideChoice
+          label="Treatment" form="segment" small value={treatment} onChange={id => setTreatment(id as DentureTreatment)}
+          options={DENTURE_TREATMENTS.map(t => {
+            const a: { ok: boolean; reason?: string } = t.id === 'staged' ? { ok: true } : optionAvail(lab, 'denture', t.id, ctx.funding);
+            return { id: t.id, label: t.name, disabled: !a.ok, reason: a.reason, tag: t.id === treatment && item.treatmentSrc !== 'You' ? item.treatmentSrc : undefined };
+          })}
+        />
+        <span className="text-xs text-[#5A5A6A]">{TREATMENT_SUB[treatment]}</span>
+      </div>
+
+      {follow?.caseId && (
+        <p className="flex items-center gap-1.5 text-xs text-[#3A3A4A]">
+          <History className="w-3.5 h-3.5 text-[#2F62D6] flex-shrink-0" strokeWidth={1.75} aria-hidden />
+          Continues {follow.caseId} at {lab.name}: the lab has the models.
+        </p>
+      )}
+
+      {treatment === 'staged' ? (
+        <ol aria-label="Stages" className="rounded-xl border border-[#ECECF2] bg-white divide-y divide-[#F0EFF6]">
+          {DENTURE_STAGES.map((st, k) => {
+            const row = plan.find(s => s.id === st.id);
+            const a = optionAvail(lab, 'denture', st.id, ctx.funding);
+            const off = !row;
+            return (
+              <li key={st.id} className={`flex items-start gap-3 ${wide ? 'px-3.5 py-2.5' : 'px-3 py-2'} ${off ? 'bg-[#FCFCFD]' : ''}`}>
+                <StageDot n={k + 1} row={row} today={today} />
+                <div className={rowGrid}>
+                  <span className={`py-1 text-sm leading-5 font-semibold ${off ? 'text-[#5A5A6A]' : 'text-[#030213]'}`}>{st.name}</span>
+                  <div className={rowControls}>
+                    {row?.state === 'here' ? (
+                      <span className="inline-flex items-center gap-1.5 h-7 text-xs font-semibold text-[#1B5E20]">
+                        Done here · {row.caseId}
+                        {row.src && <SourceTag src={row.src} />}
+                      </span>
+                    ) : (
+                      <WideChoice
+                        label={st.name} form="segment" small value={row?.state ?? 'none'} onChange={id => setState(st.id, id as RowState)}
+                        options={ROW_STATES.map(o => ({ id: o.id, label: o.label, disabled: o.id === 'order' && !a.ok, reason: a.reason }))}
+                      />
+                    )}
+                    {row?.state === 'order' && orderFields(row)}
+                    {row?.state === 'elsewhere' && (
+                      <DateField id={fieldId(st.id)} label="Done on" stage={st.name} value={row.date} max={today} optional onCommit={v => setDate(row, v)} />
+                    )}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <div className={`flex items-start gap-3 rounded-xl border border-[#ECECF2] bg-white ${wide ? 'px-3.5 py-2.5' : 'px-3 py-2'}`}>
+          <StageDot n={1} row={plan[0]} today={today} />
+          <div className={rowGrid}>
+            <span className="py-1 text-sm leading-5 font-semibold text-[#030213]">{treatmentName(treatment)}</span>
+            <div className={rowControls}>{orderFields(plan[0])}</div>
+          </div>
+        </div>
+      )}
+
+      {/* One live region, always there, so a notice that comes after a change of plan is read out. */}
+      <div role="status" aria-live="polite" className="space-y-2 empty:hidden">
+        {late.length > 0 && (
+          <Notice tone="decision" actions={<SecondaryButton onClick={suggestAll}>Suggest Dates</SecondaryButton>}>
+            {andWords(late.map(stageName))} {late.length === 1 ? 'is' : 'are'} due on or before an earlier stage. Stages usually come back in order.
+          </Notice>
+        )}
+        {notice && <Notice tone="note" onDismiss={() => setNotice(null)}>{notice}</Notice>}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <StepArrow
+          run={() => doneAndAdvance(() => updateItem(item.id, { stagesDone: true }))}
+          disabled={!ready}
+          label={ready ? `Done: ${stagesShort(item)}` : ordered.length ? 'Pick the Days' : 'Order a Stage'}
+          next={next}
+          hint={hint}
+        />
+        {treatment === 'staged' && ordered.length > 1 && !late.length && <LinkButton onClick={suggestAll}>Suggest Dates</LinkButton>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A plan without controls (Review, a sent case): each stage in play with its
+ * day, done-here and done-elsewhere tagged. Works outside a case page too (the
+ * AI page's preview), on the demo clock.
+ */
+export function StagePlanView({ item, small }: { item: ServiceItem; small?: boolean }) {
+  const now = useContext(CaseContext)?.ctx.now ?? demoNow();
+  const treatment = dentureTreatment(item);
+  const plan = stagePlan(item);
+  const today = toISO(now);
+  const text = small ? 'text-xs' : 'text-sm';
+  if (!plan.length) return <p className={`${text} text-[#5A5A6A]`}>No stage ordered yet</p>;
+  // A done-on day from another year says its year.
+  const on = (iso: string) => { const d = fromISO(iso); return `on ${fmtDay(d)}${d.getFullYear() !== now.getFullYear() ? ` ${d.getFullYear()}` : ''}`; };
+  return (
+    <ul aria-label="Stages" className="space-y-1.5">
+      {plan.map(s => (
+        <li key={s.id} className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 ${text}`}>
+          {/* Numbered as in the editor: by the stage's place among the five. */}
+          <StageDot n={treatment === 'staged' ? DENTURE_STAGES.findIndex(x => x.id === s.id) + 1 : 1} row={s} today={today} small />
+          <span className="font-semibold text-[#030213]">{treatment === 'staged' ? stageName(s.id) : treatmentName(treatment)}</span>
+          {s.state === 'order' && <span className="text-[#4A4A5A]">{s.date ? `needed by ${fmtDay(fromISO(s.date))}` : 'day not picked'}</span>}
+          {s.state === 'here' && <SourceTag src={`Done here${s.caseId ? ` · ${s.caseId}` : ''}`} />}
+          {s.state === 'elsewhere' && <SourceTag src="Done elsewhere" />}
+          {s.state === 'elsewhere' && s.date && <span className="text-[#4A4A5A]">{on(s.date)}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The stage's marker: a number while it's Not now or ordered (amber "!" without a good day), a check once it's done here or elsewhere. */
+function StageDot({ n, row, today, small }: { n: number; row?: StagePlan; today: string; small?: boolean }) {
+  const size = small ? 'w-4 h-4 text-[9px]' : 'w-6 h-6 text-[11px] mt-0.5';
+  if (row?.state === 'order' && (!row.date || row.date < today)) {
+    // Pending: the orange ripple, in the same box as the numbers so the names stay in line.
+    return <span className={`${small ? 'w-4 h-4' : 'w-6 h-6 mt-0.5'} flex-shrink-0 flex items-center justify-center`}><StateIcon state="gap" size="sm" /></span>;
+  }
+  const tone = !row ? 'border border-dashed border-[#C9C9D6] bg-white text-[#6B6B7B]'
+    : row.state === 'order' ? 'bg-[#3F6FE8] text-white'
+      : row.state === 'here' ? 'bg-[#2E7D32] text-white'
+        : 'bg-[#E8F5E9] border border-[#A5D6A7] text-[#2E7D32]';
+  return (
+    <span aria-hidden className={`${size} rounded-full flex-shrink-0 flex items-center justify-center font-bold tabular-nums ${tone}`}>
+      {row && row.state !== 'order' ? <Check className={small ? 'w-2.5 h-2.5' : 'w-3 h-3'} strokeWidth={3} /> : n}
+    </span>
+  );
+}
+
+/**
+ * A day field. A day inside min/max is taken as it's typed or picked; one
+ * outside waits for the field to lose focus (typing "2" into the day mustn't
+ * flip a stage), then goes to onCommit, which can turn it down.
+ */
+function DateField({ id, label, stage, value, min, max, optional, invalid, describedBy, onCommit }: {
+  id: string; label: string; stage: string; value?: string; min?: string; max?: string; optional?: boolean; invalid?: boolean; describedBy?: string;
+  onCommit: (iso: string) => boolean;
+}) {
+  const [v, setV] = useState(value ?? '');
+  useEffect(() => setV(value ?? ''), [value]);
+  const inside = (x: string) => (!min || x >= min) && (!max || x <= max) && Number(x.slice(0, 4)) >= 2000;
+  const commit = (x: string) => { if (!onCommit(x)) setV(value ?? ''); };
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {/* Up to five of these on a plan: a screen reader hears which stage's day it is. */}
+      <label htmlFor={id} className="text-[11px] font-semibold text-[#5A5A6A] whitespace-nowrap"><span className="sr-only">{stage} </span>{label}{optional && <span className="font-normal"> (optional)</span>}</label>
+      <input
+        id={id} type="date" value={v} min={min} max={max} aria-invalid={invalid || undefined} aria-describedby={describedBy}
+        onChange={e => { const x = e.target.value; setV(x); if (x ? inside(x) : optional) commit(x); }}
+        onBlur={() => { if (v !== (value ?? '')) commit(v); }}
+        // Enter takes the typed day and keeps focus here.
+        onKeyDown={e => { if (e.key === 'Enter' && v !== (value ?? '')) { e.preventDefault(); commit(v); } }}
+        className={`h-7 px-2 rounded-lg border text-xs tabular-nums text-[#030213] outline-none focus:border-[#3F6FE8] focus:ring-2 focus:ring-[#3F6FE8]/20 ${invalid ? 'border-[#F5D98B] bg-[#FFFBEB]' : 'border-[#D4D4DD] bg-white'}`}
+      />
+    </span>
   );
 }
 
@@ -1281,14 +1577,20 @@ function DescEditor({ item }: { item: ServiceItem }) {
   );
 }
 
-/** Used by the Review cards. */
-export function itemDetails(item: ServiceItem, ctx: ReturnType<typeof useCase>['ctx']): { label: string; value: string; src?: string }[] {
+/**
+ * Used by the Review cards. `short`: a one-line form where `value` is long
+ * (a denture's stages: value "Try In · Thu 12 Nov, … done elsewhere", short "Try In 12 Nov, …").
+ */
+export function itemDetails(item: ServiceItem, ctx: ReturnType<typeof useCase>['ctx']): { id: SlotId; label: string; value: string; short?: string; src?: string }[] {
   const e = effective(item, ctx);
   return slotsFor(item, ctx)
     .filter(s => s.answered && s.id !== 'labCheck')
     .map(s => ({
+      id: s.id,
       label: s.label,
-      value: s.id === 'prefs' ? prefsSentence(e.prefs) : s.id === 'teeth' && item.product === 'bridge' ? bridgeReadback(item, ctx.user.notation) : s.value ?? '',
+      value: s.id === 'prefs' ? prefsSentence(e.prefs) : s.id === 'teeth' && item.product === 'bridge' ? bridgeReadback(item, ctx.user.notation)
+        : s.id === 'stages' ? stagesSummary(item) : s.value ?? '',
+      short: s.id === 'stages' ? s.value : undefined,
       src: s.src,
     }));
 }
@@ -1303,6 +1605,17 @@ const OPTION_NOUN: Partial<Record<ProductId, string>> = {
   crown: 'material', bridge: 'material', implant: 'material', veneer: 'material', inlay: 'material',
   nightguard: 'type', retainer: 'type', whitening: 'type', denture: 'stage', partial: 'base',
 };
+
+/** "Try In", "Try In and Finish", "Try In, Retry and Finish" */
+const andWords = (w: string[]) => (w.length < 2 ? w.join('') : `${w.slice(0, -1).join(', ')} and ${w[w.length - 1]}`);
+
+/** After a change that removes the focused control (a used link, a notice that goes): focus `id` instead of the page. */
+function refocus(id: string) {
+  requestAnimationFrame(() => {
+    const a = document.activeElement;
+    if (!a || a === document.body) document.getElementById(id)?.focus();
+  });
+}
 
 /** Arrow keys, Home and End move focus between a group's radios; Space or Enter picks (a pick can move the step on). */
 function rove(e: KeyboardEvent<HTMLElement>) {

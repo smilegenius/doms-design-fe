@@ -47,7 +47,7 @@ const STAGES: Stage[] = [
       {
         title: 'T2 · New patient, bridge 14–16, posted, fit booked (16 taps)',
         icon: <UserPlus className="w-4 h-4" />, as: 'khan',
-        description: 'Add new Case → type “Oliver Bennett” → Add new patient (or Enter Patient Details Manually) → DOB 14051979 → Male → Create → Northfield → Bridge → 14, 16 → Done → Layered (on the shade step) → A3 → Impression by Post → tick disinfection → Add Fit Appointment → Thu 12 Nov → Send. 15 is a pontic; back by Fri 6 Nov; 3 working days spare; Print Box Label.',
+        description: 'Add new Case → type “Oliver Bennett” → Add new patient (or Enter Patient Details Manually) → DOB 14051979 → Male → Create → Northfield → Bridge → 14, 16 → Done → Layered (on the shade step) → A3 → Impression by Post → Add Fit Appointment → Thu 12 Nov → Send. 15 is a pontic; back by Fri 6 Nov; 3 working days spare; Print Box Label.',
         shows: ['New patient on the page', 'Bridge pontics', 'Disinfection tick', 'Fit calendar'],
         path: '/flows/new-case/cases', launch: true,
       },

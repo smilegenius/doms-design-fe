@@ -1,11 +1,12 @@
-// ─── New Case Flow · Sent screen, Undo and box label ─────────────────────────
+// ─── New Case Flow · Sent screen and Undo ────────────────────────────────────
+// Posted impressions print the portal's own A4 label (components/DispatchLabel):
+// the sheet that goes in the parcel, the same one Case Details and Cases print.
 
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Printer, Undo2, ArrowRight, X, Clock } from 'lucide-react';
+import { CheckCircle2, Printer, Undo2, ArrowRight, Clock } from 'lucide-react';
 import ModalPortal from '../components/ModalPortal';
+import { PrintLabelsModal } from '../components/DispatchLabel';
 import { CLINIC, Lab, Patient } from './data';
-import { labSees } from './rules';
-import { demoNow } from './dates';
 import { PrimaryButton, SecondaryButton, FOCUS } from './ui';
 
 export interface SentCase { id: string; summary: string; backBy?: string; fitFrom?: string; fit?: string }
@@ -15,7 +16,8 @@ export interface SentResult {
   posted: boolean;
   approval: boolean;
   box?: string[];
-  disinfected?: string;
+  /** The prescriber, for the label. */
+  dentist?: string;
   lab: Lab;
   patient: Patient;
   next?: { id: string; text: string };
@@ -45,7 +47,7 @@ export default function SentView({ result, onBack, onView, onNext }: {
               <p className="text-sm text-[#1F1F2E] mt-2">{c.backBy}{c.fit ? ` ${p.first}’s fit is on ${c.fit}.` : c.fitFrom ? ` Book ${p.first}’s fit from ${c.fitFrom}.` : ''}</p>
             )}
             <div className="mt-4 flex flex-wrap gap-2">
-              {result.posted && !result.approval && <PrimaryButton onClick={() => setLabel(c.id)}><Printer className="w-4 h-4" aria-hidden />Print Box Label</PrimaryButton>}
+              {result.posted && !result.approval && <PrimaryButton onClick={() => setLabel(c.id)}><Printer className="w-4 h-4" aria-hidden />Print Label</PrimaryButton>}
               <SecondaryButton onClick={() => onView(c.id)}>View Case</SecondaryButton>
             </div>
           </div>
@@ -60,7 +62,16 @@ export default function SentView({ result, onBack, onView, onNext }: {
           <SecondaryButton onClick={() => onNext(result.next!.id)}>Open<ArrowRight className="w-3.5 h-3.5" aria-hidden /></SecondaryButton>
         </div>
       )}
-      {label && <BoxLabel caseId={label} result={result} onClose={() => setLabel(null)} />}
+      {label && (
+        <PrintLabelsModal
+          caseNumbers={[label]}
+          labNames={[result.lab.name]}
+          details={[{ patient: `${p.first} ${p.last}`, dentist: result.dentist, clinic: CLINIC.name }]}
+          title={`Print label · ${label}`}
+          subtitle="Put this sheet in the parcel with the impressions."
+          onClose={() => setLabel(null)}
+        />
+      )}
     </div>
   );
 }
@@ -89,36 +100,3 @@ export function UndoToast({ seconds = 10, onUndo, onExpire }: { seconds?: number
   );
 }
 
-function BoxLabel({ caseId, result, onClose }: { caseId: string; result: SentResult; onClose: () => void }) {
-  const p = result.patient;
-  return (
-    <ModalPortal>
-      <div className="fixed inset-0 z-[115] flex items-center justify-center">
-        <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-        <div role="dialog" aria-modal="true" aria-label="Box label" className="relative bg-white rounded-2xl shadow-2xl p-6 w-[520px]">
-          <button type="button" onClick={onClose} aria-label="Close" className={`absolute right-4 top-4 p-1 rounded text-[#4A4A5A] ${FOCUS}`}><X className="w-4 h-4" /></button>
-          <h2 className="text-base font-semibold text-[#030213] mb-4">Box label</h2>
-          <div className="border-2 border-dashed border-[#030213] rounded-xl p-5 font-mono text-[13px] text-[#030213]">
-            <div className="flex gap-4">
-              <div className="w-20 h-20 grid grid-cols-9 gap-[1px] p-1 border border-[#030213] flex-shrink-0" aria-hidden>
-                {Array.from({ length: 81 }, (_, i) => <span key={i} className={((i * 31) % 7) % 2 === 0 ? 'bg-[#030213]' : 'bg-white'} />)}
-              </div>
-              <div className="min-w-0">
-                <p className="text-lg font-bold">{caseId}</p>
-                <p>{labSees(p, demoNow())}</p>
-                <p className="mt-1">To: {result.lab.name}, {result.lab.city}</p>
-                <p>From: {CLINIC.name}, {CLINIC.city}</p>
-              </div>
-            </div>
-            {result.box && <p className="mt-3">Contents: {result.box.join(', ')}</p>}
-            {result.disinfected && <p className="mt-1">{result.disinfected}</p>}
-          </div>
-          <div className="mt-5 flex justify-end gap-2">
-            <SecondaryButton onClick={onClose}>Close</SecondaryButton>
-            <PrimaryButton onClick={() => { try { window.print(); } catch { /* print blocked */ } }}><Printer className="w-4 h-4" aria-hidden />Print</PrimaryButton>
-          </div>
-        </div>
-      </div>
-    </ModalPortal>
-  );
-}

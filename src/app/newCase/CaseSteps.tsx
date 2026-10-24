@@ -9,7 +9,7 @@
 import { forwardRef, useCallback, useEffect, useRef, useState, DragEvent, ForwardedRef, KeyboardEvent, ReactNode } from 'react';
 import {
   BadgeCheck, Box, Building2, CalendarCheck, CalendarDays, Check, CircleDashed, Clock3, FileUp, HeartPulse, History, Layers, Lock,
-  Package, Palette, PenLine, ScanLine, Search, Send, Smile, SprayCan, Star, Stethoscope, Truck, Upload, UserRound, Wallet, Zap,
+  Package, Palette, PenLine, ScanLine, Search, Send, Smile, Star, Stethoscope, Truck, Upload, UserRound, Wallet, Zap,
   Anchor, type LucideIcon,
 } from 'lucide-react';
 import { useCase } from './CaseContext';
@@ -457,14 +457,10 @@ function FollowSteps({ first }: { first: string }) {
 }
 
 function PostBox({ reline, canChange, onChange }: { reline: boolean; canChange: boolean; onChange: () => void }) {
-  const { draft, update, user, readOnly } = useCase();
+  const { draft, update, readOnly } = useCase();
   const wide = useRoom() === 'wide';
   const box = { ...defaultBox(draft), ...draft.records.box };
   const toggle = (k: string) => update(d => ({ ...d, records: { ...d.records, box: { ...box, [k]: !box[k] } } }));
-  const tick = (v: boolean) => {
-    const now = demoNow();
-    update(d => ({ ...d, records: { ...d.records, disinfected: v, disinfectedAt: v ? `${fmtShort(now)} ${fmtTime(now)}` : undefined, disinfectedBy: v ? user.name : undefined } }));
-  };
   const inBox = BOX_ITEMS.filter(k => box[k] || (reline && k === 'Old denture')).length;
   return (
     <div className="space-y-4">
@@ -493,21 +489,7 @@ function PostBox({ reline, canChange, onChange }: { reline: boolean; canChange: 
           })}
         </div>
       </Card>
-      <label className={`flex items-start gap-3 px-4 py-3.5 rounded-xl border-2 cursor-pointer ${draft.records.disinfected ? 'border-[#86C99A] bg-[#F0FDF4]' : 'border-[#F5D98B] bg-[#FFFBEB]'} focus-within:ring-2 focus-within:ring-[#3F6FE8]`}>
-        <input type="checkbox" checked={draft.records.disinfected} disabled={readOnly} onChange={e => tick(e.target.checked)} className="mt-0.5 w-4 h-4 accent-[#2E7D32]" aria-describedby="disinfect-help" />
-        {wide && (
-          <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white border ${draft.records.disinfected ? 'border-[#BBF7D0] text-[#2E7D32]' : 'border-[#F5D98B] text-[#B45309]'}`} aria-hidden>
-            <SprayCan className="w-4 h-4" strokeWidth={1.75} />
-          </span>
-        )}
-        <span className={wide ? 'min-w-0' : undefined}>
-          <span className="block text-sm font-semibold text-[#030213]">I’ve disinfected everything in the box with {CLINIC.disinfectant}</span>
-          <span id="disinfect-help" className="block text-xs text-[#4A4A5A] mt-0.5">Required. It goes on the box label with your name and the time.</span>
-          {wide && draft.records.disinfected && draft.records.disinfectedBy && (
-            <span className="block text-[11px] font-semibold text-[#166534] mt-1">On the label: {draft.records.disinfectedBy} · {draft.records.disinfectedAt}</span>
-          )}
-        </span>
-      </label>
+      {/* No disinfection tick here: it isn't asked at Scans Source (the portal's A4 label goes in the box). */}
     </div>
   );
 }

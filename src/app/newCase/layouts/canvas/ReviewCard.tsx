@@ -8,7 +8,7 @@
 import { useCase } from '../../CaseContext';
 import { useController } from '../../controller';
 import { fmtDay } from '../../dates';
-import { itemTitle, plural } from '../../rules';
+import { itemTitle, plural, stagesShort } from '../../rules';
 import { gapLabel } from '../../ReviewStep';
 import { StateIcon, FOCUS } from '../../ui';
 import { DeliveryPlan } from './CaseDetails';
@@ -57,8 +57,11 @@ export default function ReviewCard() {
             return (
               <li key={i.id} className="flex items-center gap-3 px-5 py-2.5">
                 <span className="flex-1 min-w-0 text-sm text-[#030213] truncate">{itemTitle(i, n)}</span>
-                <span className="text-xs text-[#3A3A4A] whitespace-nowrap">
-                  {own?.backBy ? `Back by ${fmtDay(own.backBy)}` : own?.ta != null ? plural(own.ta, 'working day') : '—'}
+                <span className="min-w-0 max-w-[55%] truncate text-xs text-[#3A3A4A] whitespace-nowrap">
+                  {/* A denture has no date of its own: its stages each have one. */}
+                  {i.product === 'denture'
+                    ? (stagesShort(i) || 'Stage dates once a stage is ordered')
+                    : own?.backBy ? `Back by ${fmtDay(own.backBy)}` : own?.ta != null ? plural(own.ta, 'working day') : '—'}
                 </span>
               </li>
             );

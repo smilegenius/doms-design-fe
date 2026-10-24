@@ -163,7 +163,7 @@ export function offersFor(p: Pending, ctx: Ctx, fastTrack: boolean, items: Servi
   const offer = (product: ProductId, extra: Partial<ServiceItem>, blocked?: string, lead?: string): Offer => {
     const why = blocked ?? (notOnNhs(product) ? 'Not on the NHS' : undefined);
     if (why) return { product, extra, blocked: why };
-    const sub = [lead, leadTime(product, extra) ?? (product === 'denture' ? 'Pick the stage next' : undefined)].filter(Boolean).join(' · ');
+    const sub = [lead, leadTime(product, extra) ?? (product === 'denture' ? 'Plan the stages next' : undefined)].filter(Boolean).join(' · ');
     return { product, extra, sub: sub || undefined };
   };
 
