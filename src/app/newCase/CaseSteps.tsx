@@ -8,20 +8,21 @@
 
 import { forwardRef, useCallback, useEffect, useRef, useState, DragEvent, ForwardedRef, KeyboardEvent, ReactNode } from 'react';
 import {
-  BadgeCheck, Box, Building2, CalendarCheck, CalendarDays, Check, CircleDashed, Clock3, FileUp, HeartPulse, History, Layers, Lock,
+  BadgeCheck, Box, Building2, CalendarDays, Check, CircleDashed, Clock3, FileUp, HeartPulse, History, Layers, Lock,
   Package, Palette, PenLine, ScanLine, Search, Send, Smile, Star, Stethoscope, Truck, Upload, UserRound, Wallet, Zap,
-  Anchor, type LucideIcon,
+  Anchor, Mail, MessageCircle, MessageSquare, MoreHorizontal, type LucideIcon,
 } from 'lucide-react';
+import { IMPRESSION_COURIERS, SCANNER_BRANDS } from '../pages/CreateCasePage';
 import { useCase } from './CaseContext';
 import { CLINIC, DENTISTS, LABS, LabId, Patient, PriorWork, User, labById } from './data';
 import { demoNow, fmtCutoff, fmtDay, fmtFull, fmtMonth, fmtShort, fmtTime, fromISO, sameDay } from './dates';
 import {
-  BOX_ITEMS, PRODUCTS, archWord, attestation, defaultBox, fastTrackEligible, fitCheck, fitLine, fullName, guessFileRole, isPosted,
+  PRODUCTS, archWord, attestation, fastTrackEligible, fullName, guessFileRole, isPosted,
   itemPhrase, labMakes, labProducts, labSees, optionName, patientAge, patientLine, plural, recordsState, sendMode,
-  shadeSwatch, splitSuggestion, teethText, toothText, userTitle, FileRole, type ServiceItem,
+  shadeSwatch, splitSuggestion, teethText, toothText, userTitle, FileRole, type RecordsRoute, type ServiceItem,
 } from './rules';
 import { learnLogin, toggleFavourite, useFlowStore } from './store';
-import { Card, ChoiceChips, LinkButton, Notice, PrimaryButton, SecondaryButton, Segmented, SourceTag, StepHeading, FOCUS, GRADIENT_BTN } from './ui';
+import { Card, ChoiceChips, LinkButton, Notice, SecondaryButton, Segmented, SourceTag, StepHeading, FOCUS, GRADIENT_BTN } from './ui';
 import { NoteView, PRODUCT_ICON } from './ServiceSteps';
 import { useRoom } from './room';
 import PatientPicker from './PatientLauncher';
@@ -291,12 +292,18 @@ export const LabStep = forwardRef<HTMLHeadingElement>(function LabStep(_, ref) {
 
 // ─── Scans Source ────────────────────────────────────────────────────────────
 
-const ROUTES = [
+// The product's Scan Source methods, in its order (Quick Create's CaseSourcePopup), plus the flow's Scan to Follow.
+const ROUTES: { id: RecordsRoute; label: string; sub: string }[] = [
+  { id: 'upload', label: 'Via Scanner', sub: 'Scan files: upper, lower and bite' },
+  { id: 'post', label: 'Impressions (By Post)', sub: 'Adds 1 courier working day' },
+  { id: 'sms', label: 'SMS', sub: 'The case came in by text message' },
+  { id: 'whatsapp', label: 'Whatsapp', sub: 'The case came in on Whatsapp' },
+  { id: 'email', label: 'Email', sub: 'The case came in by email' },
+  { id: 'other', label: 'Other', sub: 'Any other way' },
   { id: 'follow', label: 'Scan to Follow', sub: 'Send now; the next scan attaches' },
-  { id: 'post', label: 'Impression by Post', sub: 'Adds 1 courier working day' },
-  { id: 'upload', label: 'Upload Files', sub: 'STL, PLY, OBJ or DCM' },
 ];
-const ROUTE_ICON: Record<string, LucideIcon> = { follow: Clock3, post: Package, upload: Upload };
+const ROUTE_ICON: Record<RecordsRoute, LucideIcon> = { upload: ScanLine, post: Package, sms: MessageSquare, whatsapp: MessageCircle, email: Mail, other: MoreHorizontal, follow: Clock3 };
+const ROUTE_NAME = Object.fromEntries(ROUTES.map(r => [r.id, r.label])) as Record<RecordsRoute, string>;
 
 export function recordsSummary(api: ReturnType<typeof useCase>): string {
   const { draft, ctx } = api;
@@ -308,9 +315,13 @@ export function recordsSummary(api: ReturnType<typeof useCase>): string {
     return `${txt.charAt(0).toUpperCase()}${txt.slice(1)} · ${draft.scan.scanner} · today ${draft.scan.time}`;
   }
   if (s === 'nextStage') return 'Models at the lab · box by post';
-  if (s === 'post') return 'Impression by post';
+  if (s === 'post') return draft.records.courier ? `Impressions (By Post) · ${draft.records.courier}` : 'Impressions (By Post)';
   if (s === 'follow') return 'Scan to follow';
-  if (s === 'upload') return draft.records.files.length ? `${plural(draft.records.files.length, 'file')} uploaded` : 'Upload files';
+  if (s === 'upload') {
+    const via = draft.records.scannerBrand ? `Via Scanner · ${draft.records.scannerBrand}` : 'Via Scanner';
+    return draft.records.files.length ? `${via} · ${plural(draft.records.files.length, 'file')}` : via;
+  }
+  if (s === 'sms' || s === 'whatsapp' || s === 'email' || s === 'other') return ROUTE_NAME[s];
   return 'Not chosen yet';
 }
 
@@ -319,9 +330,13 @@ export const RecordsStep = forwardRef<HTMLHeadingElement>(function RecordsStep(_
   const { draft, ctx, update, openDrawer, patient, readOnly } = api;
   const wide = useRoom() === 'wide';
   const s = recordsState(draft, ctx);
-  const setRoute = (route?: 'follow' | 'post' | 'upload') => update(d => ({ ...d, records: { ...d.records, route } }));
+  const setRoute = (route?: RecordsRoute) => update(d => ({ ...d, records: { ...d.records, route } }));
   const nextStage = draft.items.find(i => i.stageSrc === 'Next stage');
-  const reline = draft.items.some(i => i.product === 'reline');
+  // Dentures and relines always go by post. With no services yet, every choice is open.
+  const postOnly = draft.items.length > 0 && draft.items.every(i => ['denture', 'partial', 'reline'].includes(i.product));
+  // Every way is always on the step, the one in use ticked (Impressions (By Post) is the default), so the
+  // source can be changed at any time; what it needs (the courier, the scanner and files) sits under them.
+  const chooser = s !== 'scan' && s !== 'nextStage' && !postOnly && !readOnly;
 
   return (
     <div className="space-y-5">
@@ -329,27 +344,25 @@ export const RecordsStep = forwardRef<HTMLHeadingElement>(function RecordsStep(_
       {s === 'scan' && (wide ? <ScanCard /> : (
         <Settled src="From scan" action={<SecondaryButton onClick={() => openDrawer({ kind: 'scan' })}>View</SecondaryButton>}>{recordsSummary(api)}</Settled>
       ))}
-      {s === 'none' && (wide ? (
-        <RouteCards value={draft.records.route} onPick={id => setRoute(id as 'follow' | 'post' | 'upload')} />
+      {chooser && (wide ? (
+        <RouteCards value={draft.records.route} onPick={id => setRoute(id as RecordsRoute)} />
       ) : (
-        <ChoiceChips label="How will the lab get the impressions?" value={draft.records.route} onChange={id => setRoute(id as 'follow' | 'post' | 'upload')} options={ROUTES} />
+        <ChoiceChips label="How will the lab get the impressions?" value={draft.records.route} onChange={id => setRoute(id as RecordsRoute)} options={ROUTES} />
       ))}
-      {s === 'follow' && (
-        <>
-          <Settled src="You" action={!readOnly && <SecondaryButton onClick={() => setRoute(undefined)}>Change</SecondaryButton>}>Scan to follow</Settled>
-          {wide ? <FollowSteps first={patient.first} /> : (
-            <p className="text-sm text-[#3A3A4A] leading-relaxed">Send now. The lab can read the prescription straight away, and the next scan from your scanners for {patient.first} attaches to this case. You’ll confirm it before it goes to the lab.</p>
-          )}
-        </>
-      )}
+      {s === 'follow' && (wide ? <FollowSteps first={patient.first} /> : (
+        <p className="text-sm text-[#3A3A4A] leading-relaxed">Send now. The lab can read the prescription straight away, and the next scan from your scanners for {patient.first} attaches to this case. You’ll confirm it before it goes to the lab.</p>
+      ))}
       {s === 'nextStage' && nextStage && patient.nextStage && (
         <Settled src="Next stage">The lab has the models from {patient.nextStage.caseId} · {LABS.find(l => l.id === patient.nextStage!.lab)!.name}</Settled>
       )}
       {isPosted(s) && (
-        <PostBox reline={reline} canChange={s === 'post' && !draft.items.every(i => ['denture', 'partial', 'reline'].includes(i.product)) && !readOnly} onChange={() => setRoute(undefined)} />
+        <PostBox />
       )}
-      {s === 'upload' && <UploadBox onChange={() => setRoute(undefined)} />}
-      {s !== 'scan' && s !== 'none' && draft.items.every(i => ['denture', 'partial', 'reline'].includes(i.product)) && draft.items.length > 0 && (
+      {s === 'upload' && <UploadBox />}
+      {(s === 'sms' || s === 'whatsapp' || s === 'email' || s === 'other') && (
+        <p className="text-sm text-[#3A3A4A]">{s === 'other' ? 'Came in another way.' : `Came in by ${ROUTE_NAME[s]}.`}</p>
+      )}
+      {s !== 'scan' && s !== 'none' && postOnly && (
         <p className="text-xs text-[#5A5A6A]">Dentures and relines always go by post.</p>
       )}
     </div>
@@ -405,7 +418,7 @@ function ScanCard() {
 /** No records yet: the three routes as small option cards (a radiogroup). */
 function RouteCards({ value, onPick }: { value?: string; onPick: (id: string) => void }) {
   return (
-    <div role="radiogroup" aria-label="How will the lab get the impressions?" onKeyDown={roveRadios} className="grid grid-cols-3 gap-3">
+    <div role="radiogroup" aria-label="How will the lab get the impressions?" onKeyDown={roveRadios} className="flex flex-wrap gap-2">
       {ROUTES.map((r, i) => {
         const Icon = ROUTE_ICON[r.id];
         const selected = value === r.id;
@@ -419,13 +432,11 @@ function RouteCards({ value, onPick }: { value?: string; onPick: (id: string) =>
             title={r.sub}
             tabIndex={selected || (!ROUTES.some(x => x.id === value) && i === 0) ? 0 : -1}
             onClick={() => onPick(r.id)}
-            className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl border text-left transition-colors motion-reduce:transition-none ${FOCUS} ${selected ? 'bg-[#EEF4FF] border-[#3F6FE8] ring-1 ring-[#3F6FE8]' : 'bg-white border-[#D4D4DD] hover:border-[#3F6FE8] hover:bg-[#F8FAFF]'}`}
+            className={`inline-flex items-center gap-2 h-9 px-3 rounded-lg border text-sm transition-colors motion-reduce:transition-none ${FOCUS} ${selected ? 'bg-[#EEF4FF] border-[#3F6FE8] ring-1 ring-[#3F6FE8] font-semibold text-[#1E40AF]' : 'bg-white border-[#D4D4DD] text-[#1F1F2E] hover:border-[#3F6FE8] hover:bg-[#F8FAFF]'}`}
           >
-            <span className="w-8 h-8 rounded-lg bg-[#EEF4FF] border border-[#DCE6FD] text-[#2F62D6] flex items-center justify-center flex-shrink-0" aria-hidden><Icon className="w-4 h-4" strokeWidth={1.75} /></span>
-            <span className="flex-1 min-w-0">
-              <span className="flex items-center gap-1.5 text-sm font-semibold text-[#030213]">{r.label}{selected && <Check className="w-3.5 h-3.5 text-[#2F62D6]" strokeWidth={3} aria-hidden />}</span>
-              <span className="block text-[11px] leading-snug text-[#5A5A6A]">{r.sub}</span>
-            </span>
+            <Icon className={`w-4 h-4 ${selected ? 'text-[#2F62D6]' : 'text-[#5A5A6A]'}`} strokeWidth={1.75} aria-hidden />
+            {r.label}
+            {selected && <Check className="w-3.5 h-3.5 text-[#2F62D6]" strokeWidth={3} aria-hidden />}
           </button>
         );
       })}
@@ -433,7 +444,6 @@ function RouteCards({ value, onPick }: { value?: string; onPick: (id: string) =>
   );
 }
 
-/** Scan to follow, as the three things that happen. */
 function FollowSteps({ first }: { first: string }) {
   const steps: { icon: LucideIcon; title: string; sub: string }[] = [
     { icon: Send, title: 'Send now', sub: 'The lab can read the prescription straight away' },
@@ -456,45 +466,41 @@ function FollowSteps({ first }: { first: string }) {
   );
 }
 
-function PostBox({ reline, canChange, onChange }: { reline: boolean; canChange: boolean; onChange: () => void }) {
+/** Impressions (By Post): the product's "Courier / Postal service", so the lab can track the parcel. */
+function PostBox() {
   const { draft, update, readOnly } = useCase();
-  const wide = useRoom() === 'wide';
-  const box = { ...defaultBox(draft), ...draft.records.box };
-  const toggle = (k: string) => update(d => ({ ...d, records: { ...d.records, box: { ...box, [k]: !box[k] } } }));
-  const inBox = BOX_ITEMS.filter(k => box[k] || (reline && k === 'Old denture')).length;
+  const courier = draft.records.courier ?? '';
+  const [other, setOther] = useState(!!courier && !IMPRESSION_COURIERS.includes(courier));
+  const set = (c: string) => update(d => ({ ...d, records: { ...d.records, courier: c || undefined } }));
   return (
-    <div className="space-y-4">
-      {canChange && <Settled src="You" action={<SecondaryButton onClick={onChange}>Change</SecondaryButton>}>Impression by post · adds 1 courier working day</Settled>}
-      <Card className={wide ? 'p-5' : 'p-4'}>
-        {wide ? (
-          <div className="flex items-center gap-3 mb-4">
-            <span className="w-8 h-8 rounded-lg bg-[#EEF4FF] text-[#2F62D6] flex items-center justify-center flex-shrink-0" aria-hidden><Box className="w-4 h-4" strokeWidth={1.75} /></span>
-            <p className="flex-1 text-sm font-semibold text-[#030213]">What’s going in the box?</p>
-            <span className="text-[11px] text-[#5A5A6A]">{plural(inBox, 'item')} ticked</span>
-          </div>
-        ) : (
-          <p className="text-sm font-semibold text-[#030213] mb-3 flex items-center gap-2"><Box className="w-4 h-4 text-[#4A4A5A]" aria-hidden />What’s going in the box?</p>
+    <Card className="p-4">
+      <div className="grid grid-cols-2 gap-3 max-w-[560px]">
+        <label className="block">
+          <span className="block text-xs font-semibold text-[#030213] mb-1.5">Courier / Postal service</span>
+          <select
+            value={other ? 'Other' : courier}
+            disabled={readOnly}
+            onChange={e => { const v = e.target.value; setOther(v === 'Other'); set(v === 'Other' ? '' : v); }}
+            className={`w-full h-9 px-3 text-sm border border-[#E0E0E6] rounded-lg bg-white ${FOCUS}`}
+          >
+            <option value="">Select courier…</option>
+            {IMPRESSION_COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
+            <option value="Other">Other (specify)</option>
+          </select>
+          <span className="block mt-1 text-[11px] text-[#5A5A6A]">So the lab can track the parcel.</span>
+        </label>
+        {other && (
+          <label className="block">
+            <span className="block text-xs font-semibold text-[#030213] mb-1.5">Courier name</span>
+            <input value={courier} disabled={readOnly} onChange={e => set(e.target.value)} placeholder="e.g. DPD, Lab Courier…" className={`w-full h-9 px-3 text-sm border border-[#E0E0E6] rounded-lg ${FOCUS}`} />
+          </label>
         )}
-        <div className="grid grid-cols-2 gap-2">
-          {BOX_ITEMS.map(k => {
-            const locked = reline && k === 'Old denture';
-            return (
-              <label key={k} className={`flex items-center gap-2.5 px-3 ${wide ? 'py-2.5 rounded-xl' : 'py-2 rounded-lg'} border ${box[k] ? 'border-[#C8D8FC] bg-[#F5F8FF]' : 'border-[#E0E0E6]'} ${locked ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
-                <input type="checkbox" checked={!!box[k] || locked} disabled={locked || readOnly} onChange={() => toggle(k)} className="w-4 h-4 accent-[#3F6FE8]" />
-                {wide && <BoxGlyph item={k} on={!!box[k] || locked} />}
-                <span className="text-sm text-[#1F1F2E]">{k}</span>
-                {locked && <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-[#4A4A5A]"><Lock className="w-3 h-3" aria-hidden />Required for this work</span>}
-              </label>
-            );
-          })}
-        </div>
-      </Card>
-      {/* No disinfection tick here: it isn't asked at Scans Source (the portal's A4 label goes in the box). */}
-    </div>
+      </div>
+    </Card>
   );
 }
 
-function UploadBox({ onChange }: { onChange: () => void }) {
+function UploadBox() {
   const { draft, update, readOnly } = useCase();
   const wide = useRoom() === 'wide';
   const input = useRef<HTMLInputElement>(null);
@@ -502,9 +508,17 @@ function UploadBox({ onChange }: { onChange: () => void }) {
   const add = (names: string[]) => update(d => ({ ...d, records: { ...d.records, files: [...d.records.files, ...names.map(name => ({ name, role: guessFileRole(name) }))] } }));
   const setRole = (i: number, role: FileRole) => update(d => ({ ...d, records: { ...d.records, files: d.records.files.map((f, j) => (j === i ? { ...f, role } : f)) } }));
   const onDrop = (e: DragEvent) => { e.preventDefault(); setOver(false); add(Array.from(e.dataTransfer.files).map(f => f.name)); };
+  const brand = draft.records.scannerBrand ?? '';
   return (
     <div className="space-y-4">
-      <Settled src="You" action={!readOnly && <SecondaryButton onClick={onChange}>Change</SecondaryButton>}>Upload files</Settled>
+      <label className="block max-w-[270px]">
+        <span className="block text-xs font-semibold text-[#030213] mb-1.5">Scanner brand</span>
+        <select value={brand} disabled={readOnly} onChange={e => update(d => ({ ...d, records: { ...d.records, scannerBrand: e.target.value || undefined } }))} className={`w-full h-9 px-3 text-sm border border-[#E0E0E6] rounded-lg bg-white ${FOCUS}`}>
+          <option value="">Select scanner…</option>
+          {SCANNER_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <span className="block mt-1 text-[11px] text-[#5A5A6A]">So the lab knows the device.</span>
+      </label>
       {!readOnly && (
         <div
           tabIndex={0}
@@ -680,10 +694,9 @@ export function backByText(api: ReturnType<typeof useCase>): string {
 
 export const DeliveryStep = forwardRef<HTMLHeadingElement>(function DeliveryStep(_, ref) {
   const api = useCase();
-  const { draft, update, dates, lab, go, openDrawer, ctx, notes, dismissNote, sendSeparately, readOnly } = api;
+  const { draft, update, dates, lab, go, ctx, notes, dismissNote, sendSeparately, readOnly } = api;
   const wide = useRoom() === 'wide';
   const eligible = draft.items.filter(i => fastTrackEligible(i, ctx));
-  const fit = draft.fit && dates.backBy ? fitCheck(draft.fit, dates.backBy) : null;
   const split = splitSuggestion(draft, ctx, dates);
   const deliveryNotes = notes.filter(n => n.step === 'delivery');
   return (
@@ -716,29 +729,7 @@ export const DeliveryStep = forwardRef<HTMLHeadingElement>(function DeliveryStep
         </label>
       ))}
 
-      {dates.route !== 'follow' && dates.backBy && (
-        fit ? (
-          <Settled src="You" action={!readOnly && <div className="flex gap-2"><SecondaryButton onClick={() => openDrawer({ kind: 'fit' })}>Change</SecondaryButton><SecondaryButton onClick={() => update(d => ({ ...d, fit: undefined }))}>Remove</SecondaryButton></div>}>
-            {fitLine(fit)}
-          </Settled>
-        ) : wide ? (
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-dashed border-[#C9C9D6] bg-white">
-            <span className="w-8 h-8 rounded-lg bg-[#EEF4FF] text-[#2F62D6] flex items-center justify-center flex-shrink-0" aria-hidden><CalendarCheck className="w-4 h-4" strokeWidth={1.75} /></span>
-            <p className="flex-1 min-w-0 text-sm text-[#1F1F2E]">
-              <span className="block font-semibold text-[#030213]">Fit appointment</span>
-              <span className="block text-xs text-[#4A4A5A]">Book the fit from <span className="font-semibold text-[#030213]">{dates.earliestFit ? fmtDay(dates.earliestFit) : '—'}</span></span>
-            </p>
-            {!readOnly && <PrimaryButton onClick={() => openDrawer({ kind: 'fit' })}>Add Fit Appointment</PrimaryButton>}
-          </div>
-        ) : (
-          <div className="flex items-center gap-3 px-4 py-3.5 rounded-xl border border-dashed border-[#C9C9D6] bg-white">
-            <CalendarDays className="w-5 h-5 text-[#4A4A5A]" aria-hidden />
-            <p className="text-sm text-[#1F1F2E] flex-1">Book the fit from <span className="font-semibold">{dates.earliestFit ? fmtDay(dates.earliestFit) : '—'}</span></p>
-            {!readOnly && <PrimaryButton onClick={() => openDrawer({ kind: 'fit' })}>Add Fit Appointment</PrimaryButton>}
-          </div>
-        )
-      )}
-
+      {/* No fit appointment: dates live on each service. */}
       {split && !draft.keepTogether && !draft.split && !readOnly && (
         <Notice tone="note" actions={<><SecondaryButton onClick={() => sendSeparately(true)}>Send Separately</SecondaryButton><SecondaryButton onClick={() => update(d => ({ ...d, keepTogether: true }))}>Keep Together</SecondaryButton></>}>
           The {PRODUCTS[split.item.product].noun} alone would be back {fmtDay(split.backBy)}.
@@ -905,12 +896,6 @@ function ArchGlyph({ part, className = '' }: { part: 'upper' | 'lower' | 'bite';
 
 const BOX_ICON: Record<string, LucideIcon> = { 'Shade tab': Palette, 'Old denture': Smile, 'Implant components': Anchor, 'Recorded bite blocks': Layers };
 const BOX_ARCH: Record<string, 'upper' | 'lower' | 'bite'> = { 'Upper impression': 'upper', 'Lower impression': 'lower', 'Bite registration': 'bite' };
-function BoxGlyph({ item, on }: { item: string; on: boolean }) {
-  const tone = on ? 'text-[#2F62D6]' : 'text-[#8B8B9E]';
-  if (BOX_ARCH[item]) return <ArchGlyph part={BOX_ARCH[item]} className={`w-5 h-4 flex-shrink-0 ${tone}`} />;
-  const Icon = BOX_ICON[item] ?? Box;
-  return <Icon className={`w-4 h-4 flex-shrink-0 ${tone}`} strokeWidth={1.75} aria-hidden />;
-}
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /** itemPhrase, but past four teeth a count ("crown (30 teeth)"), never a paragraph of tooth numbers. */

@@ -141,7 +141,7 @@ function ItemBlock({ group }: { group: ItemGroup }) {
     <div className="pt-3 pb-1">
       <div className="flex items-center gap-3 pl-2 pr-1.5">
         {drawn && !onChart ? (
-          <MiniChart teeth={item.teeth} arch={arch} pontics={item.bridge ? bridgeParts(item).pontics : undefined} width={40} label={title} />
+          <MiniChart teeth={item.teeth} arch={arch} pontics={item.bridge ? bridgeParts(item).pontics : undefined} width={64} label={title} />
         ) : (
           <span className="w-10 h-10 rounded-xl bg-[#EEF4FF] text-[#2F62D6] flex items-center justify-center flex-shrink-0" aria-hidden>
             <Icon className="w-5 h-5" />

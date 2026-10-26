@@ -6,11 +6,12 @@
 // someone presses Refresh on the picker's New Scans lane.
 
 import { useSyncExternalStore } from 'react';
-import { CLINIC, LabId, PATIENTS, Patient, ProductId, SCANNER_LOGINS, Scanner, UserId } from './data';
-import { CaseDraft, ServiceItem, setLoginLookup } from './rules';
+import { CLINIC, LabId, PATIENTS, Patient, ProductId, SCANNER_LOGINS, Scanner, UserId, setNotationLookup } from './data';
+import { CaseDraft, Notation, ServiceItem, setLoginLookup } from './rules';
 import type { Ux } from './controller';
 
-export type RowStatus = 'Draft' | 'Ready for Dispatch' | 'Received' | 'In production' | 'Delivered';
+// A posted case is created Ready for Dispatch (not with the lab yet) and becomes Submitted once it's posted.
+export type RowStatus = 'Draft' | 'Ready for Dispatch' | 'Submitted' | 'Received' | 'In production' | 'Delivered';
 export interface CaseRow {
   id: string;
   patientId: string;
@@ -28,8 +29,12 @@ export interface CaseRow {
   labId: LabId;
   updatedAt: number;
   sentAt?: number;
+  /** The same send moment on the demo clock (ISO of demoNow() at send), so its dates hold across page loads. */
+  sentDemoAt?: string;
   /** E6 demo: the scan for a "Scan to Follow" case has arrived. */
   scanArrived?: { scanner: Scanner; time: string };
+  /** Scan to Follow: when the attached scan reached the lab, on the demo clock (ms). */
+  scanAt?: number;
   highlightUntil?: number;
 }
 export interface FlowEvent { id: string; forUser: UserId; text: string; caseId: string; at: number }
@@ -46,6 +51,8 @@ interface State {
   ux: Ux;
   /** The held-back demo scan (Hannah Lowe, iTero) has been delivered. */
   scanInboxDelivered: boolean;
+  /** Tooth numbering each user picked by the chart (FDI, Universal, Palmer); else the user's own. */
+  notations: Partial<Record<UserId, Notation>>;
 }
 
 const KEY = 'newCaseFlow.v1';
@@ -110,7 +117,7 @@ function seed(): State {
     { id: 'CAS-2026-117', patientId: 'P-2025-009', status: 'Delivered', source: 'clinic', service: 'Full denture · UPPER · Bite Registration', delivery: '2026-10-12', dentist: 'Dr Sarah Khan', labId: 'pennine', updatedAt: new Date(2026, 9, 12, 10, 30).getTime() },
     { id: 'CAS-2026-098', patientId: 'P-2025-018', status: 'Delivered', source: 'clinic', service: 'Crown · 46', delivery: '2026-10-03', dentist: 'Dr Sarah Khan', labId: 'northfield', updatedAt: new Date(2026, 9, 3, 9, 15).getTime() },
   ];
-  return { rows, patients: [], userId: 'khan', logins: {}, events: [], counter: 144, favourites: ['northfield', 'pennine'], ux: 'guided', scanInboxDelivered: false };
+  return { rows, patients: [], userId: 'khan', logins: {}, events: [], counter: 144, favourites: ['northfield', 'pennine'], ux: 'guided', scanInboxDelivered: false, notations: {} };
 }
 
 function load(): State {
@@ -152,6 +159,9 @@ export function loginMap(): Record<string, UserId | undefined> {
 }
 export const learnLogin = (login: string, userId: UserId) => commit({ ...state, logins: { ...state.logins, [login]: userId } });
 setLoginLookup(login => !loginMap()[login]);
+/** The numbering the charts and teeth read in, kept per user for next time. */
+export const setNotation = (userId: UserId, n: Notation) => commit({ ...state, notations: { ...state.notations, [userId]: n } });
+setNotationLookup(id => state.notations?.[id]);
 
 export function toggleFavourite(id: LabId) {
   const f = state.favourites.includes(id) ? state.favourites.filter(x => x !== id) : [...state.favourites, id];
@@ -175,6 +185,10 @@ export function saveRows(list: CaseRow[]) {
   commit({ ...state, rows });
 }
 export const removeRow = (id: string) => commit({ ...state, rows: state.rows.filter(r => r.id !== id) });
+/** Ready for Dispatch → Submitted once the clinic posts it (the portal's rule), with the back-by day counted from the post. */
+export function markDispatched(id: string, delivery?: string) {
+  commit({ ...state, rows: state.rows.map(r => (r.id === id ? { ...r, status: 'Submitted', delivery: delivery ?? r.delivery, updatedAt: Date.now() } : r)) });
+}
 export function openDraftsFor(patientId: string) {
   return state.rows.filter(r => r.patientId === patientId && r.status === 'Draft' && !r.flag && r.draft);
 }

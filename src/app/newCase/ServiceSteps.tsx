@@ -6,29 +6,31 @@
 // the editors turn visual (service tiles, swatches, one-line option rows);
 // One page's inline rows ('compact') keep the plain chips.
 
-import { useContext, useEffect, useMemo, useState, forwardRef, KeyboardEvent, ReactNode } from 'react';
+import { useContext, useEffect, useId, useMemo, useState, forwardRef, KeyboardEvent, ReactNode } from 'react';
 import {
   Anchor, ArrowRight, Bolt, Camera, Check, ChevronDown, Crown, Droplet, Gem, Layers, Link, Link2, Moon, MoreHorizontal, PackagePlus,
   Plus, Shapes, Shield, Smile, SmilePlus, Sparkles, Square, Wrench, History, Trash2, X, type LucideIcon,
 } from 'lucide-react';
 import { CaseContext, useCase } from './CaseContext';
-import { ChartWidthContext, useRoom } from './room';
+import { ChartWidthContext, ColumnWidthContext, LiveTeethContext, useRoom } from './room';
 import {
   ABUTMENTS, ACRYLIC_OPTIONS, BRIDGE_ERRORS, MATERIAL_GROUP, MOULD_OPTIONS, OPTIONS, PARTIAL_DESIGNS, PARTIAL_STAGES, POSTDAM_OPTIONS,
-  PREF_FIELDS, PRODUCTS, REMAKE_REASONS, ServiceItem, Slot, SlotId, TILE_ORDER, archCaps, bridgeIssue, bridgeParts, bridgeReadback,
+  PRODUCTS, REMAKE_REASONS, ServiceItem, Slot, SlotId, TILE_ORDER, archCaps, bridgeIssue, bridgeParts, bridgeReadback,
   effective, implantOnRecord, isFront, itemTitle, jawOf, labMakes, labProducts, labsThatMake, materialOptions,
   optionAvail, optionName, plural, priceOf, remakeCandidate, shadeSwatch, slotGaps, slotsFor, spanBetween, spanText,
-  teethText, toothText, unitsOf, usualsFor, palmerOf, patientAge, slotStepId,
+  teethText, toothText, unitsOf, usualsFor, palmerOf, patientAge, slotStepId, NOTATIONS, Notation,
   DENTURE_STAGES, DENTURE_TREATMENTS, DentureStageId, DentureTreatment, StagePlan, dentureStageReady, dentureTreatment,
   isFollowUp, seedDenturePlan, stageName, stageOption, stagePlan, stagesOutOfOrder, stagesShort, stagesSummary,
-  suggestedStageDates, treatmentName,
+  suggestedStageDates, treatmentName, CaseDraft, receivedFor, serviceDate,
 } from './rules';
 import { IMPLANT_SYSTEMS, LABS, ProductId } from './data';
-import { getRow } from './store';
+import { getRow, setNotation } from './store';
 import { ServiceNote } from './Instructions';
-import { ArrowAction, stepName, useFooterArrow, useHandArrow } from './footerArrow';
+import { ArrowAction, stepName, useArrowActive, useFooterArrow, useHandArrow } from './footerArrow';
 import { demoNow, fmtDay, fmtShort, fromISO, toISO } from './dates';
 import TeethChart, { ChartLegend, MiniChart } from './TeethChart';
+import { StageDatePicker } from '../components/DentureStages';
+import type { StageRow } from '../data/dentureStages';
 import {
   ChoiceChips, ChipOption, DefaultsPanel, FieldLabel, LinkButton, NextArrow, Notice, PrimaryButton, SecondaryButton, SourceTag,
   StateIcon, StepHeading, ToggleChips, FOCUS,
@@ -55,7 +57,9 @@ function useNextName(itemId: string, slot: SlotId): string {
  */
 function StepArrow({ show = true, ...a }: ArrowAction & { show?: boolean }) {
   const inFooter = useFooterArrow();
-  useHandArrow(inFooter && show, a);
+  // An editor that isn't the current step keeps its arrow to itself.
+  const active = useArrowActive();
+  useHandArrow(inFooter && show && active, a);
   if (inFooter || !show) return null;
   return <NextArrow onClick={a.run} disabled={a.disabled} label={a.label} next={a.next} hint={a.hint} />;
 }
@@ -241,7 +245,7 @@ const PANEL_SLOTS: SlotId[] = ['material', 'type', 'splint', 'retention', 'acryl
  * mini chart beside Guided's step), so the question doesn't repeat them. Many
  * teeth read as a count, never a paragraph of tooth numbers.
  */
-export function questionFor(slot: Slot, item: ServiceItem, n: 'fdi' | 'palmer', labName: string, teethShown = false): string {
+export function questionFor(slot: Slot, item: ServiceItem, n: Notation, labName: string, teethShown = false): string {
   const many = item.teeth.length > 4;
   const teeth = many ? `${item.teeth.length} teeth` : teethText(item.teeth, n);
   const title = many ? `${PRODUCTS[item.product].label} · ${item.teeth.length} teeth` : itemTitle(item, n);
@@ -249,7 +253,6 @@ export function questionFor(slot: Slot, item: ServiceItem, n: 'fdi' | 'palmer', 
     if (slot.id === 'material' && !item.ambiguous) return 'Which material?';
     if (slot.id === 'shade' && item.product !== 'denture' && item.product !== 'partial') return 'Which shade?';
     if (slot.id === 'system') return 'Which implant system?';
-    if (slot.id === 'prefs') return 'Any preferences?';
   }
   switch (slot.id) {
     case 'teeth':
@@ -289,15 +292,15 @@ export function questionFor(slot: Slot, item: ServiceItem, n: 'fdi' | 'palmer', 
     case 'retention': return 'Screw- or cement-retained?';
     case 'acrylic': return 'Which acrylic?';
     case 'mould': return 'Tooth mould';
-    case 'prefs': return `Preferences for ${title}`;
+    case 'deliveryDate': return 'When do you need it back?';
   }
 }
 
 export const SlotStep = forwardRef<HTMLHeadingElement, { item: ServiceItem; slotId: SlotId }>(function SlotStep({ item, slotId }, ref) {
-  const { ctx, user, lab, notes, dismissNote } = useCase();
+  const { ctx, draft, user, lab, notes, dismissNote } = useCase();
   const wide = useRoom() === 'wide';
   const n = user.notation;
-  const slots = slotsFor(item, ctx);
+  const slots = slotsFor(item, ctx, draft);
   const idx = slots.findIndex(s => s.id === slotId);
   const slot = slots[idx];
   if (!slot) return null;
@@ -341,9 +344,9 @@ export const SlotStep = forwardRef<HTMLHeadingElement, { item: ServiceItem; slot
           )}
         </div>
         {showMini && (
-          <figure className={`flex flex-col items-center gap-2 ${wide ? 'w-[140px] p-3 rounded-2xl bg-[#F8F9FC] border border-[#ECECF2]' : 'pt-1'}`}>
-            <MiniChart teeth={item.teeth} arch={archItem ? item.arch : undefined} pontics={item.bridge?.pontics} width={wide ? 114 : 120} label={itemTitle(item, n)} />
-            {caption && <figcaption className="max-w-[120px] text-center text-[11px] font-semibold text-[#3A3A4A] leading-snug">{caption}</figcaption>}
+          <figure className={`flex flex-col items-center gap-2 ${wide ? 'w-[200px] p-3 rounded-2xl bg-[#F8F9FC] border border-[#ECECF2]' : 'pt-1'}`}>
+            <MiniChart teeth={item.teeth} arch={archItem ? item.arch : undefined} pontics={item.bridge?.pontics} width={176} label={itemTitle(item, n)} />
+            {caption && <figcaption className="max-w-[176px] text-center text-[11px] font-semibold text-[#3A3A4A] leading-snug">{caption}</figcaption>}
           </figure>
         )}
       </div>
@@ -427,7 +430,8 @@ function OpenCaseSummary({ caseId }: { caseId: string }) {
 
 /** Has the user given this service any answer yet? An empty one goes without asking. */
 const hasWork = (i: ServiceItem) =>
-  i.teeth.length > 0 || !!i.arch || !!i.material || !!i.shade || !!i.type || !!i.stage || !!i.stages?.length || !!i.base || !!i.work || !!i.desc || i.photos.length > 0;
+  i.teeth.length > 0 || !!i.arch || !!i.material || !!i.shade || !!i.type || !!i.stage || !!i.stages?.length || !!i.base || !!i.work || !!i.desc || i.photos.length > 0
+  || !!i.requestedDelivery;
 
 /** "Remove Crown" on the step (link) or an × in the left nav (icon), with a quick confirm. */
 export function RemoveService({ item, variant = 'link' }: { item: ServiceItem; variant?: 'link' | 'icon' }) {
@@ -476,7 +480,6 @@ export function SlotEditor({ item, slot, compact }: { item: ServiceItem; slot: S
     case 'material': return <MaterialEditor item={item} compact={compact} />;
     case 'shade': return <ShadeEditor item={item} />;
     case 'photos': return <PhotosEditor item={item} />;
-    case 'prefs': return <PrefsEditor item={item} />;
     case 'implantRecord': return <ImplantDecision item={item} />;
     case 'remake': return <RemakeDecision item={item} />;
     case 'labCheck': return <LabCheck item={item} />;
@@ -484,6 +487,7 @@ export function SlotEditor({ item, slot, compact }: { item: ServiceItem; slot: S
     case 'desc': return <DescEditor item={item} />;
     case 'wings': return <WingsEditor item={item} />;
     case 'stages': return <StagesEditor item={item} />;
+    case 'deliveryDate': return <DeliveryDateEditor item={item} />;
     default: return <ChipSlot item={item} slot={slot} compact={compact} />;
   }
 }
@@ -635,7 +639,7 @@ const WIDE_FORM: Partial<Record<SlotId, 'segment' | 'pills'>> = {
 // ─── Teeth ───────────────────────────────────────────────────────────────────
 
 function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boolean }) {
-  const { user, patient, draft, readOnly, updateItem, doneAndAdvance, addService, removeItem } = useCase();
+  const { user, patient, draft, readOnly, updateItem, doneAndAdvance, answerInPlace, addService, removeItem } = useCase();
   const wide = useRoom() === 'wide';
   // The chart runs across the top of the step and fills it, up to this.
   const chartMax = useContext(ChartWidthContext) ?? (wide ? 720 : 600);
@@ -662,13 +666,32 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
     shadeSrc: i.shadeSrc === 'Made the original' ? undefined : i.shadeSrc,
   });
 
+  // Guided (LiveTeethContext): what's tapped is the answer straight away, a bridge once its span works,
+  // and the step stays put while several teeth are picked. Elsewhere teeth wait for "Done".
+  const live = useContext(LiveTeethContext);
+  const settle = (i: ServiceItem): ServiceItem => extraction
+    ? { ...i, extractDone: (i.extract?.length ?? 0) > 0 }
+    : { ...i, teethDone: isBridge ? !bridgeIssue(i) : i.teeth.length > 0 };
+  /** Every change a tap makes to the teeth. */
+  const put = (patch: Partial<ServiceItem> | ((i: ServiceItem) => ServiceItem)) => {
+    if (!live) { updateItem(item.id, patch); return; }
+    answerInPlace(() => updateItem(item.id, i => settle(typeof patch === 'function' ? patch(i) : { ...i, ...patch })));
+  };
+  // A selection tapped before (still waiting for "Done") counts as soon as the card shows it.
+  useEffect(() => {
+    if (!live || readOnly || single) return;
+    const waiting = extraction ? !item.extractDone : !item.teethDone;
+    const valid = extraction ? !!settle(item).extractDone : settle(item).teethDone;
+    if (waiting && valid && (extraction || isBridge || item.teethSrc === 'You')) put(i => i);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const tap = (id: string) => {
     setMsg(null);
     if (limit && jawOf(id) !== limit) { setMsg(`This ${noun} is for the ${limit} arch.`); return; }
     if (extraction) {
       if (missing.includes(id)) { setMsg(`${id} is recorded as missing, so it can’t be extracted.`); return; }
       const next = teeth.includes(id) ? teeth.filter(t => t !== id) : [...teeth, id];
-      updateItem(item.id, { extract: next, extractDone: false });
+      put({ extract: next, extractDone: false });
       return;
     }
     if (blocksMissing && missing.includes(id)) { setMsg(`${id} is recorded as missing. Use Bridge or Implant Crown for this site.`); return; }
@@ -677,7 +700,7 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
       updateItem(item.id, i => resetChecks({ ...i, teeth: [id], teethDone: true, teethSrc: 'You' }));
       return;
     }
-    updateItem(item.id, i => resetChecks({ ...i, teeth: i.teeth.includes(id) ? i.teeth.filter(t => t !== id) : [...i.teeth, id], teethDone: false, teethSrc: 'You' }));
+    put(i => resetChecks({ ...i, teeth: i.teeth.includes(id) ? i.teeth.filter(t => t !== id) : [...i.teeth, id], teethDone: false, teethSrc: 'You' }));
   };
 
   const tapBridge = (id: string) => {
@@ -688,21 +711,21 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
       return pontics;
     };
     if (!b.a) {
-      updateItem(item.id, { bridge: { a: id, pontics: [] }, teeth: [id], teethDone: false });
+      put({ bridge: { a: id, pontics: [] }, teeth: [id], teethDone: false });
       return;
     }
     if (!b.b) {
-      if (id === b.a) { updateItem(item.id, { bridge: { pontics: [] }, teeth: [], teethDone: false }); return; }
+      if (id === b.a) { put({ bridge: { pontics: [] }, teeth: [], teethDone: false }); return; }
       if (jawOf(id) !== jawOf(b.a)) { setMsg(BRIDGE_ERRORS.arch); return; }
       const span = spanBetween(b.a, id);
       if (span.length > 6) { setMsg(BRIDGE_ERRORS.long); return; }
-      updateItem(item.id, { bridge: { a: b.a, b: id, pontics: withDefaults(span, []) }, teeth: span, teethDone: false });
+      put({ bridge: { a: b.a, b: id, pontics: withDefaults(span, []) }, teeth: span, teethDone: false });
       return;
     }
     if (item.teeth.includes(id)) {
       if (missing.includes(id)) { setMsg(`${id} is recorded as missing, so it stays a pontic.`); return; }
       const pontics = b.pontics.includes(id) ? b.pontics.filter(t => t !== id) : [...b.pontics, id];
-      updateItem(item.id, { bridge: { ...b, pontics }, teethDone: false });
+      put({ bridge: { ...b, pontics }, teethDone: false });
       return;
     }
     if (jawOf(id) !== jawOf(b.a)) { setMsg(BRIDGE_ERRORS.arch); return; }
@@ -713,13 +736,13 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
     const span = spanBetween(sorted[0], sorted[2]);
     if (span.length > 6) { setMsg(BRIDGE_ERRORS.long); return; }
     const newInterior = span.filter(t => !item.teeth.includes(t) && t !== id);
-    updateItem(item.id, { bridge: { a: sorted[0], b: sorted[2], pontics: [...b.pontics, ...newInterior, ...span.filter(t => missing.includes(t) && !b.pontics.includes(t))] }, teeth: span, teethDone: false });
+    put({ bridge: { a: sorted[0], b: sorted[2], pontics: [...b.pontics, ...newInterior, ...span.filter(t => missing.includes(t) && !b.pontics.includes(t))] }, teeth: span, teethDone: false });
   };
 
   const setJaw = (ids: string[]) => {
     const allowed = ids.filter(t => !(blocksMissing && missing.includes(t)) && (!limit || jawOf(t) === limit));
-    if (extraction) { updateItem(item.id, { extract: allowed, extractDone: false }); return; }
-    updateItem(item.id, i => resetChecks({ ...i, teeth: allowed, teethDone: false, teethSrc: 'You' }));
+    if (extraction) { put({ extract: allowed, extractDone: false }); return; }
+    put(i => resetChecks({ ...i, teeth: allowed, teethDone: false, teethSrc: 'You' }));
   };
 
   const issue = isBridge ? bridgeIssue(item) : null;
@@ -757,14 +780,17 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
           readOnly={readOnly}
           label={teeth.length ? `Selected teeth: ${teethText(teeth, n)}` : 'No teeth selected'}
         />
-        <div className="mt-2.5 pt-2 border-t border-[#ECECF2]">
-          <ChartLegend items={[
-            'selected',
-            ...(isBridge ? ['pontic' as const] : []),
-            ...(missing.length ? ['missing' as const] : []),
-            ...(implants.length ? ['implant' as const] : []),
-            ...(otherTeeth.length ? ['other' as const] : []),
-          ]} />
+        <div className="mt-2.5 pt-2 border-t border-[#ECECF2] flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex-1 min-w-0">
+            <ChartLegend items={[
+              'selected',
+              ...(isBridge ? ['pontic' as const] : []),
+              ...(missing.length ? ['missing' as const] : []),
+              ...(implants.length ? ['implant' as const] : []),
+              ...(otherTeeth.length ? ['other' as const] : []),
+            ]} />
+          </div>
+          <NotationSelect />
         </div>
       </div>
       <div className="space-y-4">
@@ -772,8 +798,37 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
         {/* In the wide room everything under the chart sits centred with it. */}
         <div role="status" aria-live="polite" className={`min-h-[1.5rem] ${wide ? 'text-center [&>div>div]:justify-center' : ''}`}>
           {isBridge ? (
-            // One end tapped: just that tooth (the arrow's hint says what's next; sr-only says it here too). Both ends: the span read back.
-            item.teeth.length > 1 ? <p className="text-sm font-semibold text-[#030213]">{bridgeReadback(item, n)}</p>
+            // One end tapped: just that tooth (the arrow's hint says what's next; sr-only says it here too).
+            // Both ends: the span as pills, like the crown's teeth: the units, then each tooth (an abutment
+            // filled, a pontic dashed and named, as in the chart's legend; tapping one switches it, as on the
+            // chart). Only a cantilever says its kind: conventional is the usual.
+            item.teeth.length > 1 && parts ? (
+              <div>
+                <p className="sr-only">{bridgeReadback(item, n)}</p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#F0EFF6] border border-[#E0E0E6] text-xs font-semibold text-[#3A3A4A]">
+                    <Link2 className="w-3.5 h-3.5" aria-hidden />{plural(parts.span.length, 'unit')}
+                  </span>
+                  {parts.span.map(t => {
+                    const pontic = parts.pontics.includes(t);
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => tap(t)}
+                        aria-label={`${toothText(t, n)}, ${pontic ? 'pontic' : 'abutment'}. Make it ${pontic ? 'an abutment' : 'a pontic'}.`}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs font-semibold text-[#0E5A73] hover:bg-[#D4EFF8] ${pontic ? 'bg-white border-dashed border-[#5BB8D6]' : 'bg-[#E6F6FB] border-[#9ED7EA]'} ${FOCUS}`}
+                      >
+                        {toothText(t, n)}{pontic && <span className="font-medium text-[#3F7F95]">Pontic</span>}
+                      </button>
+                    );
+                  })}
+                  {parts.cantilever && (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-white border border-[#E0E0E6] text-xs font-semibold text-[#3A3A4A]">Cantilever</span>
+                  )}
+                </div>
+              </div>
+            )
               : item.teeth.length ? (
                 <span className="inline-flex px-2.5 py-1 rounded-full bg-[#E6F6FB] border border-[#9ED7EA] text-xs font-semibold text-[#0E5A73]">
                   {toothText(item.teeth[0], n)}<span className="sr-only">. Now tap the other end of the bridge.</span>
@@ -824,6 +879,30 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
   );
 }
 const abut2 = (k: number) => (k === 2 ? 'Two' : k === 3 ? 'Three' : String(k));
+
+/** The tooth numbering the charts and teeth read in (the product's three). Kept per user for next time. */
+export function NotationSelect() {
+  const { user } = useCase();
+  const id = useId();
+  return (
+    // Tiny: the words and a small arrow, no box ("Numbering FDI ⌄"). The range shows in each option's tooltip.
+    <span className="relative inline-flex items-center gap-1 text-[11px] leading-4">
+      <label htmlFor={id} className="text-[#5A5A6A]">Numbering</label>
+      <select
+        id={id}
+        value={user.notation}
+        onChange={e => setNotation(user.id, e.target.value as Notation)}
+        title={NOTATIONS.find(o => o.id === user.notation)?.range}
+        // As wide as the chosen word (a select is otherwise as wide as its longest option): the arrow sits right after it.
+        style={{ width: `calc(${(NOTATIONS.find(o => o.id === user.notation)?.label ?? '').length}ch + 16px)` }}
+        className={`appearance-none bg-transparent pr-3.5 font-semibold text-[#030213] hover:text-[#2F62D6] cursor-pointer rounded ${FOCUS}`}
+      >
+        {NOTATIONS.map(o => <option key={o.id} value={o.id} title={o.range}>{o.label}</option>)}
+      </select>
+      <ChevronDown aria-hidden className="pointer-events-none absolute right-0 w-3 h-3 text-[#5A5A6A]" strokeWidth={2} />
+    </span>
+  );
+}
 const CHIP_CAP = 12;
 
 function WingsEditor({ item }: { item: ServiceItem }) {
@@ -853,7 +932,7 @@ function WingsEditor({ item }: { item: ServiceItem }) {
 // ─── Arch ────────────────────────────────────────────────────────────────────
 
 function ArchEditor({ item }: { item: ServiceItem }) {
-  const { ctx, updateItem, notes, dismissNote, doneAndAdvance } = useCase();
+  const { ctx, updateItem, notes, dismissNote, doneAndAdvance, user } = useCase();
   const wide = useRoom() === 'wide';
   // A full denture is picked as Upper, Lower or Both (the portal's rule), like a retainer or whitening trays.
   const both = item.product === 'retainer' || item.product === 'whitening' || item.product === 'denture';
@@ -871,11 +950,18 @@ function ArchEditor({ item }: { item: ServiceItem }) {
     pick(jaw);
   };
   const open = notes.find(x => x.itemId === item.id && x.kind === 'openCase');
+  // Guided gives the chart its own column (ChartWidthContext): it fills it, up to 560 px, with the choices under it.
+  // Elsewhere it's the small 240 px chart beside the choices.
+  const chartMax = useContext(ChartWidthContext);
   return (
-    <div className="flex gap-8 items-start">
-      <TeethChart selected={[]} arch={item.arch} archMode onArch={onArch} width={240} />
-      <div className="flex-1 min-w-0 space-y-4 pt-1">
+    <div className={chartMax ? 'space-y-3' : 'flex flex-wrap gap-x-8 gap-y-3 items-start'}>
+      {chartMax
+        ? <div className="w-full mx-auto" style={{ maxWidth: Math.min(chartMax, 560) }}><TeethChart selected={[]} arch={item.arch} archMode onArch={onArch} notation={user.notation} /></div>
+        : <TeethChart selected={[]} arch={item.arch} archMode onArch={onArch} width={240} notation={user.notation} />}
+      <div className={chartMax ? 'space-y-3' : 'flex-1 min-w-[200px] space-y-4 pt-1'}>
         {wide ? (
+          // The numbering sits beside the arch choice when the chart has its own column.
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <WideChoice
             label="Arch"
             form="segment"
@@ -886,6 +972,8 @@ function ArchEditor({ item }: { item: ServiceItem }) {
               ...(both ? [{ id: 'both', label: 'Both', pic: <ArchPic jaw="both" /> }] : []),
             ]}
           />
+          {chartMax && <NotationSelect />}
+          </div>
         ) : (
           <ChoiceChips
             label="Arch"
@@ -903,16 +991,6 @@ function ArchEditor({ item }: { item: ServiceItem }) {
 
 // ─── Denture stages ──────────────────────────────────────────────────────────
 
-type RowState = 'none' | 'order' | 'elsewhere';
-const ROW_STATES: { id: RowState; label: string }[] = [
-  { id: 'none', label: 'Not Now' }, { id: 'order', label: 'Order' }, { id: 'elsewhere', label: 'Done Elsewhere' },
-];
-const TREATMENT_SUB: Record<DentureTreatment, string> = {
-  staged: 'Each stage goes to the lab and comes back for the next visit.',
-  stf: 'From the impressions straight to the finished denture.',
-  immediate: 'Made before the extractions, fitted the day the teeth come out.',
-};
-
 /**
  * A full denture's plan. Staged: one row per stage, in order, each Not Now ·
  * Order · Done Elsewhere; an ordered stage takes the day it's needed back
@@ -924,195 +1002,41 @@ const TREATMENT_SUB: Record<DentureTreatment, string> = {
  * shows the plan without controls.
  */
 function StagesEditor({ item }: { item: ServiceItem }) {
-  const { ctx, lab, readOnly, updateItem, doneAndAdvance } = useCase();
-  const wide = useRoom() === 'wide';
-  const [notice, setNotice] = useState<string | null>(null);
-  const next = useNextName(item.id, 'stages');
+  const { ctx, lab, readOnly, updateItem, answerInPlace } = useCase();
   if (readOnly) return <StagePlanView item={item} />;
-
-  const treatment = dentureTreatment(item);
+  // The main clinic portal's own picker (components/DentureStages): the five stages to tick, each with its
+  // delivery date, or "Done elsewhere" with an optional done-on date. No treatment switch, no per-row choices.
   const plan = stagePlan(item);
-  const today = toISO(ctx.now);
-  const sugg = suggestedStageDates(item, ctx);
-  const ordered = plan.filter(s => s.state === 'order');
-  const ready = dentureStageReady(item, ctx);
-  const late = stagesOutOfOrder(item);
-  const follow = plan.find(s => s.state === 'here');
-  const write = (stages: StagePlan[], patch: Partial<ServiceItem> = {}) => updateItem(item.id, i => ({
-    ...i, ...patch, stage: undefined, stages, stagesDone: false, reopen: i.reopen?.filter(r => r !== 'stages'),
-  }));
-  const day = (iso: string) => fmtDay(fromISO(iso));
-  const rowName = (id: DentureStageId) => (treatment === 'staged' ? stageName(id) : treatmentName(treatment));
-  const fieldId = (id: DentureStageId) => `nc-stage-${item.id}-${id}`;
-
-  const setState = (id: DentureStageId, to: RowState) => {
-    const old = plan.find(s => s.id === id);
-    // Picking the answer a row already has changes nothing (a settled plan stays settled).
-    if ((old?.state ?? 'none') === to) return;
-    setNotice(null);
-    const rest = plan.filter(s => s.id !== id);
-    if (to === 'none') write(rest);
-    // Ordered: the lab's suggested day for its place in the plan; done elsewhere keeps a past day as its done-on day.
-    else if (to === 'order') write([...rest, { id, state: 'order', date: old?.state === 'order' && old.date ? old.date : sugg[id] }]);
-    else write([...rest, { id, state: 'elsewhere', date: old?.date && old.date <= today ? old.date : undefined }]);
-  };
-  /** A typed or picked day; false keeps the field on its old value. */
-  const setDate = (row: StagePlan, iso: string): boolean => {
-    if (iso === (row.date ?? '')) return true;
-    setNotice(null);
-    if (row.state === 'order' && iso && iso < today) {
-      if (treatment !== 'staged') { setNotice(`${day(iso)} has passed. Pick today or later.`); return false; }
-      // A day that's passed: the stage happened, just not on this portal. Focus lands on its Done On field.
-      setNotice(`${day(iso)} has passed, so ${stageName(row.id)} is marked Done Elsewhere.`);
-      write(plan.map(r => (r.id === row.id ? { id: r.id, state: 'elsewhere', date: iso } : r)));
-      refocus(fieldId(row.id));
-      return true;
-    }
-    if (row.state === 'elsewhere' && iso > today) { setNotice('A stage done elsewhere can’t be dated after today.'); return false; }
-    write(plan.map(r => (r.id === row.id ? { ...r, date: iso || undefined, src: undefined } : r)));
-    return true;
-  };
-  /** Every ordered stage on the lab's suggested day, in order. */
-  const suggestAll = () => {
-    setNotice(null);
-    const cleared = plan.map(r => (r.state === 'order' ? { ...r, date: undefined } : r));
-    const s = suggestedStageDates({ ...item, stages: cleared }, ctx);
-    write(cleared.map(r => (r.state === 'order' ? { ...r, date: s[r.id], src: undefined } : r)));
-    // The out-of-order notice (and its button) goes once the days are in order.
-    if (ordered[0]) refocus(fieldId(ordered[0].id));
-  };
-  const setTreatment = (t: DentureTreatment) => {
-    if (t === treatment) return;
-    setNotice(null);
-    const finish = plan.find(s => s.id === 'finish' && s.state === 'order')?.date;
-    const patch: Partial<ServiceItem> = { treatment: t, treatmentSrc: 'You', extract: t === 'immediate' ? item.extract : undefined, extractDone: t === 'immediate' ? item.extractDone : undefined };
-    if (t === 'staged') {
-      // Back to stages: the patient's follow-up if there is one, else the Finish kept.
-      const seeded = seedDenturePlan({ ...item, ...patch, stages: undefined, stageSrc: undefined }, ctx);
-      write(seeded.stages?.length ? seeded.stages : [{ id: 'finish', state: 'order', date: finish }], { ...patch, stageSrc: seeded.stageSrc });
-      return;
-    }
-    const one: ServiceItem = { ...item, ...patch, stages: [] };
-    write([{ id: 'finish', state: 'order', date: finish ?? suggestedStageDates(one, ctx).finish }], { ...patch, stageSrc: undefined });
-    if (follow?.caseId) setNotice(`${treatmentName(t)} starts again from impressions, so ${follow.caseId}’s stages aren’t carried over.`);
-  };
-
-  // What the arrow says while it can't go yet.
-  const unmade = ordered.find(s => !optionAvail(lab, 'denture', stageOption(item, s.id), ctx.funding).ok);
-  const hint = !ordered.length ? 'Order at least one stage'
-    : ordered.some(s => !s.date) ? 'Pick a day for each ordered stage'
-      : ordered.some(s => s.date! < today) ? 'A day has passed: pick today or later'
-        : unmade ? `${lab.name} doesn’t make ${stageName(unmade.id)}` : undefined;
-
-  /** The needed-by field and its hint: the lab's day, and a way back to it. */
-  const orderFields = (row: StagePlan) => {
-    const s = sugg[row.id];
-    const past = !!row.date && row.date < today;
-    const early = !!row.date && !past && row.date < s;
-    const fid = fieldId(row.id);
-    return (
-      <>
-        <DateField
-          id={fid} label="Needed by" stage={rowName(row.id)} value={row.date} min={today} describedBy={`${fid}-hint`}
-          invalid={!row.date || past} onCommit={v => setDate(row, v)}
-        />
-        <span id={`${fid}-hint`} className={`text-[11px] ${!row.date || past ? 'text-[#B45309] font-semibold' : early ? 'text-[#8A4B08]' : 'text-[#5A5A6A]'}`}>
-          {!row.date ? 'Pick a day' : past ? 'This day has passed' : early ? `Before the lab’s ${day(s)}` : `Lab back by ${day(s)}`}
-          {/* The link goes once used: focus moves to the day it filled in. */}
-          {row.date !== s && (
-            <> · <LinkButton onClick={() => { setDate(row, s); refocus(fid); }}>Use {fmtShort(fromISO(s))}<span className="sr-only"> for {rowName(row.id)}</span></LinkButton></>
-          )}
-        </span>
-      </>
-    );
-  };
-  // Name in the first column; the controls (and anything they wrap onto) in the second.
-  const rowGrid = `flex-1 min-w-0 grid ${wide ? 'grid-cols-[132px_minmax(0,1fr)]' : 'grid-cols-[118px_minmax(0,1fr)]'} gap-x-3 items-start`;
-  const rowControls = 'min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1.5';
-
+  const follow = plan.filter(s => s.state === 'here');
+  const picked = plan.filter(s => s.state !== 'here');
+  const idOf = (name: string) => DENTURE_STAGES.find(s => s.name === name)!.id;
+  const dates = Object.fromEntries(picked.filter(s => s.date).map(s => [stageName(s.id), s.date!]));
+  // A stage done on the patient's earlier case shows locked, as the portal shows a stage already on the case.
+  const existing: StageRow[] = follow.map(s => ({ stage: stageName(s.id), date: s.date ?? null, status: 'delivered', orderIndex: 0, doneEarlier: false, followUp: true }));
+  // Every tick or date is the answer as it's made (like the teeth): the step stays put while the plan is built.
+  const onChange = (stages: string[], nextDates: Record<string, string>, done: string[]) => answerInPlace(() => updateItem(item.id, i => ({
+    ...i, treatment: 'staged', stage: undefined, stagesDone: true, reopen: i.reopen?.filter(r => r !== 'stages'),
+    stages: [...follow, ...stages.map(n => ({ id: idOf(n), state: done.includes(n) ? 'elsewhere' as const : 'order' as const, date: nextDates[n] || undefined }))],
+  })));
+  const unmade = picked.filter(s => s.state === 'order' && !optionAvail(lab, 'denture', s.id, ctx.funding).ok);
   return (
-    <div className={wide ? 'space-y-4' : 'space-y-3'}>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <WideChoice
-          label="Treatment" form="segment" small value={treatment} onChange={id => setTreatment(id as DentureTreatment)}
-          options={DENTURE_TREATMENTS.map(t => {
-            const a: { ok: boolean; reason?: string } = t.id === 'staged' ? { ok: true } : optionAvail(lab, 'denture', t.id, ctx.funding);
-            return { id: t.id, label: t.name, disabled: !a.ok, reason: a.reason, tag: t.id === treatment && item.treatmentSrc !== 'You' ? item.treatmentSrc : undefined };
-          })}
-        />
-        <span className="text-xs text-[#5A5A6A]">{TREATMENT_SUB[treatment]}</span>
-      </div>
-
-      {follow?.caseId && (
+    <div className="space-y-3">
+      {follow[0]?.caseId && (
         <p className="flex items-center gap-1.5 text-xs text-[#3A3A4A]">
           <History className="w-3.5 h-3.5 text-[#2F62D6] flex-shrink-0" strokeWidth={1.75} aria-hidden />
-          Continues {follow.caseId} at {lab.name}: the lab has the models.
+          Continues {follow[0].caseId} at {lab.name}: the lab has the models.
         </p>
       )}
-
-      {treatment === 'staged' ? (
-        <ol aria-label="Stages" className="rounded-xl border border-[#ECECF2] bg-white divide-y divide-[#F0EFF6]">
-          {DENTURE_STAGES.map((st, k) => {
-            const row = plan.find(s => s.id === st.id);
-            const a = optionAvail(lab, 'denture', st.id, ctx.funding);
-            const off = !row;
-            return (
-              <li key={st.id} className={`flex items-start gap-3 ${wide ? 'px-3.5 py-2.5' : 'px-3 py-2'} ${off ? 'bg-[#FCFCFD]' : ''}`}>
-                <StageDot n={k + 1} row={row} today={today} />
-                <div className={rowGrid}>
-                  <span className={`py-1 text-sm leading-5 font-semibold ${off ? 'text-[#5A5A6A]' : 'text-[#030213]'}`}>{st.name}</span>
-                  <div className={rowControls}>
-                    {row?.state === 'here' ? (
-                      <span className="inline-flex items-center gap-1.5 h-7 text-xs font-semibold text-[#1B5E20]">
-                        Done here · {row.caseId}
-                        {row.src && <SourceTag src={row.src} />}
-                      </span>
-                    ) : (
-                      <WideChoice
-                        label={st.name} form="segment" small value={row?.state ?? 'none'} onChange={id => setState(st.id, id as RowState)}
-                        options={ROW_STATES.map(o => ({ id: o.id, label: o.label, disabled: o.id === 'order' && !a.ok, reason: a.reason }))}
-                      />
-                    )}
-                    {row?.state === 'order' && orderFields(row)}
-                    {row?.state === 'elsewhere' && (
-                      <DateField id={fieldId(st.id)} label="Done on" stage={st.name} value={row.date} max={today} optional onCommit={v => setDate(row, v)} />
-                    )}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      ) : (
-        <div className={`flex items-start gap-3 rounded-xl border border-[#ECECF2] bg-white ${wide ? 'px-3.5 py-2.5' : 'px-3 py-2'}`}>
-          <StageDot n={1} row={plan[0]} today={today} />
-          <div className={rowGrid}>
-            <span className="py-1 text-sm leading-5 font-semibold text-[#030213]">{treatmentName(treatment)}</span>
-            <div className={rowControls}>{orderFields(plan[0])}</div>
-          </div>
-        </div>
-      )}
-
-      {/* One live region, always there, so a notice that comes after a change of plan is read out. */}
-      <div role="status" aria-live="polite" className="space-y-2 empty:hidden">
-        {late.length > 0 && (
-          <Notice tone="decision" actions={<SecondaryButton onClick={suggestAll}>Suggest Dates</SecondaryButton>}>
-            {andWords(late.map(stageName))} {late.length === 1 ? 'is' : 'are'} due on or before an earlier stage. Stages usually come back in order.
-          </Notice>
-        )}
-        {notice && <Notice tone="note" onDismiss={() => setNotice(null)}>{notice}</Notice>}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <StepArrow
-          run={() => doneAndAdvance(() => updateItem(item.id, { stagesDone: true }))}
-          disabled={!ready}
-          label={ready ? `Done: ${stagesShort(item)}` : ordered.length ? 'Pick the Days' : 'Order a Stage'}
-          next={next}
-          hint={hint}
-        />
-        {treatment === 'staged' && ordered.length > 1 && !late.length && <LinkButton onClick={suggestAll}>Suggest Dates</LinkButton>}
-      </div>
+      <StageDatePicker
+        stages={picked.map(s => stageName(s.id))}
+        dates={dates}
+        doneElsewhere={picked.filter(s => s.state === 'elsewhere').map(s => stageName(s.id))}
+        existing={existing}
+        onChange={onChange}
+        today={toISO(ctx.now)}
+        dense
+      />
+      {unmade.length > 0 && <Notice tone="block">{lab.name} doesn’t make {andWords(unmade.map(s => stageName(s.id)))}.</Notice>}
     </div>
   );
 }
@@ -1166,34 +1090,6 @@ function StageDot({ n, row, today, small }: { n: number; row?: StagePlan; today:
   );
 }
 
-/**
- * A day field. A day inside min/max is taken as it's typed or picked; one
- * outside waits for the field to lose focus (typing "2" into the day mustn't
- * flip a stage), then goes to onCommit, which can turn it down.
- */
-function DateField({ id, label, stage, value, min, max, optional, invalid, describedBy, onCommit }: {
-  id: string; label: string; stage: string; value?: string; min?: string; max?: string; optional?: boolean; invalid?: boolean; describedBy?: string;
-  onCommit: (iso: string) => boolean;
-}) {
-  const [v, setV] = useState(value ?? '');
-  useEffect(() => setV(value ?? ''), [value]);
-  const inside = (x: string) => (!min || x >= min) && (!max || x <= max) && Number(x.slice(0, 4)) >= 2000;
-  const commit = (x: string) => { if (!onCommit(x)) setV(value ?? ''); };
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      {/* Up to five of these on a plan: a screen reader hears which stage's day it is. */}
-      <label htmlFor={id} className="text-[11px] font-semibold text-[#5A5A6A] whitespace-nowrap"><span className="sr-only">{stage} </span>{label}{optional && <span className="font-normal"> (optional)</span>}</label>
-      <input
-        id={id} type="date" value={v} min={min} max={max} aria-invalid={invalid || undefined} aria-describedby={describedBy}
-        onChange={e => { const x = e.target.value; setV(x); if (x ? inside(x) : optional) commit(x); }}
-        onBlur={() => { if (v !== (value ?? '')) commit(v); }}
-        // Enter takes the typed day and keeps focus here.
-        onKeyDown={e => { if (e.key === 'Enter' && v !== (value ?? '')) { e.preventDefault(); commit(v); } }}
-        className={`h-7 px-2 rounded-lg border text-xs tabular-nums text-[#030213] outline-none focus:border-[#3F6FE8] focus:ring-2 focus:ring-[#3F6FE8]/20 ${invalid ? 'border-[#F5D98B] bg-[#FFFBEB]' : 'border-[#D4D4DD] bg-white'}`}
-      />
-    </span>
-  );
-}
 
 // ─── Material ────────────────────────────────────────────────────────────────
 
@@ -1428,61 +1324,6 @@ function PhotosEditor({ item }: { item: ServiceItem }) {
   );
 }
 
-// ─── Preferences ─────────────────────────────────────────────────────────────
-
-export function prefsSentence(p: ReturnType<typeof effective>['prefs']) {
-  return [
-    `${p.occlusal.toLowerCase()} occlusal`, `${p.proximal.toLowerCase()} proximal`, `${p.staining.toLowerCase()} staining`,
-    p.anatomy === 'Follow adjacent teeth' ? 'follow adjacent' : 'ideal anatomy',
-    p.clearance === 'Call me' ? 'call me if clearance is low' : p.clearance.toLowerCase(),
-    p.pontic ? `${p.pontic.toLowerCase()} pontic` : null,
-  ].filter(Boolean).join(', ');
-}
-function PrefsEditor({ item }: { item: ServiceItem }) {
-  const { ctx, openDrawer, updateItem } = useCase();
-  const wide = useRoom() === 'wide';
-  const e = effective(item, ctx);
-  if (wide) {
-    // Each preference as its own small fact; the ones changed for this case are tinted.
-    const facts: { key: string; label: string; value?: string }[] = [
-      ...PREF_FIELDS.map(f => ({ key: f.key as string, label: f.label, value: e.prefs[f.key] })),
-      ...(e.prefs.pontic ? [{ key: 'pontic', label: 'Pontic', value: e.prefs.pontic }] : []),
-      ...(e.prefs.pbcMargin ? [{ key: 'pbcMargin', label: 'PBC margin', value: e.prefs.pbcMargin }] : []),
-    ];
-    return (
-      <div className="space-y-3">
-        <p className="flex flex-wrap items-center gap-1.5 text-sm text-[#1F1F2E]">
-          <span className="font-semibold">Preferences</span> ·{' '}
-          {e.prefsChanged
-            ? <>changed for this case · <LinkButton onClick={() => updateItem(item.id, { prefs: undefined, saveUsual: false })}>Undo</LinkButton></>
-            : <SourceTag src={e.prefsSrc} />}
-        </p>
-        <dl className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-2">
-          {facts.map(f => {
-            const changed = !!item.prefs && f.key in item.prefs;
-            return (
-              <div key={f.key} className={`rounded-xl border px-3 py-2 ${changed ? 'bg-[#EEF4FF] border-[#C8D8FC]' : 'bg-[#F8F9FC] border-[#ECECF2]'}`}>
-                <dt className="text-[11px] text-[#5A5A6A]">{f.label}</dt>
-                <dd className="text-[13px] font-semibold text-[#030213]">{f.value ?? '—'}</dd>
-              </div>
-            );
-          })}
-        </dl>
-        <SecondaryButton onClick={() => openDrawer({ kind: 'prefs', itemId: item.id })}>Change for This Case</SecondaryButton>
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-[#1F1F2E]">
-        <span className="font-semibold">Preferences</span> · {e.prefsChanged ? <>changed for this case · <LinkButton onClick={() => updateItem(item.id, { prefs: undefined, saveUsual: false })}>Undo</LinkButton></> : <>{e.prefsSrc.toLowerCase()}: {prefsSentence(e.prefs)}</>}
-      </p>
-      {e.prefsChanged && <p className="text-xs text-[#5A5A6A]">{prefsSentence(e.prefs)}</p>}
-      <SecondaryButton onClick={() => openDrawer({ kind: 'prefs', itemId: item.id })}>Change for This Case</SecondaryButton>
-    </div>
-  );
-}
-
 // ─── Decisions and blockers ──────────────────────────────────────────────────
 
 function ImplantDecision({ item }: { item: ServiceItem }) {
@@ -1577,18 +1418,55 @@ function DescEditor({ item }: { item: ServiceItem }) {
   );
 }
 
+// ─── Delivery date ───────────────────────────────────────────────────────────
+
+/**
+ * When the service is needed back (the product's "Requested delivery date"): the lab's earliest day
+ * unless the clinic picks a later one. A day sooner than the lab can make it stays a gap until changed.
+ */
+function DeliveryDateEditor({ item }: { item: ServiceItem }) {
+  const { ctx, draft, lab, user, readOnly, updateItem, answerInPlace } = useCase();
+  const id = useId();
+  const sd = serviceDate(item, ctx, receivedFor(draft, ctx), draft.fastTrack);
+  if (readOnly) return <p className="text-sm font-medium text-[#030213]">{sd.backBy ? fmtDay(sd.backBy) : '—'}</p>;
+  if (!sd.earliest) return <p className="text-xs text-[#5A5A6A]">The day shows once {lab.name} can make this.</p>;
+  const earliest = fmtDay(sd.earliest);
+  const set = (iso?: string) => updateItem(item.id, i => ({ ...i, requestedDelivery: iso || undefined, deliverySrc: iso ? 'You' : undefined }));
+  return (
+    <div className="space-y-2">
+      <input
+        type="date"
+        value={item.requestedDelivery ?? toISO(sd.earliest)}
+        min={toISO(sd.earliest)}
+        aria-label={`Delivery date for ${itemTitle(item, user.notation)}`}
+        aria-describedby={`${id}-hint`}
+        aria-invalid={sd.tooSoon || undefined}
+        // Typed digit by digit, so the page stays put; clearing it goes back to the lab's earliest.
+        onChange={e => { const v = e.target.value; answerInPlace(() => set(v)); }}
+        // A click anywhere on the field opens the calendar, not only its icon.
+        onClick={e => { try { (e.currentTarget as HTMLInputElement & { showPicker?: () => void }).showPicker?.(); } catch { /* not allowed here: the icon still opens it */ } }}
+        className={`w-[140px] px-2.5 py-1.5 text-xs rounded-lg border bg-white outline-none focus:border-[#4D8EF7] text-[#030213] ${sd.tooSoon ? 'border-[#FCD34D]' : 'border-[#E0E0E6]'}`}
+      />
+      <p id={`${id}-hint`} className={`text-xs ${sd.tooSoon ? 'text-[#8A4B08]' : 'text-[#5A5A6A]'}`}>
+        Earliest the lab can deliver: {earliest}
+        {item.requestedDelivery && <> · <LinkButton onClick={() => set(undefined)}>Use {earliest}</LinkButton></>}
+      </p>
+    </div>
+  );
+}
+
 /**
  * Used by the Review cards. `short`: a one-line form where `value` is long
  * (a denture's stages: value "Try In · Thu 12 Nov, … done elsewhere", short "Try In 12 Nov, …").
+ * The Delivery date isn't one: each card reads its own Back by.
  */
-export function itemDetails(item: ServiceItem, ctx: ReturnType<typeof useCase>['ctx']): { id: SlotId; label: string; value: string; short?: string; src?: string }[] {
-  const e = effective(item, ctx);
-  return slotsFor(item, ctx)
-    .filter(s => s.answered && s.id !== 'labCheck')
+export function itemDetails(item: ServiceItem, ctx: ReturnType<typeof useCase>['ctx'], d: CaseDraft): { id: SlotId; label: string; value: string; short?: string; src?: string }[] {
+  return slotsFor(item, ctx, d)
+    .filter(s => s.answered && s.id !== 'labCheck' && s.id !== 'deliveryDate')
     .map(s => ({
       id: s.id,
       label: s.label,
-      value: s.id === 'prefs' ? prefsSentence(e.prefs) : s.id === 'teeth' && item.product === 'bridge' ? bridgeReadback(item, ctx.user.notation)
+      value: s.id === 'teeth' && item.product === 'bridge' ? bridgeReadback(item, ctx.user.notation)
         : s.id === 'stages' ? stagesSummary(item) : s.value ?? '',
       short: s.id === 'stages' ? s.value : undefined,
       src: s.src,
@@ -1609,13 +1487,6 @@ const OPTION_NOUN: Partial<Record<ProductId, string>> = {
 /** "Try In", "Try In and Finish", "Try In, Retry and Finish" */
 const andWords = (w: string[]) => (w.length < 2 ? w.join('') : `${w.slice(0, -1).join(', ')} and ${w[w.length - 1]}`);
 
-/** After a change that removes the focused control (a used link, a notice that goes): focus `id` instead of the page. */
-function refocus(id: string) {
-  requestAnimationFrame(() => {
-    const a = document.activeElement;
-    if (!a || a === document.body) document.getElementById(id)?.focus();
-  });
-}
 
 /** Arrow keys, Home and End move focus between a group's radios; Space or Enter picks (a pick can move the step on). */
 function rove(e: KeyboardEvent<HTMLElement>) {
@@ -1695,7 +1566,7 @@ function WideChoice({ label, options, value, onChange, form, small, caption }: {
   }
 
   return (
-    <div role="radiogroup" aria-label={label} onKeyDown={rove} className={`grid gap-2 ${options.length > 4 ? 'grid-cols-[repeat(auto-fill,minmax(300px,1fr))]' : 'max-w-[560px]'}`}>
+    <div role="radiogroup" aria-label={label} onKeyDown={rove} className={`grid gap-2 ${options.length > 4 ? 'grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]' : 'max-w-[560px]'}`}>
       {options.map(o => {
         const on = value === o.id;
         return (

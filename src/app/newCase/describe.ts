@@ -79,7 +79,8 @@ const FIELD_LINE: Record<'patient' | 'lab' | 'service', RegExp> = {
  * teeth or arch, material/shade, delivery and its own instruction; anything for
  * the whole case after a blank line. A full denture's Delivery line is its
  * stage plan ("Try In 12 Nov, Finish 26 Nov; Bite Registration done elsewhere"),
- * which reads back as the same plan.
+ * which reads back as the same plan; any other service's is the day it's asked
+ * back by ("12 Nov"), empty for the lab's earliest.
  */
 export function describeDraft(d: CaseDraft, patientName: string, labName: string | undefined): string {
   const lines = [`Patient Name: ${patientName}`, `Lab Name: ${d.labPicked === false ? '' : labName ?? ''}`];
@@ -93,7 +94,9 @@ export function describeDraft(d: CaseDraft, patientName: string, labName: string
     const slot = OPT_SLOT[it.product];
     const opt = slot === 'material' ? it.material : slot === 'type' ? it.type : slot === 'base' ? it.base : slot === 'work' ? it.work : undefined;
     const matShade = [opt ? optionName(it.product, opt) : '', it.shade ?? ''].filter(Boolean).join(' ');
-    const delivery = [it.product === 'denture' ? stagesLine(it) : '', d.fastTrack && k === 0 ? 'Fast-Track' : ''].filter(Boolean).join(', ');
+    // A full denture's line is its stage plan; any other service's, the day it's asked back by (none: the lab's earliest).
+    const own = it.product === 'denture' ? stagesLine(it) : it.requestedDelivery ? dayWord(it.requestedDelivery) : '';
+    const delivery = [own, d.fastTrack && k === 0 ? 'Fast-Track' : ''].filter(Boolean).join(', ');
     lines.push(
       `Service ${k + 1}: ${it.product === 'other' ? (it.desc ?? 'Something else') : PRODUCTS[it.product].label}`,
       `Teeth/Arch: ${where}`,
@@ -1592,6 +1595,8 @@ export function itemsFor(p: Parsed): ServiceItem[] {
       if (s.stages.some(r => r.follow)) x.stageSrc = 'Next stage';
     }
     if (s.inlayType) x.inlayType = s.inlayType;
+    // Its own Delivery line's day is the day it's asked back by (a full denture's days went to its stages).
+    if (s.product !== 'denture' && s.delivery?.date) { x.requestedDelivery = toISO(s.delivery.date); x.deliverySrc = AI_SRC; }
     if (s.shade) { x.shade = s.shade; x.shadeSrc = AI_SRC; }
     if (s.stump) x.stump = s.stump;
     if (s.product === 'other' && s.desc) { x.desc = s.desc; x.descDone = s.desc.trim().length >= 10; }
@@ -1625,6 +1630,8 @@ function mergeItem(old: ServiceItem, it: ServiceItem): ServiceItem {
   if (it.base) out.base = it.base;
   if (it.work) out.work = it.work;
   if (it.inlayType) out.inlayType = it.inlayType;
+  // The same day read back (the case written out as text) keeps who picked it.
+  if (it.requestedDelivery && it.requestedDelivery !== old.requestedDelivery) { out.requestedDelivery = it.requestedDelivery; out.deliverySrc = it.deliverySrc; }
   if (it.shade) { out.shade = it.shade; out.shadeSrc = it.shadeSrc; }
   if (it.stump) out.stump = it.stump;
   if (it.desc) { out.desc = it.desc; out.descDone = it.descDone; }
@@ -1669,8 +1676,7 @@ export function fitFor(dl: DeliveryRead, d: CaseDraft, ctx: Ctx): FitRead {
 /**
  * The Draft the description builds: lab, services (only options the lab
  * offers), instructions as the case note, Fast-Track when a service can take
- * it, and the date as the fit appointment when the lab can make it (a delivery
- * date: the fit the next clinic day). With `base` (the patient's open draft,
+ * it. With `base` (the patient's open draft,
  * e.g. a waiting scan) it fills that draft.
  */
 export function buildDraft(p: Parsed, patient: Patient, user: User, now: Date, base?: CaseDraft): CaseDraft {
@@ -1693,8 +1699,7 @@ export function buildDraft(p: Parsed, patient: Patient, user: User, now: Date, b
   // Full dentures on the rules: the patient's next stage at the lab that made the last one (the lab has the models), a day for each ordered stage.
   d = { ...d, items: d.items.map(i => planDenture(i, ctx)) };
   if (p.delivery.fastTrack) d = { ...d, fastTrack: d.items.some(i => fastTrackEligible(i, ctx)) };
-  const fit = fitFor(p.delivery, d, ctx);
-  if (fit.state === 'ok') d = { ...d, fit: toISO(fit.fit) };
+  // The date is checked against the lab (fitFor, in the panel) but never booked: there's no fit appointment.
   return d;
 }
 
@@ -1788,9 +1793,7 @@ const whichStage = (d: Date) => `Which stage is needed by ${fmtDay(d)}? Write th
 function stagesLine(it: ServiceItem): string {
   const t = dentureTreatment(it);
   const plan = stagePlan(it);
-  // A day in another year says its year, so reading the line back lands on the same day.
-  const year = demoNow().getFullYear();
-  const day = (iso?: string) => { if (!iso) return ''; const d = fromISO(iso); return ` ${d.getFullYear() === year ? fmtShort(d) : fmtFull(d)}`; };
+  const day = (iso?: string) => (iso ? ` ${dayWord(iso)}` : '');
   if (t !== 'staged') return `${treatmentName(t)}${day(plan[0]?.date)}`;
   const here = plan.filter(s => s.state === 'here');
   const away = plan.filter(s => s.state === 'elsewhere');
@@ -1800,6 +1803,11 @@ function stagesLine(it: ServiceItem): string {
     away.some(s => !s.date) ? `${andWords(away.filter(s => !s.date).map(s => stageName(s.id)))} done elsewhere` : '',
     ...away.filter(s => s.date).map(s => `${stageName(s.id)} done elsewhere${day(s.date)}`),
   ].filter(Boolean).join('; ');
+}
+/** A day as the template writes it, "12 Nov": one in another year says its year, so reading it back lands on the same day. */
+function dayWord(iso: string): string {
+  const d = fromISO(iso);
+  return d.getFullYear() === demoNow().getFullYear() ? fmtShort(d) : fmtFull(d);
 }
 /** "A", "A and B", "A, B and C" */
 function andWords(words: string[]): string {

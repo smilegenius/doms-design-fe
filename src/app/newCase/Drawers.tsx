@@ -1,5 +1,5 @@
 // ─── New Case Flow · drawers ─────────────────────────────────────────────────
-// More services, materials, shades, photos, preferences, the fit appointment
+// More services, materials, shades, photos, the fit appointment
 // calendar and the scan viewer. All use the portal's SideDrawer chrome.
 
 import { useMemo, useState, DragEvent } from 'react';
@@ -11,7 +11,7 @@ import {
   addDays, fmtDay, fmtShort, isBankHoliday, isClinicOpen, startOfDay, toISO, fromISO,
 } from './dates';
 import {
-  BLEACH, GROUP_ORDER, MATERIAL_GROUP, MATERIAL_GROUPS, PREF_FIELDS, PRODUCTS, STUMP, VITA_3D, VITA_CLASSICAL, effective,
+  BLEACH, GROUP_ORDER, MATERIAL_GROUP, MATERIAL_GROUPS, PRODUCTS, STUMP, VITA_3D, VITA_CLASSICAL, effective,
   fitCheck, fitFixes, labProducts, materialOptions, optionAvail, optionName, plural, priceOf, shadeSwatch,
   ServiceItem,
 } from './rules';
@@ -25,7 +25,6 @@ export default function Drawers({ drawer, onClose }: { drawer: DrawerState | nul
     case 'materials': return <Materials itemId={drawer.itemId} onClose={onClose} />;
     case 'shades': return <Shades itemId={drawer.itemId} field={drawer.field} tab={drawer.tab} onClose={onClose} />;
     case 'photos': return <Photos itemId={drawer.itemId} onClose={onClose} />;
-    case 'prefs': return <Prefs itemId={drawer.itemId} onClose={onClose} />;
     case 'fit': return <Fit onClose={onClose} />;
     case 'scan': return <Scan onClose={onClose} />;
   }
@@ -213,66 +212,6 @@ function FakeQr() {
     <div className="w-24 h-24 p-1.5 rounded-lg bg-white border border-[#E0E0E6] grid grid-cols-11 gap-[1px] flex-shrink-0" role="img" aria-label="QR code for this case's photo hand-off">
       {cells.map((on, i) => <span key={i} className={on ? 'bg-[#030213]' : 'bg-white'} />)}
     </div>
-  );
-}
-
-function Prefs({ itemId, onClose }: { itemId: string; onClose: () => void }) {
-  const { draft, ctx, user, prescriber, updateItem } = useCase();
-  const item = draft.items.find(i => i.id === itemId);
-  const e = item ? effective(item, ctx) : null;
-  const [vals, setVals] = useState(() => (e ? { ...e.prefs } : null));
-  const [saveUsual, setSaveUsual] = useState(!!item?.saveUsual);
-  if (!item || !e || !vals) return null;
-  const isPbc = e.material === 'pbc';
-  const metal = isPbc || e.material === 'metal';
-  const fields = PREF_FIELDS.map(f => f.key === 'clearance' && metal ? { ...f, options: [...f.options, 'Metal occlusal island'] } : f);
-  const save = () => {
-    // Keep only what differs from the usual, so "changed for this case" is honest.
-    const base = effective({ ...item, prefs: undefined }, ctx).prefs;
-    const changed = (Object.keys(vals) as (keyof typeof vals)[]).filter(k => vals[k] !== base[k]);
-    updateItem(item.id, { prefs: changed.length ? Object.fromEntries(changed.map(k => [k, vals[k]])) : undefined, saveUsual });
-    onClose();
-  };
-  const noun = PRODUCTS[item.product].noun;
-  return (
-    <SideDrawer open onClose={onClose} title="Preferences for this case" subtitle={`${PRODUCTS[item.product].label} · ${e.prefsSrc}`} icon={<SlidersHorizontal className="w-4 h-4 text-[#2F62D6]" />} width="md:w-[480px]">
-      <div className="space-y-4">
-        {fields.map(f => (
-          <label key={f.key} className="block">
-            <span className="block text-xs font-semibold text-[#3A3A4A] mb-1">{f.label}</span>
-            <select value={vals[f.key] as string} onChange={ev => setVals(v => ({ ...v!, [f.key]: ev.target.value }))} className="w-full rounded-lg border border-[#D4D4DD] px-3 py-2 text-sm bg-white focus:border-[#3F6FE8] outline-none">
-              {f.options.map(o => <option key={o}>{o}</option>)}
-            </select>
-          </label>
-        ))}
-        {isPbc && (
-          <label className="block">
-            <span className="block text-xs font-semibold text-[#3A3A4A] mb-1">PBC margin</span>
-            <select value={vals.pbcMargin} onChange={ev => setVals(v => ({ ...v!, pbcMargin: ev.target.value }))} className="w-full rounded-lg border border-[#D4D4DD] px-3 py-2 text-sm bg-white">
-              {['Metal collar lingual', 'Porcelain butt margin', 'Metal collar 360°'].map(o => <option key={o}>{o}</option>)}
-            </select>
-          </label>
-        )}
-        {item.product === 'bridge' && (
-          <label className="block">
-            <span className="block text-xs font-semibold text-[#3A3A4A] mb-1">Pontic design</span>
-            <select value={vals.pontic} onChange={ev => setVals(v => ({ ...v!, pontic: ev.target.value }))} className="w-full rounded-lg border border-[#D4D4DD] px-3 py-2 text-sm bg-white">
-              {['Ovate', 'Modified ridge lap', 'Ridge lap', 'Hygienic'].map(o => <option key={o}>{o}</option>)}
-            </select>
-          </label>
-        )}
-        {prescriber?.id === user.id && (
-          <label className="flex items-center gap-2.5 text-sm text-[#1F1F2E] cursor-pointer">
-            <input type="checkbox" checked={saveUsual} onChange={ev => setSaveUsual(ev.target.checked)} className="w-4 h-4 accent-[#3F6FE8]" />
-            Save as My Usual for {noun.charAt(0).toUpperCase() + noun.slice(1)}s
-          </label>
-        )}
-        <div className="flex justify-end gap-2 pt-2">
-          <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
-          <PrimaryButton onClick={save}>Use for This Case</PrimaryButton>
-        </div>
-      </div>
-    </SideDrawer>
   );
 }
 

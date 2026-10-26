@@ -30,6 +30,11 @@ const listeners = new Set<() => void>();
 const publish = (a: ArrowAction | null) => { current = a; listeners.forEach(l => l()); };
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
 
+/** False around an editor that's on screen but isn't the current step (Guided's teeth chart beside another item's editor). */
+const ArrowActive = createContext(true);
+export const ArrowActiveProvider = ArrowActive.Provider;
+export const useArrowActive = () => useContext(ArrowActive);
+
 /** The action the current step handed over, if any. */
 export const useStepArrow = () => useSyncExternalStore(subscribe, () => current, () => current);
 

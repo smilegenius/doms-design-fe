@@ -9,17 +9,18 @@
 // so the portal's Cases list and existing wizards are untouched.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import ModalPortal from '../components/ModalPortal';
 import FlowFrame from '../newCase/FlowFrame';
 import { CaseApi, CaseContext, DrawerState } from '../newCase/CaseContext';
 import { CLINIC, Funding, LabId, ProductId, labById, userById } from '../newCase/data';
-import { demoTimeOf, fmtDay, fmtTime, fromISO, toISO } from '../newCase/dates';
+import { demoNow, demoTimeOf, fmtTime, fromISO, toISO } from '../newCase/dates';
+import { useShipped } from '../newCase/dispatch';
 import {
-  CaseDraft, PRODUCTS, ServiceItem, SlotId, buildSteps, caseDates, effective, firstGap, fitCheck, gapCount, isPosted,
+  CaseDraft, PRODUCTS, ServiceItem, SlotId, buildSteps, caseDates, effective, firstGap, gapCount, isPosted,
   itemPhrase, labMakes, nextGap, notesFor, optionAvail, optionName, parseStep, recordsState, sendMode,
-  splitSuggestion, defaultBox, plural, itemTitle, sendLabel, Ctx, orderedStages, seedDenturePlan, stageOption,
+  splitSuggestion, plural, sendLabel, Ctx, orderedStages, seedDenturePlan, stageOption,
 } from '../newCase/rules';
 import {
   CaseRow, addEvent, blankDraft, getPatient, getRow, learnLogin, loginMap, newItem, nextCaseId, removeRow, restore, saveRow,
@@ -62,6 +63,13 @@ function CaseLoader({ id, sessionKey }: { id: string; sessionKey: string }) {
     return p ? { draft: blankDraft(p), row: undefined } : null;
     // Loaded once per case session.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // A finished case opened here (an old link, Back) lands on the portal's Case Details. Checked once
+  // per session, so sending from this page still shows the Sent screen.
+  const finished = useMemo(() => {
+    const row = id !== 'new' ? getRow(id) : undefined;
+    return row && row.status !== 'Draft' ? row.id : undefined;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (finished) return <Navigate to={`/flows/new-case/view/${finished}`} replace />;
   // Start from scratch: no patient yet, so the blank page asks who it's for.
   if (!initial && id === 'new' && !sp.get('patient')) return <BlankStart />;
   if (!initial) {
@@ -138,7 +146,9 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
   const [view, setView] = useState<View>(() => initialView(initialRow, user.id));
   const actingUser = user;
   const derived = buildCtx(draft, actingUser);
-  const ctx = derived!.ctx;
+  // A posted case that's been dispatched counts its dates from the post day, as its banner and Lab Work do.
+  const shipped = useShipped(view !== 'edit' && draft.id ? store.rows.find(r => r.id === draft.id) : undefined);
+  const ctx = shipped ? { ...derived!.ctx, now: fromISO(shipped.dispatchedOn) } : derived!.ctx;
   const ctxRef = useRef(ctx); ctxRef.current = ctx;
   const prescriber = derived!.prescriber;
   const patient = ctx.patient;
@@ -177,12 +187,17 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
   const stepsRef = useRef(steps); stepsRef.current = steps;
   const stepRef = useRef(step); stepRef.current = step;
   const manualAdvance = useRef(false);
+  const inPlace = useRef(false);
   const pending = useRef<{ kind: 'item'; id: string } | { kind: 'nextFrom'; id: string } | null>(null);
 
   const go = useCallback((id: string) => { setStep(id); setDrawer(null); }, []);
 
-  // Focus the step heading whenever the step changes.
-  useEffect(() => { if (!sent) headingRef.current?.focus(); }, [step, sent]);
+  // Focus the step heading whenever the step changes, unless the change came from a control that stays on
+  // screen and keeps the user's place (Guided's teeth chart beside the other items: data-nc-keep-focus).
+  useEffect(() => {
+    if (sent || document.activeElement?.closest('[data-nc-keep-focus]')) return;
+    headingRef.current?.focus();
+  }, [step, sent]);
 
   // A step that no longer exists (item removed) falls back to the first gap.
   useEffect(() => {
@@ -211,7 +226,7 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
     const was = prevGap.current;
     const isGap = !!cur?.gap;
     prevGap.current = { step, gap: isGap };
-    if (manualAdvance.current) return;
+    if (manualAdvance.current || inPlace.current) return;
     // An open case for the same item is worth a look first: "Carry On" moves on.
     const holds = notes.some(n => n.kind === 'openCase' && n.step === step);
     if (was && was.step === step && was.gap && !isGap && cur && !holds) {
@@ -219,6 +234,13 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
       return () => clearTimeout(t);
     }
   }, [step, cur?.gap]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // An answer that shouldn't move the page on (several teeth tapped one by one in Guided).
+  const answerInPlace = useCallback((fn: () => void) => {
+    inPlace.current = true;
+    fn();
+    setTimeout(() => { inPlace.current = false; }, 80);
+  }, []);
 
   const doneAndAdvance = useCallback((fn: () => void) => {
     manualAdvance.current = true;
@@ -273,15 +295,6 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
     const t = setTimeout(() => { persist(draft); setSaveState('saved'); }, 400);
     return () => clearTimeout(t);
   }, [draft, readOnly, persist, sent]);
-
-  // Re-validate the fit whenever Back by can move later.
-  useEffect(() => {
-    if (!draft.fit || !dates.backBy || readOnly) return;
-    if (!fitCheck(draft.fit, dates.backBy).ok) {
-      setDraft(d => ({ ...d, fit: undefined }));
-      toast.warning('That fit date is now too soon for the lab. Pick a new one.');
-    }
-  }, [dates.backBy?.getTime(), draft.fit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Dropping a file outside a drop zone must not navigate away.
   useEffect(() => {
@@ -433,6 +446,9 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
     if (d0.login && d0.rememberLogin && prescriber && !loginMap()[d0.login]) learnLogin(d0.login, prescriber.id);
     const snap = snapshot(ids);
     const now = Date.now();
+    // The send moment on the demo clock too: a sent case's dates count from it, and Date.now() alone moves on
+    // the demo clock with every page load.
+    const sentDemoAt = demoNow().toISOString();
     const existing = getRow(d0.id!);
     const toApprove = mode === 'approval';
     const rows: CaseRow[] = groups.map((items, k) => {
@@ -445,6 +461,7 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
         source: existing?.source ?? 'clinic', createdBy: existing?.createdBy ?? user.id, scanLabel: existing?.scanLabel,
         draft: gd, service: serviceSummary(gd, user), delivery: gdates.backBy ? toISO(gdates.backBy) : undefined,
         dentist: prescriber?.name, labId: d0.lab, updatedAt: now, sentAt: toApprove ? undefined : now,
+        sentDemoAt: toApprove ? undefined : sentDemoAt,
       };
     });
     saveRows(rows);
@@ -456,26 +473,16 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
     const next = store.rows.find(r => r.status === 'Draft' && r.source === 'scanner' && !r.flag && r.draft && !ids.includes(r.id));
     const nextP = next && getPatient(next.patientId);
     const nextCtx = next && buildCtx(next.draft!, user);
-    const box = { ...defaultBox(d0), ...d0.records.box };
     const result: SentResult = {
       heading: toApprove ? `Sent to ${prescriber!.short} to Approve` : follow ? 'Sent. Waiting for the Scan' : posted ? `Ready for Dispatch to ${lab.name}` : groups.length > 1 ? `${groups.length} Cases Created for ${lab.name}` : `Case Created for ${lab.name}`,
       approval: toApprove,
       posted,
+      follow,
       lab,
       patient,
-      box: posted ? Object.keys(box).filter(k => box[k]) : undefined,
       dentist: prescriber?.name,
-      cases: rows.map(r => {
-        const gd = r.draft!;
-        const gdates = caseDates(gd, ctx);
-        return {
-          id: r.id,
-          summary: gd.items.map(i => itemTitle(i, user.notation)).join(' + '),
-          backBy: follow && gdates.ta != null ? `Back ${plural(gdates.ta, 'working day')} after the scan arrives.` : gdates.backBy ? `Back by ${fmtDay(gdates.backBy)}.` : undefined,
-          fitFrom: !follow && !gd.fit && gdates.earliestFit ? fmtDay(gdates.earliestFit) : undefined,
-          fit: !follow && gd.fit ? fmtDay(fromISO(gd.fit)) : undefined,
-        };
-      }),
+      // The Sent screen reads each case live from the store (a dispatch there updates it at once).
+      cases: rows.map(r => ({ id: r.id })),
       next: next && nextP ? { id: next.id, text: `${nextP.first} ${nextP.last} · ${next.scanLabel ?? ''} · ${(() => { const g = nextCtx ? gapCount(next.draft!, nextCtx.ctx) : 0; return g ? `▲ ${plural(g, 'thing')} left` : '✓ Ready to send'; })()}` } : undefined,
     };
     setDraft(d0);
@@ -484,7 +491,6 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
     setSaveState('saved');
     sendingRef.current = false;
     setSending(false);
-    if (d0.items.some(i => i.saveUsual)) toast.success('Preferences saved as your usual.');
   };
 
   const undo = () => {
@@ -510,6 +516,9 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
     if (e.key === 'Escape') {
       if (drawer) { setDrawer(null); return; }
       if (pickingPatient || nhsConfirm || confirmDelete) { setPickingPatient(false); setNhsConfirm(null); setConfirmDelete(false); return; }
+      // A portal modal is open (Mark as dispatched, Print label, Dispatch details: ModalPortal locks the page's scroll):
+      // Esc is that modal's, never "leave the case".
+      if (document.body.style.overflow === 'hidden') return;
       if (sent) return;
       saveAndClose(false);
     }
@@ -526,7 +535,7 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
 
   const api: CaseApi = {
     draft, update, updateItem, ctx, user, patient, lab, prescriber, prescriberSrc: derived!.prescriberSrc,
-    steps, step, go, doneAndAdvance, dates, notes,
+    steps, step, go, doneAndAdvance, answerInPlace, dates, notes,
     dismissNote: id => setDraft(d => ({ ...d, dismissedNotes: [...d.dismissedNotes, id] })),
     gaps, readOnly, openDrawer: setDrawer, addService, removeItem, changeLab, setFunding,
     openLauncher: () => { setPickingPatient(true); go('patient'); },
@@ -585,11 +594,21 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
           <>
             <SentView
               result={sent.result}
-              onBack={() => navigate('/flows/new-case/cases', { state: { highlight: sent.ids } })}
-              onView={id => navigate(`/flows/new-case/case/${id}`, { state: { session: `view-${id}-${Date.now()}` } })}
-              onNext={id => navigate(`/flows/new-case/case/${id}`, { state: { session: `next-${id}-${Date.now()}` } })}
+              // A finished case opens in the portal's Case Details. Replace: Back then skips this Sent
+              // screen, which can't come back. One waiting for approval is still a draft, in this editor.
+              onView={id => (getRow(id)?.status === 'Draft'
+                ? navigate(`/flows/new-case/case/${id}`, { state: { session: `view-${id}-${Date.now()}` } })
+                : navigate(`/flows/new-case/view/${id}`, { replace: true }))}
+              // Posting is a real-world action: once a case is dispatched, Undo goes.
+              onDispatched={() => setUndoOpen(false)}
             />
-            {undoOpen && <UndoToast onUndo={undo} onExpire={() => setUndoOpen(false)} />}
+            {undoOpen && (
+              <UndoToast
+                message={sent.result.posted ? 'Ready for Dispatch. You can undo for 10 seconds.' : undefined}
+                onUndo={undo}
+                onExpire={() => setUndoOpen(false)}
+              />
+            )}
           </>
         ) : (
           <Layout />

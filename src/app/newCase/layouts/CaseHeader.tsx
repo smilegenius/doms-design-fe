@@ -3,12 +3,21 @@
 // case corner above its timeline, and the banners (approval, sent, reopened
 // answers). Each layout composes the pieces it wants.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, FilePlus, HelpCircle, MoreHorizontal, Trash2, X } from 'lucide-react';
 import { useCase } from '../CaseContext';
 import { useController } from '../controller';
 import { fmtDay, fromISO } from '../dates';
+import { DispatchPanel, StatusChip, dispatchLine, useShipped } from '../dispatch';
+import { CaseRow, useFlowStore } from '../store';
 import { Notice, PrimaryButton, SecondaryButton, FOCUS } from '../ui';
+
+/** The case's row, read live from the flow store: Mark as dispatched flips the badge and banner at once. */
+function useLiveRow(): CaseRow | undefined {
+  const c = useController();
+  const { rows } = useFlowStore();
+  return c.row && (rows.find(r => r.id === c.row!.id) ?? c.row);
+}
 
 export function SaveIndicator() {
   const c = useController();
@@ -48,13 +57,15 @@ export function CaseMenu() {
 
 export function CaseIdBadge() {
   const { draft } = useCase();
-  const c = useController();
+  const row = useLiveRow();
   if (!draft.id) return null;
   return (
     <span className="text-sm font-semibold text-[#030213] whitespace-nowrap">
       {draft.id}{' '}
-      <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#F3F3F5] border border-[#E0E0E6] text-[#3A3A4A] align-middle">
-        {c.row?.status ?? 'Draft'}{c.row?.flag ? ` · ${c.row.flag}` : ''}
+      {/* The portal's status badge; a flag ("Awaiting scan") reads on after it. */}
+      <span className="ml-1 inline-flex items-center gap-1 align-middle">
+        <StatusChip status={row?.status ?? 'Draft'} compact />
+        {row?.flag && <span className="text-[10px] font-semibold text-[#4A4A5A]">· {row.flag}</span>}
       </span>
     </span>
   );
@@ -65,10 +76,20 @@ export function CloseButton() {
   return <SecondaryButton onClick={() => c.saveAndClose(false)}><X className="w-3.5 h-3.5" aria-hidden />Close</SecondaryButton>;
 }
 
-/** Approval / waiting / sent / reopened banners. (Continuing a scan's draft needs no banner: the subtitle says "from iTero scan".) */
+/** Approval / waiting / ready for dispatch / sent / reopened banners. (Continuing a scan's draft needs no banner: the subtitle says "from iTero scan".) */
 export function CaseBanners({ className = 'mt-4 space-y-2' }: { className?: string }) {
   const { prescriber, lab, gaps } = useCase();
   const c = useController();
+  const row = useLiveRow();
+  const shipped = useShipped(row);
+  // Dispatching from the banner removes the button that had focus: it moves to the new line, as on the Sent page.
+  const doneRef = useRef<HTMLDivElement>(null);
+  const wasReady = useRef(row?.status === 'Ready for Dispatch');
+  useEffect(() => {
+    const ready = row?.status === 'Ready for Dispatch';
+    if (wasReady.current && !ready && shipped && (!document.activeElement || document.activeElement === document.body)) doneRef.current?.focus({ preventScroll: true });
+    wasReady.current = ready;
+  }, [row?.status, shipped]);
   const items = [];
   if (c.view === 'approve') {
     items.push(
@@ -81,12 +102,26 @@ export function CaseBanners({ className = 'mt-4 space-y-2' }: { className?: stri
     );
   }
   if (c.view === 'waiting') items.push(<Notice key="wait" tone="note">Waiting for {prescriber?.name ?? 'the prescriber'} to approve and send. It stays a draft until then.</Notice>);
-  if (c.view === 'sent' && c.row) {
-    items.push(
-      <Notice key="sent" tone="success">
-        {c.row.status} · sent to {lab.name}{c.row.delivery ? `, back by ${fmtDay(fromISO(c.row.delivery))}` : ''}{c.row.flag ? ` · ${c.row.flag}` : ''}.
-      </Notice>,
-    );
+  if (c.view === 'sent' && row) {
+    const back = row.delivery ? fmtDay(fromISO(row.delivery)) : '';
+    if (row.status === 'Ready for Dispatch') {
+      // Posted, so not with the lab yet: the portal's banner (Print label, Mark as dispatched), never "sent".
+      items.push(<DispatchPanel key="dispatch" row={row} />);
+    } else if (shipped) {
+      items.push(
+        <div key="shipped" ref={doneRef} tabIndex={-1} className="focus:outline-none">
+          <Notice tone="success">
+            {row.status} · {dispatchLine(shipped)}{back ? ` · back by ${back}` : ''}{row.flag ? ` · ${row.flag}` : ''}.
+          </Notice>
+        </div>,
+      );
+    } else {
+      items.push(
+        <Notice key="sent" tone="success">
+          {row.status} · sent to {lab.name}{back ? `, back by ${back}` : ''}{row.flag ? ` · ${row.flag}` : ''}.
+        </Notice>,
+      );
+    }
   }
   if (c.banner) items.push(<Notice key="ban" tone="decision" onDismiss={c.dismissBanner}>{c.banner}</Notice>);
   if (!items.length) return null;

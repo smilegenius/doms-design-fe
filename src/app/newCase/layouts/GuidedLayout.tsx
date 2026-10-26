@@ -58,7 +58,8 @@ export default function GuidedLayout() {
               <CaseCorner />
               <Timeline />
             </div>
-            <div className="min-w-0 w-full max-w-[960px]">
+            {/* The card takes the room beside the timeline (a 1500 px window left a strip empty at 960 px); capped only for very wide screens. */}
+            <div className="min-w-0 w-full max-w-[1200px]">
               {/* While the case is being made, the Start page's tabs stay: this is Enter Manually. */}
               {c.view === 'edit' && !api.readOnly && <CreateTabs />}
               <CaseBanners className="mb-4 space-y-2" />

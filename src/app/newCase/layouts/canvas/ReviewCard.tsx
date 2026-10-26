@@ -1,7 +1,7 @@
 // ─── Experience C · the end of the page ──────────────────────────────────────
 // Where the one continuous page arrives, right above the footer that sends it:
 // each service with its own back-by date, the case's date, the delivery plan
-// (fit appointment, sending a quicker service separately), then either what's
+// (sending a quicker service separately), then either what's
 // still missing (each one a link straight to it) or that it's ready. Send
 // itself stays in the footer, beside its attestation line.
 
@@ -9,7 +9,7 @@ import { useCase } from '../../CaseContext';
 import { useController } from '../../controller';
 import { fmtDay } from '../../dates';
 import { itemTitle, plural, stagesShort } from '../../rules';
-import { gapLabel } from '../../ReviewStep';
+import { ShippingBlock, gapLabel, useShippedRow } from '../../ReviewStep';
 import { StateIcon, FOCUS } from '../../ui';
 import { DeliveryPlan } from './CaseDetails';
 import { useCanvas } from './state';
@@ -27,6 +27,7 @@ export default function ReviewCard() {
   const { draft, dates, steps, gaps, readOnly, lab, user } = api;
   const n = user.notation;
   const todo = steps.filter(s => s.gap && s.navigable);
+  const shipped = useShippedRow();
   const say = (s: string) => {
     const t = s.replace(/^Needs you:\s*/, '');
     return t.charAt(0).toUpperCase() + t.slice(1);
@@ -71,6 +72,13 @@ export default function ReviewCard() {
             <DeliveryPlan />
           </li>
         </ul>
+      )}
+
+      {/* Read-only, once the parcel is posted: the portal's Shipping row under the services. */}
+      {shipped && (
+        <div className="px-5 py-3.5 border-t border-[#F0EFF6]">
+          <ShippingBlock row={shipped} />
+        </div>
       )}
 
       {!readOnly && (gaps > 0 ? (

@@ -144,7 +144,7 @@ export interface ServiceItem {
   attachmentCount?: number;        // number of attachments for this service
 }
 
-interface CaseForDetail {
+export interface CaseForDetail {
   id: string;
   patientName: string;
   practice: string;
@@ -187,11 +187,20 @@ interface CaseForDetail {
   /** Who submitted it through Quick Create (see data/caseProvenance). */
   createdBySide?: CreatedSide;
   createdBy?: string;
+  /** Identity-card patient details, where the host has them ("—" when absent). */
+  patientAge?: number;
+  patientGender?: string;
+  patientRef?: string;
+  /** The person under Created By (the practice's account when absent). */
+  creatorName?: string;
+  /** How it arrived, when the host words it itself (e.g. a scan still to follow). */
+  receivedVia?: string;
 }
 
 // "Received via" label — derived from the real case source so the detail view
 // always matches the case's origin (no more hardcoded "Manual upload").
 function receivedViaLabel(c: CaseForDetail): string {
+  if (c.receivedVia) return c.receivedVia;
   const hasScans = (c.serviceItems ?? []).some(si => (si.scanFileCount ?? 0) > 0);
   if (c.source === 'manual') return 'Manual upload';
   if (c.source === 'scanner') return `Scanner · ${c.scanner ?? '—'}`;
@@ -297,6 +306,17 @@ interface CaseDetailPageProps {
   viewerPortal?: ViewerPortal;
   /** What the host calls its list — "Lab Work" in the clinic portal. */
   listLabel?: string;
+  /** yyyy-mm-dd the Ready for Dispatch panel's "Dispatched on" starts at
+      (today by default) — a demo host passes its own clock. */
+  dispatchToday?: string;
+  /** Who dispatches, edits and receipts made here are recorded as (this
+      portal's user by default) — a demo host passes its own signed-in user. */
+  currentUser?: string;
+  /** False while the lab doesn't have the case yet (e.g. its scan is still
+      to follow): no Mark as Received. */
+  canMarkReceived?: boolean;
+  /** The Delivery Date field follows caseData.requestedDelivery when the host moves it (the New Case Flow demo). Off for the Cases page. */
+  followRequestedDelivery?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1451,9 +1471,12 @@ function CaseSummaryOverview({
   drafts = [],
   onOpenDraft,
   readOnlyStatus = false,
+  canReceive = true,
 }: {
   /** Clinics can't change a status; their only route is receiving. */
   readOnlyStatus?: boolean;
+  /** False while the lab doesn't have the case yet: no receiving on the cards, denture stages included. */
+  canReceive?: boolean;
   drafts?: MatchedDraft[];
   onOpenDraft?: (draftId: string) => void;
   serviceItems: ServiceItem[];
@@ -1724,7 +1747,7 @@ function CaseSummaryOverview({
                       )}
                       {/* Receiving — at the end of the row (undo while it's local). */}
                       <span className="w-[112px] flex justify-end">
-                        {!r.doneEarlier && (!closed || received) && (
+                        {canReceive && !r.doneEarlier && (!closed || received) && (
                           <button
                             type="button"
                             onClick={() => setReceivedStages(prev => {
@@ -1792,7 +1815,7 @@ function CaseSummaryOverview({
                   {(() => {
                     const pending = dentureRows.filter(r =>
                       !r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered' && !receivedStages.has(`${si.id}::${r.stage}`));
-                    if (pending.length < 1 || dentureRows.length < 2) return null;
+                    if (!canReceive || pending.length < 1 || dentureRows.length < 2) return null;
                     return (
                       <button
                         onClick={(e) => {
@@ -1825,15 +1848,15 @@ function CaseSummaryOverview({
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     Received
                   </span>
-                ) : (
+                ) : onMarkReceived ? (
                   <button
-                    onClick={(e) => { e.stopPropagation(); onMarkReceived?.(si); }}
+                    onClick={(e) => { e.stopPropagation(); onMarkReceived(si); }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm whitespace-nowrap"
                   >
                     <Check className="w-3.5 h-3.5" />
                     Mark as Received
                   </button>
-                )}
+                ) : null}
                 <button
                   onClick={(e) => { e.stopPropagation(); onSelectService(si.id); }}
                   className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors border border-[#C8D8FC] whitespace-nowrap"
@@ -2986,13 +3009,15 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived,
   );
 }
 
-function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onMarkReceived, shipment, dispatch, canEditDispatch, canEditShipment }: {
+function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onMarkReceived, canReceive = true, shipment, dispatch, canEditDispatch, canEditShipment, currentUser }: {
   service: ServiceItem;
   caseData: CaseForDetail;
   onOpenNotes: () => void;
   onOpenFullView: () => void;
   /** "Mark as Received" on a phase — the host confirms receipt. */
   onMarkReceived?: (label: string) => void;
+  /** False while the lab doesn't have the case yet: no receiving here (stages and phases). */
+  canReceive?: boolean;
   /** Shipment recorded through the CareStack flow — fills the Shipping sub-tab. */
   shipment?: CaseCareStack['shipment'];
   /** What the clinic posted to the lab when it dispatched the case. */
@@ -3001,6 +3026,8 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   canEditDispatch?: boolean;
   /** Only the lab that shipped the work can edit its shipment details. */
   canEditShipment?: boolean;
+  /** Who a dispatch edit is recorded as. */
+  currentUser?: string;
 }) {
   // ?sub=shipping opens straight on the Shipping tab (walkthrough links).
   const [subTab, setSubTab] = useState<ServiceSubTab>(() => new URLSearchParams(window.location.search).get('sub') === 'shipping' ? 'shipping' : 'details');
@@ -3016,6 +3043,22 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
     () => seedStageOrders(service, caseData.id, caseData.createdAt)
   );
   const [activeStageId, setActiveStageId] = useState<string>(() => seedStageOrders(service, caseData.id, caseData.createdAt)[0]?.id ?? '');
+  // The host can move a stage's date itself (the New Case Flow demo: a corrected post day moves a partial's
+  // back-by day): the order those dates seeded follows. Same case and service only, and only dates the host
+  // gives per stage; follow-up orders and receipts made here are kept.
+  const stageDatesKey = service.stageDates ? JSON.stringify(service.stageDates) : '';
+  const seenStageDates = useRef({ caseId: caseData.id, serviceId: service.id, key: stageDatesKey });
+  useEffect(() => {
+    const was = seenStageDates.current;
+    seenStageDates.current = { caseId: caseData.id, serviceId: service.id, key: stageDatesKey };
+    if (was.caseId !== caseData.id || was.serviceId !== service.id || was.key === stageDatesKey) return;
+    if (!stageCatalog || !service.stageDates || service.stageOrders?.length) return;
+    const seeded = seedStageOrders(service, caseData.id, caseData.createdAt)[0];
+    if (!seeded) return;
+    setStageOrders(prev => prev.map(o => (o.id === seeded.id
+      ? { ...o, deliveryDate: seeded.deliveryDate, stageDates: { ...(o.stageDates ?? {}), ...seeded.stageDates } }
+      : o)));
+  }, [caseData.id, service.id, stageDatesKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const { toast: stageToast } = useToast();
   // Receiving a stage (or all open ones) marks just those stages delivered —
   // not the whole case.
@@ -3107,7 +3150,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
             <div className="flex items-center gap-2 flex-shrink-0">
             {(() => {
               const pending = (activeDentureTab?.rows ?? []).filter(r => !r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered');
-              return pending.length > 1 ? (
+              return canReceive && pending.length > 1 ? (
                 <button
                   onClick={() => receiveStages(pending.map(r => r.stage))}
                   title="Confirm receipt of every open stage in this order"
@@ -3204,7 +3247,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                       />
                     </td>
                     <td className="px-4 py-1.5 whitespace-nowrap text-right">
-                      {!r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered' && (
+                      {canReceive && !r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered' && (
                         <button
                           type="button"
                           onClick={() => receiveStages([r.stage])}
@@ -3499,7 +3542,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                                   <CheckCircle2 className="w-3.5 h-3.5" />
                                   Received
                                 </span>
-                              ) : (
+                              ) : canReceive ? (
                                 <button
                                   onClick={() => onMarkReceived?.(`${service.name} · ${phase.label}`)}
                                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm"
@@ -3507,7 +3550,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                                   <Check className="w-3.5 h-3.5" />
                                   Mark as Received
                                 </button>
-                              )}
+                              ) : null}
                             </div>
                           </div>
                         );
@@ -3587,7 +3630,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
           </div>
         )}
         {subTab === 'invoice'  && <InvoiceTab  caseId={caseData.id} />}
-        {subTab === 'shipping' && <ShippingTab caseId={caseData.id} canEdit={canEditDispatch} canEditShipment={canEditShipment} shipment={shipment} dispatch={dispatch} dispatchServices={(caseData.serviceItems?.length ?? 0) > 1 ? caseData.serviceItems?.map(si => si.name).join(', ') : undefined} serviceName={activeOrderLabel ? `${service.name} · ${activeOrderLabel}` : service.name} />}
+        {subTab === 'shipping' && <ShippingTab caseId={caseData.id} currentUser={currentUser} canEdit={canEditDispatch} canEditShipment={canEditShipment} shipment={shipment} dispatch={dispatch} dispatchServices={(caseData.serviceItems?.length ?? 0) > 1 ? caseData.serviceItems?.map(si => si.name).join(', ') : undefined} serviceName={activeOrderLabel ? `${service.name} · ${activeOrderLabel}` : service.name} />}
       </div>
       </div>
 
@@ -3981,7 +4024,8 @@ function SentByPill({ from }: { from: 'clinic' | 'lab' }) {
     : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F5F3FF] text-[#6D28D9] border border-[#DDD6FE] whitespace-nowrap">Lab <ArrowRight className="w-2.5 h-2.5" /> Clinic</span>;
 }
 
-function ShippingTab({ shipment, dispatch, dispatchServices, serviceName, caseId, canEdit, canEditShipment }: { shipment?: CaseCareStack['shipment']; dispatch?: DispatchRecord; /** Every service in the parcel the clinic posted. */ dispatchServices?: string; serviceName?: string; caseId?: string; /** Only the clinic that dispatched the case can edit it. */ canEdit?: boolean; /** Only the lab that shipped the work can edit its shipment. */ canEditShipment?: boolean }) {
+// Exported for the New Case Flow demo's dispatched cases (src/app/newCase/dispatch.tsx).
+export function ShippingTab({ shipment, dispatch, dispatchServices, serviceName, caseId, canEdit, canEditShipment, currentUser }: { shipment?: CaseCareStack['shipment']; dispatch?: DispatchRecord; /** Who a dispatch edit is recorded as (this portal's user by default). */ currentUser?: string; /** Every service in the parcel the clinic posted. */ dispatchServices?: string; serviceName?: string; caseId?: string; /** Only the clinic that dispatched the case can edit it. */ canEdit?: boolean; /** Only the lab that shipped the work can edit its shipment. */ canEditShipment?: boolean }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [shipmentOpen, setShipmentOpen] = useState(false);
   const fmtDay = (d: string) => new Date(`${d}T12:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -4006,7 +4050,7 @@ function ShippingTab({ shipment, dispatch, dispatchServices, serviceName, caseId
           <p className="px-5 py-2.5 border-t border-[#F0EFF6] text-[10px] text-[#A0A0B0]">
             Dispatched by the clinic · {dispatch.packaging.toLowerCase()} · recorded by {dispatch.by} · {fmtAt(dispatch.at)}{dispatch.editedAt && ` · edited by ${dispatch.editedBy} · ${fmtAt(dispatch.editedAt)}`}{dispatch.comment && <> · <span className="text-[#030213]"><span className="font-semibold">Comment:</span> {dispatch.comment}</span></>}
           </p>
-          {detailsOpen && caseId && <DispatchDetailsModal caseId={caseId} record={dispatch} canEdit={!!canEdit} onClose={() => setDetailsOpen(false)} />}
+          {detailsOpen && caseId && <DispatchDetailsModal caseId={caseId} record={dispatch} canEdit={!!canEdit} onClose={() => setDetailsOpen(false)} currentUser={currentUser} />}
         </>
       )}
       {shipment && (
@@ -4060,7 +4104,7 @@ const OTHER_COURIER = 'Other';
 
 // Dispatch details: opened from the Shipping tab. Everyone who can see the case can read
 // them; only the clinic that dispatched it can edit.
-function DispatchDetailsModal({ caseId, record, canEdit, onClose }: { caseId: string; record: DispatchRecord; canEdit: boolean; onClose: () => void }) {
+function DispatchDetailsModal({ caseId, record, canEdit, onClose, currentUser = CURRENT_USER }: { caseId: string; record: DispatchRecord; canEdit: boolean; onClose: () => void; /** Who an edit is recorded as (this portal's user by default). */ currentUser?: string }) {
   const { toast } = useToast();
   const known = DISPATCH_COURIERS.includes(record.courier);
   const [courier, setCourier] = useState(known ? record.courier : OTHER_COURIER);
@@ -4074,7 +4118,7 @@ function DispatchDetailsModal({ caseId, record, canEdit, onClose }: { caseId: st
     `px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${active ? 'bg-[#EEF4FF] border-[#4D8EF7] text-[#1565C0]' : 'bg-white border-[#E0E0E6] text-[#5A5568] hover:bg-[#F8F9FC]'}`;
   const field = 'w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg';
   const save = () => {
-    updateDispatch(caseId, { courier: courierName, packaging, tracking: tracking.trim(), comment: comment.trim() || undefined, dispatchedOn, editedBy: CURRENT_USER, editedAt: new Date().toISOString() });
+    updateDispatch(caseId, { courier: courierName, packaging, tracking: tracking.trim(), comment: comment.trim() || undefined, dispatchedOn, editedBy: currentUser, editedAt: new Date().toISOString() });
     toast.success('Dispatch details updated');
     onClose();
   };
@@ -4223,7 +4267,8 @@ function ShipmentDetailsView({ caseId, shipment, canEdit, onClose }: { caseId: s
   );
 }
 
-function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline, orderCase, onDispatch }: { lab: string; caseId: string; patient: string; dentist: string; clinic: string; offline?: boolean; orderCase: CaseForDetail; onDispatch: (details: { courier: string; packaging: string; tracking: string; dispatchedOn: string; comment: string }) => void }) {
+// Exported so the New Case Flow demo (src/app/newCase/dispatch.tsx) shows this same panel; the defaults keep this page unchanged.
+export function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline, orderCase, onDispatch, className = 'mx-6 mt-1', today }: { lab: string; caseId: string; patient: string; dentist: string; clinic: string; offline?: boolean; orderCase?: CaseForDetail; onDispatch: (details: { courier: string; packaging: string; tracking: string; dispatchedOn: string; comment: string }) => void; /** Where the banner sits: this page's margins by default. */ className?: string; /** yyyy-mm-dd "Dispatched on" starts at (today by default). */ today?: string }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
@@ -4231,14 +4276,14 @@ function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline,
   const [packaging, setPackaging] = useState('Bag');
   const [otherCourier, setOtherCourier] = useState('');
   const [tracking, setTracking] = useState('');
-  const [dispatchedOn, setDispatchedOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dispatchedOn, setDispatchedOn] = useState(() => today ?? new Date().toISOString().slice(0, 10));
   const [comment, setComment] = useState('');
   const courierName = courier === OTHER_COURIER ? otherCourier.trim() : courier;
   const pick = (active: boolean) =>
     `px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${active ? 'bg-[#EEF4FF] border-[#4D8EF7] text-[#1565C0]' : 'bg-white border-[#E0E0E6] text-[#5A5568] hover:bg-[#F8F9FC]'}`;
   return (
     <>
-      <div className="mx-6 mt-1 flex items-center gap-3 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-5 py-3">
+      <div className={`${className} flex items-center gap-3 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-5 py-3`}>
         <Package className="w-4 h-4 text-[#B45309] flex-shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-[#92400E]">Ready for dispatch</p>
@@ -4348,18 +4393,32 @@ function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline,
           </div>
         </ModalPortal>
       )}
-      {printOpen && offline && <OrderFormModal caseData={orderCase} onClose={() => setPrintOpen(false)} onPrint={() => { toast.success('Printing order form…'); setPrintOpen(false); }} />}
+      {printOpen && offline && orderCase && <OrderFormModal caseData={orderCase} onClose={() => setPrintOpen(false)} onPrint={() => { toast.success('Printing order form…'); setPrintOpen(false); }} />}
       {printOpen && !offline && <PrintLabelsModal caseNumbers={[caseId]} labNames={[lab]} details={[{ patient, dentist, clinic }]} title={`Print label · ${caseId}`} subtitle="Put this sheet in the parcel with the impressions." onClose={() => setPrintOpen(false)} />}
     </>
   );
 }
 
-export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onPickStatus, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onOpenDraftCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach, viewerPortal, listLabel = 'Cases' }: CaseDetailPageProps) {
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onPickStatus, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onOpenDraftCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach, viewerPortal, listLabel = 'Cases', dispatchToday, currentUser = CURRENT_USER, canMarkReceived = true, followRequestedDelivery = false }: CaseDetailPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   // The lab's latest due-date change (if any) is the date the case is working
   // to — same rule as the Delivery Date column on the list.
   const [deliveryDate, setDeliveryDate] = useState(latestDueDateChange(caseData.id)?.next ?? caseData.requestedDelivery ?? '');
+  // The host can move the date itself (the New Case Flow demo: a corrected post day moves the back-by day).
+  // The field follows it, unless a due-date change was recorded here or it's this page's own edit coming back
+  // (a host may write it back reworded mid-typing). Same case only, and only when the host asks for it
+  // (followRequestedDelivery): the Cases page re-selects a case from its own list, which would undo an edit.
+  const ownDateEdit = useRef(false);
+  const seenRequested = useRef({ id: caseData.id, date: caseData.requestedDelivery });
+  useEffect(() => {
+    const own = ownDateEdit.current;
+    ownDateEdit.current = false;
+    const was = seenRequested.current;
+    seenRequested.current = { id: caseData.id, date: caseData.requestedDelivery };
+    if (!followRequestedDelivery || was.id !== caseData.id || was.date === caseData.requestedDelivery || own || latestDueDateChange(caseData.id)) return;
+    setDeliveryDate(caseData.requestedDelivery ?? '');
+  }, [caseData.id, caseData.requestedDelivery, deliveryDate]);
   // Conversion helpers — the rest of the app uses "DD-MMM-YYYY"; the date input expects ISO.
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] as const;
   const toIsoDate = (d: string): string => {
@@ -4829,8 +4888,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           clinic={caseData.practice}
           offline={!!offlineLabStatusFor(caseData.lab)}
           orderCase={caseData}
+          today={dispatchToday}
           onDispatch={({ courier, packaging, tracking, dispatchedOn, comment }) => {
-            recordDispatch(caseData.id, { courier, packaging, tracking, comment: comment || undefined, dispatchedOn, by: CURRENT_USER, at: new Date().toISOString() });
+            recordDispatch(caseData.id, { courier, packaging, tracking, comment: comment || undefined, dispatchedOn, by: currentUser, at: new Date().toISOString() });
             onSetStatus?.('submitted');
             toast.success(`${caseData.id} marked as dispatched — ${courier} (${packaging.toLowerCase()})${tracking ? `, tracking ${tracking}` : ''}. Case submitted to the lab.`);
           }}
@@ -4901,7 +4961,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               menu; the details grid below is always open. */}
           <div className="ml-auto flex items-center gap-2 flex-shrink-0">
             {/* Multi-service / multi-stage cases are received per service or stage on their cards. */}
-            {caseData.status !== 'delivered' && caseData.status !== 'completed' && caseData.status !== 'ready-for-dispatch'
+            {caseData.status !== 'delivered' && caseData.status !== 'completed' && caseData.status !== 'ready-for-dispatch' && canMarkReceived
               && (caseData.serviceItems?.length ?? 0) <= 1
               && !caseData.serviceItems?.some(si => (si.stages?.length ?? 0) > 1 || isDentureService(si.name)) && (
               <button
@@ -4933,9 +4993,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 {csEnabled && csRecord && <MappingIcon mapping={csRecord.patient} entity="Patient" />}
               </p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Age / Gender</p>
-              <p className="text-[11px] text-[#717182]">—</p>
+              <p className="text-[11px] text-[#717182]">{caseData.patientAge != null || caseData.patientGender ? `${caseData.patientAge ?? '—'} / ${caseData.patientGender ?? '—'}` : '—'}</p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Patient ID</p>
-              <p className="text-[11px] text-[#717182]">—</p>
+              <p className="text-[11px] text-[#717182]">{caseData.patientRef ?? '—'}</p>
             </div>
 
             {/* Clinic */}
@@ -4969,7 +5029,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 </button>
               </p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Created By</p>
-              <p className="text-[11px] text-[#717182]">Smile Genius Lab <span className="text-[#A0A0B0]">(Clinic)</span></p>
+              <p className="text-[11px] text-[#717182]">{caseData.creatorName ?? 'Smile Genius Lab'} <span className="text-[#A0A0B0]">(Clinic)</span></p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Received via</p>
               <p className="text-[11px] text-[#717182]">{receivedVia}</p>
             </div>
@@ -5000,6 +5060,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                   // With CareStack on, a real change is a due-date change: capture
                   // the reason and mirror it (note + email) before committing.
                   if (csEnabled && next && next !== deliveryDate) { setDueDateModal({ previous: deliveryDate, next }); return; }
+                  ownDateEdit.current = true;
                   setDeliveryDate(next);
                   onDeliveryDateChange?.(next);
                 }}
@@ -5121,7 +5182,8 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             caseData={caseData}
             onSelectService={(id) => setTopTab(id)}
             onOpenTimeline={() => setTimelineOpen(true)}
-            onMarkReceived={(si) => setReceivedModal({ label: si.name })}
+            onMarkReceived={canMarkReceived ? (si) => setReceivedModal({ label: si.name }) : undefined}
+            canReceive={canMarkReceived}
             drafts={matchedDrafts}
             onOpenDraft={onOpenDraftCase}
             readOnlyStatus={viewerPortal === 'clinic'}
@@ -5162,10 +5224,12 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 onOpenNotes={() => setNotesOpen(true)}
                 onOpenFullView={() => setFullViewOpen(true)}
                 onMarkReceived={(label) => setReceivedModal({ label })}
+                canReceive={canMarkReceived}
                 shipment={csRecord?.shipment}
                 dispatch={dispatchRecord}
                 canEditDispatch={viewerPortal === 'clinic'}
                 canEditShipment={viewerPortal === 'lab'}
+                currentUser={currentUser}
               />
             : null;
         })()
@@ -5237,8 +5301,8 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             variant="drawer"
             caseData={csCase}
             onRequestShipmentDetails={() => { setCsDrawerOpen(false); onRequestShipmentDetails?.(); }}
-            onMarkReceived={() => { setCsDrawerOpen(false); setReceivedModal({}); }}
-            currentUser={CURRENT_USER}
+            onMarkReceived={canMarkReceived ? () => { setCsDrawerOpen(false); setReceivedModal({}); } : undefined}
+            currentUser={currentUser}
           />
         </SideDrawer>
       )}
@@ -5293,9 +5357,10 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           onCancel={() => setDueDateModal(null)}
           onConfirm={(reason) => {
             const { previous, next } = dueDateModal;
+            ownDateEdit.current = true;
             setDeliveryDate(next);
             onDeliveryDateChange?.(next);
-            recordDueDateChange({ ...csCase, requestedDelivery: next }, { previous: previous || null, next, reason }, CURRENT_USER);
+            recordDueDateChange({ ...csCase, requestedDelivery: next }, { previous: previous || null, next, reason }, currentUser);
             setDueDateModal(null);
             toast.success(`Due date updated to ${next} — practice notified`);
           }}
@@ -5308,10 +5373,10 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           caseId={caseData.id}
           patientName={caseData.patientName}
           serviceLabel={receivedModal.label}
-          currentUser={CURRENT_USER}
+          currentUser={currentUser}
           onClose={() => setReceivedModal(null)}
           onConfirm={({ receivedAt, notes }) => {
-            if (csEnabled) recordReceipt(csCase, { receivedAt, receivedBy: CURRENT_USER, notes });
+            if (csEnabled) recordReceipt(csCase, { receivedAt, receivedBy: currentUser, notes });
             onSetStatus?.('delivered');
             setReceivedModal(null);
             toast.success(`${caseData.id} marked as received`);

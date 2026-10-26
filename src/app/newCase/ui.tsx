@@ -60,7 +60,7 @@ export function NextArrow({ onClick, disabled, label, next, hint, side = 'right'
   onClick: () => void; disabled?: boolean; label: string; next?: string; hint?: string;
   /** Where the "Next · …" words sit; the card's top-right corner puts them before the arrow. */
   side?: 'left' | 'right';
-  /** The quieter twin that goes back: white, outlined, ← and "Back · Prescriber". */
+  /** The twin that goes back: the same gradient, ← and "Back · Prescriber". */
   back?: boolean;
   /** For the card's corners: a smaller arrow and one small line of text. */
   compact?: boolean;
@@ -75,7 +75,8 @@ export function NextArrow({ onClick, disabled, label, next, hint, side = 'right'
         aria-label={next && !disabled ? `${label}, ${back ? 'to' : 'next'}: ${next}` : label}
         title={disabled ? hint : label}
         className={`group relative ${compact ? 'w-9 h-9' : 'w-11 h-11'} rounded-full flex items-center justify-center flex-shrink-0 hover:scale-105 active:scale-95 transition-transform motion-reduce:transition-none disabled:opacity-35 disabled:shadow-none disabled:hover:scale-100 disabled:cursor-not-allowed ${FOCUS} ${
-          back ? 'bg-white border border-[#D4D4DD] text-[#3A3A4A] hover:border-[#3F6FE8] hover:text-[#2F62D6] shadow-sm' : `${GRADIENT_BTN} shadow-[0_6px_16px_rgba(63,111,232,0.32)]`
+          // Back wears the same gradient as forward (the user's call); only forward pulses.
+          `${GRADIENT_BTN} shadow-[0_6px_16px_rgba(63,111,232,0.32)]`
         }`}
       >
         {!disabled && !back && <span aria-hidden className="absolute inset-0 rounded-full ring-2 ring-[#3F6FE8]/50 motion-safe:animate-ping [animation-iteration-count:2]" />}

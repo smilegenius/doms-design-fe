@@ -5,7 +5,7 @@
 import { User, labById, userById } from './data';
 import { demoNow } from './dates';
 import { CaseDraft, Ctx, gapCount, itemTitle, resolvePrescriber } from './rules';
-import { getPatient, loginMap } from './store';
+import { type CaseRow, getPatient, loginMap } from './store';
 
 export function buildCtx(draft: CaseDraft, user: User): { ctx: Ctx; prescriber?: User; prescriberSrc?: string } | null {
   const patient = getPatient(draft.patientId);
@@ -17,6 +17,10 @@ export function buildCtx(draft: CaseDraft, user: User): { ctx: Ctx; prescriber?:
     prescriber,
     prescriberSrc: pres.src,
   };
+}
+/** A sent case's context from the person who made it (else the viewer), so its prescriber, material and back-by day don't follow the demo's user switch. */
+export function sentCtx(row: CaseRow, viewer: User) {
+  return row.draft ? buildCtx(row.draft, userById(row.createdBy) ?? viewer) : null;
 }
 export function draftGaps(draft: CaseDraft, user: User): number {
   const b = buildCtx(draft, user);

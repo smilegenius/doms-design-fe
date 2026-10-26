@@ -71,6 +71,18 @@ function subscribe(listener: () => void) {
   return () => { listeners.delete(listener); };
 }
 
+/** Drop a case's dispatch — a demo that hands out the same case IDs again after a reset. */
+export function removeDispatch(caseId: string) {
+  if (!records[caseId]) return;
+  const { [caseId]: _gone, ...rest } = records;
+  commit(rest);
+}
+
+/** The dispatch recorded for a case right now (outside a render, e.g. just after recording it). */
+export function getDispatchRecord(caseId: string): DispatchRecord | undefined {
+  return records[caseId];
+}
+
 /** The dispatch recorded for a case, if any; re-renders when it is recorded. */
 export function useDispatchRecord(caseId: string): DispatchRecord | undefined {
   return useSyncExternalStore(subscribe, () => records[caseId]);

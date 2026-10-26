@@ -21,6 +21,7 @@ import DentistContactFlowPage from './pages/DentistContactFlowPage';
 import NewCaseWalkthroughPage from './pages/NewCaseWalkthroughPage';
 import NewCaseFlowPage from './pages/NewCaseFlowPage';
 import FlowCasesPage from './newCase/FlowCasesPage';
+import FlowCaseDetail from './newCase/FlowCaseDetail';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
 import LabApp from './LabApp';
@@ -448,6 +449,8 @@ export default function App() {
       <Route path="/flows/new-case" element={<NewCaseWalkthroughPage />} />
       <Route path="/flows/new-case/cases" element={<FlowCasesPage />} />
       <Route path="/flows/new-case/case/:id" element={<NewCaseFlowPage />} />
+      {/* View Case: a finished flow case in the portal's own Case Details. */}
+      <Route path="/flows/new-case/view/:id" element={<FlowCaseDetail />} />
       {/* Smile Genius Go — clinician / dentist mobile app. Has its own demo
           sign-in, so it sits outside ProtectedRoute. */}
       <Route path="/go" element={<GoVersionSelect />} />

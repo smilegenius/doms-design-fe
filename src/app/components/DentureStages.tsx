@@ -1,7 +1,7 @@
 import { Check, History, X } from 'lucide-react';
 import type { CaseStatus } from '../pages/CasesPage';
 import { STATUS_MAP } from '../pages/CaseDetailPage';
-import { ARCH_LABELS, DENTURE_STAGES, TODAY_ISO, archOf, archTeeth, isPastISO, type Arch, type StageRow } from '../data/dentureStages';
+import { ARCH_LABELS, DENTURE_STAGES, TODAY_ISO, archOf, archTeeth, type Arch, type StageRow } from '../data/dentureStages';
 
 // ─── Denture stage UI ────────────────────────────────────────────────────────
 // Shared by case creation (Quick Create + the detailed wizard), the case page's
@@ -59,11 +59,17 @@ export interface StageDatePickerProps {
   allowDoneElsewhere?: boolean;
   /** Tighter rows without the helper line — for the inline service card. */
   compact?: boolean;
+  /** ISO "today" for past / done-on checks: the portal's demo day by default (the New Case Flow demo runs on its own clock). */
+  today?: string;
+  /** One line per stage for a narrow column (the New Case Flow's side column): an unticked stage is just its
+   *  name, a ticked one has its date beside it with no visible label (the field keeps its accessible name). */
+  dense?: boolean;
 }
 
 export function StageDatePicker({
-  stages, dates, doneElsewhere = [], onChange, existing = [], catalog = DENTURE_STAGES, allowDoneElsewhere = true, compact,
+  stages, dates, doneElsewhere = [], onChange, existing = [], catalog = DENTURE_STAGES, allowDoneElsewhere = true, compact, today = TODAY_ISO, dense,
 }: StageDatePickerProps) {
+  const isPast = (iso: string | undefined | null) => !!iso && iso < today;
   const ordered = new Map(existing.map(r => [r.stage, r]));
   const selected = catalog.filter(s => stages.includes(s));
   const isDone = (s: string) => allowDoneElsewhere && doneElsewhere.includes(s);
@@ -88,7 +94,7 @@ export function StageDatePicker({
   // "Done elsewhere" turns it into past work (that date is then a done-on date).
   const setDate = (stage: string, iso: string) => {
     const nextDone = doneElsewhere;
-    if (iso && isPastISO(iso) && !isDone(stage)) {
+    if (iso && isPast(iso) && !isDone(stage)) {
       const cleared = { ...dates };
       delete cleared[stage];
       emit(stages, cleared, nextDone);
@@ -104,7 +110,7 @@ export function StageDatePicker({
   const setDone = (stage: string, done: boolean) => {
     const nextDates = { ...dates };
     // Keep a date only if it still makes sense for the new meaning.
-    if (dates[stage] && (done ? !isPastISO(dates[stage]) && dates[stage] !== TODAY_ISO : isPastISO(dates[stage]))) delete nextDates[stage];
+    if (dates[stage] && (done ? !isPast(dates[stage]) && dates[stage] !== today : isPast(dates[stage]))) delete nextDates[stage];
     emit(stages, nextDates, done ? [...doneElsewhere, stage] : doneElsewhere.filter(s => s !== stage));
   };
 
@@ -161,12 +167,14 @@ export function StageDatePicker({
                 type="date"
                 value={dates[stage] ?? ''}
                 disabled={!active}
-                min={active && !done ? TODAY_ISO : undefined}
-                max={done ? TODAY_ISO : undefined}
+                min={active && !done ? today : undefined}
+                max={done ? today : undefined}
                 aria-label={`${stage} ${done ? 'done-on' : 'delivery'} date`}
                 title={done ? 'Optional — when it was done' : undefined}
                 onChange={(e) => setDate(stage, e.target.value)}
-                className={`${compact ? 'px-2 py-1 text-[11px] rounded-md' : 'w-[140px] px-2.5 py-1.5 text-xs rounded-lg'} border bg-white outline-none focus:border-[#4D8EF7] disabled:bg-[#F8F9FC] disabled:text-[#C0C0CC] ${
+                // Dense (the New Case Flow): a click anywhere on the field opens the calendar, not only its icon.
+                onClick={dense ? (e) => { try { (e.currentTarget as HTMLInputElement & { showPicker?: () => void }).showPicker?.(); } catch { /* not allowed here: the icon still opens it */ } } : undefined}
+                className={`${compact ? 'px-2 py-1 text-[11px] rounded-md' : dense ? 'w-[128px] px-2 py-1.5 text-xs rounded-lg' : 'w-[140px] px-2.5 py-1.5 text-xs rounded-lg'} border bg-white outline-none focus:border-[#4D8EF7] disabled:bg-[#F8F9FC] disabled:text-[#C0C0CC] ${
                   active && !done && !dates[stage] ? 'border-[#FCD34D]' : 'border-[#E0E0E6]'
                 } ${done ? 'text-[#5A5568]' : 'text-[#030213]'}`}
               />
@@ -192,6 +200,30 @@ export function StageDatePicker({
                     <X className="w-3.5 h-3.5" strokeWidth={2.5} />
                   </button>
                 </div>
+              </div>
+            );
+          }
+          const box = (
+            <button
+              type="button"
+              onClick={() => toggle(stage)}
+              className={`flex items-center gap-3 flex-1 ${dense ? 'min-w-0 py-1' : 'min-w-[140px]'} text-left`}
+            >
+              <span className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                active ? 'border-[#4D8EF7] bg-[#4D8EF7]' : 'border-[#D1D5DB] bg-white'
+              }`}>
+                {active && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
+              </span>
+              <span className={`text-sm truncate ${done ? 'font-semibold text-[#5A5568]' : active ? 'font-semibold text-[#1565C0]' : 'text-[#5A5568]'}`}>{stage}</span>
+            </button>
+          );
+          // Dense (a narrow column): the stage and its "Done elsewhere" on one line, its date on the next,
+          // so nothing squeezes the name; an unticked stage is one line.
+          if (dense) {
+            return (
+              <div key={stage} className={`${rowPad} ${done ? 'bg-[#FAFAFB]' : active ? 'bg-[#F8FAFF]' : ''}`}>
+                <div className="flex items-center gap-2">{box}{doneChip}</div>
+                {active && <div className="pl-7 pb-1">{dateField}</div>}
               </div>
             );
           }

@@ -23,7 +23,7 @@ import {
 import { CLINIC, Lab, Patient, User, userById } from './data';
 import { demoNow, fmtDay, fmtFull, fmtShort, fromISO, maskDOB, parseDOB } from './dates';
 import {
-  Ctx, DENTURE_STAGES, DentureStageId, PRODUCTS, ServiceItem, StagePlan, archCaps, caseDates, dentureTreatment, effective, fullName, isPosted, labsThatMake,
+  CaseDraft, Ctx, DENTURE_STAGES, DentureStageId, PRODUCTS, ServiceItem, StagePlan, archCaps, caseDates, dentureTreatment, effective, fullName, isPosted, labsThatMake,
   optionAvail, optionName, patientAge, plural, recordsState, shadeSwatch, slotsFor, stageName, stageOption, stagePlan, suggestedStageDates,
   toothText, treatmentName,
 } from './rules';
@@ -939,6 +939,7 @@ function ServicesField({ parsed, preview, user, blocks }: { parsed: Parsed; prev
               index={i}
               item={item}
               ctx={preview?.ctx}
+              draft={preview?.draft}
               lab={parsed.lab.lab}
               user={user}
               backBy={item ? own.get(item.id) : undefined}
@@ -967,8 +968,8 @@ function EmptyServiceCard({ index }: { index: number }) {
   );
 }
 
-function ServiceCard({ s, index, item, ctx, lab, user, backBy, fastOffered }: {
-  s: ServiceRead; index: number; item?: ServiceItem; ctx?: Ctx; lab: Lab; user: User; backBy?: Date; fastOffered?: boolean;
+function ServiceCard({ s, index, item, ctx, draft, lab, user, backBy, fastOffered }: {
+  s: ServiceRead; index: number; item?: ServiceItem; ctx?: Ctx; draft?: CaseDraft; lab: Lab; user: User; backBy?: Date; fastOffered?: boolean;
 }) {
   const n = user.notation;
   const Icon = s.product ? PRODUCT_ICON[s.product] : CircleHelp;
@@ -980,8 +981,8 @@ function ServiceCard({ s, index, item, ctx, lab, user, backBy, fastOffered }: {
   const metal = eff?.material === 'metal';
   // A full denture: its stage plan stands in for the Delivery row; the tooth shade only once teeth are set up (Try In on, or a finished denture).
   const denture = s.product === 'denture';
-  const shadeAsked = !denture || !!s.shade || (item && ctx
-    ? slotsFor(item, ctx).some(x => x.id === 'shade')
+  const shadeAsked = !denture || !!s.shade || (item && ctx && draft
+    ? slotsFor(item, ctx, draft).some(x => x.id === 'shade')
     : (s.treatment ?? 'staged') !== 'staged' || !!s.stages?.some(r => r.state === 'order' && r.id !== 'tray' && r.id !== 'blocks'));
 
   let optionView: ReactNode = null;

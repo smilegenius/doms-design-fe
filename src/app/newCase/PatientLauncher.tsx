@@ -1,7 +1,7 @@
 // ─── New Case Flow · patient picker: "spotlight + bento" ─────────────────────
 // Shown on the page itself (never a popup), and nothing inside it scrolls.
 // A tall spotlight search sits on top; under it, a bento of tiles, all visible
-// at a glance:
+// at a glance (Waiting Scans is hidden for now: SHOW_SCANS):
 //   Waiting Scans    (mode 'new', two of three columns, top row) scanner
 //                    drafts as tickets: scanner badge, patient, time ago, arch
 //                    pictograms (upper / lower / bite), what's left. A green
@@ -63,6 +63,9 @@ function matches(p: Patient, q: string): boolean {
 
 /** Tickets shown before "+ N more"; bubbles at rest and result cards while searching. */
 const SCAN_CAP = 4;
+/** The Waiting Scans tile is hidden for now (user call, 26-Oct): a scan stays reachable through its
+ *  patient (the bubble's ring, or search). Flip back to bring the tile back. */
+const SHOW_SCANS = false;
 const PEOPLE = 6;
 /** The picker's own width at which the tiles sit side by side. */
 const WIDE = 760;
@@ -142,7 +145,7 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
 
   const query = q.trim();
   const searching = norm(q).length >= 2;
-  const waiting = rows.filter(r => r.status === 'Draft' && r.source === 'scanner' && !r.flag && r.draft && byId.has(r.patientId));
+  const waiting = !SHOW_SCANS ? [] : rows.filter(r => r.status === 'Draft' && r.source === 'scanner' && !r.flag && r.draft && byId.has(r.patientId));
   const scans = searching ? waiting.filter(r => matches(byId.get(r.patientId)!, q)) : waiting;
   const matched = useMemo(() => (searching ? patients.filter(p => matches(p, q)) : []), [patients, q, searching]);
   const people = searching ? matched.slice(0, PEOPLE) : recent.slice(0, PEOPLE);
@@ -342,7 +345,7 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
   const leftSelf = wide && formOpen ? 'self-start' : '';
   // Mode 'new' at rest: New Patient takes the third column, two rows tall, beside the scans and the bubbles.
   // Its form fits that height, so opening it changes nothing around it.
-  const tallTile = wide && mode === 'new' && !searching;
+  const tallTile = wide && mode === 'new' && SHOW_SCANS && !searching;
 
   const scansTile = (
     <section key="scans" aria-labelledby={`${uid}-scans`} className={`${TILE} flex flex-col p-3.5 ${leftSpan} ${RISE}`}>
@@ -471,7 +474,7 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
 
   const blocks = searching
     ? [resultsFrame, tile]
-    : mode === 'new'
+    : mode === 'new' && SHOW_SCANS
       ? wide ? [scansTile, tile, recentStrip] : [scansTile, recentStrip, tile]
       : [recentStrip, tile];
 
@@ -511,7 +514,7 @@ export default function PatientPicker({ mode, user, onClose, onOpenDraft, onPick
         </div>
       </div>
       <p role="status" className="sr-only">
-        {searching ? `Found ${plural(matched.length, 'patient')}${mode === 'new' ? ` and ${plural(scans.length, 'waiting scan')}` : ''}.${capped ? ` Showing ${PEOPLE}. Keep typing to narrow it down.` : ''}` : ''}
+        {searching ? `Found ${plural(matched.length, 'patient')}${mode === 'new' && SHOW_SCANS ? ` and ${plural(scans.length, 'waiting scan')}` : ''}.${capped ? ` Showing ${PEOPLE}. Keep typing to narrow it down.` : ''}` : ''}
       </p>
       <p role="status" className="sr-only">{said}</p>
 

@@ -7,7 +7,7 @@
 //     Create Case builds the draft and opens it at what's missing (AiStart).
 //   Enter Manually — the case step by step, starting at the step the timeline
 //     shows: Patient, "Who is this case for?" with the patient picker right
-//     on the page (no popup). Picking a patient (or a waiting scan) moves on to
+//     on the page (no popup). Picking a patient moves on to
 //     that experience's case page at its next step.
 // "Add new Case" on Lab Work opens here too.
 //
@@ -179,7 +179,7 @@ export default function BlankStart() {
         {/* The timeline's current step, as the case page shows it. */}
         <p className="w-full text-[11px] font-bold uppercase tracking-widest text-[#5A5A6A]">Patient</p>
         <h2 className="text-lg leading-6 font-semibold text-[#030213]">Who is this case for?</h2>
-        <p className="text-[13px] leading-5 text-[#4A4A5A]">Search by name, date of birth or patient ID, pick up a waiting scan, or add a new patient.</p>
+        <p className="text-[13px] leading-5 text-[#4A4A5A]">Search by name, date of birth or patient ID, or add a new patient.</p>
       </div>
       <PatientPicker
         mode="new"

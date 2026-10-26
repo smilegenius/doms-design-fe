@@ -11,7 +11,7 @@ import {
 } from './data';
 import {
   addWorkingDays, ageOn, dobFromString, firstClinicDayAfter, fmtCutoff, fmtDay, fmtShort, fromISO,
-  lastWorkingDayBefore, receivedDate, toISO, workingDaysBetween, isWorkingDay,
+  lastWorkingDayBefore, receivedDate, sameDay, toISO, workingDaysBetween, isWorkingDay,
 } from './dates';
 
 // ─── Draft shape ─────────────────────────────────────────────────────────────
@@ -84,14 +84,27 @@ export interface ServiceItem {
   remake?: 'yes' | 'no';
   remakeReason?: string;
   descDone?: boolean;
+  /**
+   * The day the clinic asks for it back (ISO yyyy-mm-dd: the product's "Requested delivery date").
+   * Unset: the lab's earliest. Never a full denture's: its stages carry the days.
+   */
+  requestedDelivery?: string;
+  deliverySrc?: string;
   /** Instructions for this service only; merged into the case instructions at Review. */
   note?: string;
   /** Slots reopened by a funding or patient change: they need a deliberate pick again. */
   reopen?: SlotId[];
 }
 
+/** How the lab gets the case: the product's Scan Source methods (Via Scanner = 'upload', Impressions (By Post) = 'post',
+ *  SMS, Whatsapp, Email, Other), plus the flow's Scan to Follow. */
+export type RecordsRoute = 'upload' | 'post' | 'sms' | 'whatsapp' | 'email' | 'other' | 'follow';
 export interface Records {
-  route?: 'follow' | 'post' | 'upload';
+  route?: RecordsRoute;
+  /** Impressions (By Post): the courier or postal service, so the lab can track the parcel. */
+  courier?: string;
+  /** Via Scanner: the scanner brand, so the lab knows the device. */
+  scannerBrand?: string;
   box: Record<string, boolean>;
   disinfected: boolean;
   /** "22 Oct 11:32" and who ticked it, for the box label. */
@@ -271,16 +284,32 @@ export const toothName = (id: string) => `${QUAD_NAME[Number(id[0])]} ${id[1]}`;
 const sortNum = (ids: string[]) => [...ids].sort((a, b) => Number(a) - Number(b));
 const posInArch = (id: string) => (jawOf(id) === 'upper' ? UPPER_ORDER : LOWER_ORDER).indexOf(id);
 
-export type Notation = 'fdi' | 'palmer';
+/** The product's three tooth numberings. Teeth are stored in FDI; these only change how they read. */
+export type Notation = 'fdi' | 'universal' | 'palmer';
+export const NOTATIONS: { id: Notation; label: string; range: string }[] = [
+  { id: 'fdi', label: 'FDI', range: '11–48' },
+  { id: 'universal', label: 'Universal', range: '1–32' },
+  { id: 'palmer', label: 'Palmer', range: 'UR1–LL8' },
+];
+/** Universal (ADA) number: 1 is the upper right third molar, round to 32, the lower right third molar. */
+export function universalOf(id: string): number {
+  const q = Number(id[0]), t = Number(id[1]);
+  return q === 1 ? 9 - t : q === 2 ? 8 + t : q === 3 ? 25 - t : 24 + t;
+}
+/** One tooth in a numbering, alone: "26", "#14", "UL6". */
+export const toothIn = (id: string, n: Notation) => (n === 'palmer' ? palmerOf(id) : n === 'universal' ? `#${universalOf(id)}` : id);
 /** "36 · LL6" (or "LL6 · 36" for a user whose setting is UR6 first). Never Universal. */
+// The chosen numbering first, then a second one for anyone who reads the other: FDI "25 · UL5",
+// Palmer "UL5 · 25", Universal "#13 · 25".
 export function toothText(id: string, n: Notation = 'fdi'): string {
-  return n === 'palmer' ? `${palmerOf(id)} · ${id}` : `${id} · ${palmerOf(id)}`;
+  return n === 'palmer' ? `${palmerOf(id)} · ${id}` : n === 'universal' ? `${toothIn(id, n)} · ${id}` : `${id} · ${palmerOf(id)}`;
 }
 export function teethText(ids: string[], n: Notation = 'fdi'): string {
   if (ids.length === 0) return '';
   const s = sortNum(ids);
   const fdi = s.join(', ');
   const pal = s.map(palmerOf).join(', ');
+  if (n === 'universal') return `${[...s].sort((a, b) => universalOf(a) - universalOf(b)).map(t => toothIn(t, n)).join(', ')} · ${fdi}`;
   return n === 'palmer' ? `${pal} · ${fdi}` : `${fdi} · ${pal}`;
 }
 /** Bridge span, "14–16 · UR4–UR6". */
@@ -289,6 +318,10 @@ export function spanText(ids: string[], n: Notation = 'fdi'): string {
   const ends = [ids[0], ids[ids.length - 1]].sort((a, b) => Number(a) - Number(b));
   const fdi = `${ends[0]}–${ends[1]}`;
   const pal = `${palmerOf(ends[0])}–${palmerOf(ends[1])}`;
+  if (n === 'universal') {
+    const [a, b] = [...ends].sort((x, y) => universalOf(x) - universalOf(y));
+    return `${toothIn(a, n)}–${toothIn(b, n)} · ${fdi}`;
+  }
   return n === 'palmer' ? `${pal} · ${fdi}` : `${fdi} · ${pal}`;
 }
 export const archCaps = (a?: Arch) => (a === 'both' ? 'UPPER AND LOWER' : a ? a.toUpperCase() : '');
@@ -694,8 +727,9 @@ export function seedDenturePlan(item: ServiceItem, ctx: Ctx): ServiceItem {
 
 export type SlotId =
   | 'labCheck' | 'teeth' | 'implantRecord' | 'remake' | 'remakeReason' | 'splint' | 'material' | 'shade' | 'photos'
-  | 'prefs' | 'wings' | 'system' | 'platform' | 'scanBody' | 'retention' | 'abutment' | 'inlayType' | 'type' | 'arch'
-  | 'under18' | 'stage' | 'stages' | 'acrylic' | 'extract' | 'mould' | 'postdam' | 'base' | 'design' | 'work' | 'desc';
+  | 'wings' | 'system' | 'platform' | 'scanBody' | 'retention' | 'abutment' | 'inlayType' | 'type' | 'arch'
+  | 'under18' | 'stage' | 'stages' | 'acrylic' | 'extract' | 'mould' | 'postdam' | 'base' | 'design' | 'work' | 'desc'
+  | 'deliveryDate';
 
 export interface Slot {
   id: SlotId;
@@ -713,7 +747,8 @@ export function shadeText(item: ServiceItem): string {
     .filter(Boolean).join(' · ');
 }
 
-export function slotsFor(item: ServiceItem, ctx: Ctx): Slot[] {
+/** `d`: the case the item is on (its records route and Fast-Track set the lab's earliest day for the Delivery date). */
+export function slotsFor(item: ServiceItem, ctx: Ctx, d: CaseDraft): Slot[] {
   const n = ctx.user.notation;
   const e = effective(item, ctx);
   const s: Slot[] = [];
@@ -725,7 +760,6 @@ export function slotsFor(item: ServiceItem, ctx: Ctx): Slot[] {
     value: matOk ? optionName(item.product, e.material) : undefined, src: matOk ? e.matSrc : undefined,
   });
   const shadeSlot = (label = 'Shade'): Slot => ({ id: 'shade', label, required: true, answered: !!item.shade, value: shadeText(item), src: item.shadeSrc });
-  const prefsSlot = (): Slot => ({ id: 'prefs', label: 'Preferences', required: false, answered: true, value: e.prefsChanged ? 'Changed for this case' : e.prefsSrc, src: e.prefsChanged ? 'You' : e.prefsSrc });
   const teethSlot = (label: string, value: string): Slot => ({ id: 'teeth', label, required: true, answered: item.teethDone && item.teeth.length > 0, value, src: item.teethSrc });
 
   if (!labMakes(ctx.lab, item.product)) push({ id: 'labCheck', label: 'Lab', required: true, answered: false });
@@ -746,7 +780,6 @@ export function slotsFor(item: ServiceItem, ctx: Ctx): Slot[] {
       push(materialSlot());
       if (e.material !== 'metal') push(shadeSlot());
       if (item.shade === 'photos') push({ id: 'photos', label: 'Photos', required: true, answered: item.photos.length > 0, value: item.photos.length ? plural(item.photos.length, 'photo') : undefined });
-      push(prefsSlot());
       break;
     }
     case 'bridge': {
@@ -756,7 +789,6 @@ export function slotsFor(item: ServiceItem, ctx: Ctx): Slot[] {
       push(materialSlot());
       if (e.material !== 'metal') push(shadeSlot());
       if (item.shade === 'photos') push({ id: 'photos', label: 'Photos', required: true, answered: item.photos.length > 0, value: item.photos.length ? plural(item.photos.length, 'photo') : undefined });
-      push(prefsSlot());
       break;
     }
     case 'implant': {
@@ -771,7 +803,6 @@ export function slotsFor(item: ServiceItem, ctx: Ctx): Slot[] {
       push({ id: 'retention', label: 'Retention', required: false, answered: true, value: e.retention === 'cement' ? 'Cement-retained' : 'Screw-retained', src: e.retentionSrc });
       if (e.retention === 'cement') push({ id: 'abutment', label: 'Abutment', required: true, answered: !!item.abutment, value: item.abutment });
       push(shadeSlot());
-      push(prefsSlot());
       break;
     }
     case 'veneer': {
@@ -794,7 +825,6 @@ export function slotsFor(item: ServiceItem, ctx: Ctx): Slot[] {
       push({ id: 'inlayType', label: 'Inlay or onlay', required: true, answered: !!item.inlayType, value: item.inlayType === 'inlay' ? 'Inlay' : item.inlayType === 'onlay' ? 'Onlay' : undefined });
       push(materialSlot());
       push(shadeSlot());
-      push(prefsSlot());
       break;
     }
     case 'nightguard':
@@ -816,7 +846,8 @@ export function slotsFor(item: ServiceItem, ctx: Ctx): Slot[] {
       const srcs = ordered.map(s => s.src);
       push({
         id: 'stages', label: 'Stages', required: true,
-        answered: !!item.stagesDone && dentureStageReady(item, ctx) && !reopened('stages'),
+        // Answered once the plan works (the portal's picker has no "Done"): a stage ordered, each dated and made by the lab.
+        answered: dentureStageReady(item, ctx) && !reopened('stages'),
         value: stagesShort(item) || undefined,
         src: (dentureTreatment(item) !== 'staged' ? item.treatmentSrc : undefined) ?? (srcs.length && srcs.every(x => x === srcs[0]) ? srcs[0] : undefined),
       });
@@ -856,6 +887,17 @@ export function slotsFor(item: ServiceItem, ctx: Ctx): Slot[] {
       push({ id: 'desc', label: 'Description', required: true, answered: !!item.descDone && (item.desc?.trim().length ?? 0) >= 10, value: item.desc?.trim() ? `${item.desc.trim().slice(0, 28)}${item.desc.trim().length > 28 ? '…' : ''}` : undefined });
       break;
     }
+  }
+  // Every service but a full denture (its stages each carry a day), last: when it's needed back. The lab's
+  // earliest counts as answered, so it never blocks; a day sooner than the lab can make it needs a look.
+  if (item.product !== 'denture') {
+    const sd = serviceDate(item, ctx, receivedFor(d, ctx), d.fastTrack);
+    const ok = !!sd.backBy && !sd.tooSoon;
+    push({
+      id: 'deliveryDate', label: 'Delivery date', required: true, answered: ok,
+      value: ok ? fmtDay(sd.backBy!) : undefined,
+      src: ok ? (sd.requested ? item.deliverySrc ?? 'You' : "Lab's earliest") : undefined,
+    });
   }
   return s;
 }
@@ -966,7 +1008,7 @@ export function priceLine(p: PriceInfo): string {
 
 // ─── Records ─────────────────────────────────────────────────────────────────
 
-export type RecordsState = 'scan' | 'nextStage' | 'follow' | 'post' | 'upload' | 'none';
+export type RecordsState = 'scan' | 'nextStage' | 'none' | RecordsRoute;
 export function recordsState(d: CaseDraft, ctx: Ctx): RecordsState {
   const dentureOnly = d.items.length > 0 && d.items.every(i => isDentureLike(i.product));
   if (dentureOnly) return d.items.some(isFollowUp) ? 'nextStage' : 'post';
@@ -1024,7 +1066,7 @@ export function sendMode(user: User, prescriber?: User): SendMode {
 
 export function gapCount(d: CaseDraft, ctx: Ctx): number {
   let n = (d.items.length === 0 ? 1 : 0) + (d.labPicked === false ? 1 : 0);
-  for (const it of d.items) n += slotGaps(slotsFor(it, ctx)).length;
+  for (const it of d.items) n += slotGaps(slotsFor(it, ctx, d)).length;
   if (recordsGap(d, ctx)) n++;
   if (prescriberGap(ctx.prescriber)) n++;
   return n;
@@ -1052,7 +1094,7 @@ export function buildSteps(d: CaseDraft, ctx: Ctx, current: string): StepNode[] 
   }
   for (const it of d.items) {
     let seenGap = false;
-    for (const sl of slotsFor(it, ctx)) {
+    for (const sl of slotsFor(it, ctx, d)) {
       const gap = sl.required && !sl.answered;
       out.push({ id: slotStepId(it.id, sl.id), kind: 'slot', gap, navigable: !seenGap, itemId: it.id, slot: sl });
       if (gap) seenGap = true;
@@ -1060,8 +1102,8 @@ export function buildSteps(d: CaseDraft, ctx: Ctx, current: string): StepNode[] 
   }
   out.push({ id: 'records', kind: 'records', gap: recordsGap(d, ctx), navigable: true });
   out.push({ id: 'prescriber', kind: 'prescriber', gap: prescriberGap(ctx.prescriber), navigable: true });
-  // No Delivery step: each service carries its own back-by date, shown with the
-  // fit appointment and fast track on Review and Send.
+  // No Delivery step: each service carries its own Delivery date (its last
+  // sub-step; a full denture dates its stages), all of them shown at Review.
   out.push({ id: 'review', kind: 'review', gap: false, navigable: true });
   return out;
 }
@@ -1085,6 +1127,20 @@ export function dateRoute(d: CaseDraft, ctx: Ctx): DateRoute {
   return 'digital';
 }
 
+/** One service's dates. */
+export interface ServiceDate {
+  id: string;
+  /** When it's due back: the clinic's requested day when the lab can make it by then, else the lab's earliest. */
+  backBy?: Date;
+  /** Working days from the day the lab receives the case to backBy. */
+  ta: number | null;
+  /** The lab's earliest day for it: received plus its turnaround. Not a full denture's (its stages are dated). */
+  earliest?: Date;
+  /** The clinic's own day (requestedDelivery), when one is set. */
+  requested?: Date;
+  /** The requested day is sooner than the lab can make it: the earliest stands in until it's changed. */
+  tooSoon?: boolean;
+}
 export interface CaseDates {
   route: DateRoute;
   received?: Date;
@@ -1092,25 +1148,41 @@ export interface CaseDates {
   earliestFit?: Date;
   /** Working days after the scan arrives (scan to follow). */
   ta?: number;
-  perItem: { id: string; backBy?: Date; ta: number | null }[];
+  perItem: ServiceDate[];
 }
+
+/** The day the lab counts the case as received: digital records today (before the cut-off), impressions a courier day on. */
+export function receivedFor(d: CaseDraft, ctx: Ctx, lab: Lab = ctx.lab): Date {
+  return receivedDate(dateRoute(d, ctx) === 'post' ? 'post' : 'digital', ctx.now, lab.cutoffMin, CLINIC.courierDays);
+}
+
+/** One service's back-by day, counted from `received` (caseDates and its Delivery date slot read the same day). */
+export function serviceDate(it: ServiceItem, ctx: Ctx, received: Date, fast: boolean, lab: Lab = ctx.lab): ServiceDate {
+  if (!labMakes(lab, it.product)) return { id: it.id, ta: null };
+  // A full denture has no date of its own: it's back when its first ordered stage is (else that stage's suggested day).
+  if (it.product === 'denture' && orderedStages(it).length) {
+    const first = firstStageDue(it);
+    const back = first ? fromISO(first.date!) : fromISO(suggestedStageDates(it, ctx, lab)[orderedStages(it)[0].id]);
+    return { id: it.id, ta: workingDaysBetween(received, back), backBy: back };
+  }
+  const lead = turnaround(it, ctx, fast, lab);
+  if (lead == null) return { id: it.id, ta: null };
+  const earliest = addWorkingDays(received, lead);
+  const asked = it.product !== 'denture' && it.requestedDelivery ? fromISO(it.requestedDelivery) : undefined;
+  const requested = asked && !isNaN(asked.getTime()) ? asked : undefined;
+  // A later day the clinic asks for is kept; a sooner one can't be made, so the earliest stands until it's changed.
+  const tooSoon = !!requested && requested < earliest;
+  const backBy = requested && !tooSoon ? requested : earliest;
+  return { id: it.id, ta: backBy === earliest ? lead : workingDaysBetween(received, backBy), backBy, earliest, requested, tooSoon };
+}
+
 export function caseDates(d: CaseDraft, ctx: Ctx, opts: { lab?: Lab; fastTrack?: boolean; items?: ServiceItem[] } = {}): CaseDates {
   const lab = opts.lab ?? ctx.lab;
   const fast = opts.fastTrack ?? d.fastTrack;
   const items = opts.items ?? d.items;
   const route = dateRoute(d, ctx);
-  const received = receivedDate(route === 'post' ? 'post' : 'digital', ctx.now, lab.cutoffMin, CLINIC.courierDays);
-  const perItem = items.map(it => {
-    if (!labMakes(lab, it.product)) return { id: it.id, ta: null };
-    // A full denture has no date of its own: it's back when its first ordered stage is (else that stage's suggested day).
-    if (it.product === 'denture' && orderedStages(it).length) {
-      const first = firstStageDue(it);
-      const back = first ? fromISO(first.date!) : fromISO(suggestedStageDates(it, ctx, lab)[orderedStages(it)[0].id]);
-      return { id: it.id, ta: workingDaysBetween(received, back), backBy: back };
-    }
-    const ta = turnaround(it, ctx, fast, lab);
-    return { id: it.id, ta, backBy: ta != null ? addWorkingDays(received, ta) : undefined };
-  });
+  const received = receivedFor(d, ctx, lab);
+  const perItem = items.map(it => serviceDate(it, ctx, received, fast, lab));
   if (items.length === 0 || perItem.some(p => p.ta == null)) return { route, received, perItem };
   const ta = Math.max(...perItem.map(p => p.ta!));
   const backBy = perItem.reduce((a, p) => (p.backBy! > a ? p.backBy! : a), perItem[0].backBy!);
@@ -1274,7 +1346,9 @@ export function notesFor(d: CaseDraft, ctx: Ctx, dates: CaseDates): NoteDef[] {
       out.push({ id: `private:${it.id}`, text: `${word} private only. This item goes to the lab as private work, not NHS.`, itemId: it.id, step: 'services', kind: 'plain' });
     }
   }
-  if (dates.route === 'digital' && dates.backBy && isWorkingDay(ctx.now)) {
+  // Only while the case's last day is a lab's earliest: a later day the clinic asked for has room for a day's slip.
+  const atEarliest = dates.perItem.some(p => !!p.backBy && !!p.earliest && sameDay(p.backBy, p.earliest) && !!dates.backBy && sameDay(p.backBy, dates.backBy));
+  if (dates.route === 'digital' && dates.backBy && atEarliest && isWorkingDay(ctx.now)) {
     const mins = ctx.now.getHours() * 60 + ctx.now.getMinutes();
     const left = ctx.lab.cutoffMin - mins;
     if (left > 0 && left <= 60) {
@@ -1283,10 +1357,6 @@ export function notesFor(d: CaseDraft, ctx: Ctx, dates: CaseDates): NoteDef[] {
         text: `Send by ${fmtCutoff(ctx.lab.cutoffMin)} to keep ${fmtDay(dates.backBy)}. ${ctx.lab.name.split(' ')[0]} counts later cases as received the next working day.`,
       });
     }
-  }
-  if (d.fit && dates.backBy) {
-    const f = fitCheck(d.fit, dates.backBy);
-    if (f.ok && f.spare === 0) out.push({ id: 'spare', text: 'No spare day if the lab has a question.', step: 'delivery', kind: 'plain' });
   }
   if (ctx.user.role === 'dentist' && d.login && !d.prescriber && d.login.split(':')[1] && LOGIN_UNLINKED(d.login)) {
     const [scanner, login] = d.login.split(':');

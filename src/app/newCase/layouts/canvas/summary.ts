@@ -36,7 +36,7 @@ export function shortPrice(p: PriceInfo): string {
  */
 export function progressOf(api: CaseApi): { done: number; total: number; ratio: number } {
   const { draft, ctx, gaps } = api;
-  const slots = draft.items.reduce((n, it) => n + slotsFor(it, ctx).filter(s => s.required).length, 0);
+  const slots = draft.items.reduce((n, it) => n + slotsFor(it, ctx, draft).filter(s => s.required).length, 0);
   const total = 3 + (draft.items.length === 0 ? 1 : 0) + slots;
   const done = Math.max(0, Math.min(total, total - gaps));
   return { done, total, ratio: total ? done / total : 0 };

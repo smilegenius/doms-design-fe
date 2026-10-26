@@ -14,12 +14,13 @@
 // The chart shows bridge pontics, recorded-missing teeth, implants on record,
 // teeth used by another service and, for arch-limited items, dims the other jaw.
 //
-// MiniChart (summary rail, Review) keeps the portal's two-arch artwork.
+// MiniChart (Review, the services list, One page's cards, the conversation) is
+// this same chart drawn small and read-only, so a case's teeth look the same
+// everywhere in the flow.
 
 import { KeyboardEvent, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
-import { InteractiveToothChart } from '../pages/CreateCasePage';
-import { LOWER_ORDER, UPPER_ORDER, archTeethIds, jawOf, palmerOf, toothName, Notation, toothText } from './rules';
+import { LOWER_ORDER, UPPER_ORDER, archTeethIds, jawOf, palmerOf, toothName, Notation, toothText, universalOf } from './rules';
 import type { Arch } from './data';
 import { CHART_W, HALF_W, MID_HALF, NARROWEST_SLOT, ToothDefs, ToothLook, ToothSvg, slotOf, toothX } from './ToothShapes';
 import { FOCUS } from './ui';
@@ -55,11 +56,13 @@ export interface ChartProps {
   readOnly?: boolean;
   notation?: Notation;
   label?: string;
+  /** A thumbnail (MiniChart): no numbers and no quadrant labels, just the teeth. */
+  thumb?: boolean;
 }
 
 export default function TeethChart({
   selected, arch, pontics = [], missing = [], implants = [], otherTeeth = [], limitArch,
-  onTooth, onArch, onSetTeeth, archMode, width, readOnly, notation = 'fdi', label,
+  onTooth, onArch, onSetTeeth, archMode, width, readOnly, notation = 'fdi', label, thumb,
 }: ChartProps) {
   const uid = `nc-tc${safeId(useId())}`;
   const boxRef = useRef<HTMLDivElement>(null);
@@ -102,7 +105,8 @@ export default function TeethChart({
       implants.includes(id) ? 'implant on record' : null,
       otherTeeth.includes(id) ? 'in another service' : null,
     ].filter(Boolean).join(', ');
-    return `Tooth ${notation === 'palmer' ? toothText(id, 'palmer') : `${id}, ${toothName(id)}`}${state ? `, ${state}` : ''}`;
+    const name = notation === 'palmer' ? toothText(id, 'palmer') : notation === 'universal' ? `${universalOf(id)}, ${toothName(id)}` : `${id}, ${toothName(id)}`;
+    return `Tooth ${name}${state ? `, ${state}` : ''}`;
   };
 
   const tap = (id: string) => (archMode ? onArch?.(jawOf(id)) : onTooth?.(id));
@@ -163,12 +167,13 @@ export default function TeethChart({
     const off = inert(id);
     // Hover washes the tooth teal (the whole row while "Select Arch" is pointed at, or in arch mode).
     const tint = !interactive || off || isLit ? 'off' : hoverJaw === jaw ? 'on' : archMode ? 'off' : 'hover';
-    const text = notation === 'palmer' ? palmerOf(id) : id;
+    const text = notation === 'palmer' ? palmerOf(id) : notation === 'universal' ? String(universalOf(id)) : id;
     // Missing teeth keep the readable number: the dashed ghost tooth already says they're missing.
     const tone = isLit ? 'text-[#0E5A73] font-semibold' : 'text-[#5A5A6A]';
     const number = (
       <span aria-hidden className={`relative block text-center whitespace-nowrap ${fullLabels ? 'text-[10px] leading-[14px]' : 'text-[9px] leading-[12px]'} ${tone}`}>
-        {fullLabels ? text : !interactive ? id[1] : (
+        {/* Universal numbers run 1–32, so the quadrant's 1–8 would mislead: they show as they are. */}
+        {fullLabels || notation === 'universal' ? text : !interactive ? id[1] : (
           <>
             <span className="group-hover:invisible group-focus-visible:invisible">{id[1]}</span>
             <span className="absolute left-1/2 top-0 z-10 hidden -translate-x-1/2 px-1 rounded bg-[#030213] text-[10px] leading-[12px] font-semibold text-white group-hover:block group-focus-visible:block">{text}</span>
@@ -183,7 +188,8 @@ export default function TeethChart({
         : 'motion-safe:group-hover:-translate-y-[2px] motion-safe:group-focus-visible:-translate-y-[2px]'}`
       : '';
     const art = <span className={`block ${lift}`}><ToothSvg id={id} uid={uid} look={look} tint={tint} /></span>;
-    const body = up ? <>{art}{number}</> : <>{number}{art}</>;
+    const shown = thumb ? null : number;
+    const body = up ? <>{art}{shown}</> : <>{shown}{art}</>;
     const cls = `relative flex-shrink-0 flex flex-col ${up ? 'justify-end' : 'justify-start'}`;
     if (!interactive) return <div key={id} className={cls} style={{ width: pct(slotOf(id)) }}>{body}</div>;
     // Dimmed only by the chart's own rule (the other jaw of an arch-limited item), never by a disabled fieldset around it.
@@ -261,10 +267,12 @@ export default function TeethChart({
         ? <div className="flex flex-wrap justify-center gap-x-2 gap-y-1 pb-2">{pill('upper')}{pill('lower')}</div>
         : <div className="flex justify-center pb-2">{pill('upper')}</div>)}
       <div className="relative">
-        <span aria-hidden className={`${quad} left-0.5 top-0.5`}>UR</span>
-        <span aria-hidden className={`${quad} right-0.5 top-0.5`}>UL</span>
-        <span aria-hidden className={`${quad} left-0.5 bottom-0.5`}>LR</span>
-        <span aria-hidden className={`${quad} right-0.5 bottom-0.5`}>LL</span>
+        {!thumb && <>
+          <span aria-hidden className={`${quad} left-0.5 top-0.5`}>UR</span>
+          <span aria-hidden className={`${quad} right-0.5 top-0.5`}>UL</span>
+          <span aria-hidden className={`${quad} left-0.5 bottom-0.5`}>LR</span>
+          <span aria-hidden className={`${quad} right-0.5 bottom-0.5`}>LL</span>
+        </>}
         {row('upper')}
         {/* The occlusal plane, between the two rows of numbers. */}
         <div aria-hidden className="relative h-1.5"><span className="absolute inset-x-[1%] top-1/2 h-px bg-[#E0E0E6]" /></div>
@@ -276,46 +284,11 @@ export default function TeethChart({
   );
 }
 
-// ─── Mini chart: the portal's arch artwork ───────────────────────────────────
+// ─── Mini chart ──────────────────────────────────────────────────────────────
 
-// Hit-area centres from InteractiveToothChart (viewBox 0 0 327 555), for the pontic marks.
-const ARCH_TEETH: Record<string, { cx: number; cy: number; rx: number; ry: number }> = {
-  '11': { cx: 144, cy: 44, rx: 12, ry: 11 }, '12': { cx: 108, cy: 51, rx: 11, ry: 10 }, '13': { cx: 81, cy: 67, rx: 14, ry: 13 },
-  '14': { cx: 68, cy: 97, rx: 15, ry: 15 }, '15': { cx: 57, cy: 129, rx: 17, ry: 15 }, '16': { cx: 46, cy: 166, rx: 22, ry: 22 },
-  '17': { cx: 42, cy: 209, rx: 20, ry: 19 }, '18': { cx: 42, cy: 247, rx: 20, ry: 18 },
-  '21': { cx: 184, cy: 44, rx: 12, ry: 11 }, '22': { cx: 219, cy: 51, rx: 11, ry: 10 }, '23': { cx: 246, cy: 67, rx: 14, ry: 13 },
-  '24': { cx: 259, cy: 97, rx: 15, ry: 15 }, '25': { cx: 270, cy: 129, rx: 17, ry: 15 }, '26': { cx: 280, cy: 166, rx: 22, ry: 22 },
-  '27': { cx: 284, cy: 209, rx: 20, ry: 19 }, '28': { cx: 284, cy: 247, rx: 20, ry: 18 },
-  '48': { cx: 49, cy: 332, rx: 21, ry: 18 }, '47': { cx: 57, cy: 370, rx: 22, ry: 21 }, '46': { cx: 66, cy: 411, rx: 22, ry: 22 },
-  '45': { cx: 71, cy: 447, rx: 16, ry: 15 }, '44': { cx: 83, cy: 474, rx: 15, ry: 14 }, '43': { cx: 102, cy: 496, rx: 16, ry: 17 },
-  '42': { cx: 126, cy: 511, rx: 13, ry: 11 }, '41': { cx: 151, cy: 520, rx: 11, ry: 6 },
-  '31': { cx: 175, cy: 520, rx: 11, ry: 6 }, '32': { cx: 200, cy: 511, rx: 13, ry: 11 }, '33': { cx: 224, cy: 496, rx: 16, ry: 17 },
-  '34': { cx: 242, cy: 474, rx: 15, ry: 14 }, '35': { cx: 254, cy: 447, rx: 16, ry: 15 }, '36': { cx: 260, cy: 412, rx: 22, ry: 22 },
-  '37': { cx: 269, cy: 372, rx: 22, ry: 21 }, '38': { cx: 277, cy: 333, rx: 21, ry: 18 },
-};
-
-/** Small read-only chart for the summary rail and Review: the portal's two arches, the teeth lit teal, pontics dashed. */
-export function MiniChart({ teeth, arch, pontics = [], width = 64, label }: { teeth: string[]; arch?: Arch; pontics?: string[]; width?: number; label: string }) {
-  const lit = arch ? archTeethIds(arch) : teeth.filter(t => !pontics.includes(t));
-  const service = { itemId: 'flow', teeth: lit } as Parameters<typeof InteractiveToothChart>[0]['activeService'];
-  return (
-    <div
-      className="relative pointer-events-none [&>div>div:first-child]:hidden [&>div>div:nth-child(2)]:!mt-0"
-      style={{ width }}
-      role="img"
-      aria-label={label}
-    >
-      <InteractiveToothChart activeService={service} width={width} onToothToggle={() => {}} />
-      {pontics.length > 0 && (
-        <svg viewBox="0 0 327 555" className="absolute inset-0 w-full h-full" aria-hidden>
-          {pontics.map(id => {
-            const t = ARCH_TEETH[id];
-            return t && <ellipse key={id} cx={t.cx} cy={t.cy} rx={t.rx} ry={t.ry} fill="rgba(89,193,227,0.22)" stroke="#2A8DB0" strokeWidth={1.6} strokeDasharray="4 3" />;
-          })}
-        </svg>
-      )}
-    </div>
-  );
+/** A case's teeth at a glance: the same horizontal chart, small and read-only, teeth lit teal, pontics dashed. */
+export function MiniChart({ teeth, arch, pontics = [], width = 120, label }: { teeth: string[]; arch?: Arch; pontics?: string[]; width?: number; label: string }) {
+  return <TeethChart selected={teeth} arch={arch} pontics={pontics} width={width} readOnly thumb label={label} />;
 }
 
 /** What the chart's looks mean, each drawn with the chart's own tooth. */

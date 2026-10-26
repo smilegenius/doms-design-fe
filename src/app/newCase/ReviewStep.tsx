@@ -1,6 +1,7 @@
 // ─── New Case Flow · Review and Send ─────────────────────────────────────────
-// One card per service with its own read-only Teeth Chart, then records,
-// prescriber, lab and delivery, the case note and the attestation line that
+// One card per service with its own read-only Teeth Chart and its own dates
+// (there's no case-level Delivery card or fit appointment), then records,
+// prescriber and lab, the case note and the attestation line that
 // makes Send the prescriber's signature. With room ('wide': Guided,
 // Conversation) it opens on a band of the case's facts, gaps read as amber
 // rows that go straight to them, and the details sit side by side as small
@@ -13,16 +14,18 @@ import {
 } from 'lucide-react';
 import { useCase } from './CaseContext';
 import { CLINIC } from './data';
-import { fmtCutoff, fmtDay, sameDay } from './dates';
+import { ShippingDetails, useShipped } from './dispatch';
+import { CaseRow, useFlowStore } from './store';
+import { fmtCutoff, fmtDay, fmtShort, sameDay } from './dates';
 import {
-  PRODUCTS, ServiceItem, StepNode, archCaps, attestation, bridgeParts, fitCheck, fullName, itemTitle, labSees, parseStep, plural,
-  recordsState, sendMode, slotsFor, splitSuggestion, fitLine, caseInstructions, instructionsStale, firstStageDue, stageName,
-  archWord, dentureTreatment, orderedStages, treatmentName,
+  PRODUCTS, ServiceItem, StepNode, archCaps, attestation, bridgeParts, fullName, itemTitle, labSees, parseStep, plural,
+  recordsState, sendMode, slotsFor, splitSuggestion, caseInstructions, instructionsStale, firstStageDue, stageName,
+  archWord, dentureTreatment, orderedStages, toothIn, treatmentName,
 } from './rules';
 import { MiniChart } from './TeethChart';
-import { CaseInstructionsBox, ServiceNote } from './Instructions';
+import { CaseInstructionsBox } from './Instructions';
 import { PRODUCT_ICON, StagePlanView, itemDetails, questionFor, NoteView } from './ServiceSteps';
-import { backByText, recordsSummary } from './CaseSteps';
+import { recordsSummary } from './CaseSteps';
 import { useRoom } from './room';
 import { Card, GapButton, LinkButton, Notice, SecondaryButton, SourceTag, StateIcon, StepHeading, FOCUS } from './ui';
 
@@ -61,8 +64,9 @@ const reviewTitle = (api: Api) =>
 
 function CompactReview({ hRef }: { hRef: HeadingRef }) {
   const api = useCase();
-  const { draft, update, go, gaps, user, prescriber, patient, lab, dates, readOnly } = api;
-  const { gapNodes, allGaps, mode, follow, fit, split } = reviewFacts(api);
+  const { draft, go, gaps, user, prescriber, patient, lab, readOnly } = api;
+  const { gapNodes, allGaps, mode, follow } = reviewFacts(api);
+  const shipped = useShippedRow();
 
   return (
     <div className="space-y-5">
@@ -85,31 +89,15 @@ function CompactReview({ hRef }: { hRef: HeadingRef }) {
       {draft.items.length === 0 && (
         <Card className="p-4 text-sm text-[#5A5A6A]">No services yet. <LinkButton onClick={() => go('services')}>Add a Service</LinkButton></Card>
       )}
+      {/* Dates live on each service (above); only sending a quicker one separately is decided here. */}
+      <SplitChoice />
 
       <Card className="divide-y divide-[#F0EFF6]">
         <Row label="Scans Source" value={recordsSummary(api)} onEdit={readOnly ? undefined : () => go('records')} />
         <Row label="Prescriber" value={prescriber ? `${prescriber.name}${prescriber.gdc ? ` · GDC ${prescriber.gdc}` : ''}` : 'Not chosen yet'} onEdit={readOnly ? undefined : () => go('prescriber')} />
         <Row label="Lab" value={`${lab.name} · ${lab.city} · MHRA ${lab.mhra}`} src={draft.labSrc} onEdit={readOnly ? undefined : () => go('lab')} />
-        <Row
-          label="Delivery"
-          value={<>
-            {backByText(api)}
-            {fit && <span className="block text-xs text-[#4A4A5A] mt-0.5">{fitLine(fit)}</span>}
-            {!fit && dates.earliestFit && dates.route !== 'follow' && !readOnly && (
-              <span className="block mt-1"><LinkButton onClick={() => api.openDrawer({ kind: 'fit' })}>Add Fit Appointment</LinkButton></span>
-            )}
-            {draft.split && <span className="block text-xs text-[#4A4A5A] mt-0.5">Sends as 2 cases{!readOnly && <> · <LinkButton onClick={() => api.sendSeparately(false)}>Keep Together</LinkButton></>}</span>}
-            {split && !draft.split && !draft.keepTogether && !readOnly && (
-              <div className="mt-2">
-                <Notice tone="note" actions={<><SecondaryButton onClick={() => api.sendSeparately(true)}>Send Separately</SecondaryButton><SecondaryButton onClick={() => update(d => ({ ...d, keepTogether: true }))}>Keep Together</SecondaryButton></>}>
-                  The {PRODUCTS[split.item.product].noun} alone would be back {fmtDay(split.backBy)}.
-                </Notice>
-              </div>
-            )}
-          </>}
-          onEdit={readOnly ? undefined : () => go('delivery')}
-        />
       </Card>
+      {shipped && <ShippingBlock row={shipped} />}
 
       {/* Each service's instructions, merged here; still editable — folded to its first line until opened. */}
       <InstructionsFold />
@@ -137,8 +125,8 @@ function Row({ label, value, src, onEdit }: { label: string; value: React.ReactN
 
 function ServiceCard({ item }: { item: ServiceItem }) {
   const api = useCase();
-  const { ctx, user, go, removeItem, notes, dismissNote, readOnly } = api;
-  const slots = slotsFor(item, ctx);
+  const { ctx, draft, user, go, removeItem, notes, dismissNote, readOnly } = api;
+  const slots = slotsFor(item, ctx, draft);
   const gaps = slots.filter(s => s.required && !s.answered).length;
   const firstSlot = slots.find(s => s.required && !s.answered) ?? slots[0];
   const itemNotes = notes.filter(n => n.itemId === item.id);
@@ -147,11 +135,9 @@ function ServiceCard({ item }: { item: ServiceItem }) {
   const own = item.product === 'denture' ? null : ownDates(api, item.id);
   return (
     <Card className="p-4">
-      <div className="flex gap-4">
-        <div className="flex-shrink-0">
-          <MiniChart teeth={item.teeth} arch={arch} pontics={item.bridge ? bridgeParts(item).pontics : undefined} width={92} label={itemTitle(item, user.notation)} />
-        </div>
-        <div className="flex-1 min-w-0">
+      {/* Name, then the chart, then the details: as on the wide Review. */}
+      <div>
+        <div>
           <div className="flex items-start gap-2">
             <h3 className="text-base font-semibold text-[#030213] flex-1">{itemTitle(item, user.notation)}</h3>
             {!readOnly && (
@@ -161,8 +147,13 @@ function ServiceCard({ item }: { item: ServiceItem }) {
               </div>
             )}
           </div>
+          {(item.teeth.length > 0 || arch) && (
+            <div className="mt-2 rounded-xl bg-[#F8F9FC] border border-[#ECECF2] px-3 py-2 flex justify-center">
+              <MiniChart teeth={item.teeth} arch={arch} pontics={item.bridge ? bridgeParts(item).pontics : undefined} width={300} label={itemTitle(item, user.notation)} />
+            </div>
+          )}
           <dl className="mt-2 grid grid-cols-[110px_1fr] gap-x-3 gap-y-1">
-            {itemDetails(item, ctx).filter(d => d.label !== 'Teeth' || item.product === 'bridge').map(d => (
+            {itemDetails(item, ctx, draft).filter(d => d.label !== 'Teeth' || item.product === 'bridge').map(d => (
               <div key={d.label} className="contents">
                 <dt className="text-xs text-[#4A4A5A]">{d.label}</dt>
                 <dd className="text-xs text-[#030213] font-medium">
@@ -178,7 +169,6 @@ function ServiceCard({ item }: { item: ServiceItem }) {
             )}
           </dl>
           {gaps > 0 && !readOnly && <p className="mt-2 text-xs font-semibold text-[#8A4B08]">▲ {gaps} {gaps === 1 ? 'thing' : 'things'} left</p>}
-          <ServiceNote item={item} className="mt-3" />
           {itemNotes.length > 0 && !readOnly && <div className="mt-3 space-y-2">{itemNotes.map(n => <NoteView key={n.id} note={n} onDismiss={() => dismissNote(n.id)} />)}</div>}
         </div>
       </div>
@@ -190,12 +180,12 @@ function ServiceCard({ item }: { item: ServiceItem }) {
 
 function WideReview({ hRef }: { hRef: HeadingRef }) {
   const api = useCase();
-  const { draft, update, ctx, steps, go, gaps, user, prescriber, patient, lab, dates, readOnly } = api;
-  const { gapNodes, allGaps, mode, follow, fit, split } = reviewFacts(api);
+  const { draft, ctx, steps, go, gaps, user, prescriber, patient, lab, readOnly } = api;
+  const { gapNodes, allGaps, mode, follow } = reviewFacts(api);
   const edit = (id: string) => (readOnly ? undefined : () => go(id));
   const gapAt = (kind: StepNode['kind']) => !readOnly && steps.some(s => s.kind === kind && s.gap);
   const back = backFact(api);
-  const addFit = !fit && !!dates.earliestFit && dates.route !== 'follow' && !readOnly;
+  const shipped = useShippedRow();
 
   return (
     <div className="space-y-4">
@@ -240,7 +230,9 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
         </section>
       )}
 
-      <section aria-labelledby="nc-review-services" className="space-y-3">
+      {/* A report: the services on the left; the case's details, its instructions and the sign-off beside them. */}
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(260px,320px)] gap-4 items-start">
+      <section aria-labelledby="nc-review-services" className="min-w-0 space-y-3">
         <SectionLabel id="nc-review-services">{draft.items.length ? `Services · ${draft.items.length}` : 'Services'}</SectionLabel>
         {draft.items.map(item => <WideService key={item.id} item={item} startOpen={draft.items.length === 1} />)}
         {draft.items.length === 0 && (
@@ -249,11 +241,14 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
             No services yet. <LinkButton onClick={() => go('services')}>Add a Service</LinkButton>
           </div>
         )}
+        {/* Dates live on each service (above); only sending a quicker one separately is decided here. */}
+        <SplitChoice />
       </section>
 
+      <aside className="min-w-0 space-y-4">
       <section aria-labelledby="nc-review-details" className="space-y-3">
         <SectionLabel id="nc-review-details">Case details</SectionLabel>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3">
           <Detail icon={ScanLine} label="Scans Source" onEdit={edit('records')} gap={gapAt('records')}>{recordsSummary(api)}</Detail>
           <Detail
             icon={Stethoscope}
@@ -264,24 +259,7 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
           >
             {prescriber ? prescriber.name : 'Not chosen yet'}
           </Detail>
-          <Detail
-            icon={Truck}
-            label="Delivery"
-            sub={(fit || addFit || draft.split) && <>
-              {fit && <span className="block">{fitLine(fit)}</span>}
-              {addFit && <span className="block mt-0.5"><LinkButton onClick={() => api.openDrawer({ kind: 'fit' })}>Add Fit Appointment</LinkButton></span>}
-              {draft.split && <span className="block mt-0.5">Sends as 2 cases{!readOnly && <> · <LinkButton onClick={() => api.sendSeparately(false)}>Keep Together</LinkButton></>}</span>}
-            </>}
-          >
-            {/* How the lab gets the work; the band above already gives the back-by day. */}
-            {receiveText(api)}
-          </Detail>
         </div>
-        {split && !draft.split && !draft.keepTogether && !readOnly && (
-          <Notice tone="note" actions={<><SecondaryButton onClick={() => api.sendSeparately(true)}>Send Separately</SecondaryButton><SecondaryButton onClick={() => update(d => ({ ...d, keepTogether: true }))}>Keep Together</SecondaryButton></>}>
-            The {PRODUCTS[split.item.product].noun} alone would be back {fmtDay(split.backBy)}.
-          </Notice>
-        )}
       </section>
 
       {/* Each service's instructions, merged here; still editable. */}
@@ -300,6 +278,11 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
         <Lock className="w-3 h-3 flex-shrink-0" strokeWidth={1.75} aria-hidden />
         {CLINIC.name} · {lab.name} sees {patient.first[0]}.{patient.last[0]}. only.
       </p>
+      </aside>
+      </div>
+
+      {/* A sent case's Shipping row (the portal's wide table) runs under both columns. */}
+      {shipped && <ShippingBlock row={shipped} />}
     </div>
   );
 }
@@ -313,8 +296,8 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
  */
 function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boolean }) {
   const api = useCase();
-  const { ctx, user, go, removeItem, notes, dismissNote, readOnly } = api;
-  const slots = slotsFor(item, ctx);
+  const { ctx, draft, user, go, removeItem, notes, dismissNote, readOnly } = api;
+  const slots = slotsFor(item, ctx, draft);
   const gaps = slots.filter(s => s.required && !s.answered).length;
   const firstSlot = slots.find(s => s.required && !s.answered) ?? slots[0];
   const itemNotes = notes.filter(n => n.itemId === item.id);
@@ -323,7 +306,7 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
   const own = item.product === 'denture' ? null : ownDates(api, item.id);
   const title = itemTitle(item, user.notation);
   const Icon = PRODUCT_ICON[item.product];
-  const details = itemDetails(item, ctx).filter(d => d.label !== 'Teeth' || item.product === 'bridge');
+  const details = itemDetails(item, ctx, draft).filter(d => d.label !== 'Teeth' || item.product === 'bridge');
   const [open, setOpen] = useState(!!startOpen || (gaps > 0 && !readOnly));
   // A denture's stages lead (the only dates it has), however long; the rest only if short. The line truncates.
   const summary = [
@@ -335,8 +318,8 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
     return (
       <Card className="p-0">
         <button type="button" aria-expanded={false} aria-controls={bodyId} onClick={() => setOpen(true)} className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-left rounded-2xl ${FOCUS}`}>
-          <span className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#F8F9FC] border border-[#ECECF2] flex items-center justify-center overflow-hidden" aria-hidden>
-            {item.teeth.length > 0 || arch ? <MiniChart teeth={item.teeth} arch={arch} pontics={item.bridge ? bridgeParts(item).pontics : undefined} width={32} label={title} /> : <Icon className="w-5 h-5 text-[#2F62D6]" strokeWidth={1.75} />}
+          <span className="flex-shrink-0 w-16 h-10 rounded-lg bg-[#F8F9FC] border border-[#ECECF2] flex items-center justify-center overflow-hidden" aria-hidden>
+            {item.teeth.length > 0 || arch ? <MiniChart teeth={item.teeth} arch={arch} pontics={item.bridge ? bridgeParts(item).pontics : undefined} width={56} label={title} /> : <Icon className="w-5 h-5 text-[#2F62D6]" strokeWidth={1.75} />}
           </span>
           <span className="flex-1 min-w-0">
             <span className="block text-sm font-semibold text-[#030213] truncate">{title}</span>
@@ -351,15 +334,11 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
   }
   return (
     <Card className="p-4 nc-accordion-in">
-      <div id={bodyId} className="flex gap-4">
-        <div className="flex-shrink-0 self-start w-[100px] rounded-xl bg-[#F8F9FC] border border-[#ECECF2] p-2 flex flex-col items-center gap-1">
-          {item.teeth.length > 0 || arch
-            ? <MiniChart teeth={item.teeth} arch={arch} pontics={item.bridge ? bridgeParts(item).pontics : undefined} width={82} label={title} />
-            : <span aria-hidden className="w-full h-[84px] flex items-center justify-center text-[#2F62D6]"><Icon className="w-8 h-8" strokeWidth={1.75} /></span>}
-          {arch && <span className="text-[10px] font-bold tracking-wider text-[#3A3A4A]">{archCaps(arch)}</span>}
-        </div>
-        <div className="flex-1 min-w-0">
+      {/* The chart under the service's name, across the card, and the details under it: no empty column beside a short chart. */}
+      <div id={bodyId}>
+        <div>
           <div className="flex items-start gap-3">
+            {!(item.teeth.length > 0 || arch) && <span aria-hidden className="w-9 h-9 rounded-lg bg-[#EEF4FF] text-[#2F62D6] flex items-center justify-center flex-shrink-0"><Icon className="w-5 h-5" strokeWidth={1.75} /></span>}
             <div className="flex-1 min-w-0">
               <h4 className="text-base font-semibold text-[#030213] leading-snug">{title}</h4>
               {gaps > 0 && !readOnly && (
@@ -378,6 +357,12 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
               </div>
             )}
           </div>
+          {(item.teeth.length > 0 || arch) && (
+            <div className="mt-3 rounded-xl bg-[#F8F9FC] border border-[#ECECF2] px-4 py-3 flex flex-col items-center gap-1.5">
+              <MiniChart teeth={item.teeth} arch={arch} pontics={item.bridge ? bridgeParts(item).pontics : undefined} width={380} label={title} />
+              {arch && <span className="text-[10px] font-bold tracking-wider text-[#3A3A4A]">{archCaps(arch)}</span>}
+            </div>
+          )}
           {details.length > 0 && (
             <dl className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2.5 rounded-xl border border-[#ECECF2] px-3.5 py-3">
               {details.map(d => (
@@ -398,7 +383,7 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
           )}
         </div>
       </div>
-      <ServiceNote item={item} className="mt-4 pt-3 border-t border-[#F0EFF6]" />
+      {/* No per-service instruction box here: the Case Instructions beside the services merge them all. */}
       {itemNotes.length > 0 && !readOnly && <div className="mt-3 space-y-2">{itemNotes.map(n => <NoteView key={n.id} note={n} onDismiss={() => dismissNote(n.id)} />)}</div>}
     </Card>
   );
@@ -452,26 +437,70 @@ function SectionLabel({ id, children }: { id: string; children: ReactNode }) {
   return <h3 id={id} className="text-[11px] font-bold uppercase tracking-widest text-[#5A5A6A]">{children}</h3>;
 }
 
+/**
+ * The case's row once its parcel is posted (Mark as dispatched), in read-only views only. Read live from
+ * the store so a dispatch made on this screen shows here at once.
+ */
+export function useShippedRow(): CaseRow | undefined {
+  const { draft, readOnly } = useCase();
+  const { rows } = useFlowStore();
+  const row = draft.id ? rows.find(r => r.id === draft.id) : undefined;
+  const rec = useShipped(row);
+  return readOnly && rec ? row : undefined;
+}
+
+/** The portal's Shipping row (Clinic → Lab, tracking, services, courier, date); its details open from the row. */
+export function ShippingBlock({ row }: { row: CaseRow }) {
+  return (
+    <div className="space-y-2">
+      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#5A5A6A]">
+        <Truck className="w-3.5 h-3.5 text-[#2F62D6]" strokeWidth={1.75} aria-hidden />Shipping
+      </p>
+      {/* The portal's six columns stay legible in a narrow column: they scroll rather than squeeze. */}
+      <div className="overflow-x-auto">
+        <div className="min-w-[560px]"><ShippingDetails row={row} /></div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** What both layouts read: the gaps, the send mode and the delivery checks. */
+/** What both layouts read: the gaps and the send mode. */
 function reviewFacts(api: Api) {
-  const { draft, ctx, steps, dates, user, prescriber } = api;
+  const { draft, ctx, steps, user, prescriber } = api;
   return {
     gapNodes: steps.filter(s => s.gap && s.navigable),
     allGaps: steps.filter(s => s.gap),
     mode: sendMode(user, prescriber),
     follow: recordsState(draft, ctx) === 'follow',
-    fit: draft.fit && dates.backBy ? fitCheck(draft.fit, dates.backBy) : null,
-    split: splitSuggestion(draft, ctx, dates),
   };
 }
 
-/** The band's back-by cell: the day, and how it's counted. */
+/** Under the services: send a quicker service on its own (the suggestion), or the choice already made. */
+function SplitChoice() {
+  const api = useCase();
+  const { draft, ctx, dates, update, readOnly } = api;
+  if (draft.split) {
+    return <p className="text-xs text-[#4A4A5A]">Sends as 2 cases{!readOnly && <> · <LinkButton onClick={() => api.sendSeparately(false)}>Keep Together</LinkButton></>}</p>;
+  }
+  const split = splitSuggestion(draft, ctx, dates);
+  if (!split || draft.keepTogether || readOnly) return null;
+  return (
+    <Notice tone="note" actions={<><SecondaryButton onClick={() => api.sendSeparately(true)}>Send Separately</SecondaryButton><SecondaryButton onClick={() => update(d => ({ ...d, keepTogether: true }))}>Keep Together</SecondaryButton></>}>
+      The {PRODUCTS[split.item.product].noun} alone would be back {fmtDay(split.backBy)}.
+    </Notice>
+  );
+}
+
+/** The band's back-by cell: the day (the last service's, with several), and how it's counted or each service's own. */
 function backFact(api: Api): { value: string; sub: string } {
   const { dates, lab, draft } = api;
+  // Several services: each is back on its own day, so the line under the case's day lists them.
+  const each = draft.items.length > 1 && dates.backBy ? perServiceLine(api) : '';
   if (dates.route === 'follow' && dates.ta != null) {
-    return { value: dates.backBy ? fmtDay(dates.backBy) : plural(dates.ta, 'working day'), sub: dates.backBy ? `if the scan arrives by ${fmtCutoff(lab.cutoffMin)} today` : 'after the scan arrives' };
+    const when = dates.backBy ? `if the scan arrives by ${fmtCutoff(lab.cutoffMin)} today` : 'after the scan arrives';
+    return { value: dates.backBy ? fmtDay(dates.backBy) : plural(dates.ta, 'working day'), sub: each ? `${each}, ${when}` : when };
   }
   // Full dentures only: the case is back when the first ordered stage is. Named from the denture that sets the day.
   const lead = dates.backBy && draft.items.every(i => i.product === 'denture')
@@ -483,24 +512,36 @@ function backFact(api: Api): { value: string; sub: string } {
     const name = t === 'staged' ? stageName(first.id) : treatmentName(t);
     return { value: fmtDay(dates.backBy), sub: draft.items.length > 1 && lead.arch ? `${name} (${archWord(lead.arch)}), its first stage back` : `${name}, the first stage back` };
   }
-  if (dates.backBy) return { value: fmtDay(dates.backBy), sub: plural(dates.ta ?? 0, 'working day') };
+  if (dates.backBy) return { value: fmtDay(dates.backBy), sub: each || plural(dates.ta ?? 0, 'working day') };
   return { value: '—', sub: 'once every item can be made' };
 }
 
-/** The Delivery card's lead: how the lab gets the work, and when. */
-function receiveText(api: Api): string {
-  const { dates, draft, ctx } = api;
-  const when = dates.received ? (sameDay(dates.received, ctx.now) ? 'today' : fmtDay(dates.received)) : '—';
-  if (dates.route === 'post') return `Posted · received ${when}`;
-  if (dates.route === 'follow') return 'Received when the scan arrives';
-  return recordsState(draft, ctx) === 'none' ? 'Received once the scans source is set' : `Digital · received ${when}`;
+/** "Crown 3 Nov · Bridge 5 Nov": each service's own day, in the case's order; a name two services share says where. */
+function perServiceLine(api: Api): string {
+  const { draft, dates, user } = api;
+  const n = user.notation;
+  const name = (i: ServiceItem) => PRODUCTS[i.product].label;
+  const where = (i: ServiceItem) => {
+    if (i.product === 'bridge' && i.bridge?.a && i.bridge?.b) return `${toothIn(i.bridge.a, n)}–${toothIn(i.bridge.b, n)}`;
+    if (i.teeth.length) return i.teeth.length > 2 ? plural(i.teeth.length, 'tooth') : i.teeth.map(t => toothIn(t, n)).join(', ');
+    return i.arch ? archWord(i.arch) : '';
+  };
+  return draft.items.map(i => {
+    const back = dates.perItem.find(p => p.id === i.id)?.backBy;
+    const twin = draft.items.some(o => o !== i && name(o) === name(i)) && where(i);
+    return `${name(i)}${twin ? ` (${where(i)})` : ''} ${back ? fmtShort(back) : '—'}`;
+  }).join(' · ');
 }
 
-/** A service's own dates: its back-by day and lead time ("7 working days"); null until the lab can make it. */
+/**
+ * A service's own dates: its back-by day (the clinic's requested day when it's set and the lab can make it)
+ * and lead time ("7 working days"); null until the lab can make it.
+ */
 function ownDates(api: Api, itemId: string): { backBy?: Date; days: string } | null {
   const per = api.dates.perItem.find(x => x.id === itemId);
   if (!per || per.ta == null) return null;
-  return { backBy: per.backBy, days: `${plural(per.ta, 'working day')}${api.dates.route === 'follow' ? ' after the scan arrives' : ''}` };
+  const asked = !!per.requested && !per.tooSoon;
+  return { backBy: per.backBy, days: `${asked ? 'Requested · ' : ''}${plural(per.ta, 'working day')}${api.dates.route === 'follow' ? ' after the scan arrives' : ''}` };
 }
 
 export { parseStep };

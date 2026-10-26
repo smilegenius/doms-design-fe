@@ -11,7 +11,6 @@ export type DrawerState =
   | { kind: 'materials'; itemId: string }
   | { kind: 'shades'; itemId: string; field: 'shade' | 'incisal' | 'cervical' | 'stump'; tab?: 'classical' | '3d' | 'bleach' }
   | { kind: 'photos'; itemId: string }
-  | { kind: 'prefs'; itemId: string }
   | { kind: 'fit' }
   | { kind: 'scan' };
 
@@ -30,6 +29,8 @@ export interface CaseApi {
   go: (id: string) => void;
   /** Teeth "Done" and similar: always move on to the next gap. */
   doneAndAdvance: (fn: () => void) => void;
+  /** Answer without moving on: Guided's teeth count as picked tap by tap, and the page stays put. */
+  answerInPlace: (fn: () => void) => void;
   dates: CaseDates;
   notes: NoteDef[];
   dismissNote: (id: string) => void;

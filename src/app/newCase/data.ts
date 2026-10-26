@@ -120,14 +120,27 @@ export interface User {
   gdc?: string;
   /** The dentist lets staff send in their name. */
   delegation?: boolean;
-  notation: 'fdi' | 'palmer';
+  /** How teeth read for this user (FDI, Universal or Palmer); stored teeth are always FDI. */
+  notation: 'fdi' | 'universal' | 'palmer';
 }
 export const USERS: User[] = [
   { id: 'khan', name: 'Dr Sarah Khan', short: 'Dr Khan', first: 'Sarah', role: 'dentist', gdc: '999101', delegation: true, notation: 'fdi' },
   { id: 'ellery', name: 'Dr Tom Ellery', short: 'Dr Ellery', first: 'Tom', role: 'dentist', gdc: '999102', delegation: false, notation: 'palmer' },
   { id: 'jess', name: 'Jess Ward', short: 'Jess Ward', first: 'Jess', role: 'nurse', notation: 'fdi' },
 ];
-export const userById = (id?: string) => USERS.find(u => u.id === id);
+// The tooth numbering each user picked in the demo (kept in the store), applied wherever a user is looked up.
+// One object per user and numbering, so a lookup only gives a new object when the numbering changes.
+let notationFor: (id: UserId) => User['notation'] | undefined = () => undefined;
+export function setNotationLookup(fn: (id: UserId) => User['notation'] | undefined) { notationFor = fn; }
+const withNotation = new Map<string, User>();
+export function userById(id?: string): User | undefined {
+  const u = USERS.find(x => x.id === id);
+  const n = u && notationFor(u.id);
+  if (!u || !n || n === u.notation) return u;
+  const key = `${u.id}:${n}`;
+  if (!withNotation.has(key)) withNotation.set(key, { ...u, notation: n });
+  return withNotation.get(key);
+}
 export const DENTISTS = USERS.filter(u => u.role === 'dentist');
 
 /** Scanner logins Smile Genius already knows. Learned links are added in the store. */

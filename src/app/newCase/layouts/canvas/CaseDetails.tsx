@@ -10,12 +10,12 @@
 // and shut, and a "Needs you" row that becomes the active one pulses once.
 
 import { ReactNode, Ref, useRef } from 'react';
-import { CalendarDays, Pencil } from 'lucide-react';
+import { Pencil } from 'lucide-react';
 import { useCase } from '../../CaseContext';
 import { useController } from '../../controller';
 import { CLINIC } from '../../data';
 import { fmtDay } from '../../dates';
-import { PRODUCTS, fitCheck, fitLine, itemPhrase, patientLine, splitSuggestion } from '../../rules';
+import { PRODUCTS, itemPhrase, patientLine, splitSuggestion } from '../../rules';
 import { CaseInstructionsBox } from '../../Instructions';
 import { LabStep, PatientStep, PrescriberStep, RecordsStep, recordsSummary } from '../../CaseSteps';
 import { NoteView } from '../../ServiceSteps';
@@ -210,28 +210,17 @@ function CaseRow({ id, label, gap, settledOnMount, summary, tags, below, autoKey
   );
 }
 
-/** The delivery plan under the services at Review: the fit appointment, sending a quicker service separately, and any delivery notes. */
+/** The delivery plan under the services at Review: sending a quicker service separately, and any delivery notes (no fit appointment). */
 export function DeliveryPlan() {
   const api = useCase();
-  const { draft, ctx, user, notes, readOnly, dates, update, openDrawer, sendSeparately, dismissNote } = api;
-  const fit = draft.fit && dates.backBy ? fitCheck(draft.fit, dates.backBy) : null;
+  const { draft, ctx, user, notes, readOnly, dates, update, sendSeparately, dismissNote } = api;
   const split = splitSuggestion(draft, ctx, dates);
   const deliveryNotes = notes.filter(x => x.step === 'delivery');
-  if (readOnly) return fit ? <p className="text-xs text-[#4A4A5A]">{fitLine(fit)}</p> : null;
+  const offer = !!split && !draft.keepTogether && !draft.split;
+  // Nothing to decide: no empty block under the back-by line.
+  if (readOnly || (!offer && !draft.split && deliveryNotes.length === 0)) return null;
   return (
     <div className="space-y-2">
-      {dates.route !== 'follow' && dates.backBy && (fit ? (
-        <p className="text-xs text-[#1F1F2E] flex items-center gap-2 flex-wrap">
-          <CalendarDays className="w-3.5 h-3.5 text-[#4A4A5A]" aria-hidden />{fitLine(fit)}
-          <LinkButton onClick={() => openDrawer({ kind: 'fit' })}>Change</LinkButton>
-          <LinkButton onClick={() => update(d => ({ ...d, fit: undefined }))}>Remove</LinkButton>
-        </p>
-      ) : (
-        <div className="flex items-center gap-3 flex-wrap">
-          <SecondaryButton onClick={() => openDrawer({ kind: 'fit' })}><CalendarDays className="w-3.5 h-3.5" aria-hidden />Add Fit Appointment</SecondaryButton>
-          <span className="text-xs text-[#4A4A5A]">Book the fit from {dates.earliestFit ? fmtDay(dates.earliestFit) : '—'}</span>
-        </div>
-      ))}
       {split && !draft.keepTogether && !draft.split && (
         <Notice tone="note" actions={<><SecondaryButton onClick={() => sendSeparately(true)}>Send Separately</SecondaryButton><SecondaryButton onClick={() => update(d => ({ ...d, keepTogether: true }))}>Keep Together</SecondaryButton></>}>
           The {PRODUCTS[split.item.product].noun} alone would be back {fmtDay(split.backBy)}.

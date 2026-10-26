@@ -57,9 +57,9 @@ function CardBody() {
 
 /** One slot of a service as a question: defaults it builds on, then its editor and notes. */
 const SlotQuestion = forwardRef<HTMLHeadingElement, { item: ServiceItem; slotId: SlotId }>(function SlotQuestion({ item, slotId }, ref) {
-  const { ctx, user, lab, notes, dismissNote, readOnly, removeItem, go } = useCase();
+  const { ctx, draft, user, lab, notes, dismissNote, readOnly, removeItem, go } = useCase();
   const n = user.notation;
-  const slots = slotsFor(item, ctx);
+  const slots = slotsFor(item, ctx, draft);
   const idx = slots.findIndex(s => s.id === slotId);
   const slot = slots[idx];
   if (!slot) return null;

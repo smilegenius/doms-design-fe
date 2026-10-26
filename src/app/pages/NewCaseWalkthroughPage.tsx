@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, ScanLine, UserPlus, Layers, Anchor, Smile, RotateCcw, ShieldAlert, Stethoscope, UserCheck,
-  CalendarDays, Inbox, FilePlus2, Repeat, Keyboard, Play,
+  Inbox, FilePlus2, Repeat, Keyboard, Play, Printer,
 } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -16,7 +16,8 @@ import { UX_OPTIONS, Ux } from '../newCase/controller';
 // timeline, the existing Teeth Chart per service, and Send as the prescriber's
 // signature with a 10-second Undo. It lives in the Flows section only, with its
 // own Lab Work list and demo data, so the portal's Cases screens are unchanged.
-// Each step signs in as the right person and opens the exact screen.
+// A finished case (View Case, or its row on Lab Work) opens in the portal's own
+// Case Details. Each step signs in as the right person and opens the exact screen.
 
 interface Step {
   title: string;
@@ -39,16 +40,16 @@ const STAGES: Stage[] = [
       {
         title: 'T1 · Amelia’s Medit draft → crown → sent (7 taps)',
         icon: <ScanLine className="w-4 h-4" />, as: 'khan',
-        description: 'Opens on Select Lab, with Northfield (the clinic’s usual lab) first. Northfield → Crown → 36 → Done → A2 → Send. Material defaults to Monolithic zirconia (Your usual, 7 days). Sent to Northfield, back by Mon 2 Nov, Undo for 10 seconds.',
+        description: 'Opens on Select Lab, with Northfield (the clinic’s usual lab) first. Northfield → Crown → 36 → Done → A2 → Create Case. Material defaults to Monolithic zirconia (Your usual, 7 days). Sent to Northfield, back by Mon 2 Nov, Undo for 10 seconds.',
         shows: ['Opens on the first gap', 'Your usual material', 'Back by Mon 2 Nov', 'Undo (10)'],
-        tryIt: ['Crown → tap 36 → Done → A2 → Send to Lab'],
+        tryIt: ['Crown → tap 36 → Done → A2 → Create Case'],
         path: '/flows/new-case/case/CAS-2026-142',
       },
       {
-        title: 'T2 · New patient, bridge 14–16, posted, fit booked (16 taps)',
+        title: 'T2 · New patient, bridge 14–16, posted (14 taps)',
         icon: <UserPlus className="w-4 h-4" />, as: 'khan',
-        description: 'Add new Case → type “Oliver Bennett” → Add new patient (or Enter Patient Details Manually) → DOB 14051979 → Male → Create → Northfield → Bridge → 14, 16 → Done → Layered (on the shade step) → A3 → Impression by Post → Add Fit Appointment → Thu 12 Nov → Send. 15 is a pontic; back by Fri 6 Nov; 3 working days spare; Print Box Label.',
-        shows: ['New patient on the page', 'Bridge pontics', 'Disinfection tick', 'Fit calendar'],
+        description: 'Add new Case → type “Oliver Bennett” → Add new patient (or Enter Patient Details Manually) → DOB 14051979 → Male → Create → Northfield → Bridge → 14, 16 → Done → Layered (on the shade step) → A3 → Impression by Post → Ready for Dispatch. 15 is a pontic; the bridge is back by Fri 6 Nov. The case isn’t with Northfield yet: Print label → Mark as dispatched (Royal Mail, Bag, optional tracking) → the case is Submitted, its back-by counted from the post day. View Case opens the portal’s Case Details, the screen every clinic case opens in: its Shipping tab has the row (Clinic → Lab). Mark as dispatched works from there too, while the case is still Ready for Dispatch.',
+        shows: ['New patient on the page', 'Bridge pontics', 'Back-by date per service', 'Portal A4 label', 'Mark as dispatched', 'Portal Case Details', 'Shipping row'],
         path: '/flows/new-case/cases', launch: true,
       },
       {
@@ -110,7 +111,7 @@ const STAGES: Stage[] = [
   },
   {
     label: 'Staff, approval and delivery',
-    blurb: 'A nurse can prepare a case but the prescription is always in a dentist’s name. Delivery dates come from the lab’s turnaround, its cut-off and UK working days.',
+    blurb: 'A nurse can prepare a case but the prescription is always in a dentist’s name. Delivery dates come from the lab’s turnaround, its cut-off and UK working days. A posted case waits as Ready for Dispatch until it is marked as dispatched.',
     steps: [
       {
         title: 'A6 · Jess (nurse) prepares Priya’s iTero draft for Dr Ellery',
@@ -127,17 +128,17 @@ const STAGES: Stage[] = [
         path: '/flows/new-case/cases',
       },
       {
-        title: 'A8 · Fit set, then a slower material',
-        icon: <CalendarDays className="w-4 h-4" />, as: 'khan',
-        description: 'Book a fit with no spare day, then switch the material to a slower one: the fit is cleared with a toast. Hatched dates explain the fixes (Fast-Track, another lab) or say no approved lab can make it.',
-        shows: ['Fit re-validated', 'Hatched dates and fixes'],
-        path: '/flows/new-case/case/CAS-2026-142',
-      },
-      {
         title: 'Scan to Follow → the scan arrives → Attach',
         icon: <Inbox className="w-4 h-4" />, as: 'khan',
         description: 'Send a case with Scan to Follow: Sent. Waiting for the Scan, row Received · Awaiting scan. On Lab Work, “Scan Arrives” then Attach: the delivery is recalculated against the lab’s cut-off.',
         shows: ['Awaiting scan', 'Attach Scan modal'],
+        path: '/flows/new-case/cases',
+      },
+      {
+        title: 'Posting several cases at once',
+        icon: <Printer className="w-4 h-4" />, as: 'khan',
+        description: 'With a case or two made with Impression by Post (as in T2), still Ready for Dispatch: on Lab Work they are pinned to the top. Ready for Dispatch filter → tick the cases (or Select all on this page) → Print labels: one A4 sheet per case. Each case is still marked as dispatched from its own Case Details (the portal’s page, opened from its row).',
+        shows: ['Pinned to the top', 'Ready for Dispatch filter', 'Bulk Print labels'],
         path: '/flows/new-case/cases',
       },
       {
@@ -193,7 +194,7 @@ export default function NewCaseWalkthroughPage() {
               </div>
             </div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[#EEF4FF] border border-[#C8D8FC] text-[#1E40AF] mb-3">
-              October 2026 · Clinic · 3 scripts + 10 checks
+              October 2026 · Clinic · 3 scripts + 11 checks
             </span>
             <h1 className="text-2xl sm:text-3xl font-bold text-[#030213] mb-2">New case flow</h1>
             <p className="text-sm text-[#717182] leading-relaxed max-w-xl mx-auto">

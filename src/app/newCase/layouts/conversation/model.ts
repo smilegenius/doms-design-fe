@@ -10,7 +10,7 @@ import type { CaseApi } from '../../CaseContext';
 import {
   ServiceItem, Slot, SlotId, StepKind, bridgeParts, effective, itemPhrase, parseStep, recordsState, slotStepId, slotsFor,
 } from '../../rules';
-import { prefsSentence, questionFor } from '../../ServiceSteps';
+import { questionFor } from '../../ServiceSteps';
 import { recordsSummary } from '../../CaseSteps';
 
 /** Slots shown in the defaults panel above the current question (as on the Guided slot screen). */
@@ -51,7 +51,6 @@ export function defaultsLead(srcs: string[]): string {
 
 function slotQuestion(slot: Slot, item: ServiceItem, api: CaseApi): string {
   if (slot.id === 'material' && !item.ambiguous) return 'Which material?';
-  if (slot.id === 'prefs') return 'Preferences';
   // The bridge question is an instruction on its own screen ("Tap the teeth at each end…").
   if (slot.id === 'teeth' && item.product === 'bridge') return 'Which teeth?';
   return questionFor(slot, item, api.user.notation, api.lab.name);
@@ -65,14 +64,13 @@ function slotAnswer(slot: Slot, item: ServiceItem): string {
 }
 /** What a folded default says in the line: the value, named where the value alone would be unclear. */
 function defaultText(slot: Slot, item: ServiceItem, api: CaseApi): string {
-  if (slot.id === 'prefs') return `Preferences: ${prefsSentence(effective(item, api.ctx).prefs)}`;
   if (slot.id === 'mould') return `Mould: ${(slot.value ?? '').toLowerCase()}`;
   return slot.value ?? '';
 }
 
 /** One service: its answered slots up to `upTo` (the current question), defaults folded into one line. */
 function itemGroup(api: CaseApi, item: ServiceItem, upTo?: SlotId): ItemGroup {
-  const slots = slotsFor(item, api.ctx);
+  const slots = slotsFor(item, api.ctx, api.draft);
   const stop = upTo ? Math.max(0, slots.findIndex(s => s.id === upTo)) : slots.length;
   const pairs: Pair[] = [];
   const defaults: Slot[] = [];

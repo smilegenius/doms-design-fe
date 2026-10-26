@@ -33,7 +33,7 @@ export function Timeline() {
   row('lab', 'Lab', draft.labPicked === false ? 'Choose a lab' : lab.name);
   if (steps.some(s => s.id === 'services')) row('services', 'Services', draft.items.length ? 'Adding a service' : 'What are we making?');
   for (const item of draft.items) {
-    const slots = slotsFor(item, ctx);
+    const slots = slotsFor(item, ctx, draft);
     const nodes = steps.filter(s => s.itemId === item.id);
     const gap = nodes.some(s => s.gap);
     const activeHere = cur?.itemId === item.id;
@@ -41,11 +41,12 @@ export function Timeline() {
     // Under the service: what's still open while it has gaps, else its material and shade.
     const left = nodes.filter(s => s.gap).length;
     const sub = left ? `${plural(left, 'thing')} left` : itemSpec(item, ctx) || undefined;
-    const subs = nodes.map(s => ({
-      s,
-      sl: slots.find(x => s.slot && x.id === s.slot.id)!,
-      state: (!s.navigable ? 'todo' : s.gap ? 'gap' : 'done') as Exclude<NodeState, 'action'>,
-    }));
+    // Each sub-step reads exactly like its section in the service card (answered, needs you, optional),
+    // so picking on the right shows here at once, teeth still to confirm included.
+    const subs = nodes.map(s => {
+      const sl = slots.find(x => s.slot && x.id === s.slot.id)!;
+      return { s, sl, state: (sl.answered ? 'done' : sl.required ? 'gap' : 'todo') as Exclude<NodeState, 'action'> };
+    });
     const subLines = lineBelow(subs.map(x => x.state));
     entries.push({
       state: gap ? 'gap' : 'done',
@@ -74,7 +75,7 @@ export function Timeline() {
                   key={s.id}
                   state={state}
                   label={sl.label}
-                  value={state === 'done' ? sl.value : undefined}
+                  value={sl.value || undefined}
                   current={step === s.id}
                   disabled={false}
                   onClick={() => go(s.id)}
@@ -106,9 +107,8 @@ export function Timeline() {
 /** Where the arrows go from here: the previous navigable step, and the next gap (or Review). */
 function useStepTargets() {
   const { steps, step } = useCase();
-  const nav = steps.filter(s => s.navigable);
-  const i = nav.findIndex(s => s.id === step);
-  const prev = i > 0 ? nav[i - 1] : undefined;
+  // Items open in any order, so the current one may sit past a gap: back is the nearest reachable step before it.
+  const prev = steps.slice(0, Math.max(0, steps.findIndex(s => s.id === step))).reverse().find(s => s.navigable);
   const after = steps.slice(steps.findIndex(s => s.id === step) + 1).find(s => s.gap && s.navigable);
   const nextId = after?.id ?? steps.find(s => s.gap && s.navigable)?.id ?? 'review';
   return { prev, nextId };

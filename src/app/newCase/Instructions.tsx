@@ -14,16 +14,21 @@ import { LinkButton, Notice, FOCUS } from './ui';
 
 const AREA = 'w-full rounded-lg border border-[#D4D4DD] px-3 py-2 text-sm focus:border-[#3F6FE8] focus:ring-2 focus:ring-[#3F6FE8]/20 outline-none';
 
-/** Optional instructions for one service: a link until used, then a small box. */
-export function ServiceNote({ item, className = '' }: { item: ServiceItem; className?: string }) {
+/**
+ * Optional instructions for one service: a link until used, then a small box.
+ * `inline`: already inside its own "Case Instructions (Crown)" section (Guided), so it opens straight to
+ * the box, focused, with no second click and no repeated label.
+ */
+export function ServiceNote({ item, className = '', inline = false, autoFocus = true }: { item: ServiceItem; className?: string; inline?: boolean; /** Put the cursor in the box when it opens empty. */ autoFocus?: boolean }) {
   const { updateItem, readOnly } = useCase();
   const wide = useRoom() === 'wide';
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(inline);
   const note = item.note ?? '';
   const id = `svc-note-${item.id}`;
   const label = `Case Instructions (${PRODUCTS[item.product].label})`;
   if (readOnly) {
     if (!note.trim()) return null;
+    if (inline) return <p className={`text-sm text-[#1F1F2E] whitespace-pre-wrap ${className}`}>{note.trim()}</p>;
     return wide ? (
       <div className={className}>
         <div className="rounded-xl bg-[#F8F9FC] border border-[#ECECF2] px-3.5 py-2.5">
@@ -57,16 +62,28 @@ export function ServiceNote({ item, className = '' }: { item: ServiceItem; class
   const area = (
     <textarea
       id={id}
-      autoFocus={open && !note}
+      autoFocus={autoFocus && open && !note}
       value={note}
       maxLength={500}
       rows={2}
       onChange={e => updateItem(item.id, { note: e.target.value })}
       placeholder="Anything the lab should know about this one?"
-      aria-describedby={wide ? `${id}-help` : undefined}
+      aria-label={inline ? label : undefined}
+      aria-describedby={wide || inline ? `${id}-help` : undefined}
       className={AREA}
     />
   );
+  if (inline) {
+    return (
+      <div className={className}>
+        {area}
+        <p id={`${id}-help`} className="flex gap-2 text-[11px] text-[#5A5A6A] mt-1">
+          <span className="flex-1 min-w-0">Goes into the case instructions at Review.</span>
+          <span aria-hidden className="tabular-nums">{note.length}/500</span>
+        </p>
+      </div>
+    );
+  }
   if (wide) {
     return (
       <div className={className}>

@@ -53,7 +53,7 @@ export function navEntries(api: CaseApi, view: string, showPicker: boolean): Nav
       : { id: 'lab', name: 'Lab', value: lab.name, state: 'done' },
   ];
   for (const it of draft.items) {
-    const left = slotGaps(slotsFor(it, ctx)).length;
+    const left = slotGaps(slotsFor(it, ctx, draft)).length;
     out.push({
       id: it.id,
       itemId: it.id,

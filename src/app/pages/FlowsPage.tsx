@@ -33,7 +33,7 @@ export const FLOWS: FlowEntry[] = [
     // From scratch: lab first, one question at a time, Send as the prescriber's signature.
     title: 'New case flow',
     description: 'The simplest way for a clinic to create lab work, from Add new Case or a scanner draft to Sent: lab first, a step timeline with one question at a time, the Teeth Chart against every service, smart defaults with their source, and Send with a 10-second Undo.',
-    detail: 'Clinic · 3 scripts + 10 checks',
+    detail: 'Clinic · 3 scripts + 11 checks',
     icon: <FilePlus2 className="w-5 h-5 text-[#2F62D6]" />,
     badge: 'Walkthrough',
     accent: '#2F62D6',

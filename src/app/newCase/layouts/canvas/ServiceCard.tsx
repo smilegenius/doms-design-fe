@@ -16,7 +16,6 @@ import { MousePointerClick, Trash2 } from 'lucide-react';
 import type { ProductId } from '../../data';
 import { useCase } from '../../CaseContext';
 import { useController } from '../../controller';
-import { fmtDay } from '../../dates';
 import {
   NoteDef, PRODUCTS, ServiceItem, Slot, SlotId, bridgeParts, itemTitle, parseStep, plural, priceOf, slotGaps,
   slotStepId, slotsFor, stagesShort,
@@ -40,13 +39,12 @@ const shownSrc = (src?: string, value?: string) => (src && src !== 'You' && src 
 export default function ServiceCard({ item }: { item: ServiceItem }) {
   const api = useCase();
   const ui = useCanvas();
-  const { ctx, draft, user, lab, readOnly, notes, dismissNote, doneAndAdvance, removeItem, step, dates, go } = api;
+  const { ctx, draft, user, lab, readOnly, notes, dismissNote, doneAndAdvance, removeItem, step, go } = api;
   const n = user.notation;
-  const slots = slotsFor(item, ctx);
+  const slots = slotsFor(item, ctx, draft);
   const left = slotGaps(slots).length;
   const p = priceOf(item, ctx, draft.fastTrack);
-  const per = dates.perItem.find(x => x.id === item.id);
-  const details = new Map(itemDetails(item, ctx).map(d => [d.label, d]));
+  const details = new Map(itemDetails(item, ctx, draft).map(d => [d.label, d]));
   const Icon = PRODUCT_ICON[item.product];
   const archItem = PRODUCTS[item.product].archItem;
   const activeHere = parseStep(step).itemId === item.id;
@@ -86,9 +84,9 @@ export default function ServiceCard({ item }: { item: ServiceItem }) {
   const bridgeText = bp ? [plural(bp.span.length, 'unit'), bp.pontics.length ? `${bp.pontics.length === 1 ? 'pontic' : 'pontics'} ${[...bp.pontics].sort((a, b) => Number(a) - Number(b)).join(', ')}` : null].filter(Boolean).join(' · ') : null;
   // The lead time once the service is chosen far enough to have one ("7 days"); never its price.
   const lead = p.kind !== 'none' && p.ta != null ? plural(p.ta, 'day') : null;
-  // A full denture has no date of its own: the line reads its ordered stages and their days.
-  const metaText = item.product === 'denture' ? stagesShort(item)
-    : [bridgeText, lead, per?.backBy && draft.items.length > 1 ? `back ${fmtDay(per.backBy)} on its own` : null].filter(Boolean).join(' · ');
+  // A full denture has no date of its own: the line reads its ordered stages and their days. Any other
+  // service's day is its own Delivery date row.
+  const metaText = item.product === 'denture' ? stagesShort(item) : [bridgeText, lead].filter(Boolean).join(' · ');
 
   // The card glides to its new height when a row opens or folds, or a note comes or goes.
   useHeightMorph(cardRef, `${rows.map(s => `${s.id}:${modes.get(s.id)}`).join(',')}|${itemNotes.length}|${readOnly}`);
@@ -124,13 +122,13 @@ export default function ServiceCard({ item }: { item: ServiceItem }) {
       }`}
     >
       <header className="flex items-center gap-3.5 px-5 py-3.5">
-        <div className="flex-shrink-0 w-[52px] flex justify-center">
+        <div className="flex-shrink-0 w-[72px] flex justify-center">
           {item.teeth.length || (archItem && item.arch) ? (
             <MiniChart
               teeth={item.teeth}
               arch={archItem ? item.arch : undefined}
               pontics={item.product === 'bridge' ? bridgeParts(item).pontics : undefined}
-              width={44}
+              width={64}
               label={title}
             />
           ) : (
@@ -200,7 +198,8 @@ function SlotRow({ item, slot, mode, onChange, onChart, value }: {
   const { readOnly, step, go, user, lab } = api;
   const id = slotStepId(item.id, slot.id);
   const active = step === id;
-  useAdvanceOnChange(mode === 'change', `${slot.value ?? ''}|${slot.src ?? ''}`, slot.answered);
+  // A date is typed digit by digit: its row stays open until Done.
+  useAdvanceOnChange(mode === 'change' && slot.id !== 'deliveryDate', `${slot.value ?? ''}|${slot.src ?? ''}`, slot.answered);
   const ref = active ? c.headingRef : undefined;
   const accent = active ? 'bg-[#3F6FE8]' : mode === 'gap' ? 'bg-[#B45309]' : '';
   const liRef = useRef<HTMLLIElement>(null);
