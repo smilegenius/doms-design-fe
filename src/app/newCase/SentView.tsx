@@ -13,7 +13,7 @@ import { useCase } from './CaseContext';
 import { recordsSummary } from './CaseSteps';
 import { Lab, Patient } from './data';
 import { fmtDay, fromISO } from './dates';
-import { CaseDraft, Ctx, ServiceItem, caseDates, isPosted, itemTitle, plural, recordsState, stagesShort } from './rules';
+import { CaseDraft, Ctx, ServiceItem, askedFor, caseDates, fastTrackEligible, isPosted, itemTitle, plural, recordsState, stagesShort } from './rules';
 import { buildCtx, scanArchesText } from './derive';
 import { useFlowStore } from './store';
 import { DispatchPanel, StatusChip, dispatchLine, useShipped } from './dispatch';
@@ -124,8 +124,10 @@ function SentCard({ id, result, onView }: { id: string; result: SentResult; onVi
     const own = dates.perItem.find(x => x.id === item.id);
     if (own?.ta == null) return '—';
     // Waiting for the scan: a day the clinic asked for stands; the lab's earliest counts from the scan.
-    if (dates.route === 'follow') return own.requested && !own.tooSoon && own.backBy ? `Back by ${fmtDay(own.backBy)}` : `${plural(own.ta, 'working day')} after the scan`;
-    return own.backBy ? `Back by ${fmtDay(own.backBy)}` : '—';
+    // Fast-Track said where it set the day, so a sooner day than usual isn't a surprise.
+    const fast = draft.fastTrack && fastTrackEligible(item, ctx) ? ' · Fast-Track' : '';
+    if (dates.route === 'follow') return `${askedFor(own) && own.backBy ? `Back by ${fmtDay(own.backBy)}` : `${plural(own.ta, 'working day')} after the scan`}${fast}`;
+    return own.backBy ? `Back by ${fmtDay(own.backBy)}${fast}` : '—';
   };
 
   return (

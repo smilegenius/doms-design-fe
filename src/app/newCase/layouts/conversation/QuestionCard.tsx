@@ -9,7 +9,7 @@
 import { forwardRef } from 'react';
 import { useCase } from '../../CaseContext';
 import { useController } from '../../controller';
-import { PRODUCTS, ServiceItem, SlotId, itemTitle, parseStep, slotGaps, slotStepId, slotsFor } from '../../rules';
+import { PRODUCTS, ServiceItem, SlotId, aProduct, itemTitle, parseStep, slotGaps, slotStepId, slotsFor } from '../../rules';
 import { PatientStep, LabStep, RecordsStep, PrescriberStep, DeliveryStep } from '../../CaseSteps';
 import { NoteView, ServicesStep, SlotEditor, questionFor } from '../../ServiceSteps';
 import { ServiceNote } from '../../Instructions';
@@ -65,7 +65,7 @@ const SlotQuestion = forwardRef<HTMLHeadingElement, { item: ServiceItem; slotId:
   if (!slot) return null;
   const gap = slot.required && !slot.answered;
   const label = PRODUCTS[item.product].label;
-  const kicker = slotGaps(slots).length ? `Adding ${/^[AEIOU]/.test(label) ? 'an' : 'a'} ${label}` : itemTitle(item, n);
+  const kicker = slotGaps(slots).length ? `Adding ${aProduct(item.product, label)}` : itemTitle(item, n);
   // A service just picked and not yet answered: a quiet way out if it was the wrong tile.
   const justPicked = !readOnly && idx === 0 && gap;
   const panel = slots.slice(0, idx).filter(s => PANEL_SLOTS.includes(s.id));

@@ -23,8 +23,10 @@ import {
   PARTIAL_STAGES, PRODUCTS, STUMP, ServiceItem, StagePlan, UPPER_ORDER, VITA_3D, VITA_CLASSICAL, buildSteps, caseDates,
   dentureTreatment, fastTrackEligible, firstGap, fitCheck, fullName, gapCount, isStageId, itemTitle, jawOf, labMakes,
   optionAvail, optionName, orderedStages, resolvePrescriber, seedDenturePlan, spanBetween, stageName, stagePlan,
-  stagesOutOfOrder, stagesSummary, suggestedStageDates, treatmentName,
+  stagesOutOfOrder, stagesSummary, suggestedStageDates, treatmentName, aProduct,
 } from './rules';
+// The portal's own wear intervals ("14 days / aligner"), so a duration is read only as one the product offers.
+import { ALIGNER_DURATIONS } from '../pages/CreateCasePage';
 import { blankDraft, loginMap, newItem } from './store';
 import { stepName } from './footerArrow';
 
@@ -93,7 +95,9 @@ export function describeDraft(d: CaseDraft, patientName: string, labName: string
       : it.arch ? (it.arch === 'both' ? 'both arches' : it.arch) : '';
     const slot = OPT_SLOT[it.product];
     const opt = slot === 'material' ? it.material : slot === 'type' ? it.type : slot === 'base' ? it.base : slot === 'work' ? it.work : undefined;
-    const matShade = [opt ? optionName(it.product, opt) : '', it.shade ?? ''].filter(Boolean).join(' ');
+    // Aligners have no material: their line is the wear interval, in the portal's words ("14 days / aligner").
+    const matShade = it.product === 'aligner' ? it.aligner?.alignerDuration ?? ''
+      : [opt ? optionName(it.product, opt) : '', it.shade ?? ''].filter(Boolean).join(' ');
     // A full denture's line is its stage plan; any other service's, the day it's asked back by (none: the lab's earliest).
     const own = it.product === 'denture' ? stagesLine(it) : it.requestedDelivery ? dayWord(it.requestedDelivery) : '';
     const delivery = [own, d.fastTrack && k === 0 ? 'Fast-Track' : ''].filter(Boolean).join(', ');
@@ -253,12 +257,14 @@ export interface ServiceRead {
   shade?: string;
   stump?: string;
   desc?: string;
+  /** Aligners: the wear interval, as the portal writes it ("14 days / aligner"). */
+  alignerDuration?: string;
   /** The case's lab makes this product. */
   makes: boolean;
   issues: string[];
   /** Its own Instruction line(s): goes to the lab as this service's instructions. */
   note?: string;
-  /** Its own Delivery line: needed by / Fast-Track. */
+  /** Its own Delivery line (needed by / Fast-Track); with no day of its own, the case's day (not a full denture's). */
   delivery?: { fastTrack: boolean; date?: Date; heard?: string };
 }
 
@@ -330,7 +336,7 @@ const NAME_STOP = new Set(`january february march april may june july august sep
 apr jun jul aug sep sept oct nov dec monday tuesday wednesday thursday friday saturday sunday mon tue tues wed thu thur thurs
 fri sat sun upper lower both left right top bottom dr mr mrs ms miss mx the a an crown crowns bridge bridges veneer veneers
 inlay inlays onlay onlays implant implants night guard guards nightguard denture dentures partial partials retainer retainers
-whitening reline relines repair emax zirconia layered monolithic mono metal composite pfm pbc nhs private fast track urgent
+aligner aligners clear whitening reline relines repair emax zirconia layered monolithic mono metal composite pfm pbc nhs private fast track urgent
 asap express priority fit today tomorrow next this lab labs dental ceramics studio denture northfield harbour harbor pennine
 please thanks thank patient service shade delivery instruction instructions note notes material teeth tooth arch hard soft
 dual essix hawley chrome acrylic flexible try special bite blocks finish immediate straight match matching keep make check
@@ -367,6 +373,7 @@ const PRODUCT_WORDS: [ProductId, RegExp][] = [
   ['denture', /\b(?:full|complete)\s+dentures?\b|\bdentures?\b|\bf\/f\b|\bfull\s+(?:upper|lower)\b/gi],
   // Essix and Hawley are options; on their own they still imply a retainer (OPTION_WORDS).
   ['retainer', /\bretainers?\b/gi],
+  ['aligner', /\b(?:clear\s+)?aligners?\b/gi],
   ['whitening', /\b(?:teeth\s+)?whitening(?:\s+trays?)?\b|\bbleach(?:ing)?\s+trays?\b/gi],
   ['crown', /\bcrowns?\b|\bcaps?\b/gi],
   ['other', /\bsomething\s+else\b|\bsurgical\s+guides?\b|\bstudy\s+models?\b|\bsports?\s+guards?\b|\bmouth\s*guards?\b|\bsnor(?:e|ing)\s+(?:guards?|appliances?)\b|\bwax[- ]?ups?\b/gi],
@@ -418,8 +425,10 @@ const NUMBER_WORD: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three
 
 /**
  * Which year a day without one falls in: the next one from today ('ahead', a
- * delivery date), the closest to today ('near', a stage's day: one just gone
- * reads as passed), or the last one up to today ('past', a done-on day).
+ * delivery date; one gone in the last two months stays gone, so it's flagged
+ * as passed rather than read as a year out), the closest to today ('near', a
+ * stage's day: one just gone reads as passed), or the last one up to today
+ * ('past', a done-on day).
  */
 type DayMode = 'ahead' | 'near' | 'past';
 const SOON_MS = 60 * 24 * 60 * 60 * 1000;
@@ -430,7 +439,10 @@ function dayMonth(d: number, m: number, y: number | undefined, now: Date, mode: 
   if (y == null) {
     const today = startOfDay(now);
     const near = [yr - 1, yr, yr + 1].map(x => new Date(x, m, d)).filter(x => x.getDate() === d);
-    if (mode === 'ahead' && date < today) date = new Date(yr + 1, m, d);
+    if (mode === 'ahead') {
+      const gone = near.filter(x => x < today && today.getTime() - x.getTime() <= SOON_MS).pop();
+      date = gone ?? near.find(x => x >= today) ?? date;
+    }
     // A done-on day just ahead stays ahead (so it's warned about and dropped), never a year back unsaid.
     else if (mode === 'past') date = date > today && date.getTime() - today.getTime() <= SOON_MS ? date : near.filter(x => x <= today).pop() ?? date;
     else if (mode === 'near') date = near.reduce((a, b) => (Math.abs(b.getTime() - today.getTime()) < Math.abs(a.getTime() - today.getTime()) ? b : a));
@@ -523,9 +535,12 @@ interface RawSvc {
   fast?: boolean;
   date?: Date;
   dateHeard?: string;
+  /** Aligners: the wear interval as written ("21 days per aligner"). */
+  duration?: Duration;
   /** Full denture: each stage as it was mentioned, in order. */
   stages: StageHeard[];
 }
+interface Duration { days: number; heard: string }
 /** A stage as written: 'done' says it happened without saying where; 'none' leaves it out ("no special tray"). */
 interface StageHeard {
   id: DentureStageId;
@@ -553,6 +568,8 @@ interface St {
   line?: RawSvc[];
   /** The "Service N:" block being read: its Delivery and Instruction lines are its own. */
   block?: RawSvc;
+  /** Wear intervals heard before any aligners were named: the aligners without one take them. */
+  durations: Duration[];
   n: number;
 }
 function newSvc(st: St, label = false): RawSvc {
@@ -691,6 +708,38 @@ function takeDates(w: Work, st: St) {
 
 function takeTimes(w: Work, st: St) {
   w.each(/\b\d{1,2}:\d{2}\s*(?:am|pm)?\b|\b\d{1,2}\s*(?:am|pm)\b/gi, m => { st.unplaced.push(m[0].trim()); });
+}
+
+/**
+ * An aligner wear interval, read as one before the products and teeth: "21 days per aligner", "14 days / aligner",
+ * "14-day aligners", "every 10 days", "change aligners every 2 weeks". Its number is never a tooth, and its
+ * "aligner" never a second service (a bare "14-day" leaves "aligners" to name the service).
+ */
+const DURATION_RE = new RegExp([
+  '\\b(\\d{1,2})[\\s-]*days?\\s*(?:\\/|per|an?|each|for\\s+each)\\s*(?:clear\\s+)?aligners?\\b',
+  '\\b(\\d{1,2})[- ]days?(?=\\s+(?:clear\\s+)?aligners?\\b)',
+  '\\b(?:(?:change|swap|switch|replace|wear)(?:\\s+(?:the\\s+|each\\s+)?(?:clear\\s+)?(?:aligners?|them|each))?\\s+)?every\\s+(\\d{1,2}|one|two|three)?\\s*(days?|weeks?)\\b',
+].join('|'), 'gi');
+function takeDurations(w: Work): Duration[] {
+  const out: Duration[] = [];
+  w.each(DURATION_RE, (m, at) => {
+    const n = m[1] ?? m[2] ?? m[3];
+    const count = n == null ? 1 : /^\d+$/.test(n) ? Number(n) : NUMBER_WORD[n.toLowerCase()];
+    const days = m[4] && /^w/i.test(m[4]) ? count * 7 : count;
+    if (!days) return false;
+    out.push({ days, heard: cleanText(w.orig(at, m[0].length)) });
+  });
+  return out;
+}
+/** Each interval to the aligners it's about: the line's, else its block's, else the last named; none yet: kept for later. */
+function placeDurations(st: St, found: Duration[]) {
+  for (const d of found) {
+    const line = (st.line ?? []).filter(s => s.product === 'aligner' && !s.duration);
+    const last = [st.block, ...[...st.svcs].reverse()].find(s => !!s && s.product === 'aligner' && !s.duration);
+    const to = line.length ? line : last ? [last] : [];
+    if (to.length) to.forEach(s => { s.duration = d; });
+    else st.durations.push(d);
+  }
 }
 
 // ─── Denture stages ──────────────────────────────────────────────────────────
@@ -1068,6 +1117,8 @@ function readPart(part: string, st: St, scope: 'any' | 'service', instr: string[
     instr.push(cleanText(part.slice(0, end)));
     w.eat(ref.index, end);
   }
+  // An aligner wear interval before anything else, so "21 days per aligner" is neither tooth 21 nor a second service.
+  const durations = takeDurations(w);
   // A full denture's stages first, each with its own day or state, so no other reader takes those words.
   const denture = dentureContext(st, part);
   const stages = denture ? readStages(w, st.ctx.now) : [];
@@ -1090,6 +1141,7 @@ function readPart(part: string, st: St, scope: 'any' | 'service', instr: string[
     takePatientCue(w, st);
   }
   takeServices(w, st);
+  if (durations.length) placeDurations(st, durations);
   if (stages.length) attachStages(st, stages);
   if (own) {
     const got = st.date as Date | undefined;
@@ -1187,8 +1239,9 @@ function readDeliveryLine(value: string, st: St, fitLabel: boolean) {
 
 /**
  * A service's own Delivery line: its needed-by date or Fast-Track. The case
- * goes as fast as its fastest ask: Fast-Track if any service wants it, and the
- * earliest needed-by date of them all. A full denture's line is its stage plan
+ * goes as fast as its fastest ask: Fast-Track if any service wants it (and the
+ * earliest needed-by date of them all, worked out in finish, so st.date stays
+ * the day written for the whole case). A full denture's line is its stage plan
  * ("Try In 12 Nov, Finish 26 Nov; Bite Registration done elsewhere"): those
  * days are the stages' own and never the case's.
  */
@@ -1198,7 +1251,6 @@ function readServiceDelivery(value: string, st: St, svc: RawSvc) {
     const reads = readStages(w, st.ctx.now);
     if (reads.length) attachStages(st, reads);
   }
-  const denture = productOf(svc).product === 'denture';
   const was = { fast: st.fast, date: st.date, heard: st.dateHeard, as: st.dateAs };
   st.fast = false;
   st.date = undefined;
@@ -1206,21 +1258,34 @@ function readServiceDelivery(value: string, st: St, svc: RawSvc) {
   readDeliveryLine(w.s, st, false);
   // Read back what the line set (the call above changes st).
   const got = st.date as Date | undefined;
-  const gotHeard = st.dateHeard as string | undefined;
   if (st.fast) svc.fast = true;
-  if (got) { svc.date = got; svc.dateHeard = gotHeard; }
-  const earlier = !denture && !!got && (!was.date || got.getTime() < was.date.getTime());
+  if (got) { svc.date = got; svc.dateHeard = st.dateHeard; }
   st.fast = was.fast || st.fast;
-  st.date = earlier ? got : was.date;
-  st.dateHeard = earlier ? gotHeard : was.heard;
-  st.dateAs = earlier ? 'delivery' : was.as;
+  st.date = was.date;
+  st.dateHeard = was.heard;
+  st.dateAs = was.as;
+}
+
+/**
+ * A day on a "Service N:" line ("Crown 36, needed by 12 Nov") is that line's services' own, like its Delivery
+ * line's. The line was read with the case's day put aside (`was`); one no service takes is the case's.
+ */
+function keepLineDate(st: St, was: { date?: Date; heard?: string; as?: St['dateAs'] }) {
+  const got = st.date;
+  const to = got ? (st.line ?? []).filter(s => productOf(s).product !== 'denture' && !s.date) : [];
+  for (const s of to) { s.date = got; s.dateHeard = st.dateHeard; }
+  if (got && !to.length && !was.date) return;
+  if (got && !to.length) st.unplaced.push(st.dateHeard ?? fmtDay(got));
+  st.date = was.date;
+  st.dateHeard = was.heard;
+  st.dateAs = was.as;
 }
 
 // ─── Reading → result ────────────────────────────────────────────────────────
 
 /** Reads a description (template lines and/or plain sentences). */
 export function parseDescription(text: string, ctx: DescribeCtx): Parsed {
-  const st: St = { ctx, svcs: [], fast: false, instr: [], unplaced: [], n: 0 };
+  const st: St = { ctx, svcs: [], fast: false, instr: [], unplaced: [], durations: [], n: 0 };
   let inInstr = false;
   // Instruction lines (and their follow-on lines) go to the service block they sit in, else to the case.
   const instrTo = () => (st.block ? st.block.note : st.instr);
@@ -1246,8 +1311,13 @@ export function parseDescription(text: string, ctx: DescribeCtx): Parsed {
           if (c && !c.product && !c.label) { c.label = true; st.line.push(c); }
           else newSvc(st, true);
           st.block = st.cur;
+          // A day on this line is its services' own: read apart from the case's day, then handed to them.
+          const was = { date: st.date, heard: st.dateHeard, as: st.dateAs };
+          st.date = undefined;
+          st.dateHeard = undefined;
           // The first clause is the service; later ones may be instructions ("match the shade of 35").
           clauses(value).forEach((part, k) => readPart(part, st, 'any', instr, k > 0));
+          keepLineDate(st, was);
           break;
         }
         case 'attr':
@@ -1352,7 +1422,8 @@ function resolveService(r: RawSvc, env: Env): ServiceRead[] {
       }
       break;
     }
-    case 'nightguard': case 'retainer': case 'whitening': case 'denture':
+    // An arch item: teeth written on its Teeth/Arch line say which arch (both jaws: both).
+    case 'nightguard': case 'retainer': case 'aligner': case 'whitening': case 'denture':
       if (!arch && expanded.length) { const j = jawsOf(expanded); arch = j.length === 1 ? j[0] : 'both'; }
       break;
     case 'partial': case 'reline': {
@@ -1399,12 +1470,24 @@ function resolveService(r: RawSvc, env: Env): ServiceRead[] {
   }
   for (const o of r.opts) {
     if (used.has(o.heard) || o.implies === product || BENIGN[product]?.includes(o.id)) continue;
-    issues.push(`“${o.heard}” doesn't go with a ${PRODUCTS[product].noun}, so it was left out.`);
+    issues.push(`“${o.heard}” doesn't go with ${aProduct(product)}, so it was left out.`);
   }
   let shade = r.shade;
   if (shade && !takesShade(product)) {
-    issues.push(`A ${PRODUCTS[product].noun} doesn't take a shade, so ${shade} was left out.`);
+    // "A night guard doesn't take a shade", "Aligners don't take a shade" (a plural name says so).
+    const what = aProduct(product);
+    issues.push(`${what.charAt(0).toUpperCase()}${what.slice(1)} ${PRODUCTS[product].plural ? "don't" : "doesn't"} take a shade, so ${shade} was left out.`);
     shade = undefined;
+  }
+  // Aligners: the wear interval, only as one the portal offers ("14 days / aligner").
+  let alignerDuration: string | undefined;
+  if (product === 'aligner' && r.duration) {
+    const v = ALIGNER_DURATIONS.find(x => parseInt(x, 10) === r.duration!.days);
+    if (v) alignerDuration = v;
+    else {
+      const days = ALIGNER_DURATIONS.map(x => String(parseInt(x, 10)));
+      issues.push(`“${r.duration.heard}” isn't one of the wear intervals (${days.slice(0, -1).join(', ')} or ${days[days.length - 1]} days per aligner), so it was left out.`);
+    }
   }
   const inlayType = product === 'inlay' && r.productText
     ? (/onlay/i.test(r.productText) && !/inlay/i.test(r.productText) ? 'onlay' : /inlay/i.test(r.productText) && !/onlay/i.test(r.productText) ? 'inlay' : undefined)
@@ -1412,7 +1495,7 @@ function resolveService(r: RawSvc, env: Env): ServiceRead[] {
   const base: ServiceRead = {
     key: r.key, product, assumed, heard, teeth: product === 'bridge' ? teeth : byNum(teeth), bridge, arch, option, stage,
     treatment: plan?.treatment, stages: plan?.stages, stagesSettled: plan?.settled,
-    inlayType, shade, stump: r.stump, desc: product === 'other' ? heard : undefined, makes: labMakes(env.lab, product), issues,
+    inlayType, shade, stump: r.stump, desc: product === 'other' ? heard : undefined, alignerDuration, makes: labMakes(env.lab, product), issues,
   };
   // One site each: implant crowns and inlays are one item per tooth.
   if ((product === 'implant' || product === 'inlay') && base.teeth.length > 1) {
@@ -1532,19 +1615,35 @@ function finish(st: St): Parsed {
     : st.lab?.kind === 'unknown' ? { kind: 'unknown', heard: st.lab.heard, lab: fallback.lab, src: fallback.src }
     : { kind: 'default', lab: fallback.lab, src: fallback.src };
   const funding = st.funding ?? matched?.funding ?? CLINIC.defaultFunding;
+  // Wear intervals heard before any aligners were named go to the aligners without one; none named: read back.
+  const aligners = raws.filter(r => productOf(r).product === 'aligner');
+  for (const r of aligners) r.duration ??= st.durations[0];
+  if (!aligners.length) st.unplaced.push(...st.durations.map(d => d.heard));
+  // A day written for the whole case (a plain sentence, the header, a Delivery line outside any service) is the
+  // day every service without its own is needed by (a fit day: the lab's working day before it). Never a full
+  // denture's: its days are its stages'.
+  const caseDay = st.date && st.dateAs === 'fit' ? lastWorkingDayBefore(st.date) : st.date;
   // Each service keeps its own instruction and delivery (an implant split per tooth shares them).
-  const services = raws.flatMap(r => resolveService(r, { lab: lab.lab, funding, patient: matched, now: ctx.now }).map(s => ({
-    ...s,
-    note: r.note.join('\n').trim() || undefined,
-    delivery: r.fast || r.date ? { fastTrack: !!r.fast, date: r.date, heard: r.dateHeard } : undefined,
-  })));
+  const services = raws.flatMap(r => resolveService(r, { lab: lab.lab, funding, patient: matched, now: ctx.now }).map(s => {
+    const date = r.date ?? (s.product && s.product !== 'denture' ? caseDay : undefined);
+    return {
+      ...s,
+      note: r.note.join('\n').trim() || undefined,
+      delivery: r.fast || date ? { fastTrack: !!r.fast, date, heard: r.date ? r.dateHeard : st.dateHeard } : undefined,
+    };
+  }));
+  // The case's day: the soonest asked for, its own or a service's.
+  let day = { date: st.date, heard: st.dateHeard, as: st.dateAs ?? 'delivery' as DeliveryRead['as'] };
+  for (const r of raws) {
+    if (r.date && productOf(r).product !== 'denture' && (!day.date || r.date < day.date)) day = { date: r.date, heard: r.dateHeard, as: 'delivery' };
+  }
   const instructions = st.instr.join('\n').trim();
   const unplaced = uniq(st.unplaced.map(cleanText).filter(Boolean));
   return {
     patient,
     lab,
     services,
-    delivery: { fastTrack: st.fast, date: st.date, heard: st.dateHeard, as: st.dateAs ?? 'delivery' },
+    delivery: { fastTrack: st.fast, ...day },
     instructions,
     funding: st.funding,
     prescriber: st.prescriber,
@@ -1595,8 +1694,9 @@ export function itemsFor(p: Parsed): ServiceItem[] {
       if (s.stages.some(r => r.follow)) x.stageSrc = 'Next stage';
     }
     if (s.inlayType) x.inlayType = s.inlayType;
-    // Its own Delivery line's day is the day it's asked back by (a full denture's days went to its stages).
+    // Its own day (its Delivery line, else the case's) is the day it's asked back by (a full denture's days went to its stages).
     if (s.product !== 'denture' && s.delivery?.date) { x.requestedDelivery = toISO(s.delivery.date); x.deliverySrc = AI_SRC; }
+    if (s.alignerDuration) x.aligner = { alignerDuration: s.alignerDuration };
     if (s.shade) { x.shade = s.shade; x.shadeSrc = AI_SRC; }
     if (s.stump) x.stump = s.stump;
     if (s.product === 'other' && s.desc) { x.desc = s.desc; x.descDone = s.desc.trim().length >= 10; }
@@ -1630,6 +1730,8 @@ function mergeItem(old: ServiceItem, it: ServiceItem): ServiceItem {
   if (it.base) out.base = it.base;
   if (it.work) out.work = it.work;
   if (it.inlayType) out.inlayType = it.inlayType;
+  // Aligners: the description's answers over the draft's, the rest of its prescription kept.
+  if (it.aligner) out.aligner = { ...old.aligner, ...it.aligner };
   // The same day read back (the case written out as text) keeps who picked it.
   if (it.requestedDelivery && it.requestedDelivery !== old.requestedDelivery) { out.requestedDelivery = it.requestedDelivery; out.deliverySrc = it.deliverySrc; }
   if (it.shade) { out.shade = it.shade; out.shadeSrc = it.shadeSrc; }
@@ -1804,10 +1906,14 @@ function stagesLine(it: ServiceItem): string {
     ...away.filter(s => s.date).map(s => `${stageName(s.id)} done elsewhere${day(s.date)}`),
   ].filter(Boolean).join('; ');
 }
-/** A day as the template writes it, "12 Nov": one in another year says its year, so reading it back lands on the same day. */
+/**
+ * A day as the template writes it, "12 Nov": one in another year, or one not after today (a passed or too-soon
+ * day), says its year, so reading it back lands on the same day and never rolls a year on.
+ */
 function dayWord(iso: string): string {
   const d = fromISO(iso);
-  return d.getFullYear() === demoNow().getFullYear() ? fmtShort(d) : fmtFull(d);
+  const now = demoNow();
+  return d.getFullYear() === now.getFullYear() && d > startOfDay(now) ? fmtShort(d) : fmtFull(d);
 }
 /** "A", "A and B", "A, B and C" */
 function andWords(words: string[]): string {

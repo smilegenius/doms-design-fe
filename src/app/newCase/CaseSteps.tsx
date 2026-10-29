@@ -685,10 +685,12 @@ function DentistCards({ value, onPick }: { value?: string; onPick: (id: string) 
 
 export function backByText(api: ReturnType<typeof useCase>): string {
   const { dates, lab } = api;
-  if (dates.route === 'follow' && dates.ta != null && dates.backBy) {
+  // A day the clinic asked for is fixed: only a lab's lead time counts from the scan.
+  if (dates.route === 'follow' && dates.ta != null && dates.backBy && !dates.fixed) {
     return `Back ${plural(dates.ta, 'working day')} after the scan arrives (${fmtDay(dates.backBy)} if it arrives before ${fmtCutoff(lab.cutoffMin)} today)`;
   }
   if (!dates.backBy) return 'Back-by date once every item can be made';
+  if (dates.route === 'follow') return `Back by ${fmtDay(dates.backBy)} · requested`;
   return `Back by ${fmtDay(dates.backBy)} · ${plural(dates.ta!, 'working day')}`;
 }
 

@@ -9,6 +9,7 @@ import { useSyncExternalStore } from 'react';
 import { CLINIC, LabId, PATIENTS, Patient, ProductId, SCANNER_LOGINS, Scanner, UserId, setNotationLookup } from './data';
 import { CaseDraft, Notation, ServiceItem, setLoginLookup } from './rules';
 import type { Ux } from './controller';
+import { removeDispatch } from '../data/dispatchRecords';
 
 // A posted case is created Ready for Dispatch (not with the lab yet) and becomes Submitted once it's posted.
 export type RowStatus = 'Draft' | 'Ready for Dispatch' | 'Submitted' | 'Received' | 'In production' | 'Delivered';
@@ -233,8 +234,10 @@ export function addEvent(e: Omit<FlowEvent, 'id' | 'at'>) {
 }
 export const dismissEvent = (id: string) => commit({ ...state, events: state.events.filter(e => e.id !== id) });
 
-/** Resetting the demo keeps the chosen experience (and holds the inbox scan back again). */
+/** Resetting the demo keeps the chosen experience (and holds the inbox scan back again). Case IDs are handed out again, so the cases it made lose their dispatch too. */
 export function resetDemo() {
-  commit({ ...seed(), ux: state.ux });
+  const fresh = seed();
+  state.rows.filter(r => !fresh.rows.some(f => f.id === r.id)).forEach(r => removeDispatch(r.id));
+  commit({ ...fresh, ux: state.ux });
 }
 export const setUx = (ux: Ux) => commit({ ...state, ux });

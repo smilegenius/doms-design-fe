@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX, Truck, Play, FilePlus2 } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
+import { setUserId, setUx } from '../newCase/store';
 
 // ─── Flows ───────────────────────────────────────────────────────────────────
 // Everything that isn't "sign in and look around a portal": the standalone
@@ -25,15 +26,15 @@ export interface FlowEntry {
   /** Timeline group, as 'YYYY-MM'. The page lists months newest first. */
   month: string;
   /** Optional secondary button for flows that are a click-through simulation. */
-  simulate?: { label: string; path: string };
+  simulate?: { label: string; path: string; before?: () => void };
 }
 
 export const FLOWS: FlowEntry[] = [
   {
-    // From scratch: lab first, one question at a time, Send as the prescriber's signature.
+    // Guided steps only: five flows, one per kind of order.
     title: 'New case flow',
-    description: 'The simplest way for a clinic to create lab work, from Add new Case or a scanner draft to Sent: lab first, a step timeline with one question at a time, the Teeth Chart against every service, smart defaults with their source, and Send with a 10-second Undo.',
-    detail: 'Clinic · 3 scripts + 11 checks',
+    description: 'The simplest way for a clinic to create lab work, in Guided steps: lab first, each service on one card with the Teeth Chart beside its questions and its own Delivery date, then Scan Source and Review. Five flows: a crown, whitening trays or a night guard, a full denture, aligners and a multi-service order.',
+    detail: 'Clinic · 5 flows',
     icon: <FilePlus2 className="w-5 h-5 text-[#2F62D6]" />,
     badge: 'Walkthrough',
     accent: '#2F62D6',
@@ -41,7 +42,9 @@ export const FLOWS: FlowEntry[] = [
     path: '/flows/new-case',
     date: '22 Oct 2026',
     month: '2026-10',
-    simulate: { label: 'Open Lab Work', path: '/flows/new-case/cases' },
+    // An earlier session may have left Conversation or One page, or another user (Jess, Dr Ellery), in the demo
+    // store: Lab Work opens in Guided as Dr Khan, as every walkthrough flow does.
+    simulate: { label: 'Open Lab Work', path: '/flows/new-case/cases', before: () => { setUx('guided'); setUserId('khan'); } },
   },
   {
     // Clinic manual creation now ends in print & ship, not a direct hand-off.
@@ -190,6 +193,7 @@ export function FlowCard({ flow, onOpen }: { flow: FlowEntry; onOpen: () => void
               onClick={e => {
                 e.stopPropagation();
                 if (!user) login(DEMO_ACCOUNT_EMAIL, 'demo');
+                flow.simulate!.before?.();
                 navigate(flow.simulate!.path);
               }}
               className="relative mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white"

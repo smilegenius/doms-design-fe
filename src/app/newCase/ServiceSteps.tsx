@@ -8,10 +8,11 @@
 
 import { useContext, useEffect, useId, useMemo, useState, forwardRef, KeyboardEvent, ReactNode } from 'react';
 import {
-  Anchor, ArrowRight, Bolt, Camera, Check, ChevronDown, Crown, Droplet, Gem, Layers, Link, Link2, Moon, MoreHorizontal, PackagePlus,
-  Plus, Shapes, Shield, Smile, SmilePlus, Sparkles, Square, Wrench, History, Trash2, X, type LucideIcon,
+  AlignHorizontalSpaceAround, Anchor, ArrowRight, Bolt, Camera, Check, ChevronDown, Crown, Droplet, Gem, Layers, Link, Link2, Moon, MoreHorizontal, PackagePlus,
+  Plus, Shapes, Shield, Smile, SmilePlus, Sparkles, Square, Wrench, History, Trash2, X, Zap, type LucideIcon,
 } from 'lucide-react';
 import { CaseContext, useCase } from './CaseContext';
+import { ControllerContext } from './controller';
 import { ChartWidthContext, ColumnWidthContext, LiveTeethContext, useRoom } from './room';
 import {
   ABUTMENTS, ACRYLIC_OPTIONS, BRIDGE_ERRORS, MATERIAL_GROUP, MOULD_OPTIONS, OPTIONS, PARTIAL_DESIGNS, PARTIAL_STAGES, POSTDAM_OPTIONS,
@@ -21,7 +22,8 @@ import {
   teethText, toothText, unitsOf, usualsFor, palmerOf, patientAge, slotStepId, NOTATIONS, Notation,
   DENTURE_STAGES, DENTURE_TREATMENTS, DentureStageId, DentureTreatment, StagePlan, dentureStageReady, dentureTreatment,
   isFollowUp, seedDenturePlan, stageName, stageOption, stagePlan, stagesOutOfOrder, stagesShort, stagesSummary,
-  suggestedStageDates, treatmentName, CaseDraft, receivedFor, serviceDate,
+  suggestedStageDates, treatmentName, CaseDraft, receivedFor, serviceDate, aProduct, fastTrackEligible,
+  AlignerGroupId, AlignerKey, alignerGroup, alignerReadback, isAlignerGroup, nextStageExtra, repeatExtra,
 } from './rules';
 import { IMPLANT_SYSTEMS, LABS, ProductId } from './data';
 import { getRow, setNotation } from './store';
@@ -38,7 +40,7 @@ import {
 
 export const PRODUCT_ICON: Record<ProductId, typeof Crown> = {
   crown: Crown, bridge: Link2, implant: Anchor, veneer: Layers, inlay: Square, nightguard: Moon, denture: Smile,
-  partial: SmilePlus, reline: Wrench, retainer: Shield, whitening: Sparkles, other: PackagePlus,
+  partial: SmilePlus, reline: Wrench, retainer: Shield, aligner: AlignHorizontalSpaceAround, whitening: Sparkles, other: PackagePlus,
 };
 
 /** Where the arrow lands once this answer is in: the service's next open item, else the next gap, else Review. */
@@ -79,7 +81,7 @@ export const ServicesStep = forwardRef<HTMLHeadingElement>(function ServicesStep
   if (rep && labMakes(lab, rep.product) && optionAvail(lab, rep.product, rep.option, ctx.funding).ok) {
     chips.push({
       label: `Repeat: ${rep.label}`, kind: 'Repeat', product: rep.product, title: rep.label,
-      onPick: () => addService(rep.product, { arch: rep.arch, archSrc: 'Last time', type: rep.option, typeSrc: 'Last time' }),
+      onPick: () => addService(rep.product, repeatExtra(rep)),
     });
   }
   const ns = patient.nextStage;
@@ -88,7 +90,7 @@ export const ServicesStep = forwardRef<HTMLHeadingElement>(function ServicesStep
     chips.push({
       label: `Next stage: ${optionName('denture', ns.stage)} · ${ns.arch} full denture (${ns.note})`,
       kind: 'Next stage', product: 'denture', title: `${optionName('denture', ns.stage)} · ${ns.arch} full denture`, sub: `${ns.note} · continues ${ns.caseId}`,
-      onPick: () => addService('denture', { arch: ns.arch, archSrc: 'Next stage', stageSrc: 'Next stage' }),
+      onPick: () => addService('denture', nextStageExtra(ns)),
     });
   }
 
@@ -199,7 +201,8 @@ export function ServiceTile({ product, nhs, onPick }: { product: ProductId; nhs:
     : (product === 'denture' ? DENTURE_STAGES : OPTIONS[product]).filter(o => optionAvail(lab, product, o.id, ctx.funding).ok);
   const days = offered.map(o => lab.prices[`${product}:${o.id}`]![2]);
   const lo = Math.min(...days), hi = Math.max(...days);
-  const count = offered.length ? plural(offered.length, OPTION_NOUN[product] ?? 'option') : null;
+  // Aligners come one way: the tile says what's picked instead of "1 option".
+  const count = !offered.length ? null : product === 'aligner' ? 'Upper, lower or both' : plural(offered.length, OPTION_NOUN[product] ?? 'option');
   // A full denture's days are each stage's, not the whole denture's.
   const span = offered.length ? (lo === hi ? plural(lo, 'day') : `${lo}–${hi} days`) + (product === 'denture' ? ' a stage' : '') : null;
   // Said instead of the count: Something Else is described, not picked; nothing on offer for an NHS patient.
@@ -292,6 +295,10 @@ export function questionFor(slot: Slot, item: ServiceItem, n: Notation, labName:
     case 'retention': return 'Screw- or cement-retained?';
     case 'acrylic': return 'Which acrylic?';
     case 'mould': return 'Tooth mould';
+    case 'alignerPlan': return 'How should the aligners be set up?';
+    case 'alignerFindings': return 'What should the aligners correct?';
+    case 'alignerPerio': return 'Biotype and Miller’s class';
+    case 'alignerOcclusion': return 'Angle’s, skeletal and dental class';
     case 'deliveryDate': return 'When do you need it back?';
   }
 }
@@ -306,7 +313,7 @@ export const SlotStep = forwardRef<HTMLHeadingElement, { item: ServiceItem; slot
   if (!slot) return null;
   const anyGap = slotGaps(slots).length > 0;
   const label = PRODUCTS[item.product].label;
-  const kicker = anyGap ? `Adding ${/^[AEIOU]/.test(label) ? 'an' : 'a'} ${label}` : itemTitle(item, n);
+  const kicker = anyGap ? `Adding ${aProduct(item.product, label)}` : itemTitle(item, n);
   const isChart = CHART_SLOTS.includes(slot.id);
   const panel = slots.slice(0, idx).filter(s => PANEL_SLOTS.includes(s.id));
   // The shade editor shows the stump-shade note itself, and the arch editor the open-case note.
@@ -431,7 +438,7 @@ function OpenCaseSummary({ caseId }: { caseId: string }) {
 /** Has the user given this service any answer yet? An empty one goes without asking. */
 const hasWork = (i: ServiceItem) =>
   i.teeth.length > 0 || !!i.arch || !!i.material || !!i.shade || !!i.type || !!i.stage || !!i.stages?.length || !!i.base || !!i.work || !!i.desc || i.photos.length > 0
-  || !!i.requestedDelivery;
+  || !!i.requestedDelivery || Object.keys(i.aligner ?? {}).length > 0;
 
 /** "Remove Crown" on the step (link) or an × in the left nav (icon), with a quick confirm. */
 export function RemoveService({ item, variant = 'link' }: { item: ServiceItem; variant?: 'link' | 'icon' }) {
@@ -488,6 +495,8 @@ export function SlotEditor({ item, slot, compact }: { item: ServiceItem; slot: S
     case 'wings': return <WingsEditor item={item} />;
     case 'stages': return <StagesEditor item={item} />;
     case 'deliveryDate': return <DeliveryDateEditor item={item} />;
+    case 'alignerPlan': case 'alignerFindings': case 'alignerPerio': case 'alignerOcclusion':
+      return <AlignerEditor item={item} group={slot.id} />;
     default: return <ChipSlot item={item} slot={slot} compact={compact} />;
   }
 }
@@ -934,8 +943,8 @@ function WingsEditor({ item }: { item: ServiceItem }) {
 function ArchEditor({ item }: { item: ServiceItem }) {
   const { ctx, updateItem, notes, dismissNote, doneAndAdvance, user } = useCase();
   const wide = useRoom() === 'wide';
-  // A full denture is picked as Upper, Lower or Both (the portal's rule), like a retainer or whitening trays.
-  const both = item.product === 'retainer' || item.product === 'whitening' || item.product === 'denture';
+  // A full denture is picked as Upper, Lower or Both (the portal's rule), like a retainer, aligners or whitening trays.
+  const both = item.product === 'retainer' || item.product === 'aligner' || item.product === 'whitening' || item.product === 'denture';
   // A full denture for the arch of the patient's next stage picks up that plan (and drops it for another arch).
   const pick = (jaw: 'upper' | 'lower' | 'both') => updateItem(item.id, i => seedDenturePlan({
     ...i, arch: jaw, archSrc: 'You',
@@ -1418,17 +1427,96 @@ function DescEditor({ item }: { item: ServiceItem }) {
   );
 }
 
+// ─── Aligners ────────────────────────────────────────────────────────────────
+
+/**
+ * One item of the aligner prescription (the portal's Aligner specifics): its fields as compact dropdowns with
+ * their label above, two to a row, one in a narrow column. A pick is the answer as it's made, so the step stays
+ * put while the rest of the item is filled in; the arrow moves on.
+ */
+function AlignerEditor({ item, group }: { item: ServiceItem; group: AlignerGroupId }) {
+  const { readOnly, updateItem, answerInPlace, doneAndAdvance } = useCase();
+  const column = useContext(ColumnWidthContext);
+  const id = useId();
+  const next = useNextName(item.id, group);
+  const g = alignerGroup(group);
+  const a = item.aligner ?? {};
+  if (readOnly) return <p className="text-sm font-medium text-[#030213]">{alignerReadback(item, group) || 'Nothing picked'}</p>;
+  // Picking the empty choice clears that field.
+  const set = (key: AlignerKey, v: string) => answerInPlace(() => updateItem(item.id, i => {
+    const aligner = { ...i.aligner };
+    if (v) aligner[key] = v; else delete aligner[key];
+    return { ...i, aligner, reopen: i.reopen?.filter(r => r !== group) };
+  }));
+  const missing = g.fields.find(f => f.required && !a[f.key]);
+  return (
+    <div className="space-y-3">
+      <div className={`grid gap-x-3 gap-y-2.5 ${column !== undefined && column < 400 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+        {g.fields.map(f => {
+          const v = a[f.key] ?? '';
+          const gap = f.required && !v;
+          return (
+            <div key={f.key} className="min-w-0">
+              <label htmlFor={`${id}-${f.key}`} className="block mb-1 text-[11px] font-semibold text-[#5A5A6A]">
+                {f.label}{f.required && <span className="font-normal"> · needed</span>}
+              </label>
+              <div className="relative">
+                <select
+                  id={`${id}-${f.key}`}
+                  value={v}
+                  onChange={e => set(f.key, e.target.value)}
+                  aria-required={f.required || undefined}
+                  className={`w-full appearance-none pl-2.5 pr-7 py-1.5 text-xs rounded-lg border bg-white outline-none focus:border-[#4D8EF7] cursor-pointer ${v ? 'text-[#030213]' : 'text-[#5A5A6A]'} ${gap ? 'border-[#FCD34D]' : 'border-[#E0E0E6]'} ${FOCUS}`}
+                >
+                  <option value="">{f.placeholder ?? 'Select'}</option>
+                  {f.options.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <ChevronDown aria-hidden className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#5A5A6A]" strokeWidth={1.75} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <StepArrow
+        disabled={!!missing}
+        run={() => doneAndAdvance(() => {})}
+        label={missing ? `Pick the ${missing.label.toLowerCase()}` : 'Done'}
+        next={next}
+        hint={missing ? `Pick the ${missing.label.toLowerCase()} first` : undefined}
+      />
+    </div>
+  );
+}
+
 // ─── Delivery date ───────────────────────────────────────────────────────────
 
 /**
  * When the service is needed back (the product's "Requested delivery date"): the lab's earliest day
- * unless the clinic picks a later one. A day sooner than the lab can make it stays a gap until changed.
+ * unless the clinic picks a later one. A day sooner than the lab can make it, or one the lab doesn't
+ * work (a weekend, a bank holiday), stays a gap until changed. Fast-Track sits beside it where it applies.
  */
 function DeliveryDateEditor({ item }: { item: ServiceItem }) {
-  const { ctx, draft, lab, user, readOnly, updateItem, answerInPlace } = useCase();
+  const { ctx, draft, lab, user, readOnly, update, updateItem, answerInPlace } = useCase();
+  const view = useContext(ControllerContext)?.view;
   const id = useId();
   const sd = serviceDate(item, ctx, receivedFor(draft, ctx), draft.fastTrack);
-  if (readOnly) return <p className="text-sm font-medium text-[#030213]">{sd.backBy ? fmtDay(sd.backBy) : '—'}</p>;
+  // The lab's Fast-Track for this service (it's the case's: every service it suits goes faster).
+  const ft = lab.fastTrack && fastTrackEligible(item, ctx) ? lab.fastTrack : undefined;
+  const fast = !!ft && draft.fastTrack;
+  const bad = sd.tooSoon || sd.offDay;
+  if (readOnly) {
+    // A sent case went with the day asked for. One waiting for approval can go too soon (the lab's cut-off
+    // passes): it says so, never the lab's earliest as if that were fine.
+    if (view !== 'sent' && bad && sd.requested) {
+      return (
+        <p className="text-sm font-medium text-[#8A4B08]">
+          {fmtDay(sd.requested)} · {sd.offDay ? 'not a lab working day' : `now too soon, the lab’s earliest is ${sd.earliest ? fmtDay(sd.earliest) : '—'}`}
+        </p>
+      );
+    }
+    const day = view === 'sent' && sd.requested ? sd.requested : sd.backBy;
+    return <p className="text-sm font-medium text-[#030213]">{day ? fmtDay(day) : '—'}{fast ? ' · Fast-Track' : ''}</p>;
+  }
   if (!sd.earliest) return <p className="text-xs text-[#5A5A6A]">The day shows once {lab.name} can make this.</p>;
   const earliest = fmtDay(sd.earliest);
   const set = (iso?: string) => updateItem(item.id, i => ({ ...i, requestedDelivery: iso || undefined, deliverySrc: iso ? 'You' : undefined }));
@@ -1440,24 +1528,34 @@ function DeliveryDateEditor({ item }: { item: ServiceItem }) {
         min={toISO(sd.earliest)}
         aria-label={`Delivery date for ${itemTitle(item, user.notation)}`}
         aria-describedby={`${id}-hint`}
-        aria-invalid={sd.tooSoon || undefined}
+        aria-invalid={bad || undefined}
         // Typed digit by digit, so the page stays put; clearing it goes back to the lab's earliest.
         onChange={e => { const v = e.target.value; answerInPlace(() => set(v)); }}
         // A click anywhere on the field opens the calendar, not only its icon.
         onClick={e => { try { (e.currentTarget as HTMLInputElement & { showPicker?: () => void }).showPicker?.(); } catch { /* not allowed here: the icon still opens it */ } }}
-        className={`w-[140px] px-2.5 py-1.5 text-xs rounded-lg border bg-white outline-none focus:border-[#4D8EF7] text-[#030213] ${sd.tooSoon ? 'border-[#FCD34D]' : 'border-[#E0E0E6]'}`}
+        className={`w-[140px] px-2.5 py-1.5 text-xs rounded-lg border bg-white outline-none focus:border-[#4D8EF7] text-[#030213] ${bad ? 'border-[#FCD34D]' : 'border-[#E0E0E6]'}`}
       />
-      <p id={`${id}-hint`} className={`text-xs ${sd.tooSoon ? 'text-[#8A4B08]' : 'text-[#5A5A6A]'}`}>
-        Earliest the lab can deliver: {earliest}
+      <p id={`${id}-hint`} className={`text-xs ${bad ? 'text-[#8A4B08]' : 'text-[#5A5A6A]'}`}>
+        {sd.offDay && sd.requested && <>{fmtDay(sd.requested)} isn’t a lab working day. </>}
+        Earliest the lab can deliver{fast ? ' with Fast-Track' : ''}: {earliest}
         {item.requestedDelivery && <> · <LinkButton onClick={() => set(undefined)}>Use {earliest}</LinkButton></>}
       </p>
+      {ft && (
+        <label className="flex items-center gap-2 text-xs text-[#1F1F2E] cursor-pointer w-fit">
+          {/* Toggling it moves the earliest day, never the step. */}
+          <input type="checkbox" checked={draft.fastTrack} onChange={e => { const on = e.target.checked; answerInPlace(() => update(d => ({ ...d, fastTrack: on }))); }} className="w-3.5 h-3.5 accent-[#3F6FE8]" />
+          <Zap className="w-3.5 h-3.5 text-[#B45309]" aria-hidden />
+          Fast-Track · {plural(ft.daysFaster, 'working day')} faster
+        </label>
+      )}
     </div>
   );
 }
 
 /**
  * Used by the Review cards. `short`: a one-line form where `value` is long
- * (a denture's stages: value "Try In · Thu 12 Nov, … done elsewhere", short "Try In 12 Nov, …").
+ * (a denture's stages: value "Try In · Thu 12 Nov, … done elsewhere", short "Try In 12 Nov, …"; an aligner
+ * item: every answer, short the first three and "+N more").
  * The Delivery date isn't one: each card reads its own Back by.
  */
 export function itemDetails(item: ServiceItem, ctx: ReturnType<typeof useCase>['ctx'], d: CaseDraft): { id: SlotId; label: string; value: string; short?: string; src?: string }[] {
@@ -1467,8 +1565,8 @@ export function itemDetails(item: ServiceItem, ctx: ReturnType<typeof useCase>['
       id: s.id,
       label: s.label,
       value: s.id === 'teeth' && item.product === 'bridge' ? bridgeReadback(item, ctx.user.notation)
-        : s.id === 'stages' ? stagesSummary(item) : s.value ?? '',
-      short: s.id === 'stages' ? s.value : undefined,
+        : s.id === 'stages' ? stagesSummary(item) : isAlignerGroup(s.id) ? alignerReadback(item, s.id) : s.value ?? '',
+      short: s.id === 'stages' || isAlignerGroup(s.id) ? s.value : undefined,
       src: s.src,
     }));
 }

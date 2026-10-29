@@ -18,7 +18,8 @@ export function caseAmount(_api: CaseApi): string {
 /** "Back by Mon 2 Nov", "Back 5 working days after the scan", … */
 export function backLine(api: CaseApi): string {
   const { draft, dates } = api;
-  if (dates.route === 'follow' && dates.ta != null) return `Back ${plural(dates.ta, 'working day')} after the scan`;
+  // A day the clinic asked for is fixed: only a lab's lead time counts from the scan.
+  if (dates.route === 'follow' && dates.ta != null && !dates.fixed) return `Back ${plural(dates.ta, 'working day')} after the scan`;
   if (dates.backBy) return `Back by ${fmtDay(dates.backBy)}`;
   return draft.items.length ? 'Back-by date once every item is chosen' : 'Add a service to see the date';
 }

@@ -53,7 +53,7 @@ const SEX: Record<Patient['sex'], string> = { F: 'Female', M: 'Male', X: 'Not st
 const PORTAL_SERVICE: Record<ProductId, string> = {
   crown: 'Crown', bridge: 'Bridge', implant: 'Implant Crown', veneer: 'Veneers', inlay: 'Inlay or Onlay',
   nightguard: 'Night Guard', denture: 'Full Denture', partial: 'Partial Denture', reline: 'Reline or Repair',
-  retainer: 'Retainer', whitening: 'Whitening Trays', other: 'Something Else',
+  retainer: 'Retainer', aligner: 'Clear Aligners', whitening: 'Whitening Trays', other: 'Something Else',
 };
 /** A partial's one stage under the portal's stage names where they match (Framework Try-In keeps its own). */
 const PARTIAL_TO_PORTAL: Record<string, string> = { tray: 'Special Tray', blocks: 'Bite Registration', tryin: 'Try In', finish: 'Finish' };
@@ -127,6 +127,11 @@ function portalItem(item: ServiceItem, k: number, o: {
   if (item.product === 'partial' && item.stage) {
     const st = PARTIAL_TO_PORTAL[item.stage] ?? PARTIAL_STAGES.find(s => s.id === item.stage)?.name ?? item.stage;
     return { ...base, deliveryDate: null, stages: [st], stageDates: { [st]: caseDate(o.backBy) } };
+  }
+  // Clear Aligners: Phasing drives the portal's Phase 1 / Phase 2 tabs (left unset, the portal's own default).
+  if (item.product === 'aligner') {
+    const ph = item.aligner?.phasing;
+    return { ...base, phasing: ph === 'Yes' ? true : ph === 'No' ? false : undefined };
   }
   return base;
 }

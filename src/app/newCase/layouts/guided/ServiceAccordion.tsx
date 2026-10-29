@@ -14,7 +14,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, MessageSquareText } from 'lucide-react';
 import { useCase } from '../../CaseContext';
 import { useController } from '../../controller';
-import { PRODUCTS, ServiceItem, Slot, SlotId, itemTitle, slotGaps, slotStepId, slotsFor } from '../../rules';
+import { PRODUCTS, ServiceItem, Slot, SlotId, aProduct, itemTitle, slotGaps, slotStepId, slotsFor } from '../../rules';
 import { NoteView, PRODUCT_ICON, RemoveService, SlotEditor, questionFor } from '../../ServiceSteps';
 import { ServiceNote } from '../../Instructions';
 import { SourceTag, StateIcon, StepHeading, FOCUS } from '../../ui';
@@ -28,7 +28,12 @@ export default function ServiceAccordion({ item, slotId }: { item: ServiceItem; 
   const slots = slotsFor(item, ctx, draft);
   const label = PRODUCTS[item.product].label;
   const open = slots.some(s => s.id === slotId) ? slotId : slots[0]?.id;
-  const kicker = slotGaps(slots).length ? `Adding ${/^[AEIOU]/.test(label) ? 'an' : 'a'} ${label}` : label;
+  const gaps = slotGaps(slots).length;
+  // "Adding a Crown", "Adding Aligners" (a plural name takes no article).
+  const kicker = gaps ? `Adding ${aProduct(item.product, label)}` : label;
+  // Only what's needed counts towards "N of M"; items left optional (an aligner's Corrections…) are said apart.
+  const needed = slots.filter(s => s.required);
+  const optional = slots.filter(s => !s.required && !s.answered).length;
   // While the step is on the chart side (Teeth, Arch) nothing in the second column is being answered, so the
   // service's Case Instructions show there by default; otherwise closed (its header reads the note back).
   // A click overrides it until the step moves on.
@@ -131,7 +136,7 @@ export default function ServiceAccordion({ item, slotId }: { item: ServiceItem; 
       <StepHeading icon={PRODUCT_ICON[item.product]} kicker={kicker} title={itemTitle(item, n)} />
       <div className="flex items-center gap-3 mb-3">
         <p className="flex-1 min-w-0 text-xs text-[#5A5A6A]">
-          {slots.filter(s => s.answered).length} of {slots.length} set{slotGaps(slots).length ? ` · ${slotGaps(slots).length} to go` : ' · all set'}
+          {gaps ? `${needed.filter(s => s.answered).length} of ${needed.length} needed set · ${gaps} to go` : 'All needed set'}{optional ? ` · ${optional} optional` : ''}
         </p>
         <RemoveService item={item} />
       </div>

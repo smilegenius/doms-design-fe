@@ -5,7 +5,7 @@
 
 export type ProductId =
   | 'crown' | 'bridge' | 'implant' | 'veneer' | 'inlay' | 'nightguard' | 'denture'
-  | 'partial' | 'reline' | 'retainer' | 'whitening' | 'other';
+  | 'partial' | 'reline' | 'retainer' | 'aligner' | 'whitening' | 'other';
 export type Funding = 'private' | 'nhs';
 export type Arch = 'upper' | 'lower' | 'both';
 export type UserId = 'khan' | 'ellery' | 'jess';
@@ -54,6 +54,8 @@ export const LABS: Lab[] = [
       'inlay:emax': [110, null, 7], 'inlay:composite': [75, 60, 6],
       'nightguard:hard': [55, 55, 5], 'nightguard:soft': [40, 40, 5], 'nightguard:dual': [65, null, 5],
       'retainer:essix': [40, 40, 4], 'retainer:hawley': [60, 60, 5],
+      // Clear aligners are private work, and the set is planned before it's made: a longer lead than a retainer.
+      'aligner:clear': [450, null, 10],
       'whitening:trays': [25, null, 4],
       'other:tbc': [null, null, 10],
     },
@@ -73,6 +75,7 @@ export const LABS: Lab[] = [
       'bridge:mono': [99, null, 6], 'bridge:emax': [118, null, 7], 'bridge:layered': [135, null, 9],
       'veneer:emax': [120, null, 7], 'veneer:feldspathic': [165, null, 9],
       'implant:mono': [240, null, 12], 'implant:layered': [285, null, 12], 'implant:cement': [310, null, 14],
+      'aligner:clear': [480, null, 12],
     },
   },
   {

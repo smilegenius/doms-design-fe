@@ -17,7 +17,7 @@ import { PrintLabelsModal } from '../components/DispatchLabel';
 import { offlineLabStatusFor } from '../components/OfflineLabNotice';
 import FlowFrame from './FlowFrame';
 import { CLINIC, labById, userById } from './data';
-import { fmtDay, fromISO, demoNow, receivedDate, addWorkingDays, toISO } from './dates';
+import { fmtDay, fromISO, demoNow, receivedDate, toISO } from './dates';
 import { caseDates, gapCount, plural } from './rules';
 import { CaseRow, dismissEvent, getPatient, nextCaseId, saveRow, saveRows, useFlowStore } from './store';
 import { buildCtx, sentCtx } from './derive';
@@ -291,13 +291,15 @@ function AttachScan({ row, onClose }: { row: CaseRow; onClose: () => void }) {
   const at = new Date(demoNow()); at.setHours(h, m, 0, 0);
   const received = receivedDate('digital', at, lab.cutoffMin);
   const ctx = sentCtx(row, user)?.ctx;
-  const ta = ctx ? caseDates(draft, ctx).ta : undefined;
-  const backBy = ta != null ? addWorkingDays(received, ta) : undefined;
+  const attached: typeof draft = { ...draft, scan, records: { ...draft.records, route: undefined } };
+  // The dates again, counted from the scan's arrival: a lab's lead time from the day it's received, a day the
+  // clinic asked for kept as it is (never turned into a count of working days and re-added).
+  const backBy = ctx ? caseDates(attached, { ...ctx, now: at }).backBy : undefined;
   const attachIt = () => {
     saveRow({
       ...row, flag: undefined, scanArrived: undefined, scanAt: at.getTime(), updatedAt: Date.now(),
       delivery: backBy ? toISO(backBy) : row.delivery,
-      draft: { ...draft, scan, records: { ...draft.records, route: undefined } },
+      draft: attached,
     });
     toast.success(`Scan attached. ${row.id} is with ${lab.name}${backBy ? `, back by ${fmtDay(backBy)}` : ''}.`);
     onClose();
@@ -338,7 +340,12 @@ function AttachScan({ row, onClose }: { row: CaseRow; onClose: () => void }) {
             ))}
           </div>
           {backBy && (
-            <p className="text-sm text-[#1F1F2E] mt-4">{arrived.time} is before {lab.name.split(' ')[0]}’s cut-off, so it’s received today. Back by <span className="font-semibold">{fmtDay(backBy)}</span>.</p>
+            <p className="text-sm text-[#1F1F2E] mt-4">
+              {toISO(received) === toISO(at)
+                ? `${arrived.time} is before ${lab.name.split(' ')[0]}’s cut-off, so it’s received today.`
+                : `${arrived.time} is after ${lab.name.split(' ')[0]}’s cut-off, so it’s received ${fmtDay(received)}.`}
+              {' '}Back by <span className="font-semibold">{fmtDay(backBy)}</span>.
+            </p>
           )}
           {missing.length > 0 && <div className="mt-3"><Notice tone="block">The scan has no {missing.join(' or ')}, which this case needs.</Notice></div>}
           <div className="mt-6 flex justify-end gap-2">

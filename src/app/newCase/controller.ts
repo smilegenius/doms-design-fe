@@ -12,7 +12,7 @@ export type CaseView = 'edit' | 'approve' | 'waiting' | 'sent';
 export type Ux = 'guided' | 'chat' | 'canvas';
 
 export const UX_OPTIONS: { id: Ux; letter: string; name: string; short: string; blurb: string }[] = [
-  { id: 'guided', letter: 'A', name: 'Guided steps', short: 'Guided', blurb: 'A step timeline on the left, one question in the middle, the case summary on the right.' },
+  { id: 'guided', letter: 'A', name: 'Guided steps', short: 'Guided', blurb: 'A step timeline on the left; each service on one card, its chart beside its questions; the footer finishes the case.' },
   { id: 'chat', letter: 'B', name: 'Conversation', short: 'Conversation', blurb: 'One column, one question at a time. Answers stack up as a short thread you can tap to change.' },
   { id: 'canvas', letter: 'C', name: 'Whole case on one page', short: 'One page', blurb: 'A step navigator on the left, the whole case in the middle and the Teeth Chart on the right. Tap teeth, pick what to make, fill the few gaps inline.' },
 ];

@@ -1,156 +1,133 @@
+import { Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowRight, ScanLine, UserPlus, Layers, Anchor, Smile, RotateCcw, ShieldAlert, Stethoscope, UserCheck,
-  Inbox, FilePlus2, Repeat, Keyboard, Play, Printer,
+  ArrowLeft, ArrowRight, RotateCcw, FilePlus2, Play, Crown, Moon, Smile, Stethoscope, Boxes, List,
 } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
-import { USERS, UserId, userById } from '../newCase/data';
+import { LabId, PATIENTS, ProductId, USERS, UserId, userById } from '../newCase/data';
 import { resetDemo, setUserId, setUx, useFlowStore } from '../newCase/store';
-import { UX_OPTIONS, Ux } from '../newCase/controller';
+import { UX_OPTIONS } from '../newCase/controller';
 
 // ─── New Case Flow · Oct-2026 — walkthrough ──────────────────────────────────
-// The simplest way for a clinic to create lab work, from "Add new Case" or a
-// scanner Draft to "Sent to lab": lab first, one question at a time on a step
-// timeline, the existing Teeth Chart per service, and Send as the prescriber's
-// signature with a 10-second Undo. It lives in the Flows section only, with its
-// own Lab Work list and demo data, so the portal's Cases screens are unchanged.
-// A finished case (View Case, or its row on Lab Work) opens in the portal's own
-// Case Details. Each step signs in as the right person and opens the exact screen.
+// The simplest way for a clinic to create lab work, in Guided steps: lab first,
+// then each service on one card (the Teeth Chart or arch picker beside its
+// questions, its own Delivery date), Scan Source and Review. Five flows, one per
+// kind of order, each opening a new case for a patient picked for it on the
+// service's card, with the lab already picked (NewCaseFlowPage presetDraft). It lives
+// in the Flows section only, with its own Lab Work list and demo data, so the
+// portal's Cases screens are unchanged.
 
-interface Step {
+/** Where a flow's Open lands: the lab already picked and, with a service (or a Services chip), that service's card. */
+interface Start {
+  lab: LabId;
+  service?: ProductId;
+  /** The Services step's chip instead of a tile: her Repeat, or his Next stage. */
+  chip?: 'repeat' | 'next';
+}
+interface Script {
+  /** "One tooth", "Night guard"… — only shown when a flow has more than one. */
+  label: string;
+  taps: string[];
+  /** Opens somewhere other than the flow's own start (another service, a chip): every row then gets its own Open. */
+  start?: Start;
+}
+interface Flow {
   title: string;
   icon: React.ReactNode;
   as: UserId;
+  /** The demo patient the new case opens for (data.ts PATIENTS). */
+  patient: string;
+  start: Start;
   description: string;
+  scripts: Script[];
   shows: string[];
-  tryIt?: string[];
-  path: string;
-  /** Starts on the blank create page, which asks for the patient on the page. */
-  launch?: boolean;
+  /** A second patient that shows a check this flow mentions (e.g. the under-18 block). */
+  alt?: { label: string; patient: string; start: Start };
 }
-interface Stage { label: string; blurb: string; steps: Step[] }
 
-const STAGES: Stage[] = [
+/** A new case for the patient, opened on the service's card with the lab (and service) already chosen. */
+const newCaseFor = (patientId: string, start: Start) => {
+  const q = new URLSearchParams({ patient: patientId, lab: start.lab });
+  if (start.chip) q.set('start', start.chip);
+  else if (start.service) q.set('service', start.service);
+  return `/flows/new-case/case/new?${q}`;
+};
+
+const FLOWS: Flow[] = [
   {
-    label: 'The three main scripts',
-    blurb: 'T1 to T3 from the requirements. Patient, then the lab (the clinic’s usual lab is listed first), then each service with its own Teeth Chart, then records, prescriber and delivery. Answering a question moves on to the next gap by itself.',
-    steps: [
-      {
-        title: 'T1 · Amelia’s Medit draft → crown → sent (7 taps)',
-        icon: <ScanLine className="w-4 h-4" />, as: 'khan',
-        description: 'Opens on Select Lab, with Northfield (the clinic’s usual lab) first. Northfield → Crown → 36 → Done → A2 → Create Case. Material defaults to Monolithic zirconia (Your usual, 7 days). Sent to Northfield, back by Mon 2 Nov, Undo for 10 seconds.',
-        shows: ['Opens on the first gap', 'Your usual material', 'Back by Mon 2 Nov', 'Undo (10)'],
-        tryIt: ['Crown → tap 36 → Done → A2 → Create Case'],
-        path: '/flows/new-case/case/CAS-2026-142',
-      },
-      {
-        title: 'T2 · New patient, bridge 14–16, posted (14 taps)',
-        icon: <UserPlus className="w-4 h-4" />, as: 'khan',
-        description: 'Add new Case → type “Oliver Bennett” → Add new patient (or Enter Patient Details Manually) → DOB 14051979 → Male → Create → Northfield → Bridge → 14, 16 → Done → Layered (on the shade step) → A3 → Impression by Post → Ready for Dispatch. 15 is a pontic; the bridge is back by Fri 6 Nov. The case isn’t with Northfield yet: Print label → Mark as dispatched (Royal Mail, Bag, optional tracking) → the case is Submitted, its back-by counted from the post day. View Case opens the portal’s Case Details, the screen every clinic case opens in: its Shipping tab has the row (Clinic → Lab). Mark as dispatched works from there too, while the case is still Ready for Dispatch.',
-        shows: ['New patient on the page', 'Bridge pontics', 'Back-by date per service', 'Portal A4 label', 'Mark as dispatched', 'Portal Case Details', 'Shipping row'],
-        path: '/flows/new-case/cases', launch: true,
-      },
-      {
-        title: 'T3 · Priya: night guard + veneer in one draft (14 taps)',
-        icon: <Layers className="w-4 h-4" />, as: 'khan',
-        description: 'Add new Case → “shah” → Priya (opens her iTero draft) → Northfield → Night Guard (Hard pre-selected) → Select Arch upper → Add Another Service → Veneer → 21 → arrow → Match from Photos → Add Photos → phone photos → Done → Send. Back by Tue 3 Nov, split suggestion for the night guard, stump-shade note, a chart per service in the summary.',
-        shows: ['Opens the scan draft', 'Two services, two charts', 'Split suggestion', 'Phone photo hand-off'],
-        path: '/flows/new-case/cases', launch: true,
-      },
+    // Daniel has no history, missing teeth or implants: no remake or implant check on the way.
+    title: 'Crown · one tooth or several',
+    icon: <Crown className="w-4 h-4" />, as: 'khan', patient: 'P-2025-071',
+    start: { lab: 'northfield', service: 'crown' },
+    description: 'Opens on the Crown card, with Daniel and Northfield (the clinic’s usual lab) already chosen; ← goes back to change them. The Teeth Chart is in its first column, with Material, Shade and Delivery date beside it. Material starts on your usual, the Delivery date on the lab’s earliest day (pick a later one if you like), and Scan Source on Impressions (By Post). Several teeth are a crown each; teeth side by side add Separate or splinted (Separate unless changed).',
+    scripts: [
+      { label: 'One tooth', taps: ['tap 16 and the → arrow', 'Shade A2', 'Review', 'Ready for Dispatch'] },
+      { label: 'Three teeth', taps: ['tap 14, 15 and 16 and the → arrow', 'Shade A2', 'Review: Separate (unless changed)', 'Ready for Dispatch'] },
     ],
+    shows: ['Opens on the Crown card', 'Teeth Chart beside the questions', 'Your usual material', 'Separate or splinted', 'Ready for Dispatch'],
   },
   {
-    label: 'Checks the flow makes for you',
-    blurb: 'What Smile Genius already knows about the patient and the lab turns into a one-tap decision, a blocker, or an option that simply can’t be picked.',
-    steps: [
-      {
-        title: 'A1 · Grace: crown on an implant site',
-        icon: <Anchor className="w-4 h-4" />, as: 'khan',
-        description: 'Crown on 46 at Northfield: “Northfield Dental Lab doesn’t make implant crowns. Harbour Ceramics Studio does.” Change Lab → Harbour → Switch to Implant Crown: the system is pre-filled from the record, back Mon 9 Nov. Pennine is then disabled on the Lab step.',
-        shows: ['Implant on record', 'Change Lab', 'Patient record defaults'],
-        path: '/flows/new-case/case/new?patient=P-2025-027',
-      },
-      {
-        title: 'A2 · Edward: next denture stage at Pennine (NHS)',
-        icon: <Smile className="w-4 h-4" />, as: 'khan',
-        description: 'Lab defaults to Pennine (“Made the previous stage”) and only Pennine’s services show. The Next stage chip sets up the Try-In. Soft Reline is disabled: “Not available on the NHS.”',
-        shows: ['Made the previous stage', 'Next stage chip', 'NHS-disabled options'],
-        path: '/flows/new-case/case/new?patient=P-2025-009',
-      },
-      {
-        title: 'A3 · William: remake check on 46',
-        icon: <Repeat className="w-4 h-4" />, as: 'khan',
-        description: 'Crown on 46: it had a monolithic zirconia crown from Northfield delivered 3 Oct (CAS-2026-098). Yes, a Remake → What went wrong? → Shade: the shade is asked again, the material is copied (“Made the original”).',
-        shows: ['Remake decision', 'Copied values', 'Shade asked again'],
-        path: '/flows/new-case/case/new?patient=P-2025-018',
-      },
-      {
-        title: 'A4 · Ben: missing 36 and an open night guard',
-        icon: <ShieldAlert className="w-4 h-4" />, as: 'khan',
-        description: 'Crown: 36 can’t be picked (recorded missing). A night guard on the upper shows the open-case note for CAS-2026-131.',
-        shows: ['Missing teeth unpickable', 'Open case note'],
-        path: '/flows/new-case/case/new?patient=P-2025-060',
-      },
-      {
-        title: 'A5 · Hannah (16): whitening trays',
-        icon: <ShieldAlert className="w-4 h-4" />, as: 'khan',
-        description: 'Whitening Trays is blocked for an under-18 patient, and the case can’t be sent until the item is removed.',
-        shows: ['Under-18 blocker'],
-        path: '/flows/new-case/case/new?patient=P-2025-052',
-      },
-      {
-        title: 'A7 · Daniel: Medit form “36 · Crown · Zirconia”',
-        icon: <FilePlus2 className="w-4 h-4" />, as: 'khan',
-        description: 'Opens with the crown and teeth set from the scan, on the gap “Medit says ‘Zirconia’. Which one?”',
-        shows: ['Scanner Rx', 'Ambiguous value as a gap'],
-        path: '/flows/new-case/case/CAS-2026-141',
-      },
+    // Whitening is private and blocked under 18, so an adult private patient; Hannah (16) shows the block.
+    title: 'Whitening trays · Night guard',
+    icon: <Moon className="w-4 h-4" />, as: 'khan', patient: 'P-2025-044',
+    start: { lab: 'northfield', service: 'nightguard' },
+    // A night guard is one arch (ArchEditor offers Both only for retainers, aligners, whitening trays and dentures).
+    description: 'Each Open lands on its service’s card at Northfield for Priya, an adult private patient. Arch services: the card’s first column is the arch picker, Upper or Lower for a night guard and Upper, Lower or Both for whitening trays. Night Guard’s Type starts on Hard (your usual). Repeat opens her soft upper night guard from June 2025 with Upper and Soft filled in. Whitening Trays is private only and blocked for patients under 18: the age check opens Services for Hannah (16), where it shows as blocked under More.',
+    scripts: [
+      { label: 'Night guard', taps: ['Upper or Lower', 'Review', 'Ready for Dispatch'] },
+      // Every item is filled (the Delivery date starts on the lab's earliest), so the → arrow goes on to Review.
+      { label: 'Repeat', start: { lab: 'northfield', chip: 'repeat' }, taps: ['Upper and Soft are filled in from last time', 'the → arrow', 'Ready for Dispatch'] },
+      { label: 'Whitening trays', start: { lab: 'northfield', service: 'whitening' }, taps: ['Both', 'Review', 'Ready for Dispatch'] },
     ],
+    shows: ['Arch picker', 'Repeat', 'Private only', 'Delivery date', 'Ready for Dispatch'],
+    alt: { label: 'Age check · Hannah Lowe (16)', patient: 'P-2025-052', start: { lab: 'northfield' } },
   },
   {
-    label: 'Staff, approval and delivery',
-    blurb: 'A nurse can prepare a case but the prescription is always in a dentist’s name. Delivery dates come from the lab’s turnaround, its cut-off and UK working days. A posted case waits as Ready for Dispatch until it is marked as dispatched.',
-    steps: [
+    // Edward is the follow-up patient: CAS-2026-117 made his tray and bite registration at Pennine.
+    title: 'Full denture',
+    icon: <Smile className="w-4 h-4" />, as: 'khan', patient: 'P-2025-009',
+    start: { lab: 'pennine', chip: 'next' },
+    description: 'Edward’s Special Tray and Bite Registration were made at Pennine on CAS-2026-117, so both Opens land at Pennine Denture Lab (Made the previous stage). Next stage opens his upper denture with those stages done and Try In ordered; New denture opens a fresh Full Denture card. The stages use the portal’s own stage picker: tick a stage and give it its date, or mark it Done elsewhere (with an optional done-on date). A full denture has no Delivery date of its own: each stage carries its day, and the impressions always go by post.',
+    scripts: [
+      { label: 'Next stage', taps: ['Tooth shade', 'Stages: Try In is filled in; tick Finish and give it a later date', 'Post-dam', 'Ready for Dispatch'] },
+      { label: 'New denture', start: { lab: 'pennine', service: 'denture' }, taps: ['Lower', 'Stages: tick Special Tray, then Done elsewhere', 'tick Bite Registration and its date', 'Ready for Dispatch'] },
+    ],
+    shows: ['Made the previous stage', 'Next stage', 'Portal stage picker', 'Done elsewhere', 'A date per stage'],
+  },
+  {
+    // Aligners are private work (Northfield and Harbour make them): an adult private patient with nothing in the way.
+    title: 'Aligners',
+    icon: <Stethoscope className="w-4 h-4" />, as: 'khan', patient: 'P-2025-018',
+    start: { lab: 'northfield', service: 'aligner' },
+    description: 'Opens on the Aligners card at Northfield for William, private work. An arch service: the Upper, Lower or Both picker in the first column, and the portal’s aligner specifics beside it (Duration, then the dropdowns for the corrections and assessment, from the portal’s own lists), then its Delivery date.',
+    scripts: [
+      { label: 'Aligners', taps: ['Upper, Lower or Both', 'Duration (Treatment setup)', 'the other aligner dropdowns, if you like', 'the → arrow', 'Ready for Dispatch'] },
+    ],
+    shows: ['Opens on the Aligners card', 'Arch picker', 'Aligner specifics', 'Portal dropdowns', 'Delivery date'],
+  },
+  {
+    // Amelia's earlier crown is on 26, so 16 and 34–36 raise no remake check.
+    title: 'Multi-service order',
+    icon: <Boxes className="w-4 h-4" />, as: 'khan', patient: 'P-2025-031',
+    start: { lab: 'northfield', service: 'crown' },
+    description: 'A crown, a bridge and a night guard in one case at Northfield; it opens on the Crown card. Each service is its own card with its own Delivery date, so the night guard can come back before the bridge. Add Another Service on the timeline starts the next one, and Review’s Back by lists each service’s date by its name.',
+    scripts: [
       {
-        title: 'A6 · Jess (nurse) prepares Priya’s iTero draft for Dr Ellery',
-        icon: <Stethoscope className="w-4 h-4" />, as: 'jess',
-        description: 'The iTero login isn’t linked, so it asks who is prescribing. Pick Dr Ellery (Remember for this iTero login stays ticked) and finish the case: the button reads “Send to Dr Ellery to Approve” and the row stays Draft · Awaiting approval.',
-        shows: ['Who is prescribing?', 'Send to Dr Ellery to Approve', 'Login remembered'],
-        path: '/flows/new-case/case/CAS-2026-143',
-      },
-      {
-        title: 'A6 · Dr Ellery approves from the bell',
-        icon: <UserCheck className="w-4 h-4" />, as: 'ellery',
-        description: 'The notification “Jess Ward prepared a case for Priya Shah” opens a read-only case with Change Something and Approve and Send. Approving keeps the same case ID; Jess is told.',
-        shows: ['Approval view', 'Same case ID', 'Preparer notified'],
-        path: '/flows/new-case/cases',
-      },
-      {
-        title: 'Scan to Follow → the scan arrives → Attach',
-        icon: <Inbox className="w-4 h-4" />, as: 'khan',
-        description: 'Send a case with Scan to Follow: Sent. Waiting for the Scan, row Received · Awaiting scan. On Lab Work, “Scan Arrives” then Attach: the delivery is recalculated against the lab’s cut-off.',
-        shows: ['Awaiting scan', 'Attach Scan modal'],
-        path: '/flows/new-case/cases',
-      },
-      {
-        title: 'Posting several cases at once',
-        icon: <Printer className="w-4 h-4" />, as: 'khan',
-        description: 'With a case or two made with Impression by Post (as in T2), still Ready for Dispatch: on Lab Work they are pinned to the top. Ready for Dispatch filter → tick the cases (or Select all on this page) → Print labels: one A4 sheet per case. Each case is still marked as dispatched from its own Case Details (the portal’s page, opened from its row).',
-        shows: ['Pinned to the top', 'Ready for Dispatch filter', 'Bulk Print labels'],
-        path: '/flows/new-case/cases',
-      },
-      {
-        title: 'Keyboard and Undo',
-        icon: <Keyboard className="w-4 h-4" />, as: 'khan',
-        description: 'Teeth are buttons with names (“Tooth 36, lower left 6, selected”). Ctrl + Enter sends when ready, else jumps to the next gap; a double press sends once. Esc closes a drawer, else saves and closes. Undo restores only the rows the send changed.',
-        shows: ['Keyboard teeth', 'Ctrl + Enter', 'One send only'],
-        path: '/flows/new-case/case/CAS-2026-142',
+        label: 'Crown + Bridge + Night Guard',
+        taps: [
+          'tap 16 and the → arrow', 'Shade', 'Add Another Service', 'Bridge',
+          'tap 34 and 36 (35 is the pontic) and the → arrow', 'Shade', 'Add Another Service', 'Night Guard',
+          'Delivery date: a later day', 'Upper', 'Review: Back by per service', 'Ready for Dispatch',
+        ],
       },
     ],
+    shows: ['Opens on the Crown card', 'Add Another Service', 'A card per service', 'Delivery date per service', 'Back by per service'],
   },
 ];
+
+const patientById = (id: string) => PATIENTS.find(p => p.id === id);
 
 export default function NewCaseWalkthroughPage() {
   const navigate = useNavigate();
@@ -159,19 +136,15 @@ export default function NewCaseWalkthroughPage() {
   const store = useFlowStore();
   const signedIn = userById(store.userId)!;
   const dirty = store.rows.some(r => r.sentAt || (r.draft?.items.length && r.id !== 'CAS-2026-141')) || store.patients.length > 0 || store.events.length > 0;
+  // Guided is the only experience: B and C stay in the code but nothing here opens them.
+  const guided = UX_OPTIONS.find(o => o.id === 'guided')!;
 
-  /** Play an experience from scratch: a blank create page in that style. */
-  const play = (ux: Ux) => {
+  /** Every launch lands in Guided, whatever an earlier session left in the store. */
+  const launch = (as: UserId, path: string) => {
     if (!user) login(DEMO_ACCOUNT_EMAIL, 'demo');
-    setUx(ux);
-    setUserId('khan');
-    navigate('/flows/new-case/case/new', { state: { session: `scratch-${Date.now()}` } });
-  };
-
-  const open = (step: Step) => {
-    if (!user) login(DEMO_ACCOUNT_EMAIL, 'demo');
-    setUserId(step.as);
-    navigate(step.launch ? '/flows/new-case/case/new' : step.path, { state: { session: `wt-${Date.now()}` } });
+    setUx('guided');
+    setUserId(as);
+    navigate(path, { state: { session: `wt-${Date.now()}` } });
   };
 
   return (
@@ -194,11 +167,11 @@ export default function NewCaseWalkthroughPage() {
               </div>
             </div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[#EEF4FF] border border-[#C8D8FC] text-[#1E40AF] mb-3">
-              October 2026 · Clinic · 3 scripts + 11 checks
+              October 2026 · Clinic · {FLOWS.length} flows
             </span>
             <h1 className="text-2xl sm:text-3xl font-bold text-[#030213] mb-2">New case flow</h1>
             <p className="text-sm text-[#717182] leading-relaxed max-w-xl mx-auto">
-              From “Add new Case” or a scanner draft to “Sent to lab”: lab first, one question at a time, the Teeth Chart against every service, and Send as the prescriber’s signature with a 10-second Undo. Desktop only (1280 px and up). Each step opens the exact screen, signed in as the right person.
+              From “Add new Case” to Ready for Dispatch in Guided steps: each service on one card with the Teeth Chart beside its questions and its own Delivery date, then Scan Source and Review. Desktop only (1280 px and up). Each flow opens a new case on its service’s card, with the patient and lab already chosen.
             </p>
           </div>
 
@@ -219,83 +192,125 @@ export default function NewCaseWalkthroughPage() {
             </button>
           </div>
 
-          {/* Three experiences of the same flow. Each card plays its own create page:
-              Start from Scratch opens a blank create page in that style. */}
+          {/* The one experience. Start from Scratch opens the blank create page, which asks for the patient. */}
           <section aria-labelledby="ux-heading" className="mb-8">
-            <h2 id="ux-heading" className="text-sm font-bold text-[#030213] mb-1">Choose an experience</h2>
-            <p className="text-xs text-[#717182] mb-3">Same case, same rules and defaults, three ways of presenting it. Start a blank case in any of them. The scenarios below open in the selected experience.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {UX_OPTIONS.map(o => {
-                const on = store.ux === o.id;
-                return (
-                  <div
-                    key={o.id}
-                    className={`flex flex-col bg-white rounded-2xl border p-4 transition-all ${on ? 'border-[#3F6FE8] ring-2 ring-[#3F6FE8]/25 shadow-sm' : 'border-[#E0E0E6] hover:border-[#C8D8FC]'}`}
-                  >
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={on}
-                      onClick={() => setUx(o.id)}
-                      className="text-left flex-1 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3F6FE8]"
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className={`w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center ${on ? 'bg-gradient-to-br from-[#3F6FE8] to-[#6A5CE8] text-white' : 'bg-[#F3F3F5] text-[#3A3A4A]'}`}>{o.letter}</span>
-                        <span className="text-sm font-semibold text-[#030213]">{o.name}</span>
-                        {on && <span className="ml-auto text-[10px] font-bold uppercase tracking-widest text-[#2F62D6]">Selected</span>}
-                      </span>
-                      <span className="block text-xs text-[#5A5A6A] leading-relaxed mt-2">{o.blurb}</span>
-                    </button>
-                    <div className="mt-4 flex flex-col gap-2">
-                      <button
-                        type="button"
-                        onClick={() => play(o.id)}
-                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#3F6FE8] to-[#6A5CE8] hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3F6FE8] focus-visible:ring-offset-2"
-                      >
-                        <Play className="w-3.5 h-3.5 fill-current" aria-hidden />
-                        Start from Scratch
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+            <h2 id="ux-heading" className="text-sm font-bold text-[#030213] mb-1">Experience</h2>
+            <p className="text-xs text-[#717182] mb-3">Every flow below opens in it. Start a blank case to try it with any patient.</p>
+            <div className="flex flex-wrap items-center gap-4 bg-white rounded-2xl border border-[#3F6FE8] ring-2 ring-[#3F6FE8]/25 shadow-sm p-4">
+              <div className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center bg-gradient-to-br from-[#3F6FE8] to-[#6A5CE8] text-white">{guided.letter}</span>
+                  <span className="text-sm font-semibold text-[#030213]">{guided.name}</span>
+                </span>
+                <span className="block text-xs text-[#5A5A6A] leading-relaxed mt-2">{guided.blurb}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => launch('khan', '/flows/new-case/case/new')}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#3F6FE8] to-[#6A5CE8] hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3F6FE8] focus-visible:ring-offset-2"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" aria-hidden />
+                Start from Scratch
+              </button>
             </div>
           </section>
 
-          <div className="space-y-4">
-            {STAGES.map((stage, si) => (
-              <section key={stage.label} className="bg-white border border-[#E0E0E6] rounded-2xl shadow-sm overflow-hidden">
-                <div className="px-4 sm:px-5 pt-4 pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-full bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white text-[11px] font-bold flex items-center justify-center tabular-nums flex-shrink-0">{si + 1}</span>
-                    <h2 className="text-sm font-bold text-[#030213] leading-snug">{stage.label}</h2>
-                  </div>
-                  <p className="text-xs text-[#717182] leading-relaxed mt-1.5">{stage.blurb}</p>
-                </div>
-                <div className="divide-y divide-[#F0EFF6] border-t border-[#F0EFF6]">
-                  {stage.steps.map(step => (
-                    <div key={step.title} className="flex items-center gap-3 px-4 sm:px-5 py-2.5">
-                      <span className="w-7 h-7 rounded-lg bg-[#F3F3F5] text-[#5A5568] flex items-center justify-center flex-shrink-0">{step.icon}</span>
+          <section aria-labelledby="flows-heading">
+            <div className="flex flex-wrap items-end gap-3 mb-3">
+              <div className="min-w-0 flex-1">
+                <h2 id="flows-heading" className="text-sm font-bold text-[#030213] mb-1">Flows</h2>
+                <p className="text-xs text-[#717182]">One per kind of order. Open signs in as the right person and starts a new case for the patient named, on the service’s card with the lab already picked; the taps are the shortest way through.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => launch('khan', '/flows/new-case/cases')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#4D8EF7] border border-[#C8D8FC] hover:bg-[#EEF4FF] transition-colors flex-shrink-0"
+              >
+                <List className="w-3 h-3" aria-hidden />
+                Open Lab Work
+              </button>
+            </div>
+
+            <ol className="space-y-4">
+              {FLOWS.map((flow, fi) => {
+                const p = patientById(flow.patient);
+                const alt = flow.alt && patientById(flow.alt.patient);
+                const perScript = flow.scripts.some(s => s.start);
+                return (
+                  <li key={flow.title} className="bg-white border border-[#E0E0E6] rounded-2xl shadow-sm p-4 sm:p-5">
+                    <div className="flex items-start gap-3">
+                      <span className="w-8 h-8 rounded-lg bg-[#EEF4FF] text-[#2F62D6] flex items-center justify-center flex-shrink-0">{flow.icon}</span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold text-[#030213] leading-snug">{step.title}</p>
-                        <p className="text-[11px] text-[#717182] leading-snug truncate" title={step.description}>
-                          {USERS.find(u => u.id === step.as)!.name} · {step.shows.join(' · ')}
+                        <h3 className="text-sm font-bold text-[#030213] leading-snug">
+                          <span className="tabular-nums text-[#8B8B9E] mr-1.5">{fi + 1}.</span>{flow.title}
+                        </h3>
+                        <p className="text-[11px] text-[#717182] leading-snug mt-0.5">
+                          {USERS.find(u => u.id === flow.as)!.name}
+                          {p && <> · for {p.first} {p.last} ({p.funding === 'nhs' ? 'NHS' : 'Private'})</>}
                         </p>
                       </div>
                       <button
-                        onClick={() => open(step)}
-                        title={step.description}
+                        type="button"
+                        onClick={() => launch(flow.as, newCaseFor(flow.patient, flow.start))}
+                        aria-label={`Open ${flow.title}`}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#4D8EF7] border border-[#C8D8FC] hover:bg-[#EEF4FF] transition-colors flex-shrink-0"
                       >
                         Open
-                        <ArrowRight className="w-3 h-3" />
+                        <ArrowRight className="w-3 h-3" aria-hidden />
                       </button>
                     </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
+
+                    <p className="text-xs text-[#5A5A6A] leading-relaxed mt-3">{flow.description}</p>
+
+                    {/* The exact taps; arrows are visual only, so a screen reader hears "then". */}
+                    <ul className="mt-3 space-y-1.5">
+                      {flow.scripts.map(s => (
+                        <li key={s.label} className="flex items-start gap-3 text-xs text-[#3A3A4A] leading-relaxed bg-[#F8F9FC] border border-[#F0EFF6] rounded-lg px-3 py-2">
+                          <span className="min-w-0 flex-1">
+                            {flow.scripts.length > 1 && <span className="font-semibold text-[#030213]">{s.label}: </span>}
+                            {s.taps.map((t, i) => (
+                              <Fragment key={i}>
+                                {i > 0 && (<><ArrowRight aria-hidden className="inline w-3 h-3 mx-1 -mt-px text-[#A0A0B0]" /><span className="sr-only">, then </span></>)}
+                                <span>{t}</span>
+                              </Fragment>
+                            ))}
+                          </span>
+                          {/* Scripts that start on different services each open their own case. */}
+                          {perScript && (
+                            <button
+                              type="button"
+                              onClick={() => launch(flow.as, newCaseFor(flow.patient, s.start ?? flow.start))}
+                              aria-label={`Open ${flow.title}: ${s.label}`}
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#4D8EF7] hover:text-[#3578E5] transition-colors flex-shrink-0"
+                            >
+                              Open
+                              <ArrowRight className="w-3 h-3" aria-hidden />
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                      {flow.shows.map(s => (
+                        <span key={s} className="px-2 py-0.5 rounded-full text-[10px] font-semibold text-[#5A5568] bg-[#F3F3F5] border border-[#E0E0E6]">{s}</span>
+                      ))}
+                      {flow.alt && alt && (
+                        <button
+                          type="button"
+                          onClick={() => launch(flow.as, newCaseFor(alt.id, flow.alt!.start))}
+                          className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-[#4D8EF7] hover:text-[#3578E5] transition-colors"
+                        >
+                          {flow.alt.label}
+                          <ArrowRight className="w-3 h-3" aria-hidden />
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
         </div>
       </main>
 

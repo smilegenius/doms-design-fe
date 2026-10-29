@@ -54,14 +54,15 @@ export default function ServiceCard({ item }: { item: ServiceItem }) {
 
   // Each row: open with "Needs you" while it's a gap; open for changing when
   // it's the active row and was already answered; else one line. A gap that has
-  // just been answered folds at once (the page moves on 220 ms later).
+  // just been answered folds at once (the page moves on 220 ms later). A Delivery date is typed digit by digit
+  // and a half-typed day can already be valid: it stays open (with Done) instead of folding mid-typing.
   const fromGap = useRef(new Set<SlotId>());
   const [, bump] = useState(0);
   const modes = new Map<SlotId, RowMode>(slots.map(s => {
     const active = step === slotStepId(item.id, s.id);
     const gap = s.required && !s.answered;
     if (!active) fromGap.current.delete(s.id);
-    else if (gap) fromGap.current.add(s.id);
+    else if (gap && s.id !== 'deliveryDate') fromGap.current.add(s.id);
     return [s.id, readOnly ? 'view' : gap ? 'gap' : active && !fromGap.current.has(s.id) ? 'change' : 'view'];
   }));
   const reopen = (id: SlotId) => { fromGap.current.delete(id); bump(x => x + 1); };

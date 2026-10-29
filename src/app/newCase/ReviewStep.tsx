@@ -20,7 +20,8 @@ import { fmtCutoff, fmtDay, fmtShort, sameDay } from './dates';
 import {
   PRODUCTS, ServiceItem, StepNode, archCaps, attestation, bridgeParts, fullName, itemTitle, labSees, parseStep, plural,
   recordsState, sendMode, slotsFor, splitSuggestion, caseInstructions, instructionsStale, firstStageDue, stageName,
-  archWord, dentureTreatment, orderedStages, toothIn, treatmentName,
+  archWord, dentureTreatment, orderedStages, toothIn, treatmentName, askedFor, fastTrackEligible, isAlignerGroup,
+  type SlotId,
 } from './rules';
 import { MiniChart } from './TeethChart';
 import { CaseInstructionsBox } from './Instructions';
@@ -308,10 +309,12 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
   const Icon = PRODUCT_ICON[item.product];
   const details = itemDetails(item, ctx, draft).filter(d => d.label !== 'Teeth' || item.product === 'bridge');
   const [open, setOpen] = useState(!!startOpen || (gaps > 0 && !readOnly));
-  // A denture's stages lead (the only dates it has), however long; the rest only if short. The line truncates.
+  // A denture's stages and an aligner's prescription lead (in their short form), however long; the rest only
+  // if short, and not the arch the title already names. The line truncates.
+  const leads = (id: SlotId) => id === 'stages' || isAlignerGroup(id);
   const summary = [
-    ...details.filter(d => d.id === 'stages').map(d => d.short ?? d.value),
-    ...details.filter(d => d.id !== 'stages').map(d => d.value).filter(v => v.length <= 34),
+    ...details.filter(d => leads(d.id)).map(d => d.short ?? d.value),
+    ...details.filter(d => !leads(d.id) && !(d.id === 'arch' && arch)).map(d => d.value).filter(v => v.length <= 34),
   ].join(' · ');
   const bodyId = `nc-review-svc-${item.id}`;
   if (!open) {
@@ -356,6 +359,13 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
                 {own.backBy && <p className="text-[11px] leading-snug text-[#5A5A6A]">{own.days}</p>}
               </div>
             )}
+            {/* Edit and Remove sit on the heading line, before the fold arrow (the user's call). */}
+            {!readOnly && (
+              <div className="flex-shrink-0 flex items-center gap-1">
+                <button type="button" onClick={() => go(`svc:${item.id}:${firstSlot.id}`)} aria-label={`Edit ${title}`} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-[#2F62D6] border border-[#DCE6FD] bg-white hover:bg-[#EEF4FF] motion-safe:transition-colors ${FOCUS}`}><Pencil className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden />Edit</button>
+                <button type="button" onClick={() => removeItem(item.id)} aria-label={`Remove ${title}`} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-[#B91C1C] hover:bg-[#FEF2F2] motion-safe:transition-colors ${FOCUS}`}><Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden />Remove</button>
+              </div>
+            )}
           </div>
           {(item.teeth.length > 0 || arch) && (
             <div className="mt-3 rounded-xl bg-[#F8F9FC] border border-[#ECECF2] px-4 py-3 flex flex-col items-center gap-1.5">
@@ -374,12 +384,6 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
                 </div>
               ))}
             </dl>
-          )}
-          {!readOnly && (
-            <div className="mt-3 flex items-center gap-1">
-              <button type="button" onClick={() => go(`svc:${item.id}:${firstSlot.id}`)} aria-label={`Edit ${title}`} className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#2F62D6] border border-[#DCE6FD] bg-white hover:bg-[#EEF4FF] motion-safe:transition-colors ${FOCUS}`}><Pencil className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden />Edit</button>
-              <button type="button" onClick={() => removeItem(item.id)} aria-label={`Remove ${title}`} className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#B91C1C] hover:bg-[#FEF2F2] motion-safe:transition-colors ${FOCUS}`}><Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} aria-hidden />Remove</button>
-            </div>
           )}
         </div>
       </div>
@@ -498,7 +502,8 @@ function backFact(api: Api): { value: string; sub: string } {
   const { dates, lab, draft } = api;
   // Several services: each is back on its own day, so the line under the case's day lists them.
   const each = draft.items.length > 1 && dates.backBy ? perServiceLine(api) : '';
-  if (dates.route === 'follow' && dates.ta != null) {
+  // Waiting for the scan, a case set by the clinic's own day(s) is back that day; else it counts from the scan.
+  if (dates.route === 'follow' && dates.ta != null && !dates.fixed) {
     const when = dates.backBy ? `if the scan arrives by ${fmtCutoff(lab.cutoffMin)} today` : 'after the scan arrives';
     return { value: dates.backBy ? fmtDay(dates.backBy) : plural(dates.ta, 'working day'), sub: each ? `${each}, ${when}` : when };
   }
@@ -512,24 +517,16 @@ function backFact(api: Api): { value: string; sub: string } {
     const name = t === 'staged' ? stageName(first.id) : treatmentName(t);
     return { value: fmtDay(dates.backBy), sub: draft.items.length > 1 && lead.arch ? `${name} (${archWord(lead.arch)}), its first stage back` : `${name}, the first stage back` };
   }
-  if (dates.backBy) return { value: fmtDay(dates.backBy), sub: each || plural(dates.ta ?? 0, 'working day') };
+  if (dates.backBy) return { value: fmtDay(dates.backBy), sub: each || (dates.route === 'follow' ? 'Requested' : plural(dates.ta ?? 0, 'working day')) };
   return { value: '—', sub: 'once every item can be made' };
 }
 
-/** "Crown 3 Nov · Bridge 5 Nov": each service's own day, in the case's order; a name two services share says where. */
+/** "Crown 3 Nov · Bridge 5 Nov": each service's own day, in the case's order, named by its service only (the user's call). */
 function perServiceLine(api: Api): string {
-  const { draft, dates, user } = api;
-  const n = user.notation;
-  const name = (i: ServiceItem) => PRODUCTS[i.product].label;
-  const where = (i: ServiceItem) => {
-    if (i.product === 'bridge' && i.bridge?.a && i.bridge?.b) return `${toothIn(i.bridge.a, n)}–${toothIn(i.bridge.b, n)}`;
-    if (i.teeth.length) return i.teeth.length > 2 ? plural(i.teeth.length, 'tooth') : i.teeth.map(t => toothIn(t, n)).join(', ');
-    return i.arch ? archWord(i.arch) : '';
-  };
+  const { draft, dates } = api;
   return draft.items.map(i => {
     const back = dates.perItem.find(p => p.id === i.id)?.backBy;
-    const twin = draft.items.some(o => o !== i && name(o) === name(i)) && where(i);
-    return `${name(i)}${twin ? ` (${where(i)})` : ''} ${back ? fmtShort(back) : '—'}`;
+    return `${PRODUCTS[i.product].label} ${back ? fmtShort(back) : '—'}`;
   }).join(' · ');
 }
 
@@ -540,8 +537,12 @@ function perServiceLine(api: Api): string {
 function ownDates(api: Api, itemId: string): { backBy?: Date; days: string } | null {
   const per = api.dates.perItem.find(x => x.id === itemId);
   if (!per || per.ta == null) return null;
-  const asked = !!per.requested && !per.tooSoon;
-  return { backBy: per.backBy, days: `${asked ? 'Requested · ' : ''}${plural(per.ta, 'working day')}${api.dates.route === 'follow' ? ' after the scan arrives' : ''}` };
+  const follow = api.dates.route === 'follow';
+  const item = api.draft.items.find(i => i.id === itemId);
+  const fast = api.draft.fastTrack && !!item && fastTrackEligible(item, api.ctx) ? ' · Fast-Track' : '';
+  // A day the clinic asked for is a fixed day, however late the scan comes: never a count after it.
+  if (askedFor(per)) return { backBy: per.backBy, days: `Requested${follow ? '' : ` · ${plural(per.ta, 'working day')}`}${fast}` };
+  return { backBy: per.backBy, days: `${plural(per.ta, 'working day')}${follow ? ' after the scan arrives' : ''}${fast}` };
 }
 
 export { parseStep };

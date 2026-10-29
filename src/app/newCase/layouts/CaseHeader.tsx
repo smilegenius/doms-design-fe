@@ -5,9 +5,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, FilePlus, HelpCircle, MoreHorizontal, Trash2, X } from 'lucide-react';
-import { useCase } from '../CaseContext';
+import { CaseApi, useCase } from '../CaseContext';
 import { useController } from '../controller';
 import { fmtDay, fromISO } from '../dates';
+import { stepName } from '../footerArrow';
+import { receivedFor, serviceDate } from '../rules';
 import { DispatchPanel, StatusChip, dispatchLine, useShipped } from '../dispatch';
 import { CaseRow, useFlowStore } from '../store';
 import { Notice, PrimaryButton, SecondaryButton, FOCUS } from '../ui';
@@ -76,9 +78,27 @@ export function CloseButton() {
   return <SecondaryButton onClick={() => c.saveAndClose(false)}><X className="w-3.5 h-3.5" aria-hidden />Close</SecondaryButton>;
 }
 
+/**
+ * What stops Approve and Send, by name. The approve view is read-only (no gap chips), and a Delivery date can go
+ * too soon while the case waits (the lab's cut-off passes), so the reason has to be said here.
+ */
+function approveBlockers(api: CaseApi): string[] {
+  const { steps, draft, ctx, user } = api;
+  const received = receivedFor(draft, ctx);
+  return steps.filter(s => s.gap).map(s => {
+    const name = stepName(steps, s.id, draft, user.notation);
+    const item = s.slot?.id === 'deliveryDate' ? draft.items.find(i => i.id === s.itemId) : undefined;
+    const sd = item ? serviceDate(item, ctx, received, draft.fastTrack) : undefined;
+    if (sd?.requested && sd.offDay) return `${name}: ${fmtDay(sd.requested)} isn’t a lab working day`;
+    if (sd?.requested && sd.tooSoon && sd.earliest) return `${name}: ${fmtDay(sd.requested)} is now too soon, the lab’s earliest is ${fmtDay(sd.earliest)}`;
+    return name;
+  });
+}
+
 /** Approval / waiting / ready for dispatch / sent / reopened banners. (Continuing a scan's draft needs no banner: the subtitle says "from iTero scan".) */
 export function CaseBanners({ className = 'mt-4 space-y-2' }: { className?: string }) {
-  const { prescriber, lab, gaps } = useCase();
+  const api = useCase();
+  const { prescriber, lab, gaps } = api;
   const c = useController();
   const row = useLiveRow();
   const shipped = useShipped(row);
@@ -92,12 +112,15 @@ export function CaseBanners({ className = 'mt-4 space-y-2' }: { className?: stri
   }, [row?.status, shipped]);
   const items = [];
   if (c.view === 'approve') {
+    const blockers = gaps > 0 ? approveBlockers(api) : [];
+    const why = blockers.length ? `Needs a change before it can go: ${blockers.join('; ')}.` : undefined;
     items.push(
       <Notice key="appr" tone="decision" actions={<>
         <SecondaryButton onClick={c.changeSomething}>Change Something</SecondaryButton>
-        <PrimaryButton onClick={() => c.send(true)} disabled={c.sending || gaps > 0}>{c.sending ? 'Sending…' : 'Approve and Send'}</PrimaryButton>
+        <PrimaryButton onClick={() => c.send(true)} disabled={c.sending || gaps > 0} title={why}>{c.sending ? 'Sending…' : 'Approve and Send'}</PrimaryButton>
       </>}>
         Prepared by {c.preparedBy?.name ?? 'a colleague'}, today {c.preparedAt ?? ''} · waiting for you to approve.
+        {why && <span className="block mt-1 font-medium text-[#8A4B08]">{why} Use Change Something to fix it.</span>}
       </Notice>,
     );
   }

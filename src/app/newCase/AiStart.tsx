@@ -21,7 +21,7 @@ import {
   Stethoscope, Undo2, UploadCloud, UserPlus, UserRound, X, Zap,
 } from 'lucide-react';
 import { CLINIC, Lab, Patient, User, userById } from './data';
-import { demoNow, fmtDay, fmtFull, fmtShort, fromISO, maskDOB, parseDOB } from './dates';
+import { demoNow, fmtDay, fmtFull, fmtShort, fromISO, isWorkingDay, maskDOB, parseDOB } from './dates';
 import {
   CaseDraft, Ctx, DENTURE_STAGES, DentureStageId, PRODUCTS, ServiceItem, StagePlan, archCaps, caseDates, dentureTreatment, effective, fullName, isPosted, labsThatMake,
   optionAvail, optionName, patientAge, plural, recordsState, shadeSwatch, slotsFor, stageName, stageOption, stagePlan, suggestedStageDates,
@@ -1038,6 +1038,10 @@ function ServiceCard({ s, index, item, ctx, draft, lab, user, backBy, fastOffere
         {s.product === 'inlay' && (
           <Row label="Type">{s.inlayType ? <span className="text-xs font-semibold text-[#030213]">{s.inlayType === 'inlay' ? 'Inlay' : 'Onlay'}</span> : <Pick />}</Row>
         )}
+        {/* Aligners: the wear interval, the one specific the portal needs ("21 days per aligner"). */}
+        {s.product === 'aligner' && (
+          <Row label="Duration">{s.alignerDuration ? <span className="text-xs font-semibold text-[#030213]">{s.alignerDuration}</span> : <Pick />}</Row>
+        )}
         {denture && <Row label="Stages"><StageList s={s} item={item} ctx={ctx} /></Row>}
         {s.product && takesShade(s.product) && !metal && shadeAsked && (
           <Row label="Shade">
@@ -1056,9 +1060,12 @@ function ServiceCard({ s, index, item, ctx, draft, lab, user, backBy, fastOffere
             {s.delivery?.date ? (
               <>
                 <span className="text-xs font-semibold text-[#030213]">Needed by {fmtDay(s.delivery.date)}</span>
-                {backBy && (backBy.getTime() <= s.delivery.date.getTime()
-                  ? <Tag tone="ok"><Check className="w-3 h-3" strokeWidth={3} aria-hidden />On time</Tag>
-                  : <Tag tone="warn">Back {fmtDay(backBy)} at the earliest</Tag>)}
+                {/* The lab delivers on working days only: a Sunday or bank holiday needs another day. */}
+                {backBy && (!isWorkingDay(s.delivery.date)
+                  ? <Tag tone="warn">Not a lab working day</Tag>
+                  : backBy.getTime() <= s.delivery.date.getTime()
+                    ? <Tag tone="ok"><Check className="w-3 h-3" strokeWidth={3} aria-hidden />On time</Tag>
+                    : <Tag tone="warn">Back {fmtDay(backBy)} at the earliest</Tag>)}
               </>
             ) : backBy ? (
               <><span className="text-xs font-semibold text-[#030213]">Back by {fmtDay(backBy)}</span><Tag tone="muted">Calculated</Tag></>
@@ -1080,7 +1087,7 @@ function ServiceCard({ s, index, item, ctx, draft, lab, user, backBy, fastOffere
         {!s.product && s.heard && <Row label="Heard"><span className="text-xs text-[#1F1F2E] truncate">“{s.heard}”</span></Row>}
       </dl>
       {s.product && !s.makes && (
-        <Warn>{lab.name} doesn’t make {PRODUCTS[s.product].noun}s.{others.length ? ` ${others.map(l => l.name).join(' or ')} ${others.length === 1 ? 'does' : 'do'}.` : ''}</Warn>
+        <Warn>{lab.name} doesn’t make {PRODUCTS[s.product].plural ? PRODUCTS[s.product].noun : `${PRODUCTS[s.product].noun}s`}.{others.length ? ` ${others.map(l => l.name).join(' or ')} ${others.length === 1 ? 'does' : 'do'}.` : ''}</Warn>
       )}
       {!s.product && <Warn>Add the product on its Service line, e.g. “Crown”, “Bridge” or “Night guard”.</Warn>}
       {s.issues.map(x => <Warn key={x}>{x}</Warn>)}

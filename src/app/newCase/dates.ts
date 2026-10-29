@@ -89,7 +89,8 @@ export function receivedDate(route: 'digital' | 'post', now: Date, cutoffMin: nu
 const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** "Mon 2 Nov" */
-export const fmtDay = (d: Date) => `${DAY[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`;
+// A day in another year than the demo's says its year ("Wed 20 Oct 2027"), so a case due a year out never reads as this month.
+export const fmtDay = (d: Date) => `${DAY[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}${d.getFullYear() !== demoNow().getFullYear() ? ` ${d.getFullYear()}` : ''}`;
 /** "2 Nov" */
 export const fmtShort = (d: Date) => `${d.getDate()} ${MON[d.getMonth()]}`;
 /** "Oct 2026" */

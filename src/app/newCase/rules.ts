@@ -13,6 +13,11 @@ import {
   addWorkingDays, ageOn, dobFromString, firstClinicDayAfter, fmtCutoff, fmtDay, fmtShort, fromISO,
   lastWorkingDayBefore, receivedDate, sameDay, toISO, workingDaysBetween, isWorkingDay,
 } from './dates';
+// The portal's own aligner lists (Quick Create's Aligner specifics), so the flow asks exactly what the product asks.
+import {
+  ALIGNER_BIOTYPE, ALIGNER_CROSSBITE, ALIGNER_CROWDING, ALIGNER_DURATIONS, ALIGNER_INCISAL_EDGE, ALIGNER_MIDLINE, ALIGNER_OPENBITE,
+  ALIGNER_OVERBITE, ALIGNER_OVERJET, ALIGNER_SPACING, MILLERS_CLASS, OCCLUSION_CLASSES, OCCLUSION_SIDES, YES_NO,
+} from '../pages/CreateCasePage';
 
 // ─── Draft shape ─────────────────────────────────────────────────────────────
 
@@ -47,6 +52,8 @@ export interface ServiceItem {
   /** Night guard / retainer type. */
   type?: string;
   typeSrc?: string;
+  /** Aligners: the portal's Aligner specifics, under its own field names (alignerDuration, ipr, anglesClass…). */
+  aligner?: AlignerAnswers;
   /**
    * Partial denture: its one stage. Full denture: never written any more (read
    * once by seedDenturePlan: 'stf' / 'immediate' → treatment, a stage id →
@@ -145,6 +152,8 @@ export interface CaseDraft {
   instructionsBase?: string;
   fastTrack: boolean;
   split: boolean;
+  /** The service Send Separately agreed to send alone: the split holds only while it's still that one. */
+  splitItem?: string;
   keepTogether: boolean;
   note: string;
   step: string;
@@ -167,8 +176,9 @@ export interface Ctx {
 
 // ─── Catalogue ───────────────────────────────────────────────────────────────
 
-export type ProductGroup = 'Fixed' | 'Implant' | 'Dentures' | 'Repairs and Relines' | 'Appliances' | 'Other';
-export const PRODUCTS: Record<ProductId, { label: string; noun: string; group: ProductGroup; privateOnly?: boolean; archItem?: boolean }> = {
+export type ProductGroup = 'Fixed' | 'Implant' | 'Dentures' | 'Repairs and Relines' | 'Orthodontics' | 'Appliances' | 'Other';
+// `plural`: the product is named in the plural ("Aligners", "whitening trays"), so it takes no "a" / "an".
+export const PRODUCTS: Record<ProductId, { label: string; noun: string; group: ProductGroup; privateOnly?: boolean; archItem?: boolean; plural?: boolean }> = {
   crown:      { label: 'Crown',            noun: 'crown',            group: 'Fixed' },
   bridge:     { label: 'Bridge',           noun: 'bridge',           group: 'Fixed' },
   implant:    { label: 'Implant Crown',    noun: 'implant crown',    group: 'Implant', privateOnly: true },
@@ -179,12 +189,18 @@ export const PRODUCTS: Record<ProductId, { label: string; noun: string; group: P
   partial:    { label: 'Partial Denture',  noun: 'partial denture',  group: 'Dentures' },
   reline:     { label: 'Reline or Repair', noun: 'reline or repair', group: 'Repairs and Relines' },
   retainer:   { label: 'Retainer',         noun: 'retainer',         group: 'Appliances', archItem: true },
-  whitening:  { label: 'Whitening Trays',  noun: 'whitening trays',  group: 'Appliances', archItem: true, privateOnly: true },
+  // The portal's Clear Aligners (Orthodontics). Private work in the UK.
+  aligner:    { label: 'Aligners',         noun: 'aligners',         group: 'Orthodontics', archItem: true, privateOnly: true, plural: true },
+  whitening:  { label: 'Whitening Trays',  noun: 'whitening trays',  group: 'Appliances', archItem: true, privateOnly: true, plural: true },
   other:      { label: 'Something Else',   noun: 'item',             group: 'Other' },
 };
+/** "a crown", "an implant crown", "aligners" (a plural name takes no article). `word`: the label instead of the noun. */
+export function aProduct(p: ProductId, word: string = PRODUCTS[p].noun): string {
+  return PRODUCTS[p].plural ? word : `${/^[aeiou]/i.test(word) ? 'an' : 'a'} ${word}`;
+}
 /** Tiles on the services step, in their fixed order; the rest live under More. */
-export const TILE_ORDER: ProductId[] = ['crown', 'bridge', 'implant', 'veneer', 'inlay', 'nightguard', 'denture'];
-export const GROUP_ORDER: ProductGroup[] = ['Fixed', 'Implant', 'Dentures', 'Repairs and Relines', 'Appliances', 'Other'];
+export const TILE_ORDER: ProductId[] = ['crown', 'bridge', 'implant', 'veneer', 'inlay', 'nightguard', 'denture', 'aligner'];
+export const GROUP_ORDER: ProductGroup[] = ['Fixed', 'Implant', 'Dentures', 'Repairs and Relines', 'Orthodontics', 'Appliances', 'Other'];
 export const ALL_PRODUCTS = Object.keys(PRODUCTS) as ProductId[];
 
 export interface Option { id: string; name: string }
@@ -203,6 +219,8 @@ export const OPTIONS: Record<ProductId, Option[]> = {
   implant: [{ id: 'mono', name: 'Monolithic zirconia · Ti-base' }, { id: 'layered', name: 'Layered zirconia · Ti-base' }],
   nightguard: [{ id: 'hard', name: 'Hard (Michigan)' }, { id: 'soft', name: 'Soft' }, { id: 'dual', name: 'Dual laminate' }],
   retainer: [{ id: 'essix', name: 'Essix 1.0 mm' }, { id: 'hawley', name: 'Hawley' }],
+  // One kind: the lab's catalogue key (lead time); what the set does is its prescription (ALIGNER_GROUPS).
+  aligner: [{ id: 'clear', name: 'Clear aligners' }],
   whitening: [{ id: 'trays', name: 'Whitening trays' }],
   // The five stages (DENTURE_STAGES) and the two treatments that skip them.
   denture: [
@@ -682,6 +700,13 @@ export function stagesShort(item: ServiceItem): string {
  * longer match the patient, arch or lab; every ordered stage without a day gets
  * its suggested one.
  */
+/** What the Services step's Repeat chip fills in from the patient's last one (the walkthrough's Repeat Open too). */
+export const repeatExtra = (rep: NonNullable<Patient['repeat']>): Partial<ServiceItem> =>
+  ({ arch: rep.arch, archSrc: 'Last time', type: rep.option, typeSrc: 'Last time' });
+/** The Next stage chip: the arch of the denture under way; seedDenturePlan fills in its stages. */
+export const nextStageExtra = (ns: NonNullable<Patient['nextStage']>): Partial<ServiceItem> =>
+  ({ arch: ns.arch, archSrc: 'Next stage', stageSrc: 'Next stage' });
+
 export function seedDenturePlan(item: ServiceItem, ctx: Ctx): ServiceItem {
   if (item.product !== 'denture') return item;
   const it: ServiceItem = { ...item };
@@ -723,13 +748,102 @@ export function seedDenturePlan(item: ServiceItem, ctx: Ctx): ServiceItem {
   return it;
 }
 
+// ─── Aligners ────────────────────────────────────────────────────────────────
+// The portal's Aligner specifics (Quick Create), field for field and in its
+// order, as four items: the setup (the duration is the one it needs), the
+// corrections, the soft-tissue assessment and the occlusion (each class with
+// its side). The lists are the portal's own (pages/CreateCasePage).
+
+export type AlignerKey =
+  | 'alignerDuration' | 'phasing' | 'ipr' | 'attachment'
+  | 'incisalEdge' | 'crowding' | 'spacing' | 'overjet' | 'overbite' | 'openbite' | 'crossbite' | 'midline'
+  | 'biotype' | 'millersClass'
+  | 'anglesClass' | 'anglesSide' | 'skeletalClass' | 'skeletalSide' | 'dentalClass' | 'dentalSide';
+export type AlignerAnswers = Partial<Record<AlignerKey, string>>;
+export type AlignerGroupId = 'alignerPlan' | 'alignerFindings' | 'alignerPerio' | 'alignerOcclusion';
+export interface AlignerField {
+  key: AlignerKey;
+  label: string;
+  options: string[];
+  required?: boolean;
+  /** The empty choice's words (the portal's "Wear interval" for the duration). */
+  placeholder?: string;
+  /** How it reads back: the value alone (the duration), Yes / No as words ("IPR" / "No IPR"), else "name: value". */
+  says?: 'value' | [yes: string, no: string];
+  /** The name it reads back under; a class and its side share one ("Angle’s: Class II, Left"). */
+  name?: string;
+}
+export const ALIGNER_GROUPS: { id: AlignerGroupId; label: string; fields: AlignerField[] }[] = [
+  {
+    id: 'alignerPlan', label: 'Treatment setup', fields: [
+      { key: 'alignerDuration', label: 'Aligner duration', options: ALIGNER_DURATIONS, required: true, placeholder: 'Wear interval', says: 'value' },
+      { key: 'phasing', label: 'Phasing', options: YES_NO, says: ['Phased', 'No phasing'] },
+      { key: 'ipr', label: 'IPR', options: YES_NO, says: ['IPR', 'No IPR'] },
+      { key: 'attachment', label: 'Attachment', options: YES_NO, says: ['Attachments', 'No attachments'] },
+    ],
+  },
+  {
+    id: 'alignerFindings', label: 'Corrections', fields: [
+      { key: 'incisalEdge', label: 'Incisal edge alignment', options: ALIGNER_INCISAL_EDGE, name: 'Incisal edge' },
+      { key: 'crowding', label: 'Crowding', options: ALIGNER_CROWDING },
+      { key: 'spacing', label: 'Spacing', options: ALIGNER_SPACING },
+      { key: 'overjet', label: 'Overjet', options: ALIGNER_OVERJET },
+      { key: 'overbite', label: 'Overbite', options: ALIGNER_OVERBITE },
+      { key: 'openbite', label: 'Openbite', options: ALIGNER_OPENBITE },
+      { key: 'crossbite', label: 'Crossbite', options: ALIGNER_CROSSBITE },
+      { key: 'midline', label: 'Midline', options: ALIGNER_MIDLINE },
+    ],
+  },
+  {
+    id: 'alignerPerio', label: 'Assessment', fields: [
+      { key: 'biotype', label: 'Biotype', options: ALIGNER_BIOTYPE },
+      { key: 'millersClass', label: 'Miller’s class', options: MILLERS_CLASS, name: 'Miller’s' },
+    ],
+  },
+  {
+    id: 'alignerOcclusion', label: 'Occlusion', fields: [
+      { key: 'anglesClass', label: 'Angle’s class', options: OCCLUSION_CLASSES, name: 'Angle’s' },
+      { key: 'anglesSide', label: 'Angle’s side', options: OCCLUSION_SIDES, name: 'Angle’s' },
+      { key: 'skeletalClass', label: 'Skeletal class', options: OCCLUSION_CLASSES, name: 'Skeletal' },
+      { key: 'skeletalSide', label: 'Skeletal side', options: OCCLUSION_SIDES, name: 'Skeletal' },
+      { key: 'dentalClass', label: 'Dental class', options: OCCLUSION_CLASSES, name: 'Dental' },
+      { key: 'dentalSide', label: 'Dental side', options: OCCLUSION_SIDES, name: 'Dental' },
+    ],
+  },
+];
+export const ALIGNER_GROUP_IDS = ALIGNER_GROUPS.map(g => g.id);
+export const isAlignerGroup = (id: string): id is AlignerGroupId => (ALIGNER_GROUP_IDS as string[]).includes(id);
+export const alignerGroup = (id: AlignerGroupId) => ALIGNER_GROUPS.find(g => g.id === id)!;
+
+/**
+ * One aligner item read back: "14 days / aligner · Phased · IPR · No attachments", "Crowding: Expand · Midline:
+ * As Needed", "Angle’s: Class II, Left". `compact`: past four answers, the first three and "+N more" (a header line).
+ */
+export function alignerReadback(item: ServiceItem, id: AlignerGroupId, compact = false): string {
+  const a = item.aligner ?? {};
+  const parts: { name?: string; vals: string[] }[] = [];
+  for (const f of alignerGroup(id).fields) {
+    const v = a[f.key];
+    if (!v) continue;
+    if (f.says === 'value') parts.push({ vals: [v] });
+    else if (f.says) parts.push({ vals: [v === 'Yes' ? f.says[0] : f.says[1]] });
+    else {
+      const name = f.name ?? f.label;
+      const same = parts.find(p => p.name === name);
+      if (same) same.vals.push(v); else parts.push({ name, vals: [v] });
+    }
+  }
+  const words = parts.map(p => (p.name ? `${p.name}: ${p.vals.join(', ')}` : p.vals.join(', ')));
+  return (compact && words.length > 4 ? [...words.slice(0, 3), `+${words.length - 3} more`] : words).join(' · ');
+}
+
 // ─── Slots ───────────────────────────────────────────────────────────────────
 
 export type SlotId =
   | 'labCheck' | 'teeth' | 'implantRecord' | 'remake' | 'remakeReason' | 'splint' | 'material' | 'shade' | 'photos'
   | 'wings' | 'system' | 'platform' | 'scanBody' | 'retention' | 'abutment' | 'inlayType' | 'type' | 'arch'
   | 'under18' | 'stage' | 'stages' | 'acrylic' | 'extract' | 'mould' | 'postdam' | 'base' | 'design' | 'work' | 'desc'
-  | 'deliveryDate';
+  | AlignerGroupId | 'deliveryDate';
 
 export interface Slot {
   id: SlotId;
@@ -834,6 +948,16 @@ export function slotsFor(item: ServiceItem, ctx: Ctx, d: CaseDraft): Slot[] {
       push({ id: 'arch', label: 'Arch', required: true, answered: !!item.arch, value: archCaps(item.arch), src: item.archSrc });
       break;
     }
+    case 'aligner': {
+      push({ id: 'arch', label: 'Arch', required: true, answered: !!item.arch, value: archCaps(item.arch), src: item.archSrc });
+      // The portal's order. Only the duration is needed; the other items count once anything in them is picked.
+      for (const g of ALIGNER_GROUPS) {
+        const need = g.fields.filter(f => f.required);
+        const answered = !reopened(g.id) && (need.length ? need.every(f => !!item.aligner?.[f.key]) : g.fields.some(f => !!item.aligner?.[f.key]));
+        push({ id: g.id, label: g.label, required: need.length > 0, answered, value: answered ? alignerReadback(item, g.id, true) : undefined });
+      }
+      break;
+    }
     case 'whitening': {
       if (isUnder18(ctx.patient, ctx.now)) push({ id: 'under18', label: 'Age check', required: true, answered: false });
       push({ id: 'arch', label: 'Arch', required: true, answered: !!item.arch, value: archCaps(item.arch), src: item.archSrc });
@@ -892,7 +1016,7 @@ export function slotsFor(item: ServiceItem, ctx: Ctx, d: CaseDraft): Slot[] {
   // earliest counts as answered, so it never blocks; a day sooner than the lab can make it needs a look.
   if (item.product !== 'denture') {
     const sd = serviceDate(item, ctx, receivedFor(d, ctx), d.fastTrack);
-    const ok = !!sd.backBy && !sd.tooSoon;
+    const ok = !!sd.backBy && !sd.tooSoon && !sd.offDay;
     push({
       id: 'deliveryDate', label: 'Delivery date', required: true, answered: ok,
       value: ok ? fmtDay(sd.backBy!) : undefined,
@@ -916,6 +1040,7 @@ export function priceKey(item: ServiceItem, ctx: Ctx): string | undefined {
     case 'nightguard': case 'retainer':
       return e.type ? `${item.product}:${e.type}` : undefined;
     case 'whitening': return 'whitening:trays';
+    case 'aligner': return 'aligner:clear';
     // The first ordered stage (its turnaround is the fallback lead time), or the treatment.
     case 'denture': { const first = orderedStages(item)[0]; return first ? `denture:${stageOption(item, first.id)}` : undefined; }
     case 'partial': return item.base ? `partial:${item.base}` : undefined;
@@ -926,7 +1051,7 @@ export function priceKey(item: ServiceItem, ctx: Ctx): string | undefined {
 export function unitsOf(item: ServiceItem): number {
   if (item.product === 'crown' || item.product === 'veneer') return Math.max(1, item.teeth.length);
   if (item.product === 'bridge') return item.rbb ? 1 : Math.max(1, item.teeth.length);
-  if (item.product === 'retainer' || item.product === 'whitening') return item.arch === 'both' ? 2 : 1;
+  if (item.product === 'retainer' || item.product === 'whitening' || item.product === 'aligner') return item.arch === 'both' ? 2 : 1;
   return 1;
 }
 export const fastTrackEligible = (item: ServiceItem, ctx: Ctx, lab: Lab = ctx.lab) => {
@@ -1140,7 +1265,11 @@ export interface ServiceDate {
   requested?: Date;
   /** The requested day is sooner than the lab can make it: the earliest stands in until it's changed. */
   tooSoon?: boolean;
+  /** The requested day isn't a lab working day (a weekend or bank holiday): like tooSoon, it needs another day. */
+  offDay?: boolean;
 }
+/** The clinic's own day stands: asked for, not too soon, on a working day. */
+export const askedFor = (p: ServiceDate) => !!p.requested && !p.tooSoon && !p.offDay;
 export interface CaseDates {
   route: DateRoute;
   received?: Date;
@@ -1148,6 +1277,8 @@ export interface CaseDates {
   earliestFit?: Date;
   /** Working days after the scan arrives (scan to follow). */
   ta?: number;
+  /** The case's day is one the clinic asked for (askedFor), not a count from when the lab receives it. */
+  fixed?: boolean;
   perItem: ServiceDate[];
 }
 
@@ -1172,8 +1303,10 @@ export function serviceDate(it: ServiceItem, ctx: Ctx, received: Date, fast: boo
   const requested = asked && !isNaN(asked.getTime()) ? asked : undefined;
   // A later day the clinic asks for is kept; a sooner one can't be made, so the earliest stands until it's changed.
   const tooSoon = !!requested && requested < earliest;
-  const backBy = requested && !tooSoon ? requested : earliest;
-  return { id: it.id, ta: backBy === earliest ? lead : workingDaysBetween(received, backBy), backBy, earliest, requested, tooSoon };
+  // The lab delivers on working days only: a Sunday or a bank holiday can't be the day either.
+  const offDay = !!requested && !tooSoon && !isWorkingDay(requested);
+  const backBy = requested && !tooSoon && !offDay ? requested : earliest;
+  return { id: it.id, ta: backBy === earliest ? lead : workingDaysBetween(received, backBy), backBy, earliest, requested, tooSoon, offDay };
 }
 
 export function caseDates(d: CaseDraft, ctx: Ctx, opts: { lab?: Lab; fastTrack?: boolean; items?: ServiceItem[] } = {}): CaseDates {
@@ -1186,7 +1319,9 @@ export function caseDates(d: CaseDraft, ctx: Ctx, opts: { lab?: Lab; fastTrack?:
   if (items.length === 0 || perItem.some(p => p.ta == null)) return { route, received, perItem };
   const ta = Math.max(...perItem.map(p => p.ta!));
   const backBy = perItem.reduce((a, p) => (p.backBy! > a ? p.backBy! : a), perItem[0].backBy!);
-  return { route, received, backBy, earliestFit: firstClinicDayAfter(backBy), ta, perItem };
+  // Set by the clinic's own day(s): it stays put whenever the scan arrives (while the lab can still make it).
+  const fixed = perItem.filter(p => sameDay(p.backBy!, backBy)).every(askedFor);
+  return { route, received, backBy, earliestFit: firstClinicDayAfter(backBy), ta, fixed, perItem };
 }
 
 /** With a fit date F: the lab must deliver by the last working day before F. */
@@ -1235,6 +1370,12 @@ export function splitSuggestion(d: CaseDraft, ctx: Ctx, dates: CaseDates) {
   const item = d.items.find(i => i.id === earliest.id)!;
   return { item, backBy: earliest.backBy! };
 }
+/** Send Separately, while it still holds: a date change that removes the split, or splits off another service, ends it. */
+export function agreedSplit(d: CaseDraft, ctx: Ctx, dates: CaseDates) {
+  if (!d.split) return null;
+  const s = splitSuggestion(d, ctx, dates);
+  return s && (!d.splitItem || s.item.id === d.splitItem) ? s : null;
+}
 
 // ─── Labels ──────────────────────────────────────────────────────────────────
 
@@ -1243,7 +1384,7 @@ export function itemTitle(item: ServiceItem, n: Notation = 'fdi'): string {
   const label = PRODUCTS[item.product].label;
   const name = item.product === 'other' ? 'Something Else' : label;
   if (item.product === 'bridge') return item.teeth.length > 1 ? `${name} · ${spanText(item.teeth, n)}` : name;
-  if (['nightguard', 'retainer', 'whitening', 'denture', 'reline'].includes(item.product)) {
+  if (['nightguard', 'retainer', 'aligner', 'whitening', 'denture', 'reline'].includes(item.product)) {
     const noun = item.product === 'nightguard' ? 'Night guard' : item.product === 'denture' ? 'Full denture' : label;
     return item.arch ? `${noun} · ${archCaps(item.arch)}` : noun;
   }
@@ -1266,6 +1407,7 @@ export function itemSpec(item: ServiceItem, ctx: Ctx): string {
   if (['crown', 'bridge', 'veneer', 'inlay', 'implant'].includes(item.product) && e.material) parts.push(optionName(item.product, e.material));
   if (item.product === 'implant' && e.retention === 'cement') parts.push('cement-retained');
   if ((item.product === 'nightguard' || item.product === 'retainer') && e.type) parts.push(optionName(item.product, e.type));
+  if (item.product === 'aligner' && item.aligner?.alignerDuration) parts.push(item.aligner.alignerDuration);
   if (item.product === 'denture') {
     const t = dentureTreatment(item);
     const ordered = orderedStages(item);
@@ -1338,11 +1480,11 @@ export function notesFor(d: CaseDraft, ctx: Ctx, dates: CaseDates): NoteDef[] {
     if (open) {
       out.push({
         id: `open:${it.id}`, itemId: it.id, step: slotStepId(it.id, 'arch'), kind: 'openCase', caseId: open.caseId,
-        text: `${ctx.patient.first} has an open case for a ${PRODUCTS[open.product].noun} (${archWord(open.arch)}) sent on ${fmtShort(fromISO(open.date))} (${open.caseId}).`,
+        text: `${ctx.patient.first} has an open case for ${aProduct(open.product)} (${archWord(open.arch)}) sent on ${fmtShort(fromISO(open.date))} (${open.caseId}).`,
       });
     }
     if (PRODUCTS[it.product].privateOnly && ctx.funding === 'nhs') {
-      const word = it.product === 'veneer' ? 'Veneers are' : it.product === 'implant' ? 'Implant crowns are' : 'Whitening trays are';
+      const word = it.product === 'veneer' ? 'Veneers are' : it.product === 'implant' ? 'Implant crowns are' : it.product === 'aligner' ? 'Aligners are' : 'Whitening trays are';
       out.push({ id: `private:${it.id}`, text: `${word} private only. This item goes to the lab as private work, not NHS.`, itemId: it.id, step: 'services', kind: 'plain' });
     }
   }

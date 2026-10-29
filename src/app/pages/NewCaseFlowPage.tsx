@@ -14,13 +14,13 @@ import { useToast } from '../context/ToastContext';
 import ModalPortal from '../components/ModalPortal';
 import FlowFrame from '../newCase/FlowFrame';
 import { CaseApi, CaseContext, DrawerState } from '../newCase/CaseContext';
-import { CLINIC, Funding, LabId, ProductId, labById, userById } from '../newCase/data';
+import { CLINIC, Funding, LABS, LabId, Patient, ProductId, labById, userById } from '../newCase/data';
 import { demoNow, demoTimeOf, fmtTime, fromISO, toISO } from '../newCase/dates';
 import { useShipped } from '../newCase/dispatch';
 import {
   CaseDraft, PRODUCTS, ServiceItem, SlotId, buildSteps, caseDates, effective, firstGap, gapCount, isPosted,
   itemPhrase, labMakes, nextGap, notesFor, optionAvail, optionName, parseStep, recordsState, sendMode,
-  splitSuggestion, plural, sendLabel, Ctx, orderedStages, seedDenturePlan, stageOption,
+  splitSuggestion, agreedSplit, plural, sendLabel, Ctx, orderedStages, seedDenturePlan, stageOption, nextStageExtra, repeatExtra,
 } from '../newCase/rules';
 import {
   CaseRow, addEvent, blankDraft, getPatient, getRow, learnLogin, loginMap, newItem, nextCaseId, removeRow, restore, saveRow,
@@ -50,19 +50,43 @@ export default function NewCaseFlowPage() {
   );
 }
 
+/**
+ * A walkthrough flow's Open: the patient, and with `lab` the lab already picked; with `service` (or `start` =
+ * repeat / next, the Services step's Repeat and Next stage chips) that service already added, so the case
+ * opens on its card. Anything the lab doesn't make (or a chip the patient doesn't have) is left to pick.
+ */
+function presetDraft(p: Patient, sp: URLSearchParams): CaseDraft {
+  const d = blankDraft(p);
+  const labId = sp.get('lab');
+  if (!labId || !LABS.some(l => l.id === labId)) return d;
+  const lab = labById(labId);
+  const picked: CaseDraft = { ...d, lab: lab.id, labSrc: lab.id === d.lab ? d.labSrc : 'You', labPicked: true };
+  const start = sp.get('start');
+  const service = sp.get('service') as ProductId | null;
+  const item = start === 'repeat' && p.repeat && labMakes(lab, p.repeat.product) && optionAvail(lab, p.repeat.product, p.repeat.option, d.funding).ok
+    ? newItem(p.repeat.product, repeatExtra(p.repeat))
+    : start === 'next' && p.nextStage && labMakes(lab, 'denture')
+      ? newItem('denture', nextStageExtra(p.nextStage))
+      : service && service in PRODUCTS && labMakes(lab, service) ? newItem(service) : undefined;
+  return item ? { ...picked, items: [item] } : picked;
+}
+
 function CaseLoader({ id, sessionKey }: { id: string; sessionKey: string }) {
   const [sp] = useSearchParams();
   // Where to open: the AI page's Details passes a step (or "item:<id>" for a service).
-  const startStep = (useLocation().state as { step?: string } | null)?.step;
+  const askedStep = (useLocation().state as { step?: string } | null)?.step;
   const store = useFlowStore();
   const user = userById(store.userId)!;
   const initial = useMemo(() => {
     const row = id !== 'new' ? getRow(id) : undefined;
     if (row?.draft) return { draft: row.draft, row };
     const p = getPatient(sp.get('patient') ?? '');
-    return p ? { draft: blankDraft(p), row: undefined } : null;
+    return p ? { draft: presetDraft(p, sp), row: undefined } : null;
     // Loaded once per case session.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // A preset service opens on its card, even when it's already complete (a Repeat).
+  const preset = !initial?.row && initial?.draft.items[0];
+  const startStep = askedStep ?? (preset ? `item:${preset.id}` : undefined);
   // A finished case opened here (an old link, Back) lands on the portal's Case Details. Checked once
   // per session, so sending from this page still shows the Sent screen.
   const finished = useMemo(() => {
@@ -279,11 +303,15 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
     });
   }, [user]);
 
-  // A new case is saved (gets an ID and a Draft row) at its first service or note.
+  // A new case is saved (gets an ID and a Draft row) at its first service or note. A walkthrough Open's preset
+  // service is there from the start, so this runs on mount: the ref hands out one ID however often it runs (and
+  // forgets it once the draft has it, so a case that loses its ID, a scan's on a change of patient, gets a new one).
+  const newId = useRef<string>();
   useEffect(() => {
-    if (readOnly || draft.id) return;
+    if (draft.id) { newId.current = undefined; return; }
+    if (readOnly) return;
     if (draft.items.length === 0 && !draft.note.trim() && !draft.instructions?.trim()) return;
-    const id = nextCaseId();
+    const id = newId.current ?? (newId.current = nextCaseId());
     setDraft(d => ({ ...d, id }));
     navigate(`/flows/new-case/case/${id}`, { replace: true, state: { session: sessionKey } });
   }, [draft.items.length, draft.note, draft.id, readOnly, navigate, sessionKey]);
@@ -412,7 +440,16 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
     toast.info(`Case moved to ${np.first} ${np.last}.`);
   };
 
-  const sendSeparately = useCallback((on: boolean) => setDraft(d => ({ ...d, split: on, keepTogether: !on })), []);
+  // Send Separately remembers which service goes alone, so a later date change can't swap it for another.
+  const sendSeparately = useCallback((on: boolean) => setDraft(d => {
+    const s = on ? splitSuggestion(d, ctxRef.current, caseDates(d, ctxRef.current)) : null;
+    return { ...d, split: !!s, splitItem: s?.item.id, keepTogether: !on };
+  }), []);
+  // A split that no longer holds (a Delivery date change brought the services together, or another one is now
+  // the early one) is turned off, so Review and the button never promise 2 cases that won't go.
+  useEffect(() => {
+    if (draft.split && !agreedSplit(draft, ctx, dates)) update(d => ({ ...d, split: false, splitItem: undefined }));
+  }, [draft, ctx, dates, update]);
 
   const ensureId = (d: CaseDraft): CaseDraft => (d.id ? d : { ...d, id: nextCaseId() });
   const saveAndClose = (withToast: boolean) => {
@@ -439,7 +476,7 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
     const follow = recordsState(draft, ctx) === 'follow';
     const posted = isPosted(recordsState(draft, ctx));
     const d0 = ensureId(draft);
-    const split = d0.split ? splitSuggestion(d0, ctx, dates) : null;
+    const split = agreedSplit(d0, ctx, dates);
     const groups = split ? [[split.item], d0.items.filter(i => i.id !== split.item.id)] : [d0.items];
     // Approving reuses the IDs made when it was sent for approval: no duplicate orders.
     const ids = d0.groupIds && d0.groupIds.length === groups.length ? d0.groupIds : groups.map((_, k) => (k === 0 ? d0.id! : nextCaseId()));
@@ -519,6 +556,8 @@ function CaseEditor({ initial, row: initialRow, user, sessionKey, startStep }: {
       // A portal modal is open (Mark as dispatched, Print label, Dispatch details: ModalPortal locks the page's scroll):
       // Esc is that modal's, never "leave the case".
       if (document.body.style.overflow === 'hidden') return;
+      // Esc in a dropdown, date or text field closes that field's own popup (or does nothing), never the case.
+      if ((e.target as HTMLElement | null)?.closest?.('select, input, textarea, [contenteditable="true"]')) return;
       if (sent) return;
       saveAndClose(false);
     }

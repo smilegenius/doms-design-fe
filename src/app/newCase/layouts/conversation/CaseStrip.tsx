@@ -13,7 +13,8 @@ import { CaseIdBadge, CaseMenu, CloseButton, SaveIndicator } from '../CaseHeader
 export default function CaseStrip() {
   const { patient, lab, draft, ctx, dates, readOnly, go } = useCase();
   const funding = draft.funding === 'nhs' ? 'NHS' : 'Private';
-  const back = dates.route === 'follow' && dates.ta != null
+  // A day the clinic asked for is fixed: only a lab's lead time counts from the scan.
+  const back = dates.route === 'follow' && dates.ta != null && !dates.fixed
     ? `Back ${plural(dates.ta, 'working day')} after the scan`
     : dates.backBy ? `Back by ${fmtDay(dates.backBy)}` : '';
   return (
