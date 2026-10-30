@@ -1,20 +1,22 @@
 // ─── Lab work — list and case ────────────────────────────────────────────────
 // A plain list of cases (no timeline / day grouping), soonest delivery date
 // first, narrowed by the status chips, search and dentist / lab filters.
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  CalendarClock, CheckCircle2, ClipboardCheck, Clock, FileText, FlaskConical, Image as ImageIcon, Inbox, MessageSquare, PackageCheck,
-  Paperclip, Pause, PlusCircle, Search, Send, Truck, X, Hammer, Building, Filter, User, List, LayoutGrid,
+  AlertTriangle, CalendarClock, CheckCircle2, ClipboardCheck, Clock, FileText, FlaskConical, Image as ImageIcon, Inbox, Loader2, MessageSquare, PackageCheck,
+  Paperclip, Pause, PlusCircle, Search, Send, Sparkles, Truck, X, Hammer, Building, Filter, User, List, LayoutGrid,
 } from '../icons';
 import { FEATURES, ME, useGo, useScoped } from '../store';
 import { ReceiveSheet } from './Logistics';
+import { CaseDocBar, FileViewer, StageRow, canOpen } from './CaseDocs';
+import { PaperRx } from './ReadSource';
 import {
   ATTENTION, Attention, CLINICIANS, labStatusOf, LABS, LabCase, LabStatus, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
-  createdOn, initials, patientById, STAGE_NAMES, StageLine, dueLabel, patchItemStages, phaseName, remainingStages, stagedKindOf, practiceName, readiness, relDay, shortName, stageIndex,
+  createdOn, initials, isReading, patientById, STAGE_NAMES, StageLine, dueLabel, patchItemStages, phaseName, remainingStages, stagedKindOf, practiceName, readiness, relDay, shortName, stageIndex,
 } from '../data';
 import { NOTIFIES_CLINIC } from '../lab/labData';
-import { Btn, Card, Chips, EmptyState, IconTile, Input, Label, Pill, PickerField, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, TeethChips, cx, useBase } from '../ui';
+import { Btn, Card, Chips, EmptyState, IconTile, Input, Label, Pill, PickerField, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, TeethChips, cx, useBase, useReadTick } from '../ui';
 
 // ─── Rows and cards ─────────────────────────────────────────────────────────
 // Two views of the same cases: a dense list (default) and roomier cards.
@@ -28,8 +30,11 @@ function labStatusNote(e: LabCase['events'][number]): { status: string; title: s
 
 const drShort = (c: LabCase) => clinicianName(c.clinician).replace(/^Dr (\S)\S* /, 'Dr $1. ');
 const labShort = (c: LabCase) => labName(c.lab).replace(/ (Dental )?(Lab|Laboratory|Works)$/, '');
-// The light version has no step-by-step form, so a draft opens its case page there
-const openCase = (c: LabCase, base = '/go') => (c.stage === 'draft' && base === '/go' ? `/go/new/manual?draft=${c.id}` : `${base}/work/${c.id}`);
+// The light version has no step-by-step form, so a draft opens its case page there. A draft made from a
+// prescription photo opens the light version's review page, filled in from the read.
+const openCase = (c: LabCase, base = '/go') => (c.stage === 'draft' && base === '/go' ? `/go/new/manual?draft=${c.id}`
+  : c.scan && base !== '/go' ? `${base}/new?draft=${c.id}` : `${base}/work/${c.id}`);
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
 /** Status pill text; an overdue case shows how late it is ("2 days late") instead of "Late". */
 const pillLabel = (c: LabCase, label: string) => {
@@ -60,11 +65,61 @@ const Initials = ({ c, size = 40 }: { c: LabCase; size?: number }) => (
   </span>
 );
 
-/** List view: initials · patient + case ID · dentist + lab · status + delivery date. */
+/**
+ * The case's services as small chips: the first two when both fit on the line (else the first), then "+N" for
+ * the rest. All of them on hover.
+ */
+function ServiceChips({ c }: { c: LabCase }) {
+  const items = allItems(c);
+  const line = useRef<HTMLSpanElement>(null);
+  const [two, setTwo] = useState(true);
+  // Try two (again whenever the case changes); drop to one if the line overflows.
+  useLayoutEffect(() => { setTwo(true); }, [c.id, items.length]);
+  useLayoutEffect(() => {
+    const el = line.current;
+    if (two && items.length > 1 && el && el.scrollWidth > el.clientWidth + 1) setTwo(false);
+  });
+  if (!items.length) return null;
+  const shown = items.slice(0, two ? 2 : 1);
+  const more = items.length - shown.length;
+  return (
+    <span ref={line} title={items.map(it => it.service).join(', ')} className="flex items-center gap-1 min-w-0 mt-1 overflow-hidden">
+      {shown.map((it, i) => (
+        <span key={i} className={cx('inline-flex items-center h-5 px-2 rounded-full bg-go-raised border border-go-line text-[10.5px] font-semibold text-go-ink2 whitespace-nowrap',
+          'flex-shrink-0', shown.length === 1 && 'max-w-[55%]')}>
+          <span className="truncate min-w-0">{it.service}</span>
+        </span>
+      ))}
+      {more > 0 && <span className="h-5 px-1.5 rounded-full bg-go-brand-soft text-[10.5px] font-bold text-go-brand-ink flex items-center flex-shrink-0">+{more}</span>}
+    </span>
+  );
+}
+
+/** A prescription photo still being read: its thumbnail, when it was taken, and "Reading". Opens the scan screen. */
+function ReadingRow({ c }: { c: LabCase }) {
+  const navigate = useNavigate();
+  const base = useBase();
+  return (
+    <button onClick={() => navigate(openCase(c, base))} className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-go-raised transition">
+      <span className="relative w-10 h-10 rounded-xl overflow-hidden bg-white border border-go-line flex-shrink-0">
+        {c.scan?.photoUrl ? <img src={c.scan.photoUrl} alt="" className="w-full h-full object-cover" /> : <PaperRx className="w-full h-full" />}
+        <span className="go-scanline absolute left-0 right-0 h-0.5 go-grad" />
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[14px] font-semibold text-go-ink truncate">Reading the prescription…</span>
+        <span className="block text-[12px] text-go-muted truncate mt-0.5">Photo taken {timeOf(c.scan!.takenAt)} · the details will appear here</span>
+      </span>
+      <Pill tone="brand" className="!h-[22px] !px-2 flex-shrink-0"><Loader2 className="w-3 h-3 animate-spin" />Reading</Pill>
+    </button>
+  );
+}
+
+/** List view: initials · patient + case ID · dentist + lab · service (+ next stage) · status + delivery date. */
 function CaseRow({ c }: { c: LabCase }) {
   const navigate = useNavigate();
   const base = useBase();
   const r = readiness(c);
+  if (isReading(c)) return <ReadingRow c={c} />;
   return (
     <button onClick={() => navigate(openCase(c, base))} className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-go-raised transition">
       <Initials c={c} />
@@ -74,8 +129,16 @@ function CaseRow({ c }: { c: LabCase }) {
           <span className="text-[10.5px] text-go-faint font-mono flex-shrink-0">{c.id}</span>
         </span>
         <WhoLine c={c} className="mt-0.5" />
-        {/* Denture stage / aligner phase that the date belongs to */}
+        <ServiceChips c={c} />
+        {/* Denture stage / aligner phase that the date belongs to: its own line, so the chips keep theirs */}
         {dueLabel(c) && <span className="block text-[11.5px] font-medium text-go-violet mt-0.5 truncate">Next: {dueLabel(c)}</span>}
+        {/* A draft read from a photo: what is left to check before it can be sent */}
+        {c.scan && (
+          <span className={cx('flex items-center gap-1 text-[11.5px] font-medium mt-0.5 min-w-0', c.scan.toCheck ? 'text-go-warn' : 'text-go-ok')}>
+            {c.scan.toCheck ? <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" /> : <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />}
+            <span className="truncate">From photo · {c.scan.toCheck ? `${c.scan.toCheck} detail${c.scan.toCheck === 1 ? '' : 's'} to check` : 'all details found'}</span>
+          </span>
+        )}
       </span>
       <span className="flex flex-col items-end flex-shrink-0">
         <Pill tone={READINESS_TONE[r.level]} className="!h-[22px] !px-2">{pillLabel(c, r.label)}</Pill>
@@ -181,11 +244,16 @@ const dueIn = (c: LabCase, b: [string, string] | null) => {
 };
 const fmtYmd = (s: string) => new Date(`${s}T12:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
+/** Demo: cases with several services come right after the pinned ones, so the chips with a count are easy to find. */
+const multiFirst = (x: LabCase, y: LabCase) => Number(allItems(y).length > 1) - Number(allItems(x).length > 1);
+/** Drafts from prescription photos come first, in the order they were taken, so a batch just saved is on top. */
+const scansFirst = (x: LabCase, y: LabCase) => Number(!!y.scan) - Number(!!x.scan) || (x.scan && y.scan ? x.scan.takenAt.localeCompare(y.scan.takenAt) : 0);
 /** Soonest delivery date first; cases with no date (e.g. drafts) at the end. */
-const byDelivery = (x: LabCase, y: LabCase) => (x.pin ?? 99) - (y.pin ?? 99) || (x.returnBy || '9').localeCompare(y.returnBy || '9');
+const byDelivery = (x: LabCase, y: LabCase) => scansFirst(x, y) || (x.pin ?? 99) - (y.pin ?? 99) || multiFirst(x, y) || (x.returnBy || '9').localeCompare(y.returnBy || '9');
 
 export function LabWorkScreen() {
   const { cases } = useScoped();
+  useReadTick(cases);
   const [params, setParams] = useSearchParams();
   const day = params.get('day') ? Number(params.get('day')) : null;
   // Status filter from the Home tiles: ready | arriving | questions | overdue
@@ -223,6 +291,7 @@ export function LabWorkScreen() {
       && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds) && dueIn(c, dueBounds);
   }), [cases, q, day, dentist, labF, bounds?.[0], bounds?.[1], dueBounds?.[0], dueBounds?.[1]]);
   const shown = base.filter(c => rf === 'all' || readiness(c).level === rf);
+  const reading = shown.filter(isReading).length;
   // Several keys in one update (two setParam calls in a row would overwrite each other)
   const setMany = (kv: Record<string, string | null>) => {
     const n = new URLSearchParams(params);
@@ -304,6 +373,15 @@ export function LabWorkScreen() {
             })}
           </div>
           <div className="px-4 mt-3 space-y-4">
+            {/* Prescription photos still being read (Light version: several taken in a row) */}
+            {reading > 0 && (
+              <div className="flex items-center gap-3 rounded-2xl border border-go-brand/25 bg-go-brand-soft px-3.5 py-2.5">
+                <Sparkles className="w-5 h-5 text-go-brand go-pulse flex-shrink-0" />
+                <p className="text-[12.5px] text-go-brand-ink leading-snug">
+                  <span className="font-semibold">Reading {reading} prescription{reading === 1 ? '' : 's'}…</span> Each one becomes a draft for you to check and send.
+                </p>
+              </div>
+            )}
             {!!shown.length && (view === 'cards' ? (
               <div className="space-y-2.5">{[...shown].sort(byDelivery).map(c => <CaseCard key={c.id} c={c} />)}</div>
             ) : (
@@ -480,25 +558,6 @@ const ymdOf = (iso: string) => iso.slice(0, 10);
 const isoFromYmd = (d: string) => (d ? new Date(`${d}T12:00`).toISOString() : '');
 const tomorrowYmd = () => new Date(Date.now() + 864e5).toISOString().slice(0, 10);
 
-/** One stage / phase row: name, date and where it is. */
-function StageRow({ s, n }: { s: StageLine; n: number }) {
-  const late = !s.state && !!s.date && dayOffset(s.date) < 0;
-  const tag = s.state === 'done-earlier' ? <Pill tone="neutral" className="!h-[22px] !px-2">Done earlier</Pill>
-    : s.state === 'received' ? <Pill tone="ok" className="!h-[22px] !px-2">Received</Pill>
-    : late ? <Pill tone="bad" className="!h-[22px] !px-2">Late</Pill>
-    : <Pill tone="brand" className="!h-[22px] !px-2">{s.date ? 'Due' : 'No date'}</Pill>;
-  return (
-    <div className="flex items-center gap-2.5 py-2">
-      <span className={cx('w-5 h-5 rounded-md text-[10.5px] font-bold flex items-center justify-center flex-shrink-0',
-        s.state ? 'bg-go-raised text-go-faint' : 'bg-go-violet-soft text-go-violet')}>{n}</span>
-      <span className="flex-1 min-w-0">
-        <span className={cx('block text-[13px] font-semibold truncate', s.state ? 'text-go-muted' : 'text-go-ink')}>{s.name}</span>
-        <span className="block text-[11.5px] text-go-muted">{s.date ? fmtDate(s.date) : s.state === 'done-earlier' ? 'Done elsewhere' : 'Date not set'}{s.orderedAt ? ` · ordered ${fmtDate(s.orderedAt)}` : ''}</span>
-      </span>
-      {tag}
-    </div>
-  );
-}
 
 function ServicesCard({ c, onOrder }: { c: LabCase; onOrder: (index: number) => void }) {
   const items = allItems(c);
@@ -611,10 +670,12 @@ export function CaseDetailScreen() {
   const [chase, setChase] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(params.get('receive') === '1');
   const [orderFor, setOrderFor] = useState<number | null>(null);
+  const [fileOpen, setFileOpen] = useState<string | null>(null);
   if (!c) {
     return <Screen header={<TopBar back fallback={`${base}/work`} title="Lab work" />}><EmptyState icon={<Search className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
   }
   if (c.stage === 'draft' && base === '/go') return <Navigate to={`/go/new/manual?draft=${c.id}`} replace />;
+  if (c.scan) return <Navigate to={openCase(c, base)} replace />;
   const p = patientById(c.patientId);
   const r = readiness(c);
   const a = nextAction(c);
@@ -647,26 +708,31 @@ export function CaseDetailScreen() {
     ['Dentist', clinicianName(c.clinician)],
     ['Material', c.material],
     ['Shade', [c.shade, c.stumpShade && `stump ${c.stumpShade}`].filter(Boolean).join(' · ') || '—'],
-    ['Next delivery', `${dueLabel(c) ? `${dueLabel(c)} · ` : ''}${fmtDate(c.returnBy)}`],
+    // No Next delivery tile: each service card above shows its own delivery date.
     ['Order type', c.funding],
     ['Practice', practiceName(c.practice)],
     ['Created by', c.source === 'photo' ? `${c.createdBy} · from photo` : c.createdBy],
   ];
 
+  // Sticky next-step bar: Dispatch / Reply / Mark as received / Chase stay in thumb reach.
+  // Hidden on the Comments tab while replying — the composer there is the action.
+  const cta = step.cta && !((a === 'reply' || a === 'on-hold') && tab === 'messages') ? (
+    <div className="flex items-center gap-3">
+      <IconTile icon={step.icon} tone={step.tone} size="sm" />
+      <div className="flex-1 min-w-0">
+        <p className="text-[13.5px] font-semibold text-go-ink truncate">{step.title}</p>
+        <p className="text-[11.5px] text-go-muted truncate">{step.body}</p>
+      </div>
+      <Btn size="md" onClick={step.cta.run} className={cx('!h-11 !px-5', a === 'chase' && '!bg-none !bg-go-bad !shadow-none')}>{step.cta.label}</Btn>
+    </div>
+  ) : null;
+  // Order form and Files & scans float in a capsule just above the next step; it shrinks to icons while scrolling
+  // down (off on Comments, where the composer needs the room).
+  const docs = tab !== 'messages' ? (compact: boolean) => <CaseDocBar c={c} compact={compact} /> : undefined;
+
   return (
     <Screen header={<TopBar back fallback={`${base}/work`} title={p.name} sub={`${c.id} · DOB ${p.dob}`} />}
-      // Sticky next-step bar: Dispatch / Reply / Mark as received / Chase stay in thumb reach.
-      // Hidden on the Comments tab while replying — the composer there is the action.
-      footer={step.cta && !((a === 'reply' || a === 'on-hold') && tab === 'messages') ? (
-        <div className="flex items-center gap-3">
-          <IconTile icon={step.icon} tone={step.tone} size="sm" />
-          <div className="flex-1 min-w-0">
-            <p className="text-[13.5px] font-semibold text-go-ink truncate">{step.title}</p>
-            <p className="text-[11.5px] text-go-muted truncate">{step.body}</p>
-          </div>
-          <Btn size="md" onClick={step.cta.run} className={cx('!h-11 !px-5', a === 'chase' && '!bg-none !bg-go-bad !shadow-none')}>{step.cta.label}</Btn>
-        </div>
-      ) : undefined}>
+      footer={cta ?? undefined} floating={docs}>
       {/* Summary */}
       <div className="px-4 pt-1">
         <div className="flex items-end justify-between gap-3">
@@ -770,12 +836,14 @@ export function CaseDetailScreen() {
         {tab === 'files' && (
           <div className="grid grid-cols-2 gap-2">
             {c.attachments.map(f => (
-              <div key={f} className="rounded-2xl bg-go-surface border border-go-line p-3 aspect-[4/3] flex flex-col justify-between">
+              // Tap to open it (a scan opens the 3D viewer full screen); impressions travel by post, so nothing to open
+              <button key={f} disabled={!canOpen(f)} onClick={() => setFileOpen(f)}
+                className="rounded-2xl bg-go-surface border border-go-line p-3 aspect-[4/3] flex flex-col justify-between text-left active:opacity-90 disabled:active:opacity-100">
                 <span className="w-9 h-9 rounded-xl bg-go-raised flex items-center justify-center text-go-muted">
                   {/photo/i.test(f) ? <ImageIcon className="w-[18px] h-[18px] text-go-brand" /> : /pdf/i.test(f) ? <FileText className="w-[18px] h-[18px] text-go-violet" /> : <Paperclip className="w-[18px] h-[18px]" />}
                 </span>
                 <p className="text-[12.5px] font-medium text-go-ink leading-snug line-clamp-2">{f}</p>
-              </div>
+              </button>
             ))}
             {!c.attachments.length && <EmptyState icon={<Inbox className="w-7 h-7" />} title="No files" />}
           </div>
@@ -785,6 +853,7 @@ export function CaseDetailScreen() {
       <ChaseSheet c={c} open={chase} onClose={() => setChase(false)} />
       <ReceiveSheet c={c} open={receiveOpen} onClose={() => setReceiveOpen(false)} />
       <OrderStageSheet c={c} index={orderFor} onClose={() => setOrderFor(null)} />
+      <FileViewer c={c} name={fileOpen} onChange={setFileOpen} onClose={() => setFileOpen(null)} />
     </Screen>
   );
 }

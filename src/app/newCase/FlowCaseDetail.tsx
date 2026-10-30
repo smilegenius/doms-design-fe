@@ -7,9 +7,9 @@
 // are written back to the flow's store, so the real Cases list is never touched.
 // Drafts, including ones waiting for approval, stay in the flow's own editor.
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import CaseDetailPage, { type CaseForDetail, type ServiceItem as PortalItem } from '../pages/CaseDetailPage';
+import CaseDetailPage, { OrderFormSlot, type CaseForDetail, type OrderFormHost, type ServiceItem as PortalItem } from '../pages/CaseDetailPage';
 import { getDispatchRecord, removeDispatch, useDispatchRecord, type DispatchRecord } from '../data/dispatchRecords';
 import { useScannerConnections } from '../data/scannerConnections';
 import { statusReach } from '../data/caseProvenance';
@@ -17,11 +17,13 @@ import { formatCaseDate } from '../data/rescanDetection';
 import { caseDateToISO, isoToCaseDate } from '../data/dentureStages';
 import { useToast } from '../context/ToastContext';
 import FlowFrame from './FlowFrame';
-import { CLINIC, Funding, Patient, PriorWork, ProductId, User, labById, userById } from './data';
-import { DEMO_NOW, demoNow, demoTimeOf, fromISO, lastWorkingDayBefore, toISO } from './dates';
+import OrderFormSheet, { OrderFormFullView, type OrderFormModel, type StageStatus } from './OrderForm';
+import { CLINIC, Funding, Patient, PriorWork, ProductId, USERS, User, labById, userById } from './data';
+import { DEMO_NOW, demoNow, demoTimeOf, fmtFull, fromISO, lastWorkingDayBefore, toISO } from './dates';
 import {
-  Ctx, Effective, PARTIAL_STAGES, ServiceItem, archTeethIds, caseDates, caseInstructions, dentureTreatment, effective,
-  isPosted, isStageId, itemFunding, optionName, patientAge, recordsState, shadeText, stageName, stagePlan,
+  Ctx, DENTURE_STAGES, Effective, FileRole, PARTIAL_STAGES, ServiceItem, archTeethIds, archWord, bridgeParts, caseDates,
+  caseInstructions, dentureTreatment, effective, isPosted, isStageId, itemFunding, itemTitle, optionName, patientAge,
+  recordsState, shadeText, spanText, stageName, stagePlan, teethText, treatmentName,
 } from './rules';
 import { CaseRow, RowStatus, getPatient, getRow, markDispatched, newItem, saveRow, useFlowStore } from './store';
 import { sentCtx } from './derive';
@@ -248,6 +250,156 @@ export function toCaseForDetail(row: CaseRow, user: User, shipped?: DispatchReco
   };
 }
 
+// ─── Order form ──────────────────────────────────────────────────────────────
+
+const fullDate = (iso?: string) => (iso ? fmtFull(fromISO(iso)) : undefined);
+/** "19/08/1955" → "19 Aug 1955" */
+const dobText = (dob: string) => {
+  const [d, m, y] = dob.split('/').map(Number);
+  return y ? fmtFull(new Date(y, m - 1, d)) : dob;
+};
+const FILE_ROLE: Record<FileRole, string> = { upper: 'Upper jaw', lower: 'Lower jaw', bite: 'Bite', other: 'Other' };
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** What a service's prescription says beyond material and shade: funding first, then what the lab needs for it. */
+function otherDetails(item: ServiceItem, funding: Funding, n: User['notation'], e?: Effective): string {
+  const parts: (string | undefined)[] = [itemFunding(item.product, funding) === 'nhs' ? 'NHS' : 'Private'];
+  if (item.product === 'denture') {
+    parts.push(treatmentName(dentureTreatment(item)));
+    if (e?.mould ?? item.mould) parts.push(`Mould: ${e?.mould ?? item.mould}`);
+    if (item.postdam) parts.push(`Post-dam: ${item.postdam}`);
+  }
+  if (item.product === 'bridge' && item.teeth.length > 1) {
+    const { pontics } = bridgeParts(item);
+    parts.push(`${item.teeth.length} units${pontics.length ? ` · pontic ${teethText(pontics, n)}` : ''}`);
+  }
+  if (item.product === 'implant' && (e?.system ?? item.system)) parts.push([e?.system ?? item.system, e?.platform ?? item.platform].filter(Boolean).join(' '));
+  if (item.product === 'aligner' && item.aligner?.alignerDuration) parts.push(item.aligner.alignerDuration);
+  if (item.product === 'other' && item.desc?.trim()) parts.push(item.desc.trim());
+  return parts.filter(Boolean).join(' · ');
+}
+
+/**
+ * The flow case as the lab's order form. A staged full denture carries its whole history: stages made on
+ * the patient's earlier case (Done, with that case's dates and instructions), stages done elsewhere, and
+ * the ones this case orders (with its status), so each new stage adds a row and an instruction card.
+ */
+export function orderFormModel(row: CaseRow, user: User, caseData: CaseForDetail): OrderFormModel {
+  const p = getPatient(row.patientId);
+  const lab = labById(row.labId);
+  const n = user.notation;
+  const draft = row.draft;
+  const ctx = sentCtx(row, user)?.ctx;
+  const hist = draft ? undefined : historyItem(row);
+  const items = draft ? draft.items : hist ? [hist] : [];
+  const funding = draft?.funding ?? p?.funding ?? CLINIC.defaultFunding;
+  // A history row's own record (its stages), and any earlier case a follow-up continues.
+  const prior = p?.history?.find(h => h.caseId === row.id);
+  const recordOf = (caseId?: string) => p?.history?.find(h => h.caseId === caseId);
+  const created = fullDate(caseDateToISO(caseData.createdAt)) ?? caseData.createdAt;
+  const status: StageStatus = row.status === 'Delivered' ? 'Done' : row.status === 'Ready for Dispatch' ? 'Ready for Dispatch' : 'In Progress';
+
+  // How the lab got it, and the files that came with it.
+  const rs = draft && ctx ? recordsState(draft, ctx) : undefined;
+  const courier = draft?.records.courier ?? getDispatchRecord(row.id)?.courier;
+  const posted = rs ? isPosted(rs) : caseData.source === 'post';
+  let receivedVia = caseData.source === 'scanner' ? `Scanner · ${caseData.scanner ?? '—'}` : caseData.source === 'email' ? 'Email' : 'Manual upload';
+  if (posted) receivedVia = `Impressions (By Post)${courier ? ` · ${courier}` : ''}`;
+  else if (rs === 'upload') receivedVia = `Via Scanner${draft?.records.scannerBrand ? ` · ${draft.records.scannerBrand}` : ''}`;
+  else if (caseData.receivedVia) receivedVia = caseData.receivedVia;
+  let scans: OrderFormModel['scans'] = [];
+  let scanNote: string | undefined;
+  if (draft?.scan) {
+    const ext = draft.scan.scanner === '3Shape' ? 'dcm' : 'stl';
+    const a = draft.scan.arches;
+    scans = [a.upper && ['Upper jaw', 'UpperJawScan'], a.lower && ['Lower jaw', 'LowerJawScan'], a.bite && ['Bite', 'BiteScan']]
+      .filter((x): x is string[] => !!x)
+      .map(([type, file]) => ({ type, file: `${file}.${ext}`, date: created }));
+  } else if (rs === 'upload') {
+    scans = draft!.records.files.map(f => ({ type: FILE_ROLE[f.role ?? 'other'], file: f.name, date: created }));
+  } else if (posted) {
+    scanNote = `Impressions (By Post)${courier ? ` with ${courier}` : ''}: they come in the parcel, so there are no scan files.`;
+  } else if (rs === 'follow') {
+    scanNote = 'Scan to follow: the scan is added here when it arrives.';
+  }
+  const attachments = items.flatMap(it => it.photos.map(ph => ({ file: `${ph.label.replace(/\s+/g, '_')}.jpg`, type: 'Photo', date: created })));
+
+  // A staged full denture: every stage in order.
+  const den = items.find(it => it.product === 'denture' && dentureTreatment(it) === 'staged');
+  const plan = den ? stagePlan(den) : [];
+  const stages: OrderFormModel['stages'] = den ? DENTURE_STAGES.map(({ id, name }, i) => {
+    const row1 = { n: i + 1, name };
+    // A history row: the stages made on it are its record's.
+    const own = !draft ? prior?.stages?.find(s => s.id === id) : undefined;
+    if (own) return { ...row1, created: fullDate(own.created), due: fullDate(own.due), status };
+    const s = plan.find(x => x.id === id);
+    if (!s) return row1;
+    if (s.state === 'here') {
+      const rec = recordOf(s.caseId)?.stages?.find(x => x.id === id);
+      return { ...row1, created: fullDate(rec?.created), due: fullDate(rec?.due), status: 'Done' as const, caseId: s.caseId };
+    }
+    if (s.state === 'elsewhere') return { ...row1, due: fullDate(s.date), status: 'Done elsewhere' as const };
+    return { ...row1, created, due: fullDate(s.date), status };
+  }) : undefined;
+
+  // Instructions: each stage made so far with what it asked for, then this case's own.
+  const instructions: OrderFormModel['instructions'] = [];
+  if (den && stages) {
+    for (const st of stages) {
+      const id = DENTURE_STAGES[st.n - 1].id;
+      const note = st.caseId ? recordOf(st.caseId)?.stages?.find(x => x.id === id)?.note : !draft ? prior?.stages?.find(x => x.id === id)?.note : undefined;
+      if (note) instructions.push({ n: st.n, title: st.caseId ? `${st.name} · ${st.caseId}` : st.name, text: note, status: st.status });
+    }
+    if (draft) {
+      const ordered = stages.filter(st => st.status && st.status !== 'Done elsewhere' && !st.caseId);
+      if (ordered.length) {
+        instructions.push({ n: ordered[0].n, title: ordered.map(st => st.name).join(' · '), text: den.note?.trim() || 'No instructions for this stage.', status });
+      }
+    }
+  }
+  if (draft?.instructions?.trim()) {
+    // Edited at Review: the case's own text, as the lab gets it.
+    instructions.push({ title: 'Case Instructions', text: draft.instructions.trim(), status });
+  } else {
+    if (draft?.note.trim()) instructions.push({ title: 'Case Instructions', text: draft.note.trim(), status });
+    items.filter(it => it !== den && it.note?.trim()).forEach(it => instructions.push({ title: itemTitle(it, n), text: it.note!.trim(), status }));
+  }
+
+  const services = items.map((it, k) => {
+    const e = ctx ? effective(it, ctx) : undefined;
+    const portal = caseData.serviceItems?.[k];
+    const name = it.product === 'denture' ? (dentureTreatment(it) === 'immediate' ? 'Immediate denture' : 'Full denture') : PORTAL_SERVICE[it.product];
+    const where = it.teeth.length ? (it.product === 'bridge' ? spanText(it.teeth, n) : teethText(it.teeth, n)) : it.arch ? capital(archWord(it.arch)) : '—';
+    const delivery = it.product === 'denture' ? 'Per stage' : portal?.deliveryDate ? fullDate(caseDateToISO(portal.deliveryDate)) ?? portal.deliveryDate : '—';
+    return { name, where, material: portal?.material ?? materialOf(it, e) ?? '—', shade: shadeText(it) || '—', other: otherDetails(it, funding, n, e), delivery };
+  });
+  const titleOf = (it: ServiceItem) => (it.product === 'denture' ? `Full denture (${archWord(it.arch)})` : itemTitle(it, n));
+  const dentist = USERS.find(u => u.name === caseData.dentist);
+
+  return {
+    id: row.id,
+    receivedVia,
+    url: `https://app.smilegenius.co.uk/cases/${row.id}`,
+    patient: { name: caseData.patientName, dob: p ? dobText(p.dob) : '—', sex: p ? SEX[p.sex] : undefined },
+    dentist: { name: caseData.dentist, detail: dentist?.gdc ? `GDC ${dentist.gdc}` : undefined },
+    practice: { name: CLINIC.name, address: CLINIC.address },
+    lab: { name: lab.name, address: lab.address },
+    caseType: items.length ? items.map(titleOf) : [row.service],
+    notation: n,
+    chart: {
+      teeth: [...new Set(items.flatMap(it => (it.teeth.length ? it.teeth : it.arch ? archTeethIds(it.arch) : [])))],
+      pontics: items.flatMap(it => (it.product === 'bridge' ? bridgeParts(it).pontics : [])),
+      legend: items.map(titleOf),
+    },
+    stages,
+    services,
+    instructions,
+    scans,
+    scanNote,
+    attachments,
+  };
+}
+
 export default function FlowCaseDetail() {
   return (
     <FlowFrame>
@@ -266,6 +418,8 @@ function DetailBody() {
   const shipped = useShipped(row);
   const connections = useScannerConnections();
   const caseData = useMemo(() => (row && row.status !== 'Draft' ? toCaseForDetail(row, user, shipped) : null), [row, user, shipped]);
+  // The order form at reading size: opened by the tab bar's full screen ('view') or Print ('print').
+  const [formView, setFormView] = useState<'view' | 'print' | null>(null);
 
   // Case IDs come back after Reset demo: a dispatch recorded before this case was sent belongs to an
   // earlier run, and the portal page reads the record as it is, so it goes.
@@ -321,8 +475,19 @@ function DetailBody() {
   };
   // The lab doesn't have it yet: not posted, or its scan is still to follow.
   const notAtLab = row.status === 'Ready for Dispatch' || row.flag === 'Awaiting scan';
+  // The flow's order form, wherever the portal page shows one (service panel, Full View, Order Form modal),
+  // and the Order form tab bar's full screen + Print, which open it at reading size.
+  const orderForm: OrderFormHost = {
+    render: ({ caseData: cd }) => <OrderFormSheet model={orderFormModel(row, user, cd)} />,
+    onFullView: () => setFormView('view'),
+    onPrint: () => setFormView('print'),
+  };
 
   return (
+    <OrderFormSlot.Provider value={orderForm}>
+    {formView && (
+      <OrderFormFullView model={orderFormModel(row, user, caseData)} autoPrint={formView === 'print'} onClose={() => setFormView(null)} />
+    )}
     <CaseDetailPage
       // A new status (Mark as dispatched) starts the page afresh; a moved date doesn't (the page follows it).
       key={`${row.id}:${row.status}`}
@@ -344,5 +509,6 @@ function DetailBody() {
       dispatchToday={toISO(demoNow())}
       currentUser={user.name}
     />
+    </OrderFormSlot.Provider>
   );
 }

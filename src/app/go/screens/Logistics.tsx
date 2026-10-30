@@ -44,6 +44,29 @@ function A4Label({ c }: { c: LabCase }) {
   );
 }
 
+/** Print several labels: the portal's A4 sheet for each case (as in its Print labels window), then Print. */
+export function PrintLabelsSheet({ cases, open, onClose, onPrinted }: { cases: LabCase[]; open: boolean; onClose: () => void; onPrinted: () => void }) {
+  const { toast } = useGo();
+  const n = cases.length;
+  return (
+    <Sheet open={open && n > 0} onClose={onClose} tall title={`Print ${n} label${n === 1 ? '' : 's'}`} sub="One A4 sheet per case. Put each in its parcel with the impressions."
+      footer={(
+        <Btn block icon={<Printer className="w-5 h-5" />} onClick={() => { toast(n === 1 ? 'Printing label…' : `Printing ${n} labels…`, 'info'); onPrinted(); }}>
+          Print {n} label{n === 1 ? '' : 's'}
+        </Btn>
+      )}>
+      <div className="space-y-4">
+        {cases.map((c, i) => (
+          <div key={c.id}>
+            <p className="mb-1.5 px-1 text-[12px] text-go-muted"><span className="font-semibold text-go-ink2">{i + 1} of {n}</span> · <span className="font-mono">{c.id}</span> · {patientById(c.patientId).name}</p>
+            <A4Label c={c} />
+          </div>
+        ))}
+      </div>
+    </Sheet>
+  );
+}
+
 /** list = where Back and "done" return to; the light version passes its To dispatch list. */
 export function DispatchScreen({ list }: { list?: string }) {
   const c = useCase();

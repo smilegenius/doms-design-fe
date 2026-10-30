@@ -11,11 +11,11 @@
 //  • Lists with dividers: <Rows> instead of `divide-y`. Stack with `gap-*`, not `space-y-*`.
 //  • Use px for tracking/leading (tracking-[1.5px], leading-[18px]), not em/relative.
 //  • Dates: <DateField> (yyyy-mm-dd strings), never a text input.
-import { Children, Fragment, createElement, isValidElement, useMemo, useState } from 'react';
+import { Children, Fragment, createElement, isValidElement, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
-import type { PressableProps, StyleProp, TextInputProps, TextProps, ViewStyle } from 'react-native';
+import type { NativeScrollEvent, NativeSyntheticEvent, PressableProps, StyleProp, TextInputProps, TextProps, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
@@ -74,13 +74,25 @@ export function useCardShadow(): ViewStyle {
  * thumb reach). Background is transparent so the app's wash shows through.
  * tabs = leave room for the floating tab bar.
  */
-export function Screen({ header, children, footer, tabs, scroll = true, className }: {
+/** floating: hovers over the content just above the footer (the case's Order form / Files capsule). It is told
+ *  `compact` while the page scrolls down, so it can shrink out of the way. */
+export function Screen({ header, children, footer, tabs, scroll = true, className, floating }: {
   header?: React.ReactNode; children: React.ReactNode; footer?: React.ReactNode; tabs?: boolean; scroll?: boolean; className?: string;
+  floating?: (compact: boolean) => React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  const [compact, setCompact] = useState(false);
+  const lastY = useRef(0);
+  const onScroll = floating ? (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const d = y - lastY.current;
+    lastY.current = y;
+    if (y < 24) setCompact(false); else if (d > 4) setCompact(true); else if (d < -4) setCompact(false);
+  } : undefined;
   const body = scroll ? (
     <ScrollView className="flex-1" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: tabs ? 120 : 24 }}>
+      onScroll={onScroll} scrollEventThrottle={16}
+      contentContainerStyle={{ paddingBottom: tabs ? 120 : floating ? 80 : 24 }}>
       {children}
     </ScrollView>
   ) : <View className="flex-1">{children}</View>;
@@ -88,6 +100,14 @@ export function Screen({ header, children, footer, tabs, scroll = true, classNam
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className={cx('flex-1', className)} style={{ paddingTop: insets.top }}>
       {header}
       {body}
+      {floating && (
+        // A zero-height layer above the footer; the capsule hangs up from it over the content
+        <View pointerEvents="box-none" style={{ height: 0, zIndex: 20 }}>
+          <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: footer ? 12 : insets.bottom + 18, alignItems: 'center' }}>
+            {floating(compact)}
+          </View>
+        </View>
+      )}
       {footer && (
         <View className="border-t border-go-line bg-go-surface/95 px-4 pt-3" style={{ paddingBottom: insets.bottom + 14 }}>
           {footer}

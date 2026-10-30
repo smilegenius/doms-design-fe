@@ -143,6 +143,8 @@ const LITE_JUMPS: Jump[] = [
     { label: 'Same prescription again · remembered', to: `${LITE}/new?rx=memory` },
     { label: 'Denture with stages · done elsewhere', to: `${LITE}/new?rx=denture` },
     { label: 'Denture next stage · earlier stages matched', to: `${LITE}/new?rx=denture-match` },
+    { label: 'Scan another while it reads', to: `${LITE}/new?rx=clean` },
+    { label: 'Several prescriptions · check 1/N, then dispatch', to: `${LITE}/new?several=1` },
   ] },
   { group: 'Deliveries', label: 'Deliveries', to: `${LITE}/deliveries`, scenarios: [
     { label: 'To dispatch', to: `${LITE}/deliveries` },

@@ -73,6 +73,7 @@ interface GoStore {
   cases: LabCase[];
   updateCase: (id: string, patch: Partial<LabCase> | ((c: LabCase) => Partial<LabCase>)) => void;
   addCase: (c: LabCase) => void;
+  removeCase: (id: string) => void;
   invoices: Invoice[];
   setInvoiceStatus: (id: string, status: InvoiceStatus, activity: string) => void;
   statements: Statement[];
@@ -142,6 +143,7 @@ export function GoStoreProvider({ children }: { children: React.ReactNode }) {
     cases,
     updateCase: (id, patch) => setCases(cs => cs.map(c => (c.id === id ? { ...c, ...(typeof patch === 'function' ? patch(c) : patch) } : c))),
     addCase: c => setCases(cs => [c, ...cs]),
+    removeCase: id => setCases(cs => cs.filter(c => c.id !== id)),
     invoices,
     setInvoiceStatus: (id, status, activity) =>
       setInvoices(is => is.map(i => (i.id === id ? { ...i, status, activity: [...i.activity, { text: activity, at: nowIso() }] } : i))),

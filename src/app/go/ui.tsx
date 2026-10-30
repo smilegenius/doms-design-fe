@@ -1,7 +1,7 @@
 // ─── Smile Genius Go — mobile UI kit ─────────────────────────────────────────
 // Small set of touch-first primitives. Every colour comes from the `go-*`
 // tokens so each component works in light and dark without variants.
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -14,17 +14,35 @@ export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Bool
 
 // ─── Layout ─────────────────────────────────────────────────────────────────
 
-// bg defaults to transparent so the phone's .go-wash gradient shows behind every screen
-export function Screen({ header, children, footer, tabs, bg = 'bg-transparent' }: {
+// bg defaults to transparent so the phone's .go-wash gradient shows behind every screen.
+// floating: something that hovers over the content just above the footer (e.g. the case's Order form / Files capsule).
+// It is told `compact` while the page scrolls down, so it can shrink out of the way.
+export function Screen({ header, children, footer, tabs, bg = 'bg-transparent', floating }: {
   header?: React.ReactNode; children: React.ReactNode; footer?: React.ReactNode; tabs?: boolean | React.ReactNode; bg?: string;
+  floating?: (compact: boolean) => React.ReactNode;
 }) {
+  const [compact, setCompact] = useState(false);
+  const lastY = useRef(0);
+  const onScroll = floating ? (e: React.UIEvent<HTMLDivElement>) => {
+    const y = e.currentTarget.scrollTop;
+    const d = y - lastY.current;
+    lastY.current = y;
+    if (y < 24) setCompact(false); else if (d > 4) setCompact(true); else if (d < -4) setCompact(false);
+  } : undefined;
   return (
     <div className={cx('absolute inset-0 flex flex-col', bg)}>
       {header}
-      <div className="go-scroll flex-1 overflow-y-auto overflow-x-hidden">
+      <div className="go-scroll flex-1 overflow-y-auto overflow-x-hidden" onScroll={onScroll}>
         {children}
-        <div className={tabs ? 'h-28' : 'h-6'} />
+        <div className={tabs ? 'h-28' : floating ? 'h-20' : 'h-6'} />
       </div>
+      {floating && (
+        <div className="relative z-20 h-0">
+          <div className={cx('absolute inset-x-0 flex justify-center pointer-events-none', footer ? 'bottom-3' : 'bottom-[calc(env(safe-area-inset-bottom)+18px)]')}>
+            <div className="pointer-events-auto">{floating(compact)}</div>
+          </div>
+        </div>
+      )}
       {footer && (
         <div className="relative z-10 border-t border-go-line bg-go-surface/90 backdrop-blur-xl px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+14px)]">
           {footer}
@@ -41,6 +59,18 @@ export function useBase() {
   return p.startsWith('/go/lite') ? '/go/lite' : '/go';
 }
 
+/** Re-render when the next prescription photo still being read is done, so "Reading" turns into the draft by itself. */
+export function useReadTick(cases: LabCase[]) {
+  const [, setTick] = useState(0);
+  const now = Date.now();
+  const next = Math.min(...cases.map(c => c.scan?.readyAt ?? Infinity).filter(t => t > now));
+  useEffect(() => {
+    if (!Number.isFinite(next)) return;
+    const t = setTimeout(() => setTick(x => x + 1), next - Date.now() + 30);
+    return () => clearTimeout(t);
+  }, [next]);
+}
+
 /** Back = browser back when there is history inside the app, else `fallback`. */
 export function useBack(fallback = '/go/home') {
   const navigate = useNavigate();
@@ -48,18 +78,20 @@ export function useBack(fallback = '/go/home') {
   return () => (location.key !== 'default' ? navigate(-1) : navigate(fallback));
 }
 
-export function TopBar({ title, sub, back, fallback, right, large, compact }: {
+export function TopBar({ title, sub, back, fallback, right, large, compact, onClose }: {
   title?: React.ReactNode; sub?: React.ReactNode; back?: boolean; fallback?: string; right?: React.ReactNode; large?: boolean;
   /** Large title with no back button or actions: drop the empty row above it. */
   compact?: boolean;
+  /** A close (×) button instead of back, with its own action. */
+  onClose?: () => void;
 }) {
   const goBack = useBack(fallback);
   return (
     <div className="relative z-10 bg-go-bg/80 backdrop-blur-xl">
       <div className={cx('flex items-center gap-2 px-3', large && compact && !back && !right ? 'h-3' : 'h-14')}>
-        {back ? (
-          <button onClick={goBack} aria-label="Go back" className="w-10 h-10 -ml-1 rounded-full flex items-center justify-center text-go-ink hover:bg-go-raised active:scale-95 transition">
-            <ChevronLeft className="w-6 h-6" />
+        {back || onClose ? (
+          <button onClick={onClose ?? goBack} aria-label={onClose ? 'Close' : 'Go back'} className="w-10 h-10 -ml-1 rounded-full flex items-center justify-center text-go-ink hover:bg-go-raised active:scale-95 transition">
+            {onClose ? <X className="w-5 h-5" /> : <ChevronLeft className="w-6 h-6" />}
           </button>
         ) : <div className="w-1" />}
         {!large && (

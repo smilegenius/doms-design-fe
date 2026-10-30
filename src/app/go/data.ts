@@ -239,7 +239,24 @@ export interface LabCase {
   firstReturnBy?: string;
   firstStaged?: StagedKind;
   firstStages?: StageLine[];
+  /** Light version: a draft made from a prescription photo while more were being taken. Gone once the case is sent. */
+  scan?: ScanDraft;
 }
+
+/** A prescription photo that is read in the background and saved as a draft (Light version, several at once). */
+export interface ScanDraft {
+  /** Which demo read the photo gets (RxScenario in lite/LiteScreens.tsx). */
+  scenario: string;
+  photoUrl: string | null;
+  photoName: string;
+  takenAt: string;
+  /** Epoch ms when the reading is done. Until then the list shows "Reading". */
+  readyAt: number;
+  /** Details the read could not find or only partly matched, for the practice to check. */
+  toCheck: number;
+}
+/** Still being read: the details aren't shown yet. */
+export const isReading = (c: LabCase) => !!c.scan && c.scan.readyAt > Date.now();
 
 /** Case creation date: createdAt, else the earliest event. Empty if unknown. */
 export const createdOn = (c: LabCase) =>
@@ -371,7 +388,7 @@ export const SEED_CASES: LabCase[] = [
     id: 'SG-28491', appointment: { at: at(7, 10, 30), kind: 'Fit', room: 'Surgery 1' }, patientId: 'P-10231', practice: 'cds', lab: 'northstar', clinician: 'reed', createdBy: 'Dr Olivia Reed',
     service: 'Crown', teeth: ['UR6'], material: 'Layered zirconia', shade: 'A2', stumpShade: 'ND3', funding: 'Private',
     instructions: 'Light contacts mesial and distal. Natural characterisation, slight translucency at the incisal third.',
-    returnBy: at(6), stage: 'ready', attachments: ['Prescription photo', 'Shade photo'], source: 'photo',
+    returnBy: at(6), stage: 'ready', attachments: ['Prescription photo', 'Shade photo', 'Intraoral scan (3Shape)'], source: 'photo',
     events: [{ stage: 'authorised', at: at(-1, 16, 22), by: 'Dr Olivia Reed' }], messages: [],
   },
   {
@@ -605,7 +622,9 @@ export function nextAction(c: LabCase): NextAction {
 export type ReadinessLevel = 'in-practice' | 'arriving' | 'on-track' | 'attention' | 'at-risk';
 export interface Readiness { level: ReadinessLevel; label: string; detail: string }
 export function readiness(c: LabCase): Readiness {
-  if (c.stage === 'draft') return { level: 'attention', label: 'Draft', detail: 'Not sent to the lab yet. Please finish the case' };
+  if (c.stage === 'draft') return isReading(c)
+    ? { level: 'attention', label: 'Reading', detail: 'Reading the prescription…' }
+    : { level: 'attention', label: 'Draft', detail: 'Not sent to the lab yet. Please finish the case' };
   if (c.onHold) return { level: 'attention', label: 'On hold', detail: c.onHold.side === 'Practice' ? 'The lab is waiting for you' : 'Paused by the lab' };
   if (c.labStatus === 'Not Approved') return { level: 'at-risk', label: 'Not approved', detail: 'The lab could not accept this · see comments' };
   if (c.stage === 'received') return { level: 'in-practice', label: 'In practice', detail: c.receipt ? `In ${c.receipt.storedIn.toLowerCase()}` : 'Received' };

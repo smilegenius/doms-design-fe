@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, Fragment } from 'react';
+import { useState, useRef, useEffect, useMemo, Fragment, createContext, useContext } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, AlertTriangle, MessageSquare, MessageCircle, ChevronDown, ChevronUp,
@@ -915,8 +915,11 @@ export function LabNotesModal({ onClose, expanded, onToggleExpand }: { onClose: 
 // ─── Viewer & Order-form panels ───────────────────────────────────────────────
 
 function ScanViewer({ format, onFormatChange }: { format: ViewerFormat; onFormatChange: (f: ViewerFormat) => void }) {
+  // A host's own order form (OrderFormSlot) sets the height of the row beside it: side by side, the viewer
+  // stretches to match it. Without one (the portal) it keeps its fixed height.
+  const matchForm = useContext(OrderFormSlot) !== null;
   return (
-    <div className="relative bg-[#F0F2F7] rounded-xl border border-[#E0E0E6] h-[320px] overflow-hidden flex items-center justify-center">
+    <div className={`relative bg-[#F0F2F7] rounded-xl border border-[#E0E0E6] overflow-hidden flex items-center justify-center ${matchForm ? 'h-[320px] lg:h-auto lg:min-h-[320px]' : 'h-[320px]'}`}>
       {/* Format tabs */}
       <div className="absolute top-3 left-3 inline-flex items-center bg-white border border-[#E0E0E6] rounded-lg overflow-hidden text-[11px] font-semibold">
         {(['3D','PLY','STL','OBJ'] as ViewerFormat[]).map((f) => (
@@ -1261,10 +1264,7 @@ function PrescriptionTab({ caseData, onOpenNotes, onOpenFullView }: {
               <FolderOpen className="w-3.5 h-3.5" />
               Lab Documents
             </button>
-            <button className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
-              <Printer className="w-3 h-3" />
-              Print
-            </button>
+            <OrderFormTools />
           </div>
 
           {orderTab === 'order-form' ? (
@@ -3448,10 +3448,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                     <FolderOpen className="w-3.5 h-3.5" />
                     Lab Documents
                   </button>
-                  <button className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
-                    <Printer className="w-3 h-3" />
-                    Print
-                  </button>
+                  <OrderFormTools />
                 </div>
 
                 {orderTab === 'order-form' ? (
@@ -3667,6 +3664,44 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   );
 }
 
+/**
+ * A host's own order form, drawn wherever this page shows one (the service panel, Full View, the Order
+ * Form modal). With onFullView / onPrint, the Order form tab bar gets a full-screen button and a working
+ * Print. Nothing sets it in the portal, so the form and tab bar below show as they are; the New Case Flow sets it.
+ */
+export type OrderFormRender = (o: { caseData: CaseForDetail; service: ServiceItem | null; wide: boolean }) => React.ReactNode;
+export interface OrderFormHost { render: OrderFormRender; onFullView?: () => void; onPrint?: () => void }
+export const OrderFormSlot = createContext<OrderFormHost | null>(null);
+
+/** The Order form tab bar's right-hand tools: the portal's Print link, or a host's full screen + Print. */
+function OrderFormTools() {
+  const host = useContext(OrderFormSlot);
+  if (!host?.onFullView) {
+    return (
+      <button className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
+        <Printer className="w-3 h-3" />
+        Print
+      </button>
+    );
+  }
+  return (
+    <div className="ml-auto flex items-center gap-1">
+      <button
+        onClick={host.onFullView}
+        title="Full view"
+        aria-label="Order form full view"
+        className="w-7 h-7 rounded-md flex items-center justify-center text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors"
+      >
+        <Maximize2 className="w-3.5 h-3.5" />
+      </button>
+      <button onClick={host.onPrint} className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[11px] font-medium text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors">
+        <Printer className="w-3 h-3" />
+        Print
+      </button>
+    </div>
+  );
+}
+
 // ─── Order form body — shared, matches the production printable form ─────────
 // One Details block with hairline group dividers (lab/practice/dentist ·
 // patient · shipping/IDs), the creation/meta block (Created On, Created by,
@@ -3678,7 +3713,9 @@ function OrderFormBody({ caseData, service, wide = false }: {
   service?: ServiceItem | null;
   wide?: boolean;
 }) {
+  const custom = useContext(OrderFormSlot);
   const svc = service ?? caseData.serviceItems?.[0] ?? null;
+  if (custom) return <>{custom.render({ caseData, service: svc, wide })}</>;
   const svcName = svc?.name ?? caseData.services[0] ?? 'Service';
   const fdiList = svc?.fdi ?? [];
   // A denture covers a whole jaw — it reads as an arch, not tooth numbers.

@@ -24,7 +24,7 @@ function Missing() {
 }
 
 /** Deterministic QR-ish pattern from the order ID — demo only. */
-function FakeCode({ seed }: { seed: string }) {
+export function FakeCode({ seed, size = 74 }: { seed: string; size?: number }) {
   const cells = useMemo(() => {
     let h = 0;
     for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
@@ -36,8 +36,8 @@ function FakeCode({ seed }: { seed: string }) {
       return (h >> 16) % 2 === 0;
     });
   }, [seed]);
-  // 11 × 11 grid in 74px with 1.5px gaps (the web grid-cols-11 gap-[1.5px])
-  const SIZE = 74, GAP = 1.5, CELL = (SIZE - GAP * 10) / 11;
+  // 11 × 11 grid, gaps 1/50 of the size: 1.5px at the label's 74px (the web grid-cols-11 gap-[1.5px])
+  const SIZE = size, GAP = size / 50, CELL = (SIZE - GAP * 10) / 11;
   return (
     <Svg width={SIZE} height={SIZE} style={{ flexShrink: 0 }}>
       {cells.map((on, i) => on && (

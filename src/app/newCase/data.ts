@@ -105,6 +105,8 @@ export const labById = (id: string) => LABS.find(l => l.id === id) ?? LABS[0];
 export const CLINIC = {
   name: 'Elmfield Dental Practice',
   city: 'Leeds',
+  /** Where the lab sends the work back (the order form's Ship to). */
+  address: '22 Elmfield Road, Headingley, Leeds LS6 2AB',
   disinfectant: 'ImpressSafe',
   usualLab: 'northfield' as LabId,
   defaultFunding: 'private' as Funding,
@@ -163,6 +165,8 @@ export interface PriorWork {
   /** ISO date delivered (or sent, for open cases). */
   date: string;
   open?: boolean;
+  /** A staged denture: each stage made on this case, when it was ordered, needed back and what it asked for (the order form's history). */
+  stages?: { id: string; created: string; due: string; note: string }[];
 }
 export interface ImplantRecord { tooth: string; system: string; platform: string; diameter: string; placed: string }
 export interface Patient {
@@ -214,7 +218,13 @@ export const PATIENTS: Patient[] = [
     id: 'P-2025-009', first: 'Edward', last: 'Thomas', dob: '19/08/1955', sex: 'M', funding: 'nhs',
     // Special Tray and Bite Registration were made on CAS-2026-117: a new upper denture at Pennine continues it.
     nextStage: { product: 'denture', arch: 'upper', stage: 'tryin', lab: 'pennine', caseId: 'CAS-2026-117', note: 'bite registration back 12 Oct' },
-    history: [{ caseId: 'CAS-2026-117', product: 'denture', arch: 'upper', option: 'blocks', lab: 'pennine', date: '2026-10-12' }],
+    history: [{
+      caseId: 'CAS-2026-117', product: 'denture', arch: 'upper', option: 'blocks', lab: 'pennine', date: '2026-10-12',
+      stages: [
+        { id: 'tray', created: '2026-09-28', due: '2026-10-05', note: 'Please make a special tray for the upper arch from the primary impression, spaced 2 mm, with a handle. Check the border extension.' },
+        { id: 'blocks', created: '2026-10-05', due: '2026-10-12', note: 'Please make an upper bite block on the master model to record the jaw relationship. Mark the centre line and smile line.' },
+      ],
+    }],
     lastLabel: 'Full denture · UPPER bite registration, Oct 2026',
   },
   {

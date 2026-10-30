@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX, Truck, Play, FilePlus2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX, Truck, Play, FilePlus2, BarChart3, FileText } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import { setUserId, setUx } from '../newCase/store';
@@ -30,6 +30,33 @@ export interface FlowEntry {
 }
 
 export const FLOWS: FlowEntry[] = [
+  {
+    // Proposed first tab of the DSO portal's Analytics. Lives only here until
+    // approved; /supplier/analytics is unchanged.
+    title: 'DSO analytics — Group Overview',
+    description: 'An executive view for the dental group: lab spend, orders, cost per case, on-time delivery, remakes and potential savings, with the spend trend, spend by treatment type and by clinic, clinic benchmarking against the group average and the key opportunities by clinic, dentist and lab.',
+    detail: 'DSO · Analytics',
+    icon: <BarChart3 className="w-5 h-5 text-[#4D8EF7]" />,
+    badge: 'Preview',
+    accent: '#4D8EF7',
+    accentSoft: '#EEF4FF',
+    path: '/flows/dso-analytics',
+    date: '29 Oct 2026',
+    month: '2026-10',
+  },
+  {
+    // The new Dental Order Form, on the New case flow's View Case only; the portal's form is unchanged.
+    title: 'Order form in Case Details',
+    description: 'The new Dental Order Form on a case: patient, dentist, practice, lab and ship-to address, the Tooth Chart, the service details, instructions and the scan and attachment files. A full denture keeps its stage history, so each new stage adds a row with its dates and status and its own instruction card.',
+    detail: 'Clinic · Case Details',
+    icon: <FileText className="w-5 h-5 text-[#1565C0]" />,
+    badge: 'Walkthrough',
+    accent: '#1565C0',
+    accentSoft: '#EEF4FF',
+    path: '/flows/order-form',
+    date: '29 Oct 2026',
+    month: '2026-10',
+  },
   {
     // Guided steps only: five flows, one per kind of order.
     title: 'New case flow',
