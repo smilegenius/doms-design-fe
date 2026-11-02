@@ -9,7 +9,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle, Bell, Building2, Camera, Check, CheckCircle2, ClipboardCheck, HelpCircle, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, Link2, Loader2, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
 } from '../icons';
-import { ME, useGo, useScoped } from '../store';
+import { FEATURES, ME, useGo, useScoped } from '../store';
 import { LAB_BASE, LAB_ID, LAB_ME, LAB_NAME } from '../lab/labData';
 import { DENTURE_STAGES, isDentureItem } from '../../data/dentureStages';
 import {
@@ -188,8 +188,8 @@ function ShotThumb({ c }: { c: LabCase }) {
 }
 
 /** The camera. `several`: each photo is saved and read in the background (a draft each), and the camera stays open.
- *  Done = check them one by one; closing (×) leaves them as drafts. onSeveral missing = no One / Several switch
- *  (a retake, or the lab side). */
+ *  Done = check them one by one. onClose (×) when photos are already being read; otherwise × goes back.
+ *  onSeveral missing = no One / Several switch (switched off, a retake, or the lab side). */
 function CameraView({ onShot, several = false, onSeveral, shots = [], onDone, onClose }: {
   onShot: (ps: Photo[]) => void; several?: boolean; onSeveral?: (on: boolean) => void; shots?: LabCase[]; onDone?: () => void; onClose?: () => void;
 }) {
@@ -207,7 +207,7 @@ function CameraView({ onShot, several = false, onSeveral, shots = [], onDone, on
     <div className="absolute inset-0 bg-[#05050B] text-white flex flex-col">
       <div className="flex items-center justify-between px-4 h-14">
         {/* With photos already taken, closing keeps them as drafts */}
-        <button onClick={several && shots.length ? onClose : back} aria-label="Close camera" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center"><X className="w-5 h-5" /></button>
+        <button onClick={onClose ?? back} aria-label="Close camera" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center"><X className="w-5 h-5" /></button>
         <span className="text-[15px] font-semibold">{!several ? 'Photograph the prescription' : shots.length ? `Prescription ${shots.length + 1}` : 'Photograph the prescriptions'}</span>
         <button onClick={() => setFlash(f => !f)} aria-label="Turn the flash on or off" className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
           {flash ? <Zap className="w-5 h-5 text-[#FBBF24]" /> : <ZapOff className="w-5 h-5" />}
@@ -423,15 +423,18 @@ function caseFrom(w: { practice: PracticeId | null; clinician: string | null; la
 
 /** Several prescriptions in a row get different reads, so the drafts list shows the range (all found, names to confirm, several services, a denture). */
 const BATCH_READS: RxScenario[] = ['clean', 'memory', 'multi', 'denture'];
-/** A prescription photo saved as a draft. It reads in the background until readyAt; the details are then on the draft. */
-function scanDraftCase(rx: RxScenario, photo: Photo, readyAt: number): LabCase {
+/** A prescription photo saved as a draft. It reads in the background until readyAt; the details are then on the draft.
+ *  taken: case ids already in use. The draft gets a free number, also free as SG-2… (its id once sent). */
+function scanDraftCase(rx: RxScenario, photo: Photo, readyAt: number, taken: Set<string>): LabCase {
+  let id: string;
+  do id = `SG-D${1100 + Math.floor(Math.random() * 800)}`; while (taken.has(id) || taken.has(id.replace('SG-D', 'SG-2')));
   const { r, unsure } = readFor(rx);
   const blocks = r.blocks.filter(b => b.itemId);
   const missing = [r.practice, r.clinician, r.lab, r.patientId].filter(x => !x).length + r.blocks.filter(b => incomplete(b, null)).length;
   const takenAt = new Date().toISOString();
   return {
     ...caseFrom(r, blocks, photo.name),
-    id: `SG-D${1100 + Math.floor(Math.random() * 800)}`, stage: 'draft', events: [], createdAt: takenAt,
+    id, stage: 'draft', events: [], createdAt: takenAt,
     scan: { scenario: rx, photoUrl: photo.url, photoName: photo.name, takenAt, readyAt, toCheck: missing + unsure.size },
   };
 }
@@ -469,9 +472,12 @@ function Scanning({ photo, onDone, stepMs = SCAN_STEP_MS, footer }: { photo: Pho
   );
 }
 
-/** Several prescriptions, after Done: every photo being read, each with its own progress. Once all are read it moves
- *  on to checking them one by one (or sooner with the button, as soon as the first is ready). Close = keep as drafts. */
-function BatchReading({ shots, onStart, onClose }: { shots: LabCase[]; onStart: () => void; onClose: () => void }) {
+/** Several prescriptions: every photo being read, each with its own progress. While they are read the main button
+ *  scans another (it joins this list); once all are read Continue (check them one by one) is added below it.
+ *  The light × on a row removes that prescription. Close = keep as drafts. */
+function BatchReading({ shots, onStart, onAddMore, onRemove, onClose }: {
+  shots: LabCase[]; onStart: () => void; onAddMore: () => void; onRemove: (id: string) => void; onClose: () => void;
+}) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 200); return () => clearInterval(t); }, []);
   const progress = (c: LabCase) => {
@@ -480,20 +486,20 @@ function BatchReading({ shots, onStart, onClose }: { shots: LabCase[]; onStart: 
   };
   const read = shots.filter(c => c.scan!.readyAt <= now).length;
   const all = read === shots.length;
-  useEffect(() => { if (!all) return; const t = setTimeout(onStart, 900); return () => clearTimeout(t); }, [all]); // eslint-disable-line react-hooks/exhaustive-deps
   const overall = shots.reduce((a, c) => a + progress(c), 0) / Math.max(1, shots.length);
   return (
     <Screen header={<TopBar onClose={onClose} title="Reading prescriptions" sub={`${read} of ${shots.length} read`} />}
       footer={(
-        <Btn block disabled={!read} icon={read ? <ClipboardCheck className="w-5 h-5" /> : <Loader2 className="w-5 h-5 animate-spin" />} onClick={onStart}>
-          {all ? 'Check them one by one' : read ? `Start checking · ${read} ready` : 'Reading…'}
-        </Btn>
+        <div className="space-y-2">
+          <Btn block variant={all ? 'secondary' : 'primary'} icon={<Camera className={cx('w-5 h-5', all && 'text-go-brand')} />} onClick={onAddMore}>Scan another prescription</Btn>
+          {all && <Btn block onClick={onStart}>Continue<ChevronRight className="w-4 h-4 -mr-1" /></Btn>}
+        </div>
       )}>
       <div className="px-5 pt-2">
         <p className="inline-flex items-center gap-2 text-[17px] font-semibold text-go-ink">
           <Sparkles className={cx('w-5 h-5 text-go-lav', !all && 'go-pulse')} />{all ? `All ${shots.length} read` : `Reading ${shots.length} prescription${shots.length === 1 ? '' : 's'}…`}
         </p>
-        <p className="text-[12.5px] text-go-muted mt-0.5">{all ? 'Next, check each one and send it.' : 'You can start checking as soon as the first one is ready.'}</p>
+        <p className="text-[12.5px] text-go-muted mt-0.5">{all ? 'Next, check each one and send it.' : 'You can scan more while we read these. You’ll check them all once they’re read.'}</p>
         <div className="mt-3 h-1.5 rounded-full bg-go-line overflow-hidden"><div className="h-full go-grad transition-[width] duration-200 ease-linear" style={{ width: `${overall * 100}%` }} /></div>
       </div>
       <div className="px-4 mt-4">
@@ -516,6 +522,10 @@ function BatchReading({ shots, onStart, onClose }: { shots: LabCase[]; onStart: 
                 {!done ? <Loader2 className="w-4 h-4 animate-spin text-go-brand flex-shrink-0" aria-label="Reading" />
                   : toCheck ? <Pill tone="warn" className="!h-[22px] !px-2 flex-shrink-0">{toCheck} to check</Pill>
                   : <CheckCircle2 className="w-5 h-5 text-go-ok flex-shrink-0" aria-label="Read" />}
+                <button onClick={() => onRemove(c.id)} aria-label={`Remove prescription ${i + 1}`}
+                  className="-ml-1 -mr-2 w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-go-faint/70 hover:text-go-muted hover:bg-go-raised transition">
+                  <X className="w-3.5 h-3.5" />
+                </button>
               </div>
             );
           })}
@@ -765,8 +775,9 @@ export function LiteCreate({ labMode }: { labMode?: boolean } = {}) {
   // Set when the user said "It's a different …": the picker then shows what the prescription says and offers to remember the choice
   const [fixing, setFixing] = useState<string | null>(null);
   const [rememberNext, setRememberNext] = useState(true);
-  // Several prescriptions (clinic only): each photo is saved as a draft and read in the background
-  const [several, setSeveral] = useState(!labMode && !draftCase && query.get('several') === '1');
+  // Several prescriptions (clinic only): each photo is saved as a draft and read in the background. `several` = the
+  // camera's Several mode (switched off: FEATURES.severalCamera); without it, "Scan another" builds the same batch
+  const [several, setSeveral] = useState(FEATURES.severalCamera && !labMode && !draftCase && query.get('several') === '1');
   const [batch, setBatch] = useState<string[]>([]);
   const [retake, setRetake] = useState(false);
   const navigate = useNavigate();
@@ -791,19 +802,22 @@ export function LiteCreate({ labMode }: { labMode?: boolean } = {}) {
    *  apart (so several uploaded at once tick off one by one); `firstIn` = time left on a photo already being read. */
   const saveShots = (ps: Photo[], firstIn?: number) => {
     let end = Math.max(0, ...cases.map(c => c.scan?.readyAt ?? 0));
+    const taken = new Set([...cases.map(c => c.id), ...batch]);
     const ids = ps.map((p, i) => {
       const k = batch.length + i;
       // The first photo keeps the read it was given (if it found the patient: a draft needs one)
       const scenario = k === 0 && readPrescription(rx).patientId ? rx : BATCH_READS[k % BATCH_READS.length];
       end = k === 0 && firstIn !== undefined ? Date.now() + firstIn : Math.max(Date.now() + SCAN_STEP_MS * READ_STEPS.length, end + 1200);
-      const d = scanDraftCase(scenario, p, end);
+      const d = scanDraftCase(scenario, p, end, taken);
+      taken.add(d.id);
       addCase(d);
       return d.id;
     });
     setBatch(b => [...b, ...ids]);
   };
-  // The photo being read carries on in the background for about the rest of the reading screen's time
-  const scanAnother = () => { if (photo) saveShots([photo], 3000); setPhoto(null); setSeveral(true); };
+  // The photo being read carries on in the background for about the rest of the reading screen's time. The camera
+  // opens as for the first photo; the next shot goes straight to the reading summary (BatchReading)
+  const scanAnother = () => { if (photo) saveShots([photo], 3000); setPhoto(null); };
 
   // Going through several prescriptions one after another: ?batch=SG-D1,SG-D2… (the drafts, in the order taken).
   // Ready for Dispatch sends one and opens the next; Skip or closing keeps the rest as drafts.
@@ -823,11 +837,18 @@ export function LiteCreate({ labMode }: { labMode?: boolean } = {}) {
 
   if (summary) return <BatchDone ids={batchIds} />;
   if (created) return <Created c={created.c} added={created.added} onAnother={reset} labMode={labMode} next={created.fromScan ? nextScan : undefined} />;
-  if (readingAll) return <BatchReading shots={shots} onStart={() => openBatch(batch, 0)} onClose={() => toDrafts(shots.length)} />;
+  // Removing a prescription from the summary deletes its draft; with none left, the camera opens afresh
+  const dropShot = (id: string) => {
+    removeCase(id); setBatch(b => b.filter(x => x !== id)); toast('Prescription removed');
+    if (shots.length === 1) setReadingAll(false);
+  };
+  if (readingAll) return <BatchReading shots={shots} onStart={() => openBatch(batch, 0)} onAddMore={() => setReadingAll(false)} onRemove={dropShot} onClose={() => toDrafts(shots.length)} />;
   if (!photo) {
-    return <CameraView onShot={ps => (several ? saveShots(ps) : setPhoto(ps[0]))} several={several} shots={shots}
-      onDone={() => setReadingAll(true)} onClose={() => toDrafts(shots.length)}
-      onSeveral={!labMode && !draftCase && !retake ? setSeveral : undefined} />;
+    // One at a time: with prescriptions already being read, the next shot joins them on the reading summary
+    const onShot = (ps: Photo[]) => (several ? saveShots(ps) : batch.length ? (saveShots(ps), setReadingAll(true)) : setPhoto(ps[0]));
+    return <CameraView onShot={onShot} several={several} shots={shots}
+      onDone={() => setReadingAll(true)} onClose={!shots.length ? undefined : several ? () => toDrafts(shots.length) : () => setReadingAll(true)}
+      onSeveral={FEATURES.severalCamera && !labMode && !draftCase && !retake ? setSeveral : undefined} />;
   }
   if (!scanned) {
     return (

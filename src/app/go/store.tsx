@@ -19,6 +19,9 @@ export const FEATURES = {
   labCardView: false,
   /** The Clinic / Lab switch in the Light version (the lab side of the same cases). Off: the switch and the lab screens are hidden. */
   labApp: true,
+  /** One / Several switch on the Light camera (Several = the camera stays open with a tray of shots, ?several=1).
+   *  Off: one prescription per photo; "Scan another prescription" takes the next one to the reading summary. */
+  severalCamera: false,
 };
 
 export type ThemePref = 'light' | 'dark' | 'system';

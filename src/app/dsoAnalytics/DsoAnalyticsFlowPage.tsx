@@ -16,7 +16,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowDown, ArrowUp, Building2, Calendar, Check, ChevronDown, Clock, FlaskConical,
-  Lightbulb, PieChart, RefreshCw, Sparkles, TrendingDown, TrendingUp, UserRound, X,
+  Lightbulb, PieChart, RefreshCw, Search, Sparkles, TrendingDown, TrendingUp, UserRound, X,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
@@ -765,16 +765,20 @@ function DateRangeSelect({ range, onChange }: { range: Range; onChange: (r: Rang
 }
 
 // ─── Clinic filter — multi-select, all clinics on by default ─────────────────
-// The × clears a narrowed filter (e.g. after clicking a clinic in a chart).
+// The × clears a narrowed filter (e.g. after clicking a clinic in a chart). A search box at the top narrows the list;
+// "All Clinics" hides while searching, so it never ticks clinics the user can't see.
 function ClinicSelect({ selected, onChange }: { selected: string[]; onChange: (next: string[]) => void }) {
   const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!open) return;
+    if (!open) { setQ(''); return; }
     const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
+  const shown = CLINICS.filter(c => c.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const searching = q.trim().length > 0;
   const allOn = selected.length === CLINICS.length;
   const summary = allOn ? 'All Clinics'
     : selected.length === 0 ? 'No clinics'
@@ -806,17 +810,39 @@ function ClinicSelect({ selected, onChange }: { selected: string[]; onChange: (n
       </button>
       {open && (
         <div className="absolute z-40 mt-1 left-0 sm:left-auto sm:right-0 w-64 bg-white border border-[#E0E0E6] rounded-xl shadow-xl overflow-hidden">
+          <div className="p-2 border-b border-[#F0EFF6]">
+            <label className="flex items-center gap-2 h-8 px-2.5 rounded-lg border border-[#E0E0E6] bg-[#FAFBFF] focus-within:border-[#4D8EF7] focus-within:bg-white transition-colors">
+              <Search className="w-3.5 h-3.5 text-[#A0A0B0] flex-shrink-0" />
+              <input
+                autoFocus
+                value={q}
+                onChange={e => setQ(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') { if (q) setQ(''); else setOpen(false); } }}
+                placeholder="Search clinics"
+                aria-label="Search clinics"
+                className="flex-1 min-w-0 bg-transparent text-xs text-[#030213] placeholder:text-[#A0A0B0] focus:outline-none"
+              />
+              {q && (
+                <button onClick={() => setQ('')} aria-label="Clear search" className="w-4 h-4 rounded flex items-center justify-center text-[#A0A0B0] hover:text-[#5A5568]">
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </label>
+          </div>
           <div className="max-h-64 overflow-y-auto py-1">
-            <button
-              onClick={() => onChange(allOn ? [] : CLINICS.map(c => c.id))}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-[#FAFBFF] transition-colors border-b border-[#F0EFF6]"
-            >
-              <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${allOn ? 'bg-[#4D8EF7] border-[#4D8EF7]' : selected.length > 0 ? 'bg-[#EEF4FF] border-[#4D8EF7]' : 'border-[#C8C8D0] bg-white'}`}>
-                {allOn ? <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} /> : selected.length > 0 ? <span className="w-1.5 h-[2px] bg-[#4D8EF7] rounded-full" /> : null}
-              </span>
-              <span className="text-xs font-semibold text-[#030213]">All Clinics</span>
-            </button>
-            {CLINICS.map(c => {
+            {!searching && (
+              <button
+                onClick={() => onChange(allOn ? [] : CLINICS.map(c => c.id))}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-[#FAFBFF] transition-colors border-b border-[#F0EFF6]"
+              >
+                <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${allOn ? 'bg-[#4D8EF7] border-[#4D8EF7]' : selected.length > 0 ? 'bg-[#EEF4FF] border-[#4D8EF7]' : 'border-[#C8C8D0] bg-white'}`}>
+                  {allOn ? <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} /> : selected.length > 0 ? <span className="w-1.5 h-[2px] bg-[#4D8EF7] rounded-full" /> : null}
+                </span>
+                <span className="text-xs font-semibold text-[#030213]">All Clinics</span>
+              </button>
+            )}
+            {!shown.length && <p className="px-3 py-4 text-center text-xs text-[#A0A0B0]">No clinics match “{q.trim()}”</p>}
+            {shown.map(c => {
               const on = selected.includes(c.id);
               return (
                 <button key={c.id} onClick={() => toggle(c.id)} className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-[#FAFBFF] transition-colors">

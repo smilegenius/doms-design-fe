@@ -242,6 +242,27 @@ export const PATIENTS: Patient[] = [
     id: 'P-2025-071', first: 'Daniel', last: 'Hughes', dob: '21/09/1977', sex: 'M', funding: 'private',
     lastLabel: 'No lab work yet',
   },
+  {
+    // The order form's multi-case order (orderFormDemo, CAS-2026-128). Her upper denture's first three stages
+    // were each made at Pennine on a case of their own; that order finishes it.
+    id: 'P-2025-083', first: 'Margaret', last: 'Hill', dob: '04/11/1951', sex: 'F', funding: 'nhs',
+    missing: ['36', '37', '46', '47'],
+    history: [
+      {
+        caseId: 'CAS-2026-086', product: 'denture', arch: 'upper', option: 'tray', lab: 'pennine', date: '2026-09-14',
+        stages: [{ id: 'tray', created: '2026-09-07', due: '2026-09-14', note: 'Please make a special tray for the upper arch from the primary impression, spaced 2 mm, with a handle.' }],
+      },
+      {
+        caseId: 'CAS-2026-102', product: 'denture', arch: 'upper', option: 'blocks', lab: 'pennine', date: '2026-09-28',
+        stages: [{ id: 'blocks', created: '2026-09-21', due: '2026-09-28', note: 'Please make an upper bite block on the master model. Mark the centre line and the smile line.' }],
+      },
+      {
+        caseId: 'CAS-2026-115', product: 'denture', arch: 'upper', option: 'tryin', lab: 'pennine', date: '2026-10-12',
+        stages: [{ id: 'tryin', created: '2026-10-05', due: '2026-10-12', note: 'Please set up the upper teeth in wax for try in: shade A3, mould to match the photos. Check the occlusion against her lower teeth.' }],
+      },
+    ],
+    lastLabel: 'Full denture · UPPER finish, Oct 2026',
+  },
 ];
 
 export const IMPLANT_SYSTEMS: { name: string; platforms: string[]; scanBodies: string[] }[] = [

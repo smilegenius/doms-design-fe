@@ -1,8 +1,9 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Crown, FileText, Moon, Smile } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Boxes, Crown, FileText, Moon, Smile } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import { setUserId, setUx } from '../newCase/store';
+import { MULTI_CASE_ID, ensureMultiCaseDemo } from '../newCase/orderFormDemo';
 
 // ─── Order form in Case Details · Oct-2026 ───────────────────────────────────
 // The new Dental Order Form, shown on the New Case Flow's View Case (the
@@ -17,6 +18,8 @@ interface Nav {
   path: string;
   /** Opens a new flow case (Guided, as Dr Khan), not an existing one. */
   newCase?: boolean;
+  /** Puts the demo case in the flow's Lab Work first, when it isn't there. */
+  before?: () => void;
 }
 
 const STEPS: { label: string; blurb: string; navs: Nav[] }[] = [
@@ -46,8 +49,28 @@ const STEPS: { label: string; blurb: string; navs: Nav[] }[] = [
     ],
   },
   {
+    label: 'A multi-case order',
+    blurb: 'Margaret Hill’s order at Pennine has three cases in one parcel: her upper full denture’s Finish, a lower cobalt-chrome partial at Framework Try-In, and a repair of her current upper denture. The form lists the cases on the order with each one’s delivery and status, then gives each case its own section: its details, its stage history (the denture’s Special Tray, Bite Registration and Try In were each made on a case of their own), its instructions and its files. The scan files and the case instructions are the whole order’s. Any case you make with several services gets the same form.',
+    navs: [
+      {
+        title: `View Case — ${MULTI_CASE_ID}`,
+        note: 'Margaret Hill · Full denture + Partial denture + Repair · In production',
+        icon: <Boxes className="w-4 h-4" />,
+        path: `/flows/new-case/view/${MULTI_CASE_ID}`,
+        before: ensureMultiCaseDemo,
+      },
+      {
+        title: 'New case — Amelia Clarke, several services',
+        note: 'Northfield · Crown, then Add Another Service for a bridge and a night guard · then View Case',
+        icon: <Crown className="w-4 h-4" />,
+        path: '/flows/new-case/case/new?patient=P-2025-031&lab=northfield&service=crown',
+        newCase: true,
+      },
+    ],
+  },
+  {
     label: 'Any other case',
-    blurb: 'Every finished case in the flow’s Lab Work opens with the same form. Without a denture there is no stage history: the Service Details table lists each service with its teeth, material, shade and delivery date, and each service’s instructions get their own card. A case made from a scan lists its scan files; impressions by post say they come in the parcel.',
+    blurb: 'Every finished case in the flow’s Lab Work opens with the same form. A one-service case without a denture has no stage history: the Service Details table gives its teeth, material, shade and delivery date, and its instructions get their own card. A case made from a scan lists its scan files; impressions by post say they come in the parcel.',
     navs: [
       {
         title: 'View Case — CAS-2026-098',
@@ -72,6 +95,7 @@ export default function OrderFormFlowPage() {
   const open = (nav: Nav) => {
     // Walkthroughs never stop at the login page: sign in with the demo account.
     if (!user) login(DEMO_ACCOUNT_EMAIL, 'demo');
+    nav.before?.();
     if (!nav.newCase) { navigate(nav.path); return; }
     // As the New case walkthrough launches a flow: Guided, signed in as Dr Khan.
     setUx('guided');

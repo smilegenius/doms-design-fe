@@ -21,7 +21,7 @@ import OrderFormSheet, { OrderFormFullView, type OrderFormModel, type StageStatu
 import { CLINIC, Funding, Patient, PriorWork, ProductId, USERS, User, labById, userById } from './data';
 import { DEMO_NOW, demoNow, demoTimeOf, fmtFull, fromISO, lastWorkingDayBefore, toISO } from './dates';
 import {
-  Ctx, DENTURE_STAGES, Effective, FileRole, PARTIAL_STAGES, ServiceItem, archTeethIds, archWord, bridgeParts, caseDates,
+  Ctx, DENTURE_STAGES, Effective, FileRole, PARTIAL_DESIGNS, PARTIAL_STAGES, ServiceItem, archTeethIds, archWord, bridgeParts, caseDates,
   caseInstructions, dentureTreatment, effective, isPosted, isStageId, itemFunding, itemTitle, optionName, patientAge,
   recordsState, shadeText, spanText, stageName, stagePlan, teethText, treatmentName,
 } from './rules';
@@ -274,9 +274,23 @@ function otherDetails(item: ServiceItem, funding: Funding, n: User['notation'], 
     parts.push(`${item.teeth.length} units${pontics.length ? ` · pontic ${teethText(pontics, n)}` : ''}`);
   }
   if (item.product === 'implant' && (e?.system ?? item.system)) parts.push([e?.system ?? item.system, e?.platform ?? item.platform].filter(Boolean).join(' '));
+  if (item.product === 'partial') {
+    const stage = PARTIAL_STAGES.find(s => s.id === item.stage)?.name;
+    const design = PARTIAL_DESIGNS.find(d => d.id === item.design)?.name;
+    if (stage) parts.push(`Stage: ${stage}`);
+    if (design) parts.push(`Design: ${design}`);
+  }
   if (item.product === 'aligner' && item.aligner?.alignerDuration) parts.push(item.aligner.alignerDuration);
   if (item.product === 'other' && item.desc?.trim()) parts.push(item.desc.trim());
   return parts.filter(Boolean).join(' · ');
+}
+
+/** A full denture's ordered stages with their days: "Finish · Thu 29 Oct 2026". */
+function stageDelivery(item: ServiceItem): string {
+  const t = dentureTreatment(item);
+  const ordered = stagePlan(item).filter(s => s.state === 'order');
+  if (!ordered.length) return '—';
+  return ordered.map(s => `${t === 'staged' ? stageName(s.id) : treatmentName(t)} · ${s.date ? fmtFull(fromISO(s.date)) : '—'}`).join(', ');
 }
 
 /**
@@ -322,58 +336,85 @@ export function orderFormModel(row: CaseRow, user: User, caseData: CaseForDetail
   } else if (rs === 'follow') {
     scanNote = 'Scan to follow: the scan is added here when it arrives.';
   }
-  const attachments = items.flatMap(it => it.photos.map(ph => ({ file: `${ph.label.replace(/\s+/g, '_')}.jpg`, type: 'Photo', date: created })));
+  const photosOf = (it: ServiceItem) => it.photos.map(ph => ({ file: `${ph.label.replace(/\s+/g, '_')}.jpg`, type: 'Photo', date: created }));
+  const attachments = items.flatMap(photosOf);
 
   // A staged full denture: every stage in order.
-  const den = items.find(it => it.product === 'denture' && dentureTreatment(it) === 'staged');
-  const plan = den ? stagePlan(den) : [];
-  const stages: OrderFormModel['stages'] = den ? DENTURE_STAGES.map(({ id, name }, i) => {
-    const row1 = { n: i + 1, name };
-    // A history row: the stages made on it are its record's.
-    const own = !draft ? prior?.stages?.find(s => s.id === id) : undefined;
-    if (own) return { ...row1, created: fullDate(own.created), due: fullDate(own.due), status };
-    const s = plan.find(x => x.id === id);
-    if (!s) return row1;
-    if (s.state === 'here') {
-      const rec = recordOf(s.caseId)?.stages?.find(x => x.id === id);
-      return { ...row1, created: fullDate(rec?.created), due: fullDate(rec?.due), status: 'Done' as const, caseId: s.caseId };
-    }
-    if (s.state === 'elsewhere') return { ...row1, due: fullDate(s.date), status: 'Done elsewhere' as const };
-    return { ...row1, created, due: fullDate(s.date), status };
-  }) : undefined;
-
-  // Instructions: each stage made so far with what it asked for, then this case's own.
-  const instructions: OrderFormModel['instructions'] = [];
-  if (den && stages) {
+  const staged = (it: ServiceItem) => it.product === 'denture' && dentureTreatment(it) === 'staged';
+  const stagesOf = (den: ServiceItem): NonNullable<OrderFormModel['stages']> => {
+    const plan = stagePlan(den);
+    return DENTURE_STAGES.map(({ id, name }, i) => {
+      const row1 = { n: i + 1, name };
+      // A history row: the stages made on it are its record's.
+      const own = !draft ? prior?.stages?.find(s => s.id === id) : undefined;
+      if (own) return { ...row1, created: fullDate(own.created), due: fullDate(own.due), status };
+      const s = plan.find(x => x.id === id);
+      if (!s) return row1;
+      if (s.state === 'here') {
+        const rec = recordOf(s.caseId)?.stages?.find(x => x.id === id);
+        return { ...row1, created: fullDate(rec?.created), due: fullDate(rec?.due), status: 'Done' as const, caseId: s.caseId };
+      }
+      if (s.state === 'elsewhere') return { ...row1, due: fullDate(s.date), status: 'Done elsewhere' as const };
+      return { ...row1, created, due: fullDate(s.date), status };
+    });
+  };
+  // Each stage made so far with what it asked for (from the case it was made on), then the stages this case orders.
+  const stageCards = (den: ServiceItem, stages: NonNullable<OrderFormModel['stages']>): OrderFormModel['instructions'] => {
+    const out: OrderFormModel['instructions'] = [];
     for (const st of stages) {
       const id = DENTURE_STAGES[st.n - 1].id;
       const note = st.caseId ? recordOf(st.caseId)?.stages?.find(x => x.id === id)?.note : !draft ? prior?.stages?.find(x => x.id === id)?.note : undefined;
-      if (note) instructions.push({ n: st.n, title: st.caseId ? `${st.name} · ${st.caseId}` : st.name, text: note, status: st.status });
+      if (note) out.push({ n: st.n, title: st.caseId ? `${st.name} · ${st.caseId}` : st.name, text: note, status: st.status });
     }
     if (draft) {
       const ordered = stages.filter(st => st.status && st.status !== 'Done elsewhere' && !st.caseId);
       if (ordered.length) {
-        instructions.push({ n: ordered[0].n, title: ordered.map(st => st.name).join(' · '), text: den.note?.trim() || 'No instructions for this stage.', status });
+        out.push({ n: ordered[0].n, title: ordered.map(st => st.name).join(' · '), text: den.note?.trim() || 'No instructions for this stage.', status });
       }
     }
-  }
-  if (draft?.instructions?.trim()) {
-    // Edited at Review: the case's own text, as the lab gets it.
-    instructions.push({ title: 'Case Instructions', text: draft.instructions.trim(), status });
+    return out;
+  };
+  const den = items.find(staged);
+  const stages = den ? stagesOf(den) : undefined;
+  // Edited at Review: the case's own text, as the lab gets it (each service's note is in it).
+  const edited = draft?.instructions?.trim();
+
+  // Instructions: each stage made so far with what it asked for, then this case's own.
+  const instructions: OrderFormModel['instructions'] = [];
+  if (den && stages) instructions.push(...stageCards(den, stages));
+  if (edited) {
+    instructions.push({ title: 'Case Instructions', text: edited, status });
   } else {
     if (draft?.note.trim()) instructions.push({ title: 'Case Instructions', text: draft.note.trim(), status });
     items.filter(it => it !== den && it.note?.trim()).forEach(it => instructions.push({ title: itemTitle(it, n), text: it.note!.trim(), status }));
   }
 
+  const several = items.length > 1;
   const services = items.map((it, k) => {
     const e = ctx ? effective(it, ctx) : undefined;
     const portal = caseData.serviceItems?.[k];
     const name = it.product === 'denture' ? (dentureTreatment(it) === 'immediate' ? 'Immediate denture' : 'Full denture') : PORTAL_SERVICE[it.product];
     const where = it.teeth.length ? (it.product === 'bridge' ? spanText(it.teeth, n) : teethText(it.teeth, n)) : it.arch ? capital(archWord(it.arch)) : '—';
-    const delivery = it.product === 'denture' ? 'Per stage' : portal?.deliveryDate ? fullDate(caseDateToISO(portal.deliveryDate)) ?? portal.deliveryDate : '—';
+    // A partial's day is its one stage's.
+    const due = portal?.deliveryDate ?? Object.values(portal?.stageDates ?? {}).find(Boolean);
+    // Several cases are listed with their delivery days, so a denture's are its ordered stages' (one denture: they're in its history).
+    const delivery = it.product === 'denture' ? (several ? stageDelivery(it) : 'Per stage') : due ? fullDate(caseDateToISO(due)) ?? due : '—';
     return { name, where, material: portal?.material ?? materialOf(it, e) ?? '—', shade: shadeText(it) || '—', other: otherDetails(it, funding, n, e), delivery };
   });
   const titleOf = (it: ServiceItem) => (it.product === 'denture' ? `Full denture (${archWord(it.arch)})` : itemTitle(it, n));
+  /** A case's own instruction card: what it asks for at this step (a partial's stage, a reline's work), else its title. */
+  const noteTitle = (it: ServiceItem) =>
+    (it.product === 'partial' && it.stage ? PARTIAL_STAGES.find(s => s.id === it.stage)?.name : undefined)
+    ?? (it.product === 'reline' && it.work ? optionName('reline', it.work) : undefined)
+    ?? itemTitle(it, n);
+  // Several cases: each its own section, with its stage history, cards and files; the order keeps its own note.
+  const cases: OrderFormModel['cases'] = several ? items.map((it, k) => {
+    const own = staged(it) ? stagesOf(it) : undefined;
+    const cards = own ? stageCards(it, own) : !edited && it.note?.trim() ? [{ title: noteTitle(it), text: it.note.trim(), status }] : [];
+    return { title: titleOf(it), service: services[k], status, stages: own, instructions: cards, attachments: photosOf(it) };
+  }) : undefined;
+  const orderNote = edited || draft?.note.trim();
+  const orderCards: OrderFormModel['instructions'] = orderNote ? [{ title: `For all ${items.length} cases`, text: orderNote, status }] : [];
   const dentist = USERS.find(u => u.name === caseData.dentist);
 
   return {
@@ -391,12 +432,14 @@ export function orderFormModel(row: CaseRow, user: User, caseData: CaseForDetail
       pontics: items.flatMap(it => (it.product === 'bridge' ? bridgeParts(it).pontics : [])),
       legend: items.map(titleOf),
     },
-    stages,
+    stages: cases ? undefined : stages,
     services,
-    instructions,
+    instructions: cases ? orderCards : instructions,
+    cases,
     scans,
     scanNote,
-    attachments,
+    // Several cases: each lists its own photos.
+    attachments: cases ? [] : attachments,
   };
 }
 

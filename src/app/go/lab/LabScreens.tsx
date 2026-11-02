@@ -62,9 +62,10 @@ export function LabTabBar() {
     { to: `${LAB_BASE}/cases`, label: 'Cases', icon: Layers },
     { to: `${LAB_BASE}/account`, label: 'Me', icon: User },
   ];
+  // Docked full width, as the clinic's Light tab bar (ui.tsx LiteTabBar).
   return (
-    <nav className="go-tabbar absolute bottom-0 inset-x-0 z-20 px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-2 pointer-events-none">
-      <div className="pointer-events-auto relative flex items-center justify-around h-16 rounded-[26px] bg-go-surface/80 backdrop-blur-2xl border border-go-line go-card-shadow">
+    <nav className="go-tabbar absolute bottom-0 inset-x-0 z-20 bg-go-surface/90 backdrop-blur-2xl border-t border-go-line pb-[max(env(safe-area-inset-bottom),14px)]">
+      <div className="relative flex items-center justify-around h-16">
         {tabs.map(t => {
           if (!t) {
             return (

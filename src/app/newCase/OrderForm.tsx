@@ -7,8 +7,10 @@
 // where it goes back to, the teeth on one chart, a staged denture's history
 // (each stage made so far, with its dates, status and instructions, so a new
 // stage adds a row and an instruction card), each service's prescription, and
-// the scan and attachment files. The model is built from the flow's case in
-// FlowCaseDetail (orderFormModel); this file only draws it.
+// the scan and attachment files. An order with several cases (services) lists
+// them, then gives each its own section: its details and delivery, its stage
+// history, its instructions and its files. The model is built from the flow's
+// case in FlowCaseDetail (orderFormModel); this file only draws it.
 
 import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FileText, Mail, Package, Printer, ScanLine, X } from 'lucide-react';
@@ -19,6 +21,24 @@ import TeethChart from './TeethChart';
 import { NOTATIONS, Notation } from './rules';
 
 export type StageStatus = 'Done' | 'Done elsewhere' | 'In Progress' | 'Ready for Dispatch';
+
+type StageRow = { n: number; name: string; created?: string; due?: string; status?: StageStatus; caseId?: string };
+type ServiceRow = { name: string; where: string; material: string; shade: string; other: string; delivery: string };
+type Card = { n?: number; title: string; text: string; status?: StageStatus };
+type FileRow = { file: string; type: string; date: string };
+
+/** One case of an order with several: drawn in a section of its own. */
+export interface OrderFormCase {
+  /** "Full denture (upper)", as Case Type lists it. */
+  title: string;
+  service: ServiceRow;
+  status?: StageStatus;
+  /** A staged full denture's five stages. */
+  stages?: StageRow[];
+  /** Its own cards: a denture's stage cards, else its own instructions. */
+  instructions: Card[];
+  attachments: FileRow[];
+}
 
 export interface OrderFormModel {
   id: string;
@@ -34,13 +54,18 @@ export interface OrderFormModel {
   notation: Notation;
   chart: { teeth: string[]; pontics: string[]; legend: string[] };
   /** A staged full denture: all five stages in order, each made here, done elsewhere, ordered on this case or not yet. */
-  stages?: { n: number; name: string; created?: string; due?: string; status?: StageStatus; caseId?: string }[];
-  services: { name: string; where: string; material: string; shade: string; other: string; delivery: string }[];
-  instructions: { n?: number; title: string; text: string; status?: StageStatus }[];
+  stages?: StageRow[];
+  services: ServiceRow[];
+  instructions: Card[];
+  /**
+   * An order with several cases: each in its own section, in place of the Stage History, Service Details
+   * and per-service cards. `instructions` and `attachments` then hold only the order's own.
+   */
+  cases?: OrderFormCase[];
   scans: { type: string; file: string; date: string }[];
   /** Said in the Scan Files block when there are no files (impressions by post, scan to follow). */
   scanNote?: string;
-  attachments: { file: string; type: string; date: string }[];
+  attachments: FileRow[];
 }
 
 const STATUS_STYLE: Record<StageStatus, string> = {
@@ -93,6 +118,7 @@ export default function OrderFormSheet({ model, roomy: forceRoomy }: { model: Or
   const [ref, w] = useWidth();
   const roomy = forceRoomy || w >= 640;
   const single = model.services.length === 1;
+  const cases = model.cases;
   const notation = NOTATIONS.find(x => x.id === model.notation)?.label ?? 'FDI';
 
   return (
@@ -122,7 +148,11 @@ export default function OrderFormSheet({ model, roomy: forceRoomy }: { model: Or
         <Info label="Practice Name" value={model.practice.name} />
         <Info label="Lab Name" value={model.lab.name} sub={model.lab.address} />
         <Info label="Ship to Address" value={model.practice.address} />
-        <Info label="Case Type" value={model.caseType.join(' · ')} />
+        {/* Several cases: one line each, numbered as their sections are. */}
+        <Info
+          label={cases ? `Case Type · ${cases.length} cases` : 'Case Type'}
+          value={cases ? model.caseType.map((t, i) => `${i + 1} · ${t}`).join('\n') : model.caseType.join(' · ')}
+        />
       </div>
 
       <Block
@@ -136,11 +166,12 @@ export default function OrderFormSheet({ model, roomy: forceRoomy }: { model: Or
           </div>
           {model.chart.legend.length > 0 && (
             <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
-              {model.chart.legend.map(l => (
-                <span key={l} className="inline-flex items-center gap-1.5 text-[11px] text-[#4A4A5A]">
+              {model.chart.legend.map((l, i) => (
+                <span key={i} className="inline-flex items-center gap-1.5 text-[11px] text-[#4A4A5A]">
                   {/* The chart's own selection colours (ToothShapes: the 'se' fill, TEAL_LINE). */}
                   <span className="w-2.5 h-2.5 rounded-sm bg-[#8DD4EC] border border-[#3FA8CA]" aria-hidden />
-                  {l}
+                  {/* Several cases: numbered as their sections are. */}
+                  {cases ? `${i + 1} · ${l}` : l}
                 </span>
               ))}
             </div>
@@ -148,67 +179,114 @@ export default function OrderFormSheet({ model, roomy: forceRoomy }: { model: Or
         </div>
       </Block>
 
-      {model.stages && (
-        <Block title="Denture Stage History">
-          <Table
-            cols={['#', 'Stage Name', 'Creation Date', 'Requested Delivery Date', 'Status']}
-            widths={['w-7', '', '', '', 'w-24']}
-            rows={model.stages.map(s => [
-              <span className="text-[#717182]">{s.n}</span>,
-              <span className={s.status ? 'font-semibold' : ''}>
-                {s.name}
-                {s.caseId && <span className="block text-[10px] font-normal text-[#A0A0B0]">{s.caseId}</span>}
-              </span>,
-              s.created ?? <Dash />,
-              s.due ?? <Dash />,
-              <StatusPill status={s.status} />,
-            ])}
-          />
-        </Block>
+      {cases ? (
+        <>
+          {/* The order at a glance, then each case on its own. */}
+          <Block title="Cases on this Order" aside={<span className="text-[10px] text-[#717182]">{cases.length} cases</span>}>
+            {/* Narrow, the teeth are left to each case's section so the status still fits. */}
+            <Table
+              cols={['#', 'Case', ...(roomy ? ['Teeth / Arch'] : []), 'Delivery', 'Status']}
+              widths={['w-7', '', ...(roomy ? [''] : []), '', 'w-24']}
+              rows={cases.map((c, i) => [
+                <CaseNo n={i + 1} />,
+                <span className="font-semibold">{c.title}</span>,
+                ...(roomy ? [c.service.where] : []),
+                c.service.delivery,
+                <StatusPill status={c.status} />,
+              ])}
+            />
+          </Block>
+          {cases.map((c, i) => <CaseSection key={i} c={c} n={i + 1} total={cases.length} roomy={roomy} />)}
+          {model.instructions.length > 0 && (
+            <Block title="Order Instructions">
+              <div className="p-2.5 space-y-2">
+                {model.instructions.map((c, i) => <InstructionCard key={i} c={c} />)}
+              </div>
+            </Block>
+          )}
+        </>
+      ) : (
+        <>
+          {model.stages && (
+            <Block title="Denture Stage History">
+              <StageTable stages={model.stages} />
+            </Block>
+          )}
+
+          <Block title={single ? `Service Details (${model.services[0].name})` : 'Service Details'}>
+            <Table
+              cols={['Service Name', 'Teeth / Arch', 'Material', 'Tooth Shade', 'Other Details', 'Delivery']}
+              rows={model.services.map(s => [s.name, s.where, s.material, s.shade, s.other, s.delivery])}
+            />
+          </Block>
+
+          <Block title="Instructions">
+            <div className="p-2.5 space-y-2">
+              {model.instructions.length === 0 && <p className="px-1 py-1 text-xs text-[#A0A0B0]">No instructions on this order.</p>}
+              {model.instructions.map((c, i) => <InstructionCard key={i} c={c} />)}
+            </div>
+          </Block>
+        </>
       )}
 
-      <Block title={single ? `Service Details (${model.services[0].name})` : 'Service Details'}>
-        <Table
-          cols={['Service Name', 'Teeth / Arch', 'Material', 'Tooth Shade', 'Other Details', 'Delivery']}
-          rows={model.services.map(s => [s.name, s.where, s.material, s.shade, s.other, s.delivery])}
-        />
-      </Block>
-
-      <Block title="Instructions">
-        <div className="p-2.5 space-y-2">
-          {model.instructions.length === 0 && <p className="px-1 py-1 text-xs text-[#A0A0B0]">No instructions on this order.</p>}
-          {model.instructions.map((c, i) => (
-            <div key={i} className={`rounded-lg border px-3 py-2.5 ${c.status ? CARD_STYLE[c.status] : 'bg-[#F8F9FC] border-[#E0E0E6]'}`}>
-              <div className="flex items-start gap-2.5">
-                {c.n !== undefined && (
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-px ${c.status ? NUMBER_STYLE[c.status] : 'bg-[#4D8EF7] text-white'}`}>{c.n}</span>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-xs font-semibold">{c.title}</p>
-                    {c.status && <StatusPill status={c.status} />}
-                  </div>
-                  <p className="text-xs text-[#4A4A5A] leading-relaxed mt-1 whitespace-pre-line">{c.text}</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Block>
-
-      <div className={`grid gap-3 ${roomy ? 'grid-cols-2' : 'grid-cols-1'}`}>
+      {/* Several cases: the scans are the whole order's, and each case lists its own attachments. */}
+      <div className={`grid gap-3 ${roomy && !(cases && model.attachments.length === 0) ? 'grid-cols-2' : 'grid-cols-1'}`}>
         <Block title="Scan Files" icon={<ScanLine className="w-3.5 h-3.5" />}>
           {model.scans.length > 0
             ? <Table cols={['Scan Type', 'File Name', 'Date Uploaded']} rows={model.scans.map(s => [s.type, s.file, s.date])} />
             : <Empty icon={model.scanNote?.startsWith('Impressions') ? <Package className="w-3.5 h-3.5" /> : <Mail className="w-3.5 h-3.5" />} text={model.scanNote ?? 'No scan files on this order.'} />}
         </Block>
-        <Block title="Additional Attachment Files" icon={<FileText className="w-3.5 h-3.5" />}>
-          {model.attachments.length > 0
-            ? <Table cols={['File Name', 'Type', 'Date Uploaded']} rows={model.attachments.map(a => [a.file, a.type, a.date])} />
-            : <Empty icon={<FileText className="w-3.5 h-3.5" />} text="No additional attachments." />}
-        </Block>
+        {!(cases && model.attachments.length === 0) && (
+          <Block title="Additional Attachment Files" icon={<FileText className="w-3.5 h-3.5" />}>
+            {model.attachments.length > 0
+              ? <Table cols={['File Name', 'Type', 'Date Uploaded']} rows={model.attachments.map(a => [a.file, a.type, a.date])} />
+              : <Empty icon={<FileText className="w-3.5 h-3.5" />} text="No additional attachments." />}
+          </Block>
+        )}
       </div>
     </div>
+  );
+}
+
+/** One case of several: its details and delivery, its stage history, its instructions and its files. */
+function CaseSection({ c, n, total, roomy }: { c: OrderFormCase; n: number; total: number; roomy: boolean }) {
+  return (
+    <section className="rounded-xl border border-[#E0E0E6] overflow-hidden bg-white">
+      <div className="flex items-center gap-2.5 px-3 py-2 bg-[#EEF4FF] border-b border-[#DCE7FD]">
+        <CaseNo n={n} />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[13px] font-semibold text-[#1565C0] leading-snug break-words">{c.title}</h3>
+          <p className="text-[10px] text-[#717182]">Case {n} of {total}</p>
+        </div>
+        <StatusPill status={c.status} />
+      </div>
+      <div className="p-3 space-y-3">
+        <div className={`grid gap-2 ${roomy ? 'grid-cols-4' : 'grid-cols-2'}`}>
+          <Info label="Teeth / Arch" value={c.service.where} />
+          <Info label="Material" value={c.service.material} />
+          <Info label="Tooth Shade" value={c.service.shade} />
+          <Info label="Delivery" value={c.service.delivery} />
+          <div className="col-span-full">
+            <Info label="Other Details" value={c.service.other || '—'} />
+          </div>
+        </div>
+        {c.stages && (
+          <Sub title="Denture Stage History">
+            <div className="rounded-lg border border-[#F0EFF6] overflow-hidden"><StageTable stages={c.stages} /></div>
+          </Sub>
+        )}
+        <Sub title="Instructions">
+          {c.instructions.length > 0
+            ? <div className="space-y-2">{c.instructions.map((card, i) => <InstructionCard key={i} c={card} />)}</div>
+            : <p className="text-xs text-[#A0A0B0]">No instructions for this case.</p>}
+        </Sub>
+        <Sub title="Attachment Files" icon={<FileText className="w-3 h-3" />}>
+          {c.attachments.length > 0
+            ? <div className="rounded-lg border border-[#F0EFF6] overflow-hidden"><Table cols={['File Name', 'Type', 'Date Uploaded']} rows={c.attachments.map(a => [a.file, a.type, a.date])} /></div>
+            : <p className="text-xs text-[#A0A0B0]">No attachments for this case.</p>}
+        </Sub>
+      </div>
+    </section>
   );
 }
 
@@ -289,7 +367,7 @@ function Info({ label, value, sub }: { label: string; value: string; sub?: strin
   return (
     <div className="rounded-lg bg-[#F8F9FC] border border-[#F0EFF6] px-3 py-2 min-w-0">
       <p className="text-[10px] text-[#717182]">{label}</p>
-      <p className="text-xs font-semibold leading-snug break-words">{value}</p>
+      <p className="text-xs font-semibold leading-snug break-words whitespace-pre-line">{value}</p>
       {sub && <p className="text-[11px] text-[#4A4A5A] leading-snug mt-0.5 break-words">{sub}</p>}
     </div>
   );
@@ -331,6 +409,59 @@ function Table({ cols, rows, widths = [] }: { cols: string[]; rows: ReactNode[][
 }
 
 const Dash = () => <span className="text-[#A0A0B0]">—</span>;
+
+function StageTable({ stages }: { stages: StageRow[] }) {
+  return (
+    <Table
+      cols={['#', 'Stage Name', 'Creation Date', 'Requested Delivery Date', 'Status']}
+      widths={['w-7', '', '', '', 'w-24']}
+      rows={stages.map(s => [
+        <span className="text-[#717182]">{s.n}</span>,
+        <span className={s.status ? 'font-semibold' : ''}>
+          {s.name}
+          {s.caseId && <span className="block text-[10px] font-normal text-[#A0A0B0]">{s.caseId}</span>}
+        </span>,
+        s.created ?? <Dash />,
+        s.due ?? <Dash />,
+        <StatusPill status={s.status} />,
+      ])}
+    />
+  );
+}
+
+function InstructionCard({ c }: { c: Card }) {
+  return (
+    <div className={`rounded-lg border px-3 py-2.5 ${c.status ? CARD_STYLE[c.status] : 'bg-[#F8F9FC] border-[#E0E0E6]'}`}>
+      <div className="flex items-start gap-2.5">
+        {c.n !== undefined && (
+          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-px ${c.status ? NUMBER_STYLE[c.status] : 'bg-[#4D8EF7] text-white'}`}>{c.n}</span>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs font-semibold">{c.title}</p>
+            {c.status && <StatusPill status={c.status} />}
+          </div>
+          <p className="text-xs text-[#4A4A5A] leading-relaxed mt-1 whitespace-pre-line">{c.text}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A case's number, on the order's list and its section. */
+const CaseNo = ({ n }: { n: number }) => (
+  <span className="w-5 h-5 rounded-full bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0 tabular-nums">{n}</span>
+);
+
+/** A heading inside a case's section. */
+function Sub({ title, icon, children }: { title: string; icon?: ReactNode; children: ReactNode }) {
+  return (
+    <div>
+      <p className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[#717182] mb-1.5">{icon}{title}</p>
+      {children}
+    </div>
+  );
+}
 
 function Empty({ icon, text }: { icon: ReactNode; text: string }) {
   return (
