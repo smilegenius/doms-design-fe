@@ -123,10 +123,8 @@ export default function AcceptCasePrompt({ c, onClose, start = 'accept' }: { c: 
                 )}
               </div>
 
+              {/* No Cancel: the header's × closes the popup, as on the product's other modals. */}
               <div className="flex flex-wrap items-center justify-end gap-3 px-6 py-5">
-                <button onClick={onClose} className={`${accepted ? 'min-w-[120px] bg-[#F3F3F5] hover:bg-[#E9E9EE] text-[#1E1B4B]' : 'mr-auto text-[#717182] hover:text-[#030213]'} px-4 py-3 rounded-xl text-sm font-semibold transition-colors`}>
-                  Cancel
-                </button>
                 {!accepted && (
                   <button
                     onClick={() => setStep('missing')}
@@ -197,13 +195,17 @@ export default function AcceptCasePrompt({ c, onClose, start = 'accept' }: { c: 
                 </div>
               </div>
 
+              {/* Back returns to the question; there's no Cancel, the header's × closes the popup. */}
               <div className="flex items-center justify-end gap-3 px-6 py-5">
-                <button
-                  onClick={() => (start === 'missing' ? onClose() : setStep('accept'))}
-                  className="inline-flex items-center justify-center gap-1.5 min-w-[120px] px-5 py-3 rounded-xl text-sm font-semibold text-[#1E1B4B] bg-[#F3F3F5] hover:bg-[#E9E9EE] transition-colors"
-                >
-                  {start === 'missing' ? 'Cancel' : <><ArrowLeft className="w-4 h-4" />Back</>}
-                </button>
+                {start === 'accept' && (
+                  <button
+                    onClick={() => setStep('accept')}
+                    className="inline-flex items-center justify-center gap-1.5 min-w-[120px] px-5 py-3 rounded-xl text-sm font-semibold text-[#1E1B4B] bg-[#F3F3F5] hover:bg-[#E9E9EE] transition-colors"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    Back
+                  </button>
+                )}
                 <button
                   onClick={hold}
                   disabled={!canHold}
