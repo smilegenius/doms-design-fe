@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX, Truck, Play, FilePlus2, BarChart3, FileText } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX, Truck, Play, FilePlus2, BarChart3, FileText, Printer } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import { setUserId, setUx } from '../newCase/store';
@@ -30,6 +30,19 @@ export interface FlowEntry {
 }
 
 export const FLOWS: FlowEntry[] = [
+  {
+    // Print on the order form asks the lab first, so labs start changing statuses.
+    title: 'Accept case on print',
+    description: 'Printing the Smile Genius order form asks the lab first. Not yet accepted: “Do you have everything needed to process this case?” → Accept & print, or Something missing to put it On Hold. Posted and not marked received: “Has the parcel arrived…?” → Mark received, accept & print. Already accepted: “Print the order form?” → Print form. On the Cases list and Case Details.',
+    detail: 'Lab · Cases · Case Details',
+    icon: <Printer className="w-5 h-5 text-[#15803D]" />,
+    badge: 'Walkthrough',
+    accent: '#15803D',
+    accentSoft: '#F0FDF4',
+    path: '/flows/accept-on-print',
+    date: '3 Nov 2026',
+    month: '2026-11',
+  },
   {
     // Proposed first tab of the DSO portal's Analytics. Lives only here until
     // approved; /supplier/analytics is unchanged.

@@ -319,6 +319,18 @@ interface CaseDetailPageProps {
   followRequestedDelivery?: boolean;
 }
 
+/**
+ * A host's own case status, for lab statuses the portal doesn't have yet (the Accept-on-print flow: Received,
+ * Accepted…): its control in the identity card, its look on the service card and the steps of the status strip.
+ * Nothing in the portal sets it, so the status dropdown, pills and pipeline show as they are.
+ */
+export interface CaseStatusHost {
+  control: React.ReactNode;
+  look: { label: string; bg: string; color: string; border: string; dot: string };
+  steps: { label: string; actor: string; when: string; state?: 'current' | 'blocked' }[];
+}
+export const CaseStatusSlot = createContext<CaseStatusHost | null>(null);
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export const STATUS_MAP: Record<CaseStatus, { label: string; bg: string; color: string; border: string; banner: string; dot: string }> = {
@@ -917,7 +929,7 @@ export function LabNotesModal({ onClose, expanded, onToggleExpand }: { onClose: 
 function ScanViewer({ format, onFormatChange }: { format: ViewerFormat; onFormatChange: (f: ViewerFormat) => void }) {
   // A host's own order form (OrderFormSlot) sets the height of the row beside it: side by side, the viewer
   // stretches to match it. Without one (the portal) it keeps its fixed height.
-  const matchForm = useContext(OrderFormSlot) !== null;
+  const matchForm = !!useContext(OrderFormSlot)?.render;
   return (
     <div className={`relative bg-[#F0F2F7] rounded-xl border border-[#E0E0E6] overflow-hidden flex items-center justify-center ${matchForm ? 'h-[320px] lg:h-auto lg:min-h-[320px]' : 'h-[320px]'}`}>
       {/* Format tabs */}
@@ -1068,6 +1080,7 @@ export function FullViewModal({ caseData, onClose, onOpenNotes }: {
 }) {
   const [viewerFormat, setViewerFormat] = useState<ViewerFormat>('3D');
   const [orderTab, setOrderTab] = useState<'order-form' | 'lab-documents'>('order-form');
+  const orderFormHost = useContext(OrderFormSlot);
 
   return (
     <ModalPortal>
@@ -1180,7 +1193,7 @@ export function FullViewModal({ caseData, onClose, onOpenNotes }: {
           )}
 
           {/* Floating Print button — sits over the Order form panel */}
-          <button className="absolute bottom-5 right-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-[#4D8EF7]/30">
+          <button onClick={orderFormHost?.onPrint} className="absolute bottom-5 right-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-[#4D8EF7]/30">
             <Printer className="w-4 h-4" />
             Print
           </button>
@@ -3108,7 +3121,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   const effectiveStatus = dentureNextStage ? dentureNextStage.status
     : (staging && activeStageOrder) ? activeStageOrder.status : service.status;
   const effectiveDelivery = (staging && activeStageOrder) ? activeStageOrder.deliveryDate : service.deliveryDate;
-  const s = STATUS_MAP[effectiveStatus];
+  const s = useContext(CaseStatusSlot)?.look ?? STATUS_MAP[effectiveStatus];
   const iStyle = SERVICE_ICON_COLOR[service.name] ?? { bg: '#FFF7ED', color: '#F59E0B' };
 
   // The email thread now lives in a case-level side drawer (opened from the
@@ -3668,9 +3681,10 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
  * A host's own order form, drawn wherever this page shows one (the service panel, Full View, the Order
  * Form modal). With onFullView / onPrint, the Order form tab bar gets a full-screen button and a working
  * Print. Nothing sets it in the portal, so the form and tab bar below show as they are; the New Case Flow sets it.
+ * A host with no render keeps the portal's form and only takes the Print (the Accept-on-print flow).
  */
 export type OrderFormRender = (o: { caseData: CaseForDetail; service: ServiceItem | null; wide: boolean }) => React.ReactNode;
-export interface OrderFormHost { render: OrderFormRender; onFullView?: () => void; onPrint?: () => void }
+export interface OrderFormHost { render?: OrderFormRender; onFullView?: () => void; onPrint?: () => void }
 export const OrderFormSlot = createContext<OrderFormHost | null>(null);
 
 /** The Order form tab bar's right-hand tools: the portal's Print link, or a host's full screen + Print. */
@@ -3678,7 +3692,7 @@ function OrderFormTools() {
   const host = useContext(OrderFormSlot);
   if (!host?.onFullView) {
     return (
-      <button className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
+      <button onClick={host?.onPrint} className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
         <Printer className="w-3 h-3" />
         Print
       </button>
@@ -3715,7 +3729,7 @@ function OrderFormBody({ caseData, service, wide = false }: {
 }) {
   const custom = useContext(OrderFormSlot);
   const svc = service ?? caseData.serviceItems?.[0] ?? null;
-  if (custom) return <>{custom.render({ caseData, service: svc, wide })}</>;
+  if (custom?.render) return <>{custom.render({ caseData, service: svc, wide })}</>;
   const svcName = svc?.name ?? caseData.services[0] ?? 'Service';
   const fdiList = svc?.fdi ?? [];
   // A denture covers a whole jaw — it reads as an arch, not tooth numbers.
@@ -4437,6 +4451,7 @@ export function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, o
 }
 
 export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onPickStatus, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onOpenDraftCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach, viewerPortal, listLabel = 'Cases', dispatchToday, currentUser = CURRENT_USER, canMarkReceived = true, followRequestedDelivery = false }: CaseDetailPageProps) {
+  const statusHost = useContext(CaseStatusSlot);
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   // The lab's latest due-date change (if any) is the date the case is working
@@ -4942,7 +4957,19 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         title="Open the full case timeline"
         className="mx-6 mt-2 rounded-xl border border-[#DBEAFE] bg-[#EEF4FF]/60 px-5 py-3 flex items-start gap-8 overflow-x-auto text-left hover:bg-[#EEF4FF] transition-colors"
       >
-        {buildCasePipeline(caseData).filter(s => s.done || s.state === 'current' || s.state === 'blocked').map((s, i, arr) => {
+        {statusHost ? statusHost.steps.map((s, i, arr) => {
+          const current = s.state === 'current';
+          const blocked = s.state === 'blocked';
+          return (
+            <span key={`${s.label}-${i}`} className="relative flex flex-col items-start min-w-[150px] flex-shrink-0">
+              {i < arr.length - 1 && <span className="absolute left-2 top-1 h-px w-[calc(100%+2rem)] bg-[#C8D8FC]" />}
+              <span className={`relative w-2 h-2 rounded-full mb-2 ${blocked ? 'bg-[#C62828]' : current ? 'bg-[#A59DFF] ring-4 ring-[#A59DFF]/25' : 'bg-[#4D8EF7]'}`} />
+              <span className="text-sm font-semibold text-[#030213] leading-tight">{s.label}</span>
+              <span className="text-[11px] text-[#717182] mt-0.5 truncate max-w-[150px]">{s.actor}</span>
+              <span className="text-[11px] text-[#717182]">{s.when}</span>
+            </span>
+          );
+        }) : buildCasePipeline(caseData).filter(s => s.done || s.state === 'current' || s.state === 'blocked').map((s, i, arr) => {
           const current = s.state === 'current';
           const blocked = s.state === 'blocked';
           const actor = i <= 1 || s.label === 'Delivered' ? caseData.practice : (caseData.lab ?? 'Lab');
@@ -4968,9 +4995,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               override / Smile Genius-only popup first. Also flips
               automatically through the missing-info email loop. */}
           {/* Multi-service / staged cases show status per service or stage instead. */}
-          {!((caseData.serviceItems?.length ?? 0) > 1 || caseData.serviceItems?.some(si => (si.stages?.length ?? 0) > 1 || isDentureService(si.name))) && (
+          {statusHost?.control ?? (!((caseData.serviceItems?.length ?? 0) > 1 || caseData.serviceItems?.some(si => (si.stages?.length ?? 0) > 1 || isDentureService(si.name))) && (
             <StatusDropdown status={caseData.status} onPick={onPickStatus} />
-          )}
+          ))}
 
           <CreatedByIcon createdBy={caseCreatedBy(caseData, viewerPortal)} showName />
 

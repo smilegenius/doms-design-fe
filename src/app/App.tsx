@@ -24,6 +24,8 @@ import FlowCasesPage from './newCase/FlowCasesPage';
 import FlowCaseDetail from './newCase/FlowCaseDetail';
 import OrderFormFlowPage from './pages/OrderFormFlowPage';
 import DsoAnalyticsFlowPage from './dsoAnalytics/DsoAnalyticsFlowPage';
+import AcceptOnPrintFlowPage from './acceptOnPrint/AcceptOnPrintFlowPage';
+import LabCaseDetail from './acceptOnPrint/LabCaseDetail';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
 import LabApp from './LabApp';
@@ -458,6 +460,10 @@ export default function App() {
       {/* DSO analytics — Group Overview (Oct 2026), proposed in Flows before it
           replaces anything in /supplier/analytics. */}
       <Route path="/flows/dso-analytics" element={<DsoAnalyticsFlowPage />} />
+      {/* [Lab] Accept case on print (Nov 2026): the walkthrough opens the portal's Case Details on
+          the flow's own demo cases, so the portal's Cases screens stay as they are. */}
+      <Route path="/flows/accept-on-print" element={<AcceptOnPrintFlowPage />} />
+      <Route path="/flows/accept-on-print/case/:id" element={<LabCaseDetail />} />
       {/* Smile Genius Go — clinician / dentist mobile app. Has its own demo
           sign-in, so it sits outside ProtectedRoute. */}
       <Route path="/go" element={<GoVersionSelect />} />

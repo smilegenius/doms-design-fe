@@ -82,7 +82,7 @@ export type CaseStatus =
   | 'on-hold'
   | 'completed';
 
-type Scanner = 'iTero' | '3Shape' | 'Medit' | 'Carestream';
+export type Scanner = 'iTero' | '3Shape' | 'Medit' | 'Carestream';
 
 // How the case data physically reached the clinic.
 //   scanner — captured by a chairside intra-oral scanner
@@ -208,7 +208,7 @@ function ScannerIcon({ scanner, size = 32 }: { scanner: Scanner; size?: number }
 // fall back to the brand-specific ScannerIcon (the existing pattern); email
 // and manual sources get a flat coloured tile so the case origin is
 // immediately readable at row glance.
-function SourceIcon({ source, scanner, size = 32 }: { source: CaseSource; scanner: Scanner; size?: number }) {
+export function SourceIcon({ source, scanner, size = 32 }: { source: CaseSource; scanner: Scanner; size?: number }) {
   if (source === 'scanner') return <ScannerIcon scanner={scanner} size={size} />;
   if (source === 'email') {
     return (
