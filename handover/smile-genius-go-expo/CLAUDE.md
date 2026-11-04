@@ -26,7 +26,7 @@ Dental practices send lab work (crowns, bridges, dentures, aligners…) to denta
 ```
 src/app/                    Routes only (thin files → src/screens)
   _layout.tsx               Fonts, store, ThemeRoot, auth redirect, toasts
-  (tabs)/_layout.tsx        Tabs with the custom floating TabBar
+  (tabs)/_layout.tsx        Tabs with the custom docked TabBar
   (tabs)/home|work|invoices|account.tsx
   work/[id]/index.tsx       Case detail (params: tab, receive)
   work/[id]/dispatch.tsx    Print label and dispatch
@@ -65,7 +65,7 @@ src/theme/ThemeRoot.tsx     Sets the go-* CSS variables (NativeWind vars()), use
 |---|---|
 | `Screen({header, footer, tabs, scroll, floating})` | Every screen. Safe areas, keyboard avoiding, scrolling body, sticky `footer`. `tabs` leaves room for the tab bar. `floating(compact)` hovers just above the footer, and `compact` is true while scrolling down |
 | `TopBar({title, sub, back, fallback, right, large})` | Screen header. `back` uses router history with a fallback (`useBack`) |
-| `TabBar` / `NewWorkSheet` | Floating tab bar; the centre (+) opens "Create lab work" |
+| `TabBar` / `NewWorkSheet` | Tab bar docked to the bottom edge, full width with no margins (designer, 4 Nov 2026): its surface runs under the home indicator, the tabs sit above the safe area (at least 14px). The centre (+) opens "Create lab work" |
 | `T`, `Grad`, `Rows`, `useCardShadow` | Text, brand gradient, divided rows, card shadow |
 | `Card`, `Section`, `KV` | Content surfaces. KV = label/value rows |
 | `Btn({variant, size, block, icon})` | Buttons: lg 52px, md 40px |
