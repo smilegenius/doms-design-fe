@@ -256,7 +256,7 @@ export default function IntakeForm({ config, preview = false, initialMode = null
             </span>
           </div>
         </div>
-        {config.welcome && <p className="text-sm text-[#5A5568] leading-relaxed mt-4 pt-4 border-t border-dashed border-[#F0EFF6]">{config.welcome}</p>}
+        {(mode === 'files' || config.welcome) && <p className="text-sm text-[#5A5568] leading-relaxed mt-4 pt-4 border-t border-dashed border-[#F0EFF6]">{mode === 'files' ? `Send scans, photos or notes for a case ${config.labName} already has. We'll add them to the right case.` : config.welcome}</p>}
       </div>
     </div>
   );
