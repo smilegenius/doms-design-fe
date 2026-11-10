@@ -24,6 +24,7 @@ import {
   isFollowUp, seedDenturePlan, stageName, stageOption, stagePlan, stagesOutOfOrder, stagesShort, stagesSummary,
   suggestedStageDates, treatmentName, CaseDraft, receivedFor, serviceDate, aProduct, fastTrackEligible,
   AlignerGroupId, AlignerKey, alignerGroup, alignerReadback, isAlignerGroup, nextStageExtra, repeatExtra,
+  archAllowsBoth,
 } from './rules';
 import { IMPLANT_SYSTEMS, LABS, ProductId } from './data';
 import { getRow, setNotation } from './store';
@@ -105,7 +106,7 @@ export const ServicesStep = forwardRef<HTMLHeadingElement>(function ServicesStep
         {chips.length > 0 && (
           <div className="mb-6">
             <p className="text-xs font-semibold text-[#3A3A4A] mb-2">Pick up where you left off</p>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,260px),1fr))] gap-3">
               {chips.map(c => {
                 const Icon = PRODUCT_ICON[c.product];
                 return (
@@ -124,10 +125,10 @@ export const ServicesStep = forwardRef<HTMLHeadingElement>(function ServicesStep
           </div>
         )}
 
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(156px,1fr))] gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(156px,1fr))] gap-2 sm:gap-3">
           {tiles.map(p => <ServiceTile key={p} product={p} nhs={nhs} onPick={() => addService(p)} />)}
           {hasMore && (
-            <button type="button" onClick={() => openDrawer({ kind: 'moreServices' })} className={`flex flex-col justify-between gap-4 min-h-[120px] p-4 rounded-2xl border border-dashed border-[#C9C9D6] bg-white hover:border-[#3F6FE8] hover:bg-[#F8FAFF] text-left transition-colors motion-reduce:transition-none ${FOCUS}`}>
+            <button type="button" onClick={() => openDrawer({ kind: 'moreServices' })} className={`flex flex-col justify-between gap-3 sm:gap-4 min-h-[104px] sm:min-h-[120px] p-3 sm:p-4 rounded-2xl border border-dashed border-[#C9C9D6] bg-white hover:border-[#3F6FE8] hover:bg-[#F8FAFF] text-left transition-colors motion-reduce:transition-none ${FOCUS}`}>
               <span className="flex items-center gap-2 w-full">
                 <span aria-hidden className="w-11 h-11 rounded-xl bg-[#F3F3F5] text-[#4A4A5A] flex items-center justify-center"><MoreHorizontal className="w-5 h-5" strokeWidth={1.75} /></span>
                 <span aria-hidden className="ml-auto flex -space-x-1.5">
@@ -209,7 +210,7 @@ export function ServiceTile({ product, nhs, onPick }: { product: ProductId; nhs:
   const lead = product === 'other' ? 'Describe the work' : !offered.length && ctx.funding === 'nhs' ? 'Not on the NHS' : null;
   if (wide) {
     return (
-      <button type="button" onClick={onPick} className={`group flex flex-col justify-between gap-4 min-h-[120px] p-4 rounded-2xl border border-[#E0E0E6] bg-white text-left hover:border-[#3F6FE8] hover:shadow-[0_10px_24px_-14px_rgba(63,111,232,0.55)] transition-[border-color,box-shadow] motion-reduce:transition-none ${FOCUS}`}>
+      <button type="button" onClick={onPick} className={`group flex flex-col justify-between gap-3 sm:gap-4 min-h-[104px] sm:min-h-[120px] p-3 sm:p-4 rounded-2xl border border-[#E0E0E6] bg-white text-left hover:border-[#3F6FE8] hover:shadow-[0_10px_24px_-14px_rgba(63,111,232,0.55)] transition-[border-color,box-shadow] motion-reduce:transition-none ${FOCUS}`}>
         <span className="flex items-start justify-between gap-2 w-full">
           <span aria-hidden className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#EEF4FF] to-[#F3EEFF] border border-[#DCE6FD] text-[#2F62D6] flex items-center justify-center"><Icon className="w-5 h-5" strokeWidth={1.75} /></span>
           {nhs && PRODUCTS[product].privateOnly
@@ -450,8 +451,8 @@ export function RemoveService({ item, variant = 'link' }: { item: ServiceItem; v
   const remove = () => { setConfirm(false); removeItem(item.id); toast.info(`${title} removed.`); };
   const ask = () => (hasWork(item) ? setConfirm(c => !c) : remove());
   const confirmBox = (
-    <span role="group" aria-label={`Remove ${title}?`} className="inline-flex items-center gap-2 text-xs text-[#1F1F2E]">
-      Remove {title}? Its answers go too.
+    <span role="group" aria-label={`Remove ${title}?`} className="inline-flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-[#1F1F2E]">
+      <span className="max-sm:basis-full">Remove {title}? Its answers go too.</span>
       <button type="button" onClick={remove} className={`px-2 py-1 rounded-md font-semibold text-white bg-[#B91C1C] hover:bg-[#991B1B] ${FOCUS}`}>Remove</button>
       <button type="button" onClick={() => setConfirm(false)} className={`px-2 py-1 rounded-md font-semibold text-[#3A3A4A] border border-[#D4D4DD] bg-white hover:bg-[#F8F9FC] ${FOCUS}`}>Keep</button>
     </span>
@@ -471,8 +472,8 @@ export function RemoveService({ item, variant = 'link' }: { item: ServiceItem; v
     );
   }
   return confirm ? confirmBox : (
-    <button type="button" onClick={ask} className={`inline-flex items-center gap-1 text-xs font-semibold text-[#B91C1C] hover:underline rounded ${FOCUS}`}>
-      <Trash2 className="w-3.5 h-3.5" aria-hidden />Remove {label}
+    <button type="button" onClick={ask} aria-label={`Remove ${label}`} className={`inline-flex items-center gap-1 text-xs font-semibold text-[#B91C1C] hover:underline rounded max-sm:py-2 max-sm:-my-2 ${FOCUS}`}>
+      <Trash2 className="w-3.5 h-3.5" aria-hidden />Remove<span className="max-sm:hidden">&nbsp;{label}</span>
     </button>
   );
 }
@@ -772,7 +773,7 @@ function TeethEditor({ item, extraction }: { item: ServiceItem; extraction?: boo
     <div className="space-y-4">
       {/* The horizontal chart on top at full width, its legend under it; what's picked reads back below. */}
       <div
-        className={`rounded-xl bg-[#F8F9FC] border border-[#ECECF2] ${wide ? 'mx-auto px-4 pt-3 pb-2.5' : 'px-2.5 pt-2.5 pb-2'}`}
+        className={`rounded-xl bg-[#F8F9FC] border border-[#ECECF2] ${wide ? 'mx-auto px-4 max-sm:px-1.5 pt-3 pb-2.5' : 'px-2.5 pt-2.5 pb-2'}`}
         style={{ maxWidth: chartMax }}
       >
         <TeethChart
@@ -904,7 +905,7 @@ export function NotationSelect() {
         title={NOTATIONS.find(o => o.id === user.notation)?.range}
         // As wide as the chosen word (a select is otherwise as wide as its longest option): the arrow sits right after it.
         style={{ width: `calc(${(NOTATIONS.find(o => o.id === user.notation)?.label ?? '').length}ch + 16px)` }}
-        className={`appearance-none bg-transparent pr-3.5 font-semibold text-[#030213] hover:text-[#2F62D6] cursor-pointer rounded ${FOCUS}`}
+        className={`appearance-none bg-transparent pr-3.5 max-sm:py-2 max-sm:-my-2 font-semibold text-[#030213] hover:text-[#2F62D6] cursor-pointer rounded ${FOCUS}`}
       >
         {NOTATIONS.map(o => <option key={o.id} value={o.id} title={o.range}>{o.label}</option>)}
       </select>
@@ -943,8 +944,8 @@ function WingsEditor({ item }: { item: ServiceItem }) {
 function ArchEditor({ item }: { item: ServiceItem }) {
   const { ctx, updateItem, notes, dismissNote, doneAndAdvance, user } = useCase();
   const wide = useRoom() === 'wide';
-  // A full denture is picked as Upper, Lower or Both (the portal's rule), like a retainer, aligners or whitening trays.
-  const both = item.product === 'retainer' || item.product === 'aligner' || item.product === 'whitening' || item.product === 'denture';
+  // Every whole-arch service (night guard, retainer, aligners, whitening trays, full denture) can be Upper, Lower or Both.
+  const both = archAllowsBoth(item.product);
   // A full denture for the arch of the patient's next stage picks up that plan (and drops it for another arch).
   const pick = (jaw: 'upper' | 'lower' | 'both') => updateItem(item.id, i => seedDenturePlan({
     ...i, arch: jaw, archSrc: 'You',
@@ -970,7 +971,7 @@ function ArchEditor({ item }: { item: ServiceItem }) {
       <div className={chartMax ? 'space-y-3' : 'flex-1 min-w-[200px] space-y-4 pt-1'}>
         {wide ? (
           // The numbering sits beside the arch choice when the chart has its own column.
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 max-sm:[&>div:first-child]:w-full">
           <WideChoice
             label="Arch"
             form="segment"
@@ -1451,7 +1452,7 @@ function AlignerEditor({ item, group }: { item: ServiceItem; group: AlignerGroup
   const missing = g.fields.find(f => f.required && !a[f.key]);
   return (
     <div className="space-y-3">
-      <div className={`grid gap-x-3 gap-y-2.5 ${column !== undefined && column < 400 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+      <div className={`grid gap-x-3 gap-y-2.5 ${column !== undefined && column < 400 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
         {g.fields.map(f => {
           const v = a[f.key] ?? '';
           const gap = f.required && !v;
@@ -1626,15 +1627,16 @@ function WideChoice({ label, options, value, onChange, form, small, caption }: {
       : '';
     return (
       <div>
-        <div role="radiogroup" aria-label={label} onKeyDown={rove} className="inline-flex flex-wrap gap-1 p-1 rounded-xl bg-[#F0EFF6] border border-[#E0E0E6]">
+        {/* On a phone the choices share the width in equal cells (two per row past three), so the track never wraps raggedly. */}
+        <div role="radiogroup" aria-label={label} onKeyDown={rove} className={`inline-flex flex-wrap gap-1 p-1 rounded-xl bg-[#F0EFF6] border border-[#E0E0E6] max-sm:grid max-sm:w-full ${options.length > 3 ? 'max-sm:grid-cols-2' : 'max-sm:grid-flow-col max-sm:auto-cols-fr'}`}>
           {options.map(o => {
             const on = value === o.id;
             return (
-              <button key={o.id} {...radio(o)} className={`inline-flex items-center gap-1.5 ${small ? 'h-7 px-3 text-xs' : 'h-8 px-3.5 text-sm'} rounded-lg font-semibold transition-colors motion-reduce:transition-none ${FOCUS} ${
+              <button key={o.id} {...radio(o)} className={`inline-flex items-center gap-1.5 ${small ? 'h-7 px-3 text-xs' : 'h-8 px-3.5 text-sm'} max-sm:min-w-0 max-sm:justify-center max-sm:h-auto max-sm:min-h-9 max-sm:py-1.5 max-sm:px-2 max-sm:text-center max-sm:leading-tight rounded-lg font-semibold transition-colors motion-reduce:transition-none ${FOCUS} ${
                 o.disabled ? 'text-[#8B8B9E] cursor-not-allowed' : on ? 'bg-white text-[#1E40AF] shadow-sm ring-1 ring-[#DCE6FD]' : 'text-[#4A4A5A] hover:text-[#030213] hover:bg-white/70'}`}>
                 {o.pic && <span aria-hidden className={`flex ${on ? 'text-[#2F62D6]' : ''}`}>{o.pic}</span>}
                 {o.label}
-                {on && <Check aria-hidden className="w-3.5 h-3.5 text-[#2F62D6]" strokeWidth={3} />}
+                {on && <Check aria-hidden className="w-3.5 h-3.5 text-[#2F62D6] max-sm:hidden" strokeWidth={3} />}
               </button>
             );
           })}
@@ -1650,9 +1652,9 @@ function WideChoice({ label, options, value, onChange, form, small, caption }: {
         {options.map(o => {
           const on = value === o.id;
           return (
-            <button key={o.id} {...radio(o)} className={`inline-flex items-center gap-1.5 ${small ? 'h-8 px-3 text-[13px]' : 'h-9 px-3.5 text-sm'} rounded-full border transition-colors motion-reduce:transition-none ${FOCUS} ${tone(on, o.disabled)}`}>
+            <button key={o.id} {...radio(o)} className={`inline-flex max-w-full min-w-0 items-center gap-1.5 ${small ? 'h-8 px-3 text-[13px]' : 'h-9 px-3.5 text-sm'} rounded-full border transition-colors motion-reduce:transition-none ${FOCUS} ${tone(on, o.disabled)}`}>
               {o.pic && <span aria-hidden className="flex">{o.pic}</span>}
-              <span className="font-semibold whitespace-nowrap">{o.label}</span>
+              <span className="min-w-0 truncate font-semibold">{o.label}</span>
               {o.tag && <SourceTag src={o.tag} />}
               {o.sub && !o.disabled && <span className="text-xs text-[#5A5A6A] whitespace-nowrap">{o.sub}</span>}
               {on && <Check aria-hidden className="w-3.5 h-3.5 text-[#2F62D6]" strokeWidth={3} />}
@@ -1664,18 +1666,23 @@ function WideChoice({ label, options, value, onChange, form, small, caption }: {
   }
 
   return (
-    <div role="radiogroup" aria-label={label} onKeyDown={rove} className={`grid gap-2 ${options.length > 4 ? 'grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]' : 'max-w-[560px]'}`}>
+    <div role="radiogroup" aria-label={label} onKeyDown={rove} className={`grid gap-2 ${options.length > 4 ? 'grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]' : 'grid-cols-[minmax(0,1fr)] max-w-[560px]'}`}>
       {options.map(o => {
         const on = value === o.id;
         return (
-          <button key={o.id} {...radio(o)} className={`flex items-center gap-2.5 h-10 pl-3 pr-2.5 rounded-xl border text-left transition-colors motion-reduce:transition-none ${FOCUS} ${tone(on, o.disabled)}`}>
+          // A row never outgrows its card: on a narrow card the name wraps (with its tag) and the lead time stays.
+          <button key={o.id} {...radio(o)} className={`min-w-0 flex items-center gap-2.5 min-h-10 py-1.5 pl-3 pr-2.5 rounded-xl border text-left transition-colors motion-reduce:transition-none ${FOCUS} ${tone(on, o.disabled)}`}>
             {o.pic}
-            <span className="min-w-0 truncate text-sm font-semibold">{o.label}</span>
-            {o.tag && <SourceTag src={o.tag} />}
+            <span className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="min-w-0 text-sm font-semibold leading-5 break-words">{o.label}</span>
+              {o.tag && <SourceTag src={o.tag} />}
+              {/* On a phone an unavailable answer's reason reads under its name, not squeezed beside it. */}
+              {o.disabled && o.reason && <span className="sm:hidden basis-full text-xs text-[#6B6B7B]">{o.reason}</span>}
+            </span>
             {/* Lead time and dot never leave the row: only the label (or an unavailable answer's reason) truncates. */}
-            <span className={`ml-auto flex items-center gap-2.5 pl-1 ${o.disabled ? 'min-w-0' : 'flex-shrink-0'}`}>
+            <span className={`ml-auto flex items-center gap-2.5 pl-1 ${o.disabled ? 'sm:min-w-0 max-sm:flex-shrink-0' : 'flex-shrink-0'}`}>
               {o.disabled
-                ? o.reason && <span className="min-w-0 truncate text-xs text-[#6B6B7B]">{o.reason}</span>
+                ? o.reason && <span className="max-sm:hidden min-w-0 truncate text-xs text-[#6B6B7B]">{o.reason}</span>
                 : o.sub && <span className="whitespace-nowrap text-xs tabular-nums text-[#5A5A6A]">{o.sub}</span>}
               <span aria-hidden className={`w-[18px] h-[18px] rounded-full border flex-shrink-0 flex items-center justify-center ${
                 on ? 'bg-[#3F6FE8] border-[#3F6FE8]' : o.disabled ? 'border-dashed border-[#C9C9D6]' : 'bg-white border-[#C9C9D6]'}`}>

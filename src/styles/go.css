@@ -114,12 +114,17 @@
 @keyframes go-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes go-toast-in { from { opacity: 0; transform: translateY(-12px) scale(.98); } to { opacity: 1; transform: none; } }
 @keyframes go-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* Manual create: the next page slides in from the right, going back from the left (pushed screens). */
+@keyframes go-push-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes go-pop-in { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
 @keyframes go-scan { 0% { top: 8%; } 50% { top: 88%; } 100% { top: 8%; } }
 @keyframes go-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .go-sheet-in { animation: go-sheet-in .28s cubic-bezier(.2,.8,.2,1); }
 .go-fade-in { animation: go-fade-in .2s ease-out; }
 .go-toast-in { animation: go-toast-in .25s cubic-bezier(.2,.8,.2,1); }
 .go-rise { animation: go-rise .35s cubic-bezier(.2,.8,.2,1) both; }
+.go-push-in { animation: go-push-in .32s cubic-bezier(.2,.8,.2,1) both; }
+.go-pop-in { animation: go-pop-in .32s cubic-bezier(.2,.8,.2,1) both; }
 .go-scanline { animation: go-scan 2.6s ease-in-out infinite; }
 .go-pulse { animation: go-pulse 1.4s ease-in-out infinite; }
 /* Camera shutter: a quick white flash over the viewfinder */

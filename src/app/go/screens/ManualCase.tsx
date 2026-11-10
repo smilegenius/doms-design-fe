@@ -10,7 +10,7 @@
 //   3 Order details — order type, appointment, source, notes, files
 //   4 Review
 // A case can be saved as a draft at any point and reopened filled in.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ReadFlag, ReadHint, ReadMode, ReadSource, SourceCard } from './ReadSource';
 import {
@@ -248,7 +248,8 @@ export function ToothPicker({ value, onChange, invalid }: { value: string[]; onC
 const GENDERS = ['Female', 'Male', 'Other', 'Prefer not to say'];
 
 /** open / onOpenChange / bare let a parent drive the sheet (bare = no field, just the sheet). */
-export function PatientPicker({ value, onChange, invalid, open: openProp, onOpenChange, bare }: { value: string | null; onChange: (id: string) => void; invalid?: boolean; open?: boolean; onOpenChange?: (o: boolean) => void; bare?: boolean }) {
+/** createWith: open straight into the new-patient form with this name (Lite's "Add “…” as a new patient"). */
+export function PatientPicker({ value, onChange, invalid, open: openProp, onOpenChange, bare, createWith }: { value: string | null; onChange: (id: string) => void; invalid?: boolean; open?: boolean; onOpenChange?: (o: boolean) => void; bare?: boolean; createWith?: string }) {
   const [openInner, setOpenInner] = useState(false);
   const open = openProp ?? openInner;
   const setOpen = (v: boolean) => { setOpenInner(v); onOpenChange?.(v); };
@@ -266,6 +267,7 @@ export function PatientPicker({ value, onChange, invalid, open: openProp, onOpen
   const exact = PATIENTS.some(x => x.name.toLowerCase() === q.trim().toLowerCase());
   const close = () => { setOpen(false); setCreating(false); setEditId(null); setQ(''); };
   const startCreate = () => { setNp({ ...blank, name: q.trim() }); setCreating(true); };
+  useEffect(() => { if (open && createWith !== undefined) { setNp({ ...blank, name: createWith }); setCreating(true); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const ukDate = (iso: string) => (iso ? new Date(iso).toLocaleDateString('en-GB') : '—');
   const isoDate = (uk: string) => { const [d, m, y] = uk.split('/'); return y ? `${y}-${m}-${d}` : ''; };
   const editDetails = () => {
@@ -401,7 +403,8 @@ export function PatientPicker({ value, onChange, invalid, open: openProp, onOpen
 
 // ─── Lab: search, favourites, or add an offline lab on the spot ─────────────
 
-export function LabPicker({ value, onChange, invalid, open: openProp, onOpenChange, bare, header }: { value: string | null; onChange: (id: string) => void; invalid?: boolean; open?: boolean; onOpenChange?: (o: boolean) => void; bare?: boolean; header?: React.ReactNode }) {
+/** createWith: open straight into the add-a-lab form with this name. */
+export function LabPicker({ value, onChange, invalid, open: openProp, onOpenChange, bare, header, createWith }: { value: string | null; onChange: (id: string) => void; invalid?: boolean; open?: boolean; onOpenChange?: (o: boolean) => void; bare?: boolean; header?: React.ReactNode; createWith?: string }) {
   const [openInner, setOpenInner] = useState(false);
   const open = openProp ?? openInner;
   const setOpen = (v: boolean) => { setOpenInner(v); onOpenChange?.(v); };
@@ -415,6 +418,7 @@ export function LabPicker({ value, onChange, invalid, open: openProp, onOpenChan
   const hits = LABS.filter(l => (tab === 'all' || favs.includes(l.id)) && `${l.name} ${l.town}`.toLowerCase().includes(term));
   const exact = LABS.some(l => l.name.toLowerCase() === term);
   const close = () => { setOpen(false); setCreating(false); setQ(''); };
+  useEffect(() => { if (open && createWith !== undefined) { setNl({ name: createWith, town: '', email: '', phone: '' }); setCreating(true); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const create = () => { const id = addLab({ name: nl.name.trim(), town: nl.town.trim() || '—', email: nl.email || undefined, phone: nl.phone || undefined }); onChange(id); close(); };
 
   return (
@@ -503,7 +507,7 @@ export function LabPicker({ value, onChange, invalid, open: openProp, onOpenChan
 // ─── Service editor sheet (pick a service, then its details) ────────────────
 
 /** Chips with an "Other (specify)" escape hatch, like the web dropdowns. */
-function ChoiceWithOther({ options, value, onChange, placeholder }: { options: string[]; value: string | null; onChange: (v: string | null) => void; placeholder: string }) {
+export function ChoiceWithOther({ options, value, onChange, placeholder }: { options: string[]; value: string | null; onChange: (v: string | null) => void; placeholder: string }) {
   const isOther = value !== null && !options.includes(value);
   return (
     <div className="space-y-2">
@@ -535,7 +539,7 @@ function BrandField({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-function DetailInput({ field, value, onChange, hint }: { field: DetailField; value: string | string[] | undefined; onChange: (v: string | string[]) => void; hint?: React.ReactNode }) {
+export function DetailInput({ field, value, onChange, hint }: { field: DetailField; value: string | string[] | undefined; onChange: (v: string | string[]) => void; hint?: React.ReactNode }) {
   const v = value ?? (field.kind === 'multi' ? [] : '');
   return (
     <div>

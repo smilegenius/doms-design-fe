@@ -1,4 +1,4 @@
-import { Check, History, X } from 'lucide-react';
+import { Check, History, Lock, X } from 'lucide-react';
 import type { CaseStatus } from '../pages/CasesPage';
 import { STATUS_MAP } from '../pages/CaseDetailPage';
 import { ARCH_LABELS, DENTURE_STAGES, TODAY_ISO, archOf, archTeeth, type Arch, type StageRow } from '../data/dentureStages';
@@ -115,19 +115,37 @@ export function StageDatePicker({
   };
 
   const rowPad = compact ? 'px-2.5 py-1.5' : 'px-3 py-2';
+  // Compact rows on a matched case share one grid: stage · date · status · lock or ✕.
+  const matchedGrid = 'grid grid-cols-[minmax(0,1fr)_118px_104px_24px] items-center gap-x-2';
 
   return (
     <div className="space-y-2">
       {!compact && <p className="text-[11px] text-[#717182]">Tick a stage, then set its delivery date</p>}
 
-      {compact && selected.length === 0 && (
+      {compact && selected.length === 0 && existing.length === 0 && (
         <p className="text-[11px] text-[#D97706]">No stages picked yet — add them with Edit.</p>
       )}
-      <div className={`border border-[#E0E0E6] rounded-xl divide-y divide-[#F0EFF6] bg-white overflow-hidden ${compact && selected.length === 0 ? 'hidden' : ''}`}>
-        {/* Compact (service card): only the picked stages, each with a ✕ to
-            drop it — picking more happens in the service window. */}
-        {(compact ? selected : catalog).map(stage => {
+      <div className={`border border-[#E0E0E6] rounded-xl divide-y divide-[#F0EFF6] bg-white overflow-hidden ${compact && selected.length === 0 && existing.length === 0 ? 'hidden' : ''}`}>
+        {/* Compact (service card): the stages already on a matched case
+            (locked), then the picked ones, each with a ✕ to drop it —
+            picking more happens in the service window. */}
+        {(compact ? catalog.filter(s => ordered.has(s) || stages.includes(s)) : catalog).map(stage => {
           const prior = ordered.get(stage);
+          if (prior && compact) {
+            // Matched-case row on the shared grid: stage · date · status · lock (in the ✕ column).
+            return (
+              <div key={stage} className={`${rowPad} bg-white`} title="Already ordered on this case">
+                <div className={matchedGrid}>
+                  <span className="text-xs truncate min-w-0 font-medium text-[#5A5568]">{stage}</span>
+                  <span className="text-[11px] text-[#A0A0B0] whitespace-nowrap pl-2">{prior.date ?? '—'}</span>
+                  <span className="justify-self-start"><StageStatusCell row={prior} size="xs" /></span>
+                  <span className="w-6 h-6 flex items-center justify-center text-[#C0C0CC]" aria-label="Locked">
+                    <Lock className="w-3 h-3" />
+                  </span>
+                </div>
+              </div>
+            );
+          }
           if (prior) {
             return (
               <div key={stage} className={`flex items-center gap-3 ${rowPad} bg-[#FAFBFC]`}>
@@ -150,7 +168,7 @@ export function StageDatePicker({
               onClick={() => setDone(stage, !done)}
               aria-pressed={done}
               title="Done before this case reached Smile Genius — e.g. at the patient's previous lab"
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap transition-colors ${
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap transition-colors ${dense ? 'max-sm:py-1.5 max-sm:px-2.5 max-sm:text-[11px] max-sm:min-h-[32px]' : ''} ${
                 done ? 'bg-[#F3F3F5] text-[#5A5568] border-[#C9C9D3]' : 'bg-white text-[#A0A0B0] border-[#E0E0E6] hover:text-[#5A5568]'
               }`}
             >
@@ -180,6 +198,37 @@ export function StageDatePicker({
               />
             </label>
           );
+          // Compact on a matched case: the new stage sits on the same grid as
+          // the locked rows above it, so dates and statuses share columns.
+          if (compact && existing.length > 0) {
+            return (
+              <div key={stage} className={`${rowPad} bg-[#F8FAFF]`}>
+                <div className={matchedGrid}>
+                  <span className="text-xs truncate min-w-0 font-semibold text-[#030213]">{stage}</span>
+                  <input
+                    type="date"
+                    value={dates[stage] ?? ''}
+                    min={today}
+                    aria-label={`${stage} delivery date`}
+                    onChange={(e) => setDate(stage, e.target.value)}
+                    className={`w-full px-2 py-1 text-[11px] rounded-md border bg-white outline-none focus:border-[#4D8EF7] text-[#030213] ${dates[stage] ? 'border-[#E0E0E6]' : 'border-[#FCD34D]'}`}
+                  />
+                  <span className="justify-self-start inline-flex items-center gap-1.5 rounded-full font-semibold border whitespace-nowrap px-2 py-px text-[10px] bg-[#EEF4FF] text-[#1565C0] border-[#BFDBFE]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#4D8EF7]" />New stage
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggle(stage)}
+                    aria-label={`Remove ${stage}`}
+                    title={`Remove ${stage}`}
+                    className="w-6 h-6 rounded-md flex items-center justify-center text-[#A0A0B0] hover:text-[#C62828] hover:bg-[#FFEBEE] transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  </button>
+                </div>
+              </div>
+            );
+          }
           // Compact (service card): name + ✕ on top, date + "Done elsewhere" below.
           if (compact) {
             return (

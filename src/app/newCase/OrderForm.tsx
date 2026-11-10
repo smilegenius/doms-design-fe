@@ -6,14 +6,25 @@
 // One sheet for the whole case, as the lab reads it: who it's for and from,
 // where it goes back to, the teeth on one chart, a staged denture's history
 // (each stage made so far, with its dates, status and instructions, so a new
-// stage adds a row and an instruction card), each service's prescription, and
-// the scan and attachment files. An order with several cases (services) lists
-// them, then gives each its own section: its details and delivery, its stage
-// history, its instructions and its files. The model is built from the flow's
-// case in FlowCaseDetail (orderFormModel); this file only draws it.
+// stage adds a row and an instruction card), each service's prescription and
+// the instructions. An order with several cases (treatments) gives each a
+// number, on the chart (a numbered line along its teeth) and wherever it
+// appears: one Treatments row each (details, delivery, status), a stage
+// history per staged denture, and its instructions marked with its number.
+// The model is built from the flow's case in FlowCaseDetail (orderFormModel);
+// this file only draws it.
+//
+// Laid out to print on one A4 page (5-Nov-2026): the patient and order ID head
+// it on one row, the Smile Genius logo on the right; the details are two
+// rows; the chart runs the full width; three QR codes (open the case, the
+// how-to video, help) close the page as on the dispatch label. No file lists (the case page has
+// its scans and files). A long order is scaled to fit the page. White, black
+// and greys only, in a plain system font: labs aren't used to colours.
 
-import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { FileText, Mail, Package, Printer, ScanLine, X } from 'lucide-react';
+import { ReactNode, RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { AlertTriangle, Download, Loader2, Printer, X } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import ModalPortal from '../components/ModalPortal';
 import { FakeQr } from '../components/DispatchLabel';
@@ -25,11 +36,10 @@ export type StageStatus = 'Done' | 'Done elsewhere' | 'In Progress' | 'Ready for
 type StageRow = { n: number; name: string; created?: string; due?: string; status?: StageStatus; caseId?: string };
 type ServiceRow = { name: string; where: string; material: string; shade: string; other: string; delivery: string };
 type Card = { n?: number; title: string; text: string; status?: StageStatus };
-type FileRow = { file: string; type: string; date: string };
 
-/** One case of an order with several: drawn in a section of its own. */
+/** One case of an order with several: its Treatments row, its stage history and its cards. */
 export interface OrderFormCase {
-  /** "Full denture (upper)", as Case Type lists it. */
+  /** "Full denture (upper)", as Treatments lists it. */
   title: string;
   service: ServiceRow;
   status?: StageStatus;
@@ -37,7 +47,6 @@ export interface OrderFormCase {
   stages?: StageRow[];
   /** Its own cards: a denture's stage cards, else its own instructions. */
   instructions: Card[];
-  attachments: FileRow[];
 }
 
 export interface OrderFormModel {
@@ -49,51 +58,38 @@ export interface OrderFormModel {
   dentist: { name: string; detail?: string };
   practice: { name: string; address: string };
   lab: { name: string; address: string };
-  /** "Full denture (upper)", or each service of a multi-service case. */
+  /** The Treatments: "Full denture (upper)", or each service of a multi-service case. */
   caseType: string[];
+  /** "NHS", "Private", or "NHS / Private" when the services differ: shown in the Treatments box. */
+  orderType?: string;
   notation: Notation;
-  chart: { teeth: string[]; pontics: string[]; legend: string[] };
+  /** `groups`: several cases, each treatment's teeth (its colour and its numbered lines on the chart). */
+  chart: { teeth: string[]; pontics: string[]; groups?: { teeth: string[]; n: number }[] };
   /** A staged full denture: all five stages in order, each made here, done elsewhere, ordered on this case or not yet. */
   stages?: StageRow[];
   services: ServiceRow[];
   instructions: Card[];
   /**
-   * An order with several cases: each in its own section, in place of the Stage History, Service Details
-   * and per-service cards. `instructions` and `attachments` then hold only the order's own.
+   * An order with several cases, drawn in place of the Stage History, Service Details and per-service
+   * cards. `instructions` then holds only the order's own.
    */
   cases?: OrderFormCase[];
-  scans: { type: string; file: string; date: string }[];
-  /** Said in the Scan Files block when there are no files (impressions by post, scan to follow). */
-  scanNote?: string;
-  attachments: FileRow[];
 }
 
-const STATUS_STYLE: Record<StageStatus, string> = {
-  Done: 'bg-[#E8F5E9] text-[#2E7D32] border-[#C8E6C9]',
-  'Done elsewhere': 'bg-[#F3F3F5] text-[#5A5568] border-[#E0E0E6]',
-  'In Progress': 'bg-[#FFF8E1] text-[#A16207] border-[#FDE68A]',
-  'Ready for Dispatch': 'bg-[#FFF3E0] text-[#E65100] border-[#FFCC80]',
-};
-const NUMBER_STYLE: Record<StageStatus, string> = {
-  Done: 'bg-[#2E7D32] text-white',
-  'Done elsewhere': 'bg-[#717182] text-white',
-  'In Progress': 'bg-[#F59E0B] text-white',
-  'Ready for Dispatch': 'bg-[#E65100] text-white',
-};
-const CARD_STYLE: Record<StageStatus, string> = {
-  Done: 'bg-[#F4FBF5] border-[#DCEFDF]',
-  'Done elsewhere': 'bg-[#F8F9FC] border-[#E0E0E6]',
-  'In Progress': 'bg-[#FFFBEB] border-[#FDECB5]',
-  'Ready for Dispatch': 'bg-[#FFF8F1] border-[#FFE0B2]',
-};
+/**
+ * The form's look (5-Nov-2026, the user: labs aren't used to colours, "simple white professional design"): white,
+ * black and greys only, one plain system sans serif, small uppercase section titles over hairline rules. Since 6-Nov
+ * the Smile Genius logo is black and white too.
+ */
+const FORM_FONT = '"Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif';
+const INK = 'text-[#1A1A1F]';
+const MUTED = 'text-[#6B6B75]';
+const RULE = 'border-[#D9D9DE]';
 
+/** A stage's or case's status, as plain text. */
 function StatusPill({ status }: { status?: StageStatus }) {
   if (!status) return <span className="text-[#A0A0B0]">—</span>;
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-semibold whitespace-nowrap ${STATUS_STYLE[status]}`}>
-      {status}
-    </span>
-  );
+  return <span className={`whitespace-nowrap ${INK}`}>{status}</span>;
 }
 
 /** The sheet's own width, so it lays out for the narrow service panel and for Full View alike. */
@@ -120,90 +116,103 @@ export default function OrderFormSheet({ model, roomy: forceRoomy }: { model: Or
   const single = model.services.length === 1;
   const cases = model.cases;
   const notation = NOTATIONS.find(x => x.id === model.notation)?.label ?? 'FDI';
+  // Each copy of the sheet (panel, Full View, print) needs its own gradient id, or the logo's smile
+  // takes the hidden print copy's and doesn't show.
+  const gid = `of_grad_${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  // A one-denture case's delivery days are its stages' (in the history), so the column goes.
+  const showDelivery = model.services.some(s => s.delivery);
 
   return (
-    <div ref={ref} className="space-y-3 text-[#030213]">
-      {/* Header: who made the form, the case and how it reached the lab */}
-      <div className="flex items-start justify-between gap-3 flex-wrap pb-3 border-b border-[#F0EFF6]">
-        <div className="min-w-0">
-          <SmileGeniusWordmark gradientId={`of_grad_${model.id}`} className="w-32 h-auto" />
-          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#717182] mt-1">Dental Order Form</p>
-        </div>
-        <div className="flex items-start gap-3 ml-auto">
-          <div className="text-right space-y-0.5">
-            <p className="text-xs"><span className="text-[#717182]">Order ID:</span> <span className="font-semibold">{model.id}</span></p>
-            <p className="text-xs"><span className="text-[#717182]">Received via:</span> <span className="font-semibold">{model.receivedVia}</span></p>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <FakeQr seed={model.url} size={roomy ? 56 : 48} />
-            <span className="text-[9px] text-[#717182] whitespace-nowrap">Scan to view case</span>
-          </div>
-        </div>
+    <div ref={ref} className={`space-y-2 ${INK}`} style={{ fontFamily: FORM_FONT }}>
+      {/* Header: Patient and Order ID on one row, the logo on the right; a dark rule under it. The QR codes are at
+          the foot of the sheet (6-Nov). */}
+      <div className="flex items-center gap-3 pb-2 border-b border-[#2B2B33]">
+        {/* As the Dentist / Practice boxes below, without the boxes: each label on top, its value under it
+            (5-Nov: no DOB or gender on the form). */}
+        <dl className="min-w-0 flex-1 flex flex-wrap gap-x-8 gap-y-1.5">
+          {([['Patient', model.patient.name], ['Order ID', model.id]] as const)
+            .map(([k, v]) => (
+              <div key={k} className="min-w-0">
+                <FieldText label={k} value={v} as="dl" nowrap={k !== 'Patient'} />
+              </div>
+            ))}
+        </dl>
+        {/* Black and white (6-Nov): the smile in the wordmark's own dark grey, so the form has no colour at all. */}
+        <SmileGeniusWordmark gradientId={gid} smileFill="#3C3C3C" className={`${roomy ? 'w-36' : 'w-24'} h-auto flex-shrink-0 self-start`} />
       </div>
 
-      {/* Who and where */}
-      <div className={`grid gap-2 ${roomy ? 'grid-cols-3' : 'grid-cols-2'}`}>
-        <Info label="Patient Name" value={model.patient.name} sub={[`DOB: ${model.patient.dob}`, model.patient.sex].filter(Boolean).join(' · ')} />
-        <Info label="Dentist Name" value={model.dentist.name} sub={model.dentist.detail} />
-        <Info label="Practice Name" value={model.practice.name} />
-        <Info label="Lab Name" value={model.lab.name} sub={model.lab.address} />
-        <Info label="Ship to Address" value={model.practice.address} />
-        {/* Several cases: one line each, numbered as their sections are. */}
-        <Info
-          label={cases ? `Case Type · ${cases.length} cases` : 'Case Type'}
-          value={cases ? model.caseType.map((t, i) => `${i + 1} · ${t}`).join('\n') : model.caseType.join(' · ')}
+      {/* Who and where, in two rows. */}
+      <Fields cols={roomy ? 'grid-cols-3' : 'grid-cols-2'}>
+        {/* The practice and the address the work ships back to, in one box on the left (6-Nov); wide, it spans both rows. */}
+        <Field
+          label="Practice"
+          value={<>
+            {model.practice.name}
+            {/* Its own heading over the address (6-Nov), as the other boxes have. */}
+            <span className={`block mt-1.5 text-[9.5px] leading-tight font-normal ${MUTED}`}>Ship to Address</span>
+            {/* The same type as every other box's value (semibold, 11.5px, from FieldText). */}
+            <span className="block">{model.practice.address}</span>
+          </>}
+          className={roomy ? 'row-span-2' : ''}
         />
-      </div>
+        <Field label="Dentist" value={<>{model.dentist.name}{model.dentist.detail && <span className="ml-1.5 text-[10.5px] font-normal text-[#4A4A5A]">{model.dentist.detail}</span>}</>} />
+        <Field label="Lab" value={model.lab.name} />
+        <Field label="Received via" value={model.receivedVia} />
+        <Field
+          label={cases ? `Treatments · ${cases.length}` : 'Treatments'}
+          value={cases
+            // Each numbered as on the chart's lines.
+            ? <span className="flex flex-wrap gap-x-3 gap-y-0.5">{model.caseType.map((t, i) => <span key={i} className="inline-flex items-center gap-1"><CaseNo n={i + 1} />{t}</span>)}</span>
+            : model.caseType.join(' · ')}
+          // On the heading's line, on the right (6-Nov).
+          aside={model.orderType && <>Order type: <span className={`font-semibold ${INK}`}>{model.orderType}</span></>}
+        />
+      </Fields>
 
+      {/* No legend (5-Nov: it doesn't scale to 5–6 treatments): Treatments above gives each one's number. */}
       <Block
         title="Tooth Chart"
-        aside={<span className="text-[10px] text-[#717182]">Tooth System: <span className="ml-0.5 px-1.5 py-0.5 rounded bg-white border border-[#E0E0E6] font-semibold text-[#030213]">{notation}</span></span>}
+        aside={<span className={`text-[10px] ${MUTED} whitespace-nowrap`}>Tooth System: <span className={`ml-0.5 font-semibold ${INK}`}>{notation}</span></span>}
       >
-        <div className="px-3 py-3">
-          {/* Kept to a reading size: at full Full View width the chart would be taller than the rest of the sheet needs. */}
-          <div className="max-w-[520px] mx-auto">
-            <TeethChart selected={model.chart.teeth} pontics={model.chart.pontics} readOnly notation={model.notation} label="Teeth on this order" />
+        <div className="px-2 pt-1.5 pb-2">
+          {/* The full width, up to about a page's: a wider sheet (laid out to be scaled onto the page) mustn't grow it. */}
+          <div className="mx-auto max-w-[720px]">
+            {/* Teeth a little smaller than their places (6-Nov: larger than the 5-Nov half size, so the shaded line art reads,
+                as on a scanner's Rx; a touch shorter than wide so the chart stays compact). In grey (mono): several
+                treatments are told apart by their numbered lines. */}
+            <TeethChart selected={model.chart.teeth} pontics={model.chart.pontics} groups={model.chart.groups} toothHeight={0.62} toothWidth={0.74} mono readOnly notation={model.notation} label="Teeth on this order" />
           </div>
-          {model.chart.legend.length > 0 && (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
-              {model.chart.legend.map((l, i) => (
-                <span key={i} className="inline-flex items-center gap-1.5 text-[11px] text-[#4A4A5A]">
-                  {/* The chart's own selection colours (ToothShapes: the 'se' fill, TEAL_LINE). */}
-                  <span className="w-2.5 h-2.5 rounded-sm bg-[#8DD4EC] border border-[#3FA8CA]" aria-hidden />
-                  {/* Several cases: numbered as their sections are. */}
-                  {cases ? `${i + 1} · ${l}` : l}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       </Block>
 
       {cases ? (
         <>
-          {/* The order at a glance, then each case on its own. */}
-          <Block title="Cases on this Order" aside={<span className="text-[10px] text-[#717182]">{cases.length} cases</span>}>
-            {/* Narrow, the teeth are left to each case's section so the status still fits. */}
+          {/* One row a case, numbered as on the chart. Narrow, its details go under its name. */}
+          <Block title="Treatments" aside={<span className={`text-[10px] ${MUTED}`}>{cases.length} cases</span>}>
             <Table
-              cols={['#', 'Case', ...(roomy ? ['Teeth / Arch'] : []), 'Delivery', 'Status']}
-              widths={['w-7', '', ...(roomy ? [''] : []), '', 'w-24']}
-              rows={cases.map((c, i) => [
-                <CaseNo n={i + 1} />,
-                <span className="font-semibold">{c.title}</span>,
-                ...(roomy ? [c.service.where] : []),
-                c.service.delivery,
-                <StatusPill status={c.status} />,
-              ])}
+              cols={roomy ? ['#', 'Treatment', 'Teeth / Arch', 'Material', 'Tooth Shade', 'Other Details', 'Delivery', 'Status'] : ['#', 'Treatment', 'Delivery', 'Status']}
+              widths={['w-6']}
+              rows={cases.map((c, i) => {
+                const s = c.service;
+                const name = <span className="font-semibold">{c.title}</span>;
+                return roomy
+                  ? [<CaseNo n={i + 1} />, name, s.where, s.material, s.shade, s.other || <Dash />, s.delivery || <Dash />, <StatusPill status={c.status} />]
+                  : [<CaseNo n={i + 1} />, <>{name}<span className={`block text-[10px] ${MUTED}`}>{[s.where, s.material, s.shade, s.other].filter(x => x && x !== '—').join(' · ')}</span></>, s.delivery || <Dash />, <StatusPill status={c.status} />];
+              })}
             />
           </Block>
-          {cases.map((c, i) => <CaseSection key={i} c={c} n={i + 1} total={cases.length} roomy={roomy} />)}
-          {model.instructions.length > 0 && (
-            <Block title="Order Instructions">
-              <div className="p-2.5 space-y-2">
-                {model.instructions.map((c, i) => <InstructionCard key={i} c={c} />)}
-              </div>
+          {cases.map((c, i) => c.stages && (
+            <Block key={i} title="Denture Stage History" icon={<CaseNo n={i + 1} />} aside={<span className={`text-[10.5px] ${MUTED} truncate`}>{c.title}</span>}>
+              <StageTable stages={c.stages} />
             </Block>
-          )}
+          ))}
+          {/* Every case's cards, each with its case's number, then the order's own. */}
+          <Block title="Instructions">
+            <div className={`p-2 ${cardsLayout(roomy)}`}>
+              {cases.flatMap((c, i) => c.instructions.map((card, k) => <InstructionCard key={`${i}-${k}`} c={card} caseNo={i + 1} />))}
+              {model.instructions.map((c, k) => <InstructionCard key={`o${k}`} c={c} />)}
+            </div>
+          </Block>
         </>
       ) : (
         <>
@@ -215,89 +224,167 @@ export default function OrderFormSheet({ model, roomy: forceRoomy }: { model: Or
 
           <Block title={single ? `Service Details (${model.services[0].name})` : 'Service Details'}>
             <Table
-              cols={['Service Name', 'Teeth / Arch', 'Material', 'Tooth Shade', 'Other Details', 'Delivery']}
-              rows={model.services.map(s => [s.name, s.where, s.material, s.shade, s.other, s.delivery])}
+              cols={['Service Name', 'Teeth / Arch', 'Material', 'Tooth Shade', 'Other Details', ...(showDelivery ? ['Delivery'] : [])]}
+              rows={model.services.map(s => [s.name, s.where, s.material, s.shade, s.other, ...(showDelivery ? [s.delivery || <Dash />] : [])])}
             />
           </Block>
 
           <Block title="Instructions">
-            <div className="p-2.5 space-y-2">
-              {model.instructions.length === 0 && <p className="px-1 py-1 text-xs text-[#A0A0B0]">No instructions on this order.</p>}
+            <div className={`p-2 ${cardsLayout(roomy && model.instructions.length > 1)}`}>
+              {model.instructions.length === 0 && <p className={`px-1 text-[11px] ${MUTED}`}>No instructions on this order.</p>}
               {model.instructions.map((c, i) => <InstructionCard key={i} c={c} />)}
             </div>
           </Block>
         </>
       )}
 
-      {/* Several cases: the scans are the whole order's, and each case lists its own attachments. */}
-      <div className={`grid gap-3 ${roomy && !(cases && model.attachments.length === 0) ? 'grid-cols-2' : 'grid-cols-1'}`}>
-        <Block title="Scan Files" icon={<ScanLine className="w-3.5 h-3.5" />}>
-          {model.scans.length > 0
-            ? <Table cols={['Scan Type', 'File Name', 'Date Uploaded']} rows={model.scans.map(s => [s.type, s.file, s.date])} />
-            : <Empty icon={model.scanNote?.startsWith('Impressions') ? <Package className="w-3.5 h-3.5" /> : <Mail className="w-3.5 h-3.5" />} text={model.scanNote ?? 'No scan files on this order.'} />}
-        </Block>
-        {!(cases && model.attachments.length === 0) && (
-          <Block title="Additional Attachment Files" icon={<FileText className="w-3.5 h-3.5" />}>
-            {model.attachments.length > 0
-              ? <Table cols={['File Name', 'Type', 'Date Uploaded']} rows={model.attachments.map(a => [a.file, a.type, a.date])} />
-              : <Empty icon={<FileText className="w-3.5 h-3.5" />} text="No additional attachments." />}
-          </Block>
-        )}
+      {/* The foot of the sheet (6-Nov), three separate sections: open the case (the code alone), the how-to video
+          with the four steps it shows, and help. Then the duplicate check, as a warning. */}
+      <div className={`grid ${roomy ? 'grid-cols-[auto_minmax(0,1fr)_minmax(0,220px)]' : 'grid-cols-2'} gap-2`}>
+        {/* Open this case stands out (6-Nov): a grey section, the code on a white tile so it still scans. */}
+        <FootSection className="bg-[#E9E9ED] border-[#C9C9D0]">
+          <span className="p-1 rounded-sm bg-white flex-shrink-0"><FakeQr seed={model.url} size={roomy ? 44 : 38} /></span>
+          <p className="text-[11px] font-bold leading-tight whitespace-nowrap">Open this case</p>
+        </FootSection>
+        <FootSection className={roomy ? '' : 'col-span-2 row-start-2'}>
+          <FakeQr seed="smile-genius-lab-video" size={roomy ? 44 : 38} />
+          <div className="min-w-0">
+            <p className="text-[10.5px] font-semibold leading-tight">Watch how: open, accept, ship</p>
+            {/* Four short steps (6-Nov: about 70% of the earlier wording), one line each, in an even 2 × 2 grid. */}
+            <ol className={`mt-1 grid ${roomy ? 'grid-cols-2' : 'grid-cols-1'} gap-x-4 gap-y-1 text-[9px] leading-[12px] ${MUTED}`}>
+              {[
+                <>Log in at <b className={INK}>dental.smilegeniusapp.com</b></>,
+                <>Search <b className={INK}>{model.id}</b>, review it</>,
+                <><b className={INK}>Accept</b> it, or ask the practice</>,
+                <>Once sent, mark it <b className={INK}>Shipped</b></>,
+              ].map((step, i) => (
+                <li key={i} className="flex items-center gap-1 min-w-0">
+                  <span className={`w-3 h-3 flex-shrink-0 rounded-full border border-[#3A3A44] text-[7.5px] leading-[10px] text-center font-bold ${INK}`}>{i + 1}</span>
+                  <span className={roomy ? 'whitespace-nowrap' : 'break-words min-w-0'}>{step}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </FootSection>
+        <FootSection>
+          <FakeQr seed="smile-genius-support" size={roomy ? 44 : 38} />
+          <div className="min-w-0">
+            <p className="text-[10.5px] font-semibold leading-tight">Need help?</p>
+            <p className={`text-[9px] leading-tight ${MUTED} mt-0.5 break-words`}>Trouble signing in? Scan to book time, or email</p>
+            <p className={`text-[9px] leading-tight font-semibold ${INK} whitespace-nowrap`}>support@smilegeniusdental.com</p>
+          </div>
+        </FootSection>
+      </div>
+      {/* The duplicate check (6-Nov): the one warning on the sheet, in ink with a heavier border (no colour on the form). */}
+      <div role="note" className="flex items-start gap-2 px-2.5 py-1.5 rounded border-[1.5px] border-[#2B2B33]">
+        <AlertTriangle aria-hidden className="w-3.5 h-3.5 mt-px flex-shrink-0" strokeWidth={2.25} />
+        <p className="text-[10px] leading-snug">
+          <b>Please check for duplicates.</b> Before you start, make sure this case isn’t already in Smile Genius. If it is, message the practice before making anything.
+        </p>
       </div>
     </div>
   );
 }
 
-/** One case of several: its details and delivery, its stage history, its instructions and its files. */
-function CaseSection({ c, n, total, roomy }: { c: OrderFormCase; n: number; total: number; roomy: boolean }) {
-  return (
-    <section className="rounded-xl border border-[#E0E0E6] overflow-hidden bg-white">
-      <div className="flex items-center gap-2.5 px-3 py-2 bg-[#EEF4FF] border-b border-[#DCE7FD]">
-        <CaseNo n={n} />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-[13px] font-semibold text-[#1565C0] leading-snug break-words">{c.title}</h3>
-          <p className="text-[10px] text-[#717182]">Case {n} of {total}</p>
-        </div>
-        <StatusPill status={c.status} />
-      </div>
-      <div className="p-3 space-y-3">
-        <div className={`grid gap-2 ${roomy ? 'grid-cols-4' : 'grid-cols-2'}`}>
-          <Info label="Teeth / Arch" value={c.service.where} />
-          <Info label="Material" value={c.service.material} />
-          <Info label="Tooth Shade" value={c.service.shade} />
-          <Info label="Delivery" value={c.service.delivery} />
-          <div className="col-span-full">
-            <Info label="Other Details" value={c.service.other || '—'} />
-          </div>
-        </div>
-        {c.stages && (
-          <Sub title="Denture Stage History">
-            <div className="rounded-lg border border-[#F0EFF6] overflow-hidden"><StageTable stages={c.stages} /></div>
-          </Sub>
-        )}
-        <Sub title="Instructions">
-          {c.instructions.length > 0
-            ? <div className="space-y-2">{c.instructions.map((card, i) => <InstructionCard key={i} c={card} />)}</div>
-            : <p className="text-xs text-[#A0A0B0]">No instructions for this case.</p>}
-        </Sub>
-        <Sub title="Attachment Files" icon={<FileText className="w-3 h-3" />}>
-          {c.attachments.length > 0
-            ? <div className="rounded-lg border border-[#F0EFF6] overflow-hidden"><Table cols={['File Name', 'Type', 'Date Uploaded']} rows={c.attachments.map(a => [a.file, a.type, a.date])} /></div>
-            : <p className="text-xs text-[#A0A0B0]">No attachments for this case.</p>}
-        </Sub>
-      </div>
-    </section>
-  );
+// ─── Full view ───────────────────────────────────────────────────────────────
+
+/** The A4 page inside its 10 mm margins, in CSS px (a little short of 277 mm, so rounding never adds a page). */
+const MM = 96 / 25.4;
+const PAGE_W = 190 * MM;
+const PAGE_H = 274 * MM;
+
+/**
+ * The scale the page copy (`ref`) prints at: the largest at which it fits one page. At scale s the copy is laid out
+ * PAGE_W / s wide (so it fills the page once scaled) and must be no taller than PAGE_H / s. Laid out wider it gets
+ * shorter, so a bisection finds it. The copy's width is kept set to match.
+ */
+function usePageFit(ref: RefObject<HTMLDivElement>) {
+  const [fit, setFit] = useState(1);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const heightAt = (s: number) => { el.style.width = `${PAGE_W / s}px`; return el.scrollHeight; };
+    const measure = () => {
+      let best = 1;
+      if (heightAt(1) > PAGE_H) {
+        let lo = 0.3, hi = 1;
+        for (let k = 0; k < 12; k++) {
+          const mid = (lo + hi) / 2;
+          if (mid * heightAt(mid) <= PAGE_H) lo = mid; else hi = mid;
+        }
+        best = Math.floor(lo * 1000) / 1000;
+      }
+      el.style.width = `${PAGE_W / best}px`;
+      setFit(best);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return fit;
 }
 
-// ─── Full view ───────────────────────────────────────────────────────────────
+/**
+ * The same one page as Print, saved as `Order-Form-<id>.pdf`: the page copy (`el`, laid out PAGE_W / fit wide in an
+ * off-screen, hidden holder) drawn to an image, the holder shown for the capture, and placed on an A4 page inside
+ * the same 10 mm margins.
+ */
+async function savePdf(el: HTMLElement, id: string) {
+  const holder = el.parentElement;
+  const was = holder?.style.visibility ?? '';
+  const [{ toJpeg }, { jsPDF }] = await Promise.all([import('html-to-image'), import('jspdf')]);
+  try {
+    if (holder) holder.style.visibility = 'visible';
+    // JPEG, not PNG: a page drawn at twice the size is ~15 MB as PNG in the PDF, well under 1 MB as JPEG.
+    const img = await toJpeg(el, {
+      // The form is in the system font (FORM_FONT), which the drawing has without any web font to embed.
+      pixelRatio: 2, quality: 0.92, backgroundColor: '#ffffff', style: { transform: 'none' }, skipFonts: true,
+    });
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    // Laid out PAGE_W / fit wide (190 mm once scaled), its height then fits the page's 274 mm.
+    pdf.addImage(img, 'JPEG', 10, 10, 190, (190 * el.scrollHeight) / el.offsetWidth);
+    pdf.save(`Order-Form-${id}.pdf`);
+  } finally {
+    if (holder) holder.style.visibility = was;
+  }
+}
+
+/**
+ * A PDF of a case's order form without opening it (the walkthrough's Download PDF): the page copy laid out off
+ * screen, fitted to the page as Full View's is, saved once it has settled; then `onDone` (ok or not).
+ */
+export function OrderFormPdfJob({ model, onDone }: { model: OrderFormModel; onDone: (ok: boolean) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const fit = usePageFit(ref);
+  useEffect(() => {
+    // The fit and the chart's own measuring settle within a frame or two of mounting.
+    const t = setTimeout(() => {
+      if (!ref.current) return;
+      savePdf(ref.current, model.id).then(() => onDone(true), () => onDone(false));
+    }, 400);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return createPortal(
+    <div aria-hidden style={{ position: 'fixed', left: -100000, top: 0, visibility: 'hidden', pointerEvents: 'none' }}>
+      <div ref={ref} style={{ width: PAGE_W / fit, transform: `scale(${fit})`, transformOrigin: 'top left' }}>
+        <OrderFormSheet model={model} roomy />
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 /**
  * The whole sheet at reading size, opened from the Order form tab bar's full-screen button (or its Print,
  * with `autoPrint`, which opens the print dialog straight away). Print sends only the sheet: a body-level
- * copy, as the label preview does.
+ * copy, as the label preview does, always on one page. The copy is laid out off screen at the page's width;
+ * when it's taller than the page it's laid out wider and scaled down to fit, so it never runs onto a second.
  */
 export function OrderFormFullView({ model, onClose, autoPrint }: { model: OrderFormModel; onClose: () => void; autoPrint?: boolean }) {
+  const printRef = useRef<HTMLDivElement>(null);
+  const fit = usePageFit(printRef);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -309,14 +396,33 @@ export function OrderFormFullView({ model, onClose, autoPrint }: { model: OrderF
     const t = setTimeout(() => window.print(), 150);
     return () => clearTimeout(t);
   }, [autoPrint]);
+
+  // Download PDF: the print copy, saved as a file.
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const download = async () => {
+    if (!printRef.current) return;
+    setSaving(true);
+    try {
+      await savePdf(printRef.current, model.id);
+    } catch {
+      toast.error('The PDF couldn’t be made. Use Print and choose “Save as PDF” instead.');
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <ModalPortal>
+      {/* Off screen (but laid out, so it can be measured) until printing; then the only thing on the page. */}
       <style>{`
-        .of-print-root { display: none; }
+        .of-print-root { position: fixed; left: -100000px; top: 0; width: 190mm; visibility: hidden; pointer-events: none; }
         @media print {
-          @page { size: A4; margin: 12mm; }
+          @page { size: A4; margin: 10mm; }
           body > *:not(.of-print-root) { display: none !important; }
-          .of-print-root { display: block !important; }
+          .of-print-root {
+            position: static !important; visibility: visible !important; width: 190mm; height: 274mm; overflow: hidden;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+          }
         }
       `}</style>
       <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={`Order form ${model.id}`}>
@@ -331,16 +437,24 @@ export function OrderFormFullView({ model, onClose, autoPrint }: { model: OrderF
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto bg-[#F3F3F5] p-5">
-            <div className="mx-auto max-w-[840px] bg-white rounded-xl border border-[#E0E0E6] shadow-sm p-6">
+          <div className="flex-1 overflow-y-auto bg-[#F3F3F5] p-4">
+            <div className="mx-auto max-w-[840px] bg-white rounded-xl border border-[#E0E0E6] shadow-sm p-5">
               <OrderFormSheet model={model} />
             </div>
           </div>
+          {/* The header's × closes it, so the footer holds only the real actions. */}
           <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-[#F0EFF6]">
-            <p className="text-[11px] text-[#717182]">A4 · Choose “Save as PDF” in the print window to download.</p>
+            <p className="text-[11px] text-[#717182]">
+              A4, one page{fit < 0.995 ? ` (scaled to ${Math.round(fit * 100)}%)` : ''}
+            </p>
             <div className="flex gap-2 flex-shrink-0">
-              <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">
-                Close
+              <button
+                onClick={download}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-[#4D8EF7] border border-[#C8D8FC] hover:bg-[#EEF4FF] disabled:opacity-60 disabled:cursor-wait transition-colors"
+              >
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                {saving ? 'Preparing PDF…' : 'Download PDF'}
               </button>
               <button
                 onClick={() => window.print()}
@@ -354,8 +468,10 @@ export function OrderFormFullView({ model, onClose, autoPrint }: { model: OrderF
         </div>
       </div>
       {/* Print-only copy at body level: what the browser actually prints. */}
-      <div className="of-print-root">
-        <OrderFormSheet model={model} roomy />
+      <div className="of-print-root" aria-hidden>
+        <div ref={printRef} style={{ width: PAGE_W / fit, transform: `scale(${fit})`, transformOrigin: 'top left' }}>
+          <OrderFormSheet model={model} roomy />
+        </div>
       </div>
     </ModalPortal>
   );
@@ -363,21 +479,46 @@ export function OrderFormFullView({ model, onClose, autoPrint }: { model: OrderF
 
 // ─── Pieces ──────────────────────────────────────────────────────────────────
 
-function Info({ label, value, sub }: { label: string; value: string; sub?: string }) {
+/** Labelled values in one box, split by hairlines (the gaps show the border colour through). */
+/** One section of the sheet's foot: a code and what it's for, in a hairline box. */
+function FootSection({ className = '', children }: { className?: string; children: ReactNode }) {
+  return <div className={`flex items-center gap-2 min-w-0 px-2 py-1.5 rounded border ${className.includes('border-[') ? '' : RULE} ${className}`}>{children}</div>;
+}
+
+function Fields({ cols, children }: { cols: string; children: ReactNode }) {
+  return <div className={`grid ${cols} gap-px bg-[#D9D9DE] border ${RULE} rounded overflow-hidden`}>{children}</div>;
+}
+
+function Field({ label, value, sub, aside, className = '' }: { label: string; value: ReactNode; sub?: string; aside?: ReactNode; className?: string }) {
   return (
-    <div className="rounded-lg bg-[#F8F9FC] border border-[#F0EFF6] px-3 py-2 min-w-0">
-      <p className="text-[10px] text-[#717182]">{label}</p>
-      <p className="text-xs font-semibold leading-snug break-words whitespace-pre-line">{value}</p>
-      {sub && <p className="text-[11px] text-[#4A4A5A] leading-snug mt-0.5 break-words">{sub}</p>}
+    <div className={`bg-white px-2.5 py-1.5 min-w-0 ${className}`}>
+      <FieldText label={label} value={value} aside={aside} />
+      {sub && <p className={`text-[10.5px] ${MUTED} leading-snug break-words`}>{sub}</p>}
     </div>
   );
 }
 
+/** A field's label over its value: the details boxes' type, and the header's (`as="dl"`: a term and its description). */
+function FieldText({ label, value, as, nowrap, aside }: { label: string; value: ReactNode; as?: 'dl'; nowrap?: boolean; aside?: ReactNode }) {
+  const Label = as ? 'dt' : 'p';
+  const Value = as ? 'dd' : 'div';
+  return (
+    <>
+      {/* `aside`: something said on the label's line, at its right (Treatments' order type). */}
+      <Label className={`text-[9.5px] leading-tight ${MUTED} ${aside ? 'flex items-baseline justify-between gap-2' : ''}`}>
+        {aside ? <><span>{label}</span><span className="whitespace-nowrap">{aside}</span></> : label}
+      </Label>
+      <Value className={`text-[11.5px] font-semibold leading-snug ${INK} ${nowrap ? 'whitespace-nowrap' : 'break-words'}`}>{value}</Value>
+    </>
+  );
+}
+
+/** A section: its title small, upper case and dark on a light grey bar, over a hairline. */
 function Block({ title, aside, icon, children }: { title: string; aside?: ReactNode; icon?: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-xl border border-[#E0E0E6] overflow-hidden bg-white">
-      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[#EEF4FF] border-b border-[#DCE7FD]">
-        <h3 className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#1565C0]">{icon}{title}</h3>
+    <section className={`rounded border ${RULE} overflow-hidden bg-white`}>
+      <div className={`flex items-center justify-between gap-2 px-2.5 py-1 bg-[#F5F5F7] border-b ${RULE}`}>
+        <h3 className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] text-[#2B2B33]">{icon}{title}</h3>
         {aside}
       </div>
       {children}
@@ -388,18 +529,18 @@ function Block({ title, aside, icon, children }: { title: string; aside?: ReactN
 function Table({ cols, rows, widths = [] }: { cols: string[]; rows: ReactNode[][]; widths?: string[] }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left text-xs">
+      <table className="w-full text-left text-[11px]">
         <thead>
-          <tr className="bg-[#F8F9FC] border-b border-[#F0EFF6]">
+          <tr className="border-b border-[#E4E4E8]">
             {cols.map((c, i) => (
-              <th key={c} className={`px-3 py-1.5 text-[10px] font-semibold text-[#717182] whitespace-nowrap ${widths[i] ?? ''}`}>{c}</th>
+              <th key={c} className={`px-2.5 py-1 text-[9.5px] font-semibold ${MUTED} whitespace-nowrap ${widths[i] ?? ''}`}>{c}</th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-[#F0EFF6]">
+        <tbody className="divide-y divide-[#EDEDF0]">
           {rows.map((r, i) => (
             <tr key={i}>
-              {r.map((cell, j) => <td key={j} className="px-3 py-1.5 align-top">{cell}</td>)}
+              {r.map((cell, j) => <td key={j} className="px-2.5 py-[3px] align-top leading-snug">{cell}</td>)}
             </tr>
           ))}
         </tbody>
@@ -416,10 +557,11 @@ function StageTable({ stages }: { stages: StageRow[] }) {
       cols={['#', 'Stage Name', 'Creation Date', 'Requested Delivery Date', 'Status']}
       widths={['w-7', '', '', '', 'w-24']}
       rows={stages.map(s => [
-        <span className="text-[#717182]">{s.n}</span>,
-        <span className={s.status ? 'font-semibold' : ''}>
+        <span className={MUTED}>{s.n}</span>,
+        // The case it was made on, beside its name (one line a stage).
+        <span className={s.status ? 'font-semibold' : MUTED}>
           {s.name}
-          {s.caseId && <span className="block text-[10px] font-normal text-[#A0A0B0]">{s.caseId}</span>}
+          {s.caseId && <span className={`ml-1.5 text-[10px] font-normal ${MUTED}`}>{s.caseId}</span>}
         </span>,
         s.created ?? <Dash />,
         s.due ?? <Dash />,
@@ -429,45 +571,31 @@ function StageTable({ stages }: { stages: StageRow[] }) {
   );
 }
 
-function InstructionCard({ c }: { c: Card }) {
+/** Instruction cards: two to a row on the wide sheet (it keeps the page to one), else one under another. */
+const cardsLayout = (twoUp: boolean) => (twoUp ? 'grid grid-cols-2 gap-1.5' : 'space-y-1.5');
+
+/**
+ * One instruction, plain (5-Nov: no status colours or pills, the stage history has the status): a number, then
+ * the title and the text. The number is the case's (as on the chart) on an order of several, else the stage's.
+ */
+function InstructionCard({ c, caseNo }: { c: Card; caseNo?: number }) {
+  const n = caseNo ?? c.n;
   return (
-    <div className={`rounded-lg border px-3 py-2.5 ${c.status ? CARD_STYLE[c.status] : 'bg-[#F8F9FC] border-[#E0E0E6]'}`}>
-      <div className="flex items-start gap-2.5">
-        {c.n !== undefined && (
-          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-px ${c.status ? NUMBER_STYLE[c.status] : 'bg-[#4D8EF7] text-white'}`}>{c.n}</span>
-        )}
+    <div className={`rounded border ${RULE} bg-white px-2.5 py-1.5`}>
+      <div className="flex items-start gap-2">
+        {n !== undefined && <span className="mt-px"><CaseNo n={n} /></span>}
         <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-xs font-semibold">{c.title}</p>
-            {c.status && <StatusPill status={c.status} />}
-          </div>
-          <p className="text-xs text-[#4A4A5A] leading-relaxed mt-1 whitespace-pre-line">{c.text}</p>
+          <p className="text-[11px] font-semibold leading-snug">{c.title}</p>
+          <p className="text-[11px] text-[#3A3A44] leading-snug whitespace-pre-line">{c.text}</p>
         </div>
       </div>
     </div>
   );
 }
 
-/** A case's number, on the order's list and its section. */
+/** A number in a thin dark ring: a case's (the Treatments list and row, the chart's lines, its cards) or a stage's. */
 const CaseNo = ({ n }: { n: number }) => (
-  <span className="w-5 h-5 rounded-full bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0 tabular-nums">{n}</span>
+  <span className={`w-4 h-4 rounded-full border border-[#2B2B33] bg-white ${INK} text-[9px] font-bold flex items-center justify-center flex-shrink-0 tabular-nums`}>
+    {n}
+  </span>
 );
-
-/** A heading inside a case's section. */
-function Sub({ title, icon, children }: { title: string; icon?: ReactNode; children: ReactNode }) {
-  return (
-    <div>
-      <p className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[#717182] mb-1.5">{icon}{title}</p>
-      {children}
-    </div>
-  );
-}
-
-function Empty({ icon, text }: { icon: ReactNode; text: string }) {
-  return (
-    <p className="flex items-center gap-2 px-3 py-2.5 text-xs text-[#717182]">
-      <span className="text-[#A0A0B0]">{icon}</span>
-      {text}
-    </p>
-  );
-}

@@ -1,13 +1,14 @@
 // ─── Smile Genius Go · Light version ─────────────────────────────────────────
-// The short flow: sign in → home → create (from a prescription photo, one page)
-// → received → to dispatch (print label). No audio, no step-by-step form, no
-// invoices. Several prescriptions can be photographed in a row: each is read in
+// The short flow: sign in → home → create → received → to dispatch (print
+// label). Create has two ways in: a prescription photo (one review page, below)
+// or Manual, step by step (lite/LiteManual.tsx, /go/lite/new/manual). No audio,
+// no invoices. Several prescriptions can be photographed in a row: each is read in
 // the background and saved as a draft (Lab work › Draft). Mounted at /go/lite/*.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  AlertTriangle, Bell, Building2, Camera, Check, CheckCircle2, ClipboardCheck, HelpCircle, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, Link2, Loader2, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
+  AlertTriangle, Bell, Building2, Camera, PenLine, Check, CheckCircle2, ClipboardCheck, HelpCircle, ChevronDown, ChevronRight, FlaskConical, Home, ImageUp, Link2, Loader2, LogOut, PackageCheck, Plus, PlusCircle, Printer, RotateCcw, Sparkles, Trash, Truck, User, X, Zap, ZapOff,
 } from '../icons';
 import { FEATURES, ME, useGo, useScoped } from '../store';
 import { LAB_BASE, LAB_ID, LAB_ME, LAB_NAME } from '../lab/labData';
@@ -70,17 +71,23 @@ export function LiteHome() {
         </button>
       </div>
 
+      {/* Two ways in: a photo of the prescription (we fill it in) or step by step. */}
       <div className="px-4 mt-4">
-        <button onClick={() => navigate(`${LITE}/new`)}
-          className="go-rise relative w-full overflow-hidden text-left rounded-[24px] border border-go-brand/25 bg-gradient-to-br from-go-brand-soft via-go-surface to-go-violet-soft go-card-shadow p-4 flex items-center gap-3.5 active:scale-[.99] transition">
-          <span className="pointer-events-none absolute -top-16 -right-12 w-48 h-48 rounded-full bg-go-lav/30 blur-3xl" />
-          <span className="relative w-12 h-12 rounded-[16px] go-grad go-glow text-white flex items-center justify-center flex-shrink-0"><Plus className="w-6 h-6" strokeWidth={2.5} /></span>
-          <span className="relative flex-1 min-w-0">
-            <span className="block text-[17px] font-bold text-go-ink tracking-tight leading-tight">Create lab work</span>
-            <span className="block text-[12.5px] text-go-ink2 mt-0.5 leading-snug">Scan the prescription. We’ll fill in the details.</span>
-          </span>
-          <ChevronRight className="relative w-5 h-5 text-go-brand flex-shrink-0" />
-        </button>
+        {/* Kept short so the status tiles below stay in view: one title line, then two slim side-by-side buttons. */}
+        <div className="go-rise relative overflow-hidden rounded-[20px] border border-go-brand/25 bg-gradient-to-br from-go-brand-soft via-go-surface to-go-violet-soft go-card-shadow p-3">
+          <span className="pointer-events-none absolute -top-16 -right-12 w-40 h-40 rounded-full bg-go-lav/30 blur-3xl" />
+          <p className="relative px-0.5 text-[14px] font-bold text-go-ink tracking-tight leading-tight">Create lab work</p>
+          <div className="relative grid grid-cols-2 gap-2 mt-2.5">
+            <button onClick={() => navigate(`${LITE}/new`)} className="rounded-[14px] go-grad go-glow text-white px-2.5 py-2 text-left flex items-center gap-2.5 active:scale-[.97] transition min-w-0">
+              <span className="w-8 h-8 rounded-[10px] bg-white/20 flex items-center justify-center flex-shrink-0"><Camera className="w-[18px] h-[18px]" /></span>
+              <span className="min-w-0"><span className="block text-[13.5px] font-bold leading-tight">Photo</span><span className="block text-[10.5px] text-white/85 truncate">Scan the Rx</span></span>
+            </button>
+            <button onClick={() => navigate(`${LITE}/new/manual`)} className="rounded-[14px] bg-go-surface border border-go-line go-card-shadow px-2.5 py-2 text-left flex items-center gap-2.5 active:scale-[.97] transition min-w-0">
+              <span className="w-8 h-8 rounded-[10px] bg-go-violet-soft text-go-violet flex items-center justify-center flex-shrink-0"><PenLine className="w-[18px] h-[18px]" /></span>
+              <span className="min-w-0"><span className="block text-[13.5px] font-bold text-go-ink leading-tight">Manual</span><span className="block text-[10.5px] text-go-muted truncate">Step by step</span></span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="px-4 mt-3"><StatusTiles cases={cases} /></div>
@@ -1122,7 +1129,7 @@ function BatchDone({ ids }: { ids: string[] }) {
 }
 
 /** next: the photo drafts still to check, when this case came from one ("Check the next draft"). */
-function Created({ c, added, onAnother, labMode, next }: { c: LabCase; added?: string[]; onAnother: () => void; labMode?: boolean; next?: LabCase[] }) {
+export function Created({ c, added, onAnother, labMode, next }: { c: LabCase; added?: string[]; onAnother: () => void; labMode?: boolean; next?: LabCase[] }) {
   const navigate = useNavigate();
   return (
     <Screen>

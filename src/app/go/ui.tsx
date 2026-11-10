@@ -5,7 +5,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronDown, Check, Search, X, Home, Layers, Plus, Receipt, Wallet, User, Truck, PackageCheck, CheckCircle2, AlertTriangle, Info, Camera, PenLine, Mic,
+  ChevronLeft, ChevronDown, ChevronRight, Check, Search, X, Home, Layers, Plus, Receipt, Wallet, User, Truck, PackageCheck, CheckCircle2, AlertTriangle, Info, Camera, PenLine, Mic,
 } from './icons';
 import { FEATURES, useGo, useScoped } from './store';
 import { LabCase, ReadinessLevel, STAGES, Stage, invoiceNeedsAction, isOverdue, readiness, stageIndex, stageLabel } from './data';
@@ -132,9 +132,10 @@ export function TabBar() {
   return useBase() === '/go' ? <FullTabBar /> : <LiteTabBar />;
 }
 
-/** Light version: Home · Deliveries (to dispatch, arriving, received) · + · Lab work · Me. The + goes straight to the prescription scan. */
+/** Light version: Home · Deliveries (to dispatch, arriving, received) · + · Lab work · Me. The + asks Photo or Manual. */
 function LiteTabBar() {
   const navigate = useNavigate();
+  const [newOpen, setNewOpen] = useState(false);
   const { pathname } = useLocation();
   const { cases } = useScoped();
   const toDispatch = cases.filter(c => c.stage === 'ready' && !c.onHold).length;
@@ -154,7 +155,7 @@ function LiteTabBar() {
         {tabs.map(t => {
           if (!t) {
             return (
-              <button key="new" onClick={() => navigate(`${L}/new`)} aria-label="Create lab work"
+              <button key="new" onClick={() => setNewOpen(true)} aria-label="Create lab work"
                 className="-mt-7 w-14 h-14 rounded-[20px] go-grad go-glow text-white flex items-center justify-center active:scale-95 transition ring-4 ring-go-bg">
                 <Plus className="w-6 h-6" strokeWidth={2.5} />
               </button>
@@ -173,6 +174,7 @@ function LiteTabBar() {
           );
         })}
       </div>
+      <LiteCreateSheet open={newOpen} onClose={() => setNewOpen(false)} />
     </nav>
   );
 }
@@ -232,6 +234,20 @@ export function NewWorkSheet({ open, onClose }: { open: boolean; onClose: () => 
         <ActionTile icon={<Mic className="w-6 h-6" />} tone="pink" title="By audio" body="Say what you need. We’ll turn it into a case." onClick={() => go('/go/new/audio')} />
         <ActionTile icon={<Camera className="w-6 h-6" />} tone="brand" title="By photo" body="Take a photo of a written prescription. We’ll turn it into a case." onClick={() => go('/go/new/capture')} />
         <ActionTile icon={<PenLine className="w-6 h-6" />} tone="violet" title="Manually" body="Fill in the form yourself, step by step." onClick={() => go('/go/new/manual')} />
+      </div>
+    </Sheet>
+  );
+}
+
+/** Light version's create sheet: a photo of the prescription, or step by step. */
+export function LiteCreateSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const navigate = useNavigate();
+  const go = (to: string) => { onClose(); navigate(to); };
+  return (
+    <Sheet open={open} onClose={onClose} title="Create lab work" sub="How would you like to start?">
+      <div className="space-y-2.5 pb-1">
+        <ActionTile icon={<Camera className="w-5 h-5" />} tone="brand" title="Photo" body="Scan the prescription. We’ll fill in the details." onClick={() => go('/go/lite/new')} right={<ChevronRight className="w-5 h-5 text-go-faint" />} />
+        <ActionTile icon={<PenLine className="w-5 h-5" />} tone="violet" title="Manual" body="Fill it in step by step." onClick={() => go('/go/lite/new/manual')} right={<ChevronRight className="w-5 h-5 text-go-faint" />} />
       </div>
     </Sheet>
   );

@@ -193,7 +193,7 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
       <StepHeading ref={hRef} icon={ClipboardCheck} kicker="Review and Send" title={reviewTitle(api)} />
 
       {/* The case at a glance. */}
-      <dl className="grid grid-cols-3 rounded-2xl border border-[#ECECF2] bg-[#F8F9FC] divide-x divide-[#ECECF2]">
+      <dl className="grid grid-cols-1 sm:grid-cols-3 rounded-2xl border border-[#ECECF2] bg-[#F8F9FC] max-sm:divide-y sm:divide-x divide-[#ECECF2]">
         <Fact icon={UserRound} label="Patient" value={fullName(patient)} sub={labSees(patient, ctx.now)} />
         <Fact
           icon={Building2}
@@ -232,7 +232,7 @@ function WideReview({ hRef }: { hRef: HeadingRef }) {
       )}
 
       {/* A report: the services on the left; the case's details, its instructions and the sign-off beside them. */}
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(260px,320px)] gap-4 items-start">
+      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(260px,320px)] gap-4 items-start">
       <section aria-labelledby="nc-review-services" className="min-w-0 space-y-3">
         <SectionLabel id="nc-review-services">{draft.items.length ? `Services · ${draft.items.length}` : 'Services'}</SectionLabel>
         {draft.items.map(item => <WideService key={item.id} item={item} startOpen={draft.items.length === 1} />)}
@@ -340,9 +340,9 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
       {/* The chart under the service's name, across the card, and the details under it: no empty column beside a short chart. */}
       <div id={bodyId}>
         <div>
-          <div className="flex items-start gap-3">
+          <div className="flex flex-wrap sm:flex-nowrap items-start gap-x-3 gap-y-2">
             {!(item.teeth.length > 0 || arch) && <span aria-hidden className="w-9 h-9 rounded-lg bg-[#EEF4FF] text-[#2F62D6] flex items-center justify-center flex-shrink-0"><Icon className="w-5 h-5" strokeWidth={1.75} /></span>}
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-[60%] sm:min-w-0">
               <h4 className="text-base font-semibold text-[#030213] leading-snug">{title}</h4>
               {gaps > 0 && !readOnly && (
                 <p className="mt-1 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#FFF8E1] border border-[#F5D98B] text-[11px] font-semibold text-[#8A4B08]">
@@ -354,7 +354,7 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
               <ChevronDown className="w-4 h-4 rotate-180" aria-hidden />
             </button>
             {own && (
-              <div className="flex-shrink-0 max-w-[180px] text-right">
+              <div className="flex-shrink-0 max-w-[180px] max-sm:order-last max-sm:max-w-none max-sm:w-full max-sm:text-left sm:text-right">
                 <p className="text-sm font-semibold text-[#030213]">{own.backBy ? `Back by ${fmtDay(own.backBy)}` : own.days}</p>
                 {own.backBy && <p className="text-[11px] leading-snug text-[#5A5A6A]">{own.days}</p>}
               </div>
@@ -374,9 +374,9 @@ function WideService({ item, startOpen }: { item: ServiceItem; startOpen?: boole
             </div>
           )}
           {details.length > 0 && (
-            <dl className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2.5 rounded-xl border border-[#ECECF2] px-3.5 py-3">
+            <dl className="mt-3 grid grid-cols-1 min-[420px]:grid-cols-2 gap-x-5 gap-y-2.5 rounded-xl border border-[#ECECF2] px-3.5 py-3">
               {details.map(d => (
-                <div key={d.label} className={`min-w-0 ${d.value.length > 34 || d.id === 'stages' ? 'col-span-2' : ''}`}>
+                <div key={d.label} className={`min-w-0 ${d.value.length > 34 || d.id === 'stages' ? 'min-[420px]:col-span-2' : ''}`}>
                   <dt className="text-[10px] font-bold uppercase tracking-wider text-[#5A5A6A]">{d.label}</dt>
                   {d.id === 'stages'
                     ? <dd className="mt-1"><StagePlanView item={item} /></dd>

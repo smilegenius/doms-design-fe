@@ -22,6 +22,7 @@ import { FinanceScreen, InvoiceScreen, InvoicesComingSoon, StatementScreen } fro
 import { LAB_BASE, LAB_ME } from './lab/labData';
 import { LabAccount, LabCaseDetail, LabCases, LabDeliveries, LabHome, LabNew, LabNotifications } from './lab/LabScreens';
 import { LITE, LiteCreate, LiteDeliveries, LiteDispatch, LiteHome } from './lite/LiteScreens';
+import LiteManual from './lite/LiteManual';
 import { AccountScreen, AppearanceSettings, DashboardSettings, NotificationSettings, NotificationsScreen, PracticesSettings } from './screens/Account';
 
 // Reviewer navigation. Each entry can carry scenarios: variants of the same
@@ -145,6 +146,11 @@ const LITE_JUMPS: Jump[] = [
     { label: 'Denture next stage · earlier stages matched', to: `${LITE}/new?rx=denture-match` },
     { label: 'Scan another while it reads', to: `${LITE}/new?rx=clean` },
     ...(FEATURES.severalCamera ? [{ label: 'Several prescriptions · check 1/N, then dispatch', to: `${LITE}/new?several=1` }] : []),
+  ] },
+  { group: 'Create', label: 'Create manually', to: `${LITE}/new/manual`, scenarios: [
+    { label: 'Photo or Manual (the + sheet)', to: `${LITE}/home` },
+    { label: 'New case, step by step', to: `${LITE}/new/manual` },
+    { label: 'Finish a saved draft', to: `${LITE}/new/manual?draft=SG-D1012` },
   ] },
   { group: 'Deliveries', label: 'Deliveries', to: `${LITE}/deliveries`, scenarios: [
     { label: 'To dispatch', to: `${LITE}/deliveries` },
@@ -438,6 +444,7 @@ function LiteRoutes() {
         <Route path="work" element={<LabWorkScreen />} />
         <Route path="work/:id" element={<CaseDetailScreen />} />
         <Route path="new" element={<LiteCreate />} />
+        <Route path="new/manual" element={<LiteManual />} />
         <Route path="deliveries" element={<LiteDeliveries />} />
         <Route path="received" element={<Navigate to={`${LITE}/deliveries?tab=received`} replace />} />
         <Route path="dispatch" element={<Navigate to={`${LITE}/deliveries`} replace />} />
@@ -458,7 +465,7 @@ function GoRoutes({ lite }: { lite?: boolean }) {
   const { pathname, search, key } = useLocation();
   return (
     // Create (light) restarts at the scan screen every time it is opened
-    <div key={pathname.startsWith('/go/new') ? pathname + search : (pathname === '/go/lite/new' || pathname === `${LAB_BASE}/new`) ? key : pathname} className="absolute inset-0 go-fade-in">
+    <div key={pathname.startsWith('/go/new') ? pathname + search : (pathname === '/go/lite/new' || pathname === '/go/lite/new/manual' || pathname === `${LAB_BASE}/new`) ? key : pathname} className="absolute inset-0 go-fade-in">
       {lite ? <LiteRoutes /> : <Routes>
         <Route path="signin" element={signedIn ? <Navigate to="/go/home" replace /> : <SignInScreen />} />
         <Route path="forgot" element={<ForgotScreen />} />
@@ -519,7 +526,9 @@ function Phone({ lite, side, scale, caption }: { lite?: boolean; side?: 'clinic'
   return (
     <div className="flex flex-col items-center gap-3">
       {caption && <span className="hidden sm:inline-flex items-center h-7 px-3.5 rounded-full bg-go-surface border border-go-line text-[12px] font-bold text-go-ink2">{caption}</span>}
-      <div className="relative sm:flex-shrink-0 sm:overflow-hidden sm:rounded-[58px]" style={scale < 1 ? { width: 390 * scale, height: 844 * scale, borderRadius: 58 * scale } : undefined}>
+      {/* overflow-clip, not hidden: the scaled phone's layout box is taller than this frame, and a hidden box can
+          still be scrolled — focusing a field low on the screen (Add patient → Phone) scrolled the phone's top off. */}
+      <div className="relative w-full sm:w-auto sm:flex-shrink-0 sm:overflow-clip sm:rounded-[58px]" style={scale < 1 ? { width: 390 * scale, height: 844 * scale, borderRadius: 58 * scale } : undefined}>
         {/* Bezel: dark on the light theme, light grey on the dark theme so the screen edge reads */}
         <div className={cx('relative w-full h-[100dvh] sm:w-[390px] sm:h-[844px] sm:rounded-[58px] sm:p-[10px] origin-top-left',
           theme === 'dark'

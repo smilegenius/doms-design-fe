@@ -165,8 +165,10 @@ export interface PriorWork {
   /** ISO date delivered (or sent, for open cases). */
   date: string;
   open?: boolean;
-  /** A staged denture: each stage made on this case, when it was ordered, needed back and what it asked for (the order form's history). */
-  stages?: { id: string; created: string; due: string; note: string }[];
+  /** A staged denture: each stage made on this case, when it was ordered and needed back (the order form's history). */
+  stages?: { id: string; created: string; due: string }[];
+  /** What the case asked for: as the New case flow takes it, one instruction for all the stages it ordered. */
+  note?: string;
 }
 export interface ImplantRecord { tooth: string; system: string; platform: string; diameter: string; placed: string }
 export interface Patient {
@@ -206,7 +208,10 @@ export const PATIENTS: Patient[] = [
   {
     id: 'P-2025-018', first: 'William', last: 'Grant', dob: '07/06/1981', sex: 'M', funding: 'private',
     lastShade: 'A3',
-    history: [{ caseId: 'CAS-2026-098', product: 'crown', teeth: ['46'], option: 'mono', shade: 'A3', lab: 'northfield', date: '2026-10-03' }],
+    history: [{
+      caseId: 'CAS-2026-098', product: 'crown', teeth: ['46'], option: 'mono', shade: 'A3', lab: 'northfield', date: '2026-10-03',
+      note: 'Please match the shade of 45 and keep the occlusal contact light. The preparation margin is chamfered all round.',
+    }],
     lastLabel: 'Crown 46 · LR6, Oct 2026',
   },
   {
@@ -220,10 +225,12 @@ export const PATIENTS: Patient[] = [
     nextStage: { product: 'denture', arch: 'upper', stage: 'tryin', lab: 'pennine', caseId: 'CAS-2026-117', note: 'bite registration back 12 Oct' },
     history: [{
       caseId: 'CAS-2026-117', product: 'denture', arch: 'upper', option: 'blocks', lab: 'pennine', date: '2026-10-12',
+      // Both stages ordered together on this case, with one instruction for the two.
       stages: [
-        { id: 'tray', created: '2026-09-28', due: '2026-10-05', note: 'Please make a special tray for the upper arch from the primary impression, spaced 2 mm, with a handle. Check the border extension.' },
-        { id: 'blocks', created: '2026-10-05', due: '2026-10-12', note: 'Please make an upper bite block on the master model to record the jaw relationship. Mark the centre line and smile line.' },
+        { id: 'tray', created: '2026-09-28', due: '2026-10-05' },
+        { id: 'blocks', created: '2026-09-28', due: '2026-10-12' },
       ],
+      note: 'Please make a special tray for the upper arch from the primary impression, spaced 2 mm, with a handle, then an upper bite block on the master model to record the jaw relationship. Mark the centre line and smile line.',
     }],
     lastLabel: 'Full denture · UPPER bite registration, Oct 2026',
   },
@@ -243,25 +250,10 @@ export const PATIENTS: Patient[] = [
     lastLabel: 'No lab work yet',
   },
   {
-    // The order form's multi-case order (orderFormDemo, CAS-2026-128). Her upper denture's first three stages
-    // were each made at Pennine on a case of their own; that order finishes it.
+    // The order form walkthrough's crown + full denture order (orderFormDemo, CAS-2026-128): a crown on 45 and a
+    // new upper full denture with all five stages ordered at once, one instruction for them all.
     id: 'P-2025-083', first: 'Margaret', last: 'Hill', dob: '04/11/1951', sex: 'F', funding: 'nhs',
-    missing: ['36', '37', '46', '47'],
-    history: [
-      {
-        caseId: 'CAS-2026-086', product: 'denture', arch: 'upper', option: 'tray', lab: 'pennine', date: '2026-09-14',
-        stages: [{ id: 'tray', created: '2026-09-07', due: '2026-09-14', note: 'Please make a special tray for the upper arch from the primary impression, spaced 2 mm, with a handle.' }],
-      },
-      {
-        caseId: 'CAS-2026-102', product: 'denture', arch: 'upper', option: 'blocks', lab: 'pennine', date: '2026-09-28',
-        stages: [{ id: 'blocks', created: '2026-09-21', due: '2026-09-28', note: 'Please make an upper bite block on the master model. Mark the centre line and the smile line.' }],
-      },
-      {
-        caseId: 'CAS-2026-115', product: 'denture', arch: 'upper', option: 'tryin', lab: 'pennine', date: '2026-10-12',
-        stages: [{ id: 'tryin', created: '2026-10-05', due: '2026-10-12', note: 'Please set up the upper teeth in wax for try in: shade A3, mould to match the photos. Check the occlusion against her lower teeth.' }],
-      },
-    ],
-    lastLabel: 'Full denture · UPPER finish, Oct 2026',
+    lastLabel: 'Crown 45 + Full denture · UPPER, Oct 2026',
   },
 ];
 

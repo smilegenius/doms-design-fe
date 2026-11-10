@@ -30,9 +30,10 @@ function labStatusNote(e: LabCase['events'][number]): { status: string; title: s
 
 const drShort = (c: LabCase) => clinicianName(c.clinician).replace(/^Dr (\S)\S* /, 'Dr $1. ');
 const labShort = (c: LabCase) => labName(c.lab).replace(/ (Dental )?(Lab|Laboratory|Works)$/, '');
-// The light version has no step-by-step form, so a draft opens its case page there. A draft made from a
-// prescription photo opens the light version's review page, filled in from the read.
+// A draft reopens in its form: the full app's manual form, the light version's Manual flow (a draft with a saved
+// form), or the light version's photo review page (a draft made from a prescription photo, filled in from the read).
 const openCase = (c: LabCase, base = '/go') => (c.stage === 'draft' && base === '/go' ? `/go/new/manual?draft=${c.id}`
+  : c.stage === 'draft' && base === '/go/lite' && c.draftForm && !c.scan ? `${base}/new/manual?draft=${c.id}`
   : c.scan && base !== '/go' ? `${base}/new?draft=${c.id}` : `${base}/work/${c.id}`);
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
@@ -675,6 +676,7 @@ export function CaseDetailScreen() {
     return <Screen header={<TopBar back fallback={`${base}/work`} title="Lab work" />}><EmptyState icon={<Search className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
   }
   if (c.stage === 'draft' && base === '/go') return <Navigate to={`/go/new/manual?draft=${c.id}`} replace />;
+  if (c.stage === 'draft' && base === '/go/lite' && c.draftForm && !c.scan) return <Navigate to={`${base}/new/manual?draft=${c.id}`} replace />;
   if (c.scan) return <Navigate to={openCase(c, base)} replace />;
   const p = patientById(c.patientId);
   const r = readiness(c);
@@ -689,7 +691,7 @@ export function CaseDetailScreen() {
 
   // One-line next step with its action — reads like a to-do, not a card.
   const step: { icon: React.ReactNode; tone: Tone; title: string; body: string; cta?: { label: string; run: () => void } } = {
-    finish: { icon: <ClipboardCheck className="w-5 h-5" />, tone: 'neutral' as Tone, title: 'Draft not sent yet', body: 'Finish the details and send it to the lab.', cta: { label: 'Finish case', run: () => navigate(base === '/go' ? `/go/new/manual?draft=${c.id}` : `${base}/new`) } },
+    finish: { icon: <ClipboardCheck className="w-5 h-5" />, tone: 'neutral' as Tone, title: 'Draft not sent yet', body: 'Finish the details and send it to the lab.', cta: { label: 'Finish case', run: () => navigate(base === '/go' ? `/go/new/manual?draft=${c.id}` : base === '/go/lite' && c.draftForm ? `${base}/new/manual?draft=${c.id}` : `${base}/new`) } },
     // Only the lab can put a case on or off hold. The practice answers in Comments when the lab is waiting on it.
     'on-hold': c.onHold?.side === 'Practice'
       ? { icon: <Pause className="w-5 h-5" />, tone: 'warn' as Tone, title: 'On hold · the lab is waiting for you', body: c.onHold.reason, cta: { label: 'Reply', run: () => setTab('messages') } }

@@ -60,7 +60,7 @@ export const FLOWS: FlowEntry[] = [
   {
     // The new Dental Order Form, on the New case flow's View Case only; the portal's form is unchanged.
     title: 'Order form in Case Details',
-    description: 'The new Dental Order Form on a case: patient, dentist, practice, lab and ship-to address, the Tooth Chart, the service details, instructions and the scan and attachment files. A full denture keeps its stage history, so each new stage adds a row with its dates and status and its own instruction card. An order with several cases gives each case its own section.',
+    description: 'The new Dental Order Form on a case: patient, dentist, practice, lab and ship-to address, the Tooth Chart, the service details and instructions. A full denture keeps its stage history, so each new stage adds a row with its dates and status and its own instruction card. An order with several cases gives each one its own colour on the chart. The form prints on one A4 page.',
     detail: 'Clinic · Case Details',
     icon: <FileText className="w-5 h-5 text-[#1565C0]" />,
     badge: 'Walkthrough',
