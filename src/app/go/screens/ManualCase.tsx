@@ -539,11 +539,12 @@ function BrandField({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-export function DetailInput({ field, value, onChange, hint }: { field: DetailField; value: string | string[] | undefined; onChange: (v: string | string[]) => void; hint?: React.ReactNode }) {
+/** `bare` leaves the label out, for a parent that already names the field (Go Lite's closed rows). */
+export function DetailInput({ field, value, onChange, hint, bare }: { field: DetailField; value: string | string[] | undefined; onChange: (v: string | string[]) => void; hint?: React.ReactNode; bare?: boolean }) {
   const v = value ?? (field.kind === 'multi' ? [] : '');
   return (
     <div>
-      <Label optional={!field.required}>{field.label}</Label>
+      {!bare && <Label optional={!field.required}>{field.label}</Label>}
       {field.kind === 'chips' && <Chips options={field.options ?? []} value={(v as string) || null} onChange={(x: string) => onChange(x)} />}
       {field.kind === 'multi' && <Chips options={field.options ?? []} value={v as string[]} onChange={(x: string[]) => onChange(x)} multi />}
       {field.kind === 'text' && <Input value={v as string} onChange={e => onChange(e.target.value)} placeholder={`Enter ${field.label.toLowerCase()}`} />}

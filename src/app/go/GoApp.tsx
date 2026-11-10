@@ -151,6 +151,10 @@ const LITE_JUMPS: Jump[] = [
     { label: 'Photo or Manual (the + sheet)', to: `${LITE}/home` },
     { label: 'New case, step by step', to: `${LITE}/new/manual` },
     { label: 'Finish a saved draft', to: `${LITE}/new/manual?draft=SG-D1012` },
+    { label: 'Denture with stages · no matching case', to: `${LITE}/new/manual?demo=denture` },
+    { label: 'Denture next stage · earlier stages matched', to: `${LITE}/new/manual?demo=denture-match` },
+    { label: 'Partial denture · matched, Retry or Finish next', to: `${LITE}/new/manual?demo=partial-match` },
+    { label: 'Matched denture · review, add to case', to: `${LITE}/new/manual?demo=denture-match-review` },
   ] },
   { group: 'Deliveries', label: 'Deliveries', to: `${LITE}/deliveries`, scenarios: [
     { label: 'To dispatch', to: `${LITE}/deliveries` },

@@ -8,8 +8,8 @@
 
 import { useContext, useEffect, useId, useMemo, useState, forwardRef, KeyboardEvent, ReactNode } from 'react';
 import {
-  AlignHorizontalSpaceAround, Anchor, ArrowRight, Bolt, Camera, Check, ChevronDown, Crown, Droplet, Gem, Layers, Link, Link2, Moon, MoreHorizontal, PackagePlus,
-  Plus, Shapes, Shield, Smile, SmilePlus, Sparkles, Square, Wrench, History, Trash2, X, Zap, type LucideIcon,
+  ArrowRight, Bolt, Camera, Check, ChevronDown, Droplet, Gem, Link, Link2, MoreHorizontal, PackagePlus,
+  Plus, Shapes, History, Trash2, X, Zap, type LucideIcon,
 } from 'lucide-react';
 import { CaseContext, useCase } from './CaseContext';
 import { ControllerContext } from './controller';
@@ -33,15 +33,20 @@ import { ArrowAction, stepName, useArrowActive, useFooterArrow, useHandArrow } f
 import { demoNow, fmtDay, fmtShort, fromISO, toISO } from './dates';
 import TeethChart, { ChartLegend, MiniChart } from './TeethChart';
 import { StageDatePicker } from '../components/DentureStages';
+import {
+  Aligner, Denture, DenturePartial, DentureReline, NightGuard, Retainer, ToothBridge, ToothCrown, ToothImplant, ToothInlay, ToothOther, ToothVeneer,
+  WhiteningTray,
+} from '../components/TreatmentIcons';
 import type { StageRow } from '../data/dentureStages';
 import {
   ChoiceChips, ChipOption, DefaultsPanel, FieldLabel, LinkButton, NextArrow, Notice, PrimaryButton, SecondaryButton, SourceTag,
   StateIcon, StepHeading, ToggleChips, FOCUS,
 } from './ui';
 
-export const PRODUCT_ICON: Record<ProductId, typeof Crown> = {
-  crown: Crown, bridge: Link2, implant: Anchor, veneer: Layers, inlay: Square, nightguard: Moon, denture: Smile,
-  partial: SmilePlus, reline: Wrench, retainer: Shield, aligner: AlignHorizontalSpaceAround, whitening: Sparkles, other: PackagePlus,
+/** Treatment icons — the dental work itself; shared with Smile Genius Go. */
+export const PRODUCT_ICON: Record<ProductId, LucideIcon> = {
+  crown: ToothCrown, bridge: ToothBridge, implant: ToothImplant, veneer: ToothVeneer, inlay: ToothInlay, nightguard: NightGuard, denture: Denture,
+  partial: DenturePartial, reline: DentureReline, retainer: Retainer, aligner: Aligner, whitening: WhiteningTray, other: ToothOther,
 };
 
 /** Where the arrow lands once this answer is in: the service's next open item, else the next gap, else Review. */

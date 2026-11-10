@@ -17,16 +17,16 @@
 // made here lands in Lab work and To dispatch exactly like a photo case, and a
 // draft (Save draft) reopens here with ?draft=ID.
 // Only Patient, Lab, Dentist and one service are required (Go's rule).
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Building2, CalendarClock, Camera, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, FileText, FlaskConical, Layers, Link2, Mail,
-  MessageSquare, Mic, Monitor, Moon, Paperclip, PlusCircle, Sparkles, Star, Trash, Truck, User, UserPlus, X,
+  Building2, CalendarClock, Camera, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, FileText, FlaskConical, Mail,
+  Lock, MessageSquare, Mic, Monitor, Paperclip, PlusCircle, Star, Trash, Truck, User, UserPlus, X,
 } from '../icons';
 import { ME, useGo } from '../store';
 import {
-  CASE_SOURCES, CLINICIANS, LABS, LabCase, MATERIALS, PATIENTS, PRACTICES, SERVICE_CATEGORIES, SHADES, STAGE_NAMES,
-  clinicianName, detailFields, freeTextMaterial, getCategoryForItem, labName, needsMaterial, patientById, phaseName, practiceName, serviceLabel,
+  CASE_SOURCES, CLINICIANS, LABS, LabCase, MATERIALS, PATIENTS, PRACTICES, SERVICE_CATEGORIES, SHADES, STAGE_NAMES, StageLine,
+  allItems, clinicianName, patchItemStages, detailFields, freeTextMaterial, getCategoryForItem, labName, needsMaterial, patientById, phaseName, practiceName, serviceLabel,
 } from '../data';
 import {
   CaseForm, ChoiceWithOther, DetailInput, FormItem, LabPicker, PatientPicker, buildCase, buildDraft, emptyForm, itemDateSummary, itemMissing,
@@ -34,6 +34,9 @@ import {
 } from '../screens/ManualCase';
 import { Avatar, Btn, Input, Screen, SearchBox, Segmented, Sheet, TeethChips, TextArea, cx } from '../ui';
 import { Created, LITE } from './LiteScreens';
+import { PRODUCT_ICON } from '../../newCase/ServiceSteps';
+import type { ProductId } from '../../newCase/data';
+import { ToothDefs, ToothSvg, slotOf } from '../../newCase/ToothShapes';
 
 // ─── Steps ──────────────────────────────────────────────────────────────────
 
@@ -59,14 +62,21 @@ const ARCH_ONLY = new Set(['or-retainers', 'or-clear-aligners', 'de-full-denture
 const ARCH_TOKENS = ['Upper arch', 'Lower arch', 'Both arches'] as const;
 type ArchToken = (typeof ARCH_TOKENS)[number];
 
-const CATEGORY_ICON: Record<string, React.ReactNode> = {
-  'single-unit': <Layers className="w-5 h-5" />,
-  bridge: <Link2 className="w-5 h-5" />,
-  orthodontics: <Sparkles className="w-5 h-5" />,
-  denture: <User className="w-5 h-5" />,
-  appliances: <Moon className="w-5 h-5" />,
-  others: <PlusCircle className="w-5 h-5" />,
+// Each service gets the same icon the New Case flow gives its product (crown, implant, veneer, denture…), not
+// one icon per category.
+const ITEM_PRODUCT: Record<string, ProductId> = {
+  'su-post-and-core-retained-crown': 'crown', 'su-screw-retained-crown': 'implant', 'su-implant-abutment': 'implant',
+  'su-inlay-onlay': 'inlay', 'su-veneer': 'veneer', 'su-crown': 'crown',
+  'br-post-and-core-retained': 'bridge', 'br-implant-abutment': 'bridge', 'br-screw-retained': 'bridge', 'br-pontic': 'bridge', 'br-abutment': 'bridge',
+  'or-retainers': 'retainer', 'or-clear-aligners': 'aligner',
+  'de-partial-denture': 'partial', 'de-full-denture': 'denture', 'de-immediate-denture': 'denture',
+  'ap-whitening-tray': 'whitening', 'ap-night-guard': 'nightguard', 'ap-splint': 'nightguard',
+  'ot-other': 'other',
 };
+function ServiceIcon({ itemId }: { itemId: string }) {
+  const Icon = PRODUCT_ICON[ITEM_PRODUCT[itemId] ?? 'other'];
+  return <Icon className="w-5 h-5" strokeWidth={1.75} />;
+}
 const SOURCE_ICON: Record<string, React.ReactNode> = {
   'Via Scanner': <Monitor className="w-5 h-5" />,
   'Impressions (By Post)': <Truck className="w-5 h-5" />,
@@ -195,66 +205,153 @@ function DateField({ value, onChange, label, min, allowPast, optional, compact }
 // ─── Tooth chart (UK Palmer notation: UR8 … UL8 / LR8 … LL8) ────────────────
 
 const SIDE = [8, 7, 6, 5, 4, 3, 2, 1];
-const toothWeight = (n: number) => (n >= 6 ? 1.3 : n >= 4 ? 1 : n === 3 ? 0.95 : 0.85);
 const ARCH_OF: Record<ArchToken, string[]> = {
   'Upper arch': [...SIDE.map(n => `UR${n}`), ...[...SIDE].reverse().map(n => `UL${n}`)],
   'Lower arch': [...SIDE.map(n => `LR${n}`), ...[...SIDE].reverse().map(n => `LL${n}`)],
   'Both arches': [],
 };
 
-function Tooth({ id, on, lower, onTap }: { id: string; on: boolean; lower?: boolean; onTap: () => void }) {
-  const n = Number(id.slice(2));
+// The chart's teeth are the New Case flow's anatomical ones (ToothShapes): each tooth its own shape and width, crowns
+// meeting at the bite line, selected teeth in the selection teal. Go's UR/UL/LL/LR ids map to FDI quadrants 1–4.
+const FDI_QUADRANT: Record<string, string> = { UR: '1', UL: '2', LL: '3', LR: '4' };
+const fdiOf = (id: string) => `${FDI_QUADRANT[id.slice(0, 2)]}${id.slice(2)}`;
+
+type QuadKey = 'UR' | 'UL' | 'LR' | 'LL';
+// The four quadrants as the mouth looks from the front: patient's right on the left, front teeth at the midline.
+const QUADS: { key: QuadKey; label: string; ids: string[]; lower?: boolean }[] = [
+  { key: 'UR', label: 'Upper right', ids: SIDE.map(n => `UR${n}`) },
+  { key: 'UL', label: 'Upper left', ids: [...SIDE].reverse().map(n => `UL${n}`) },
+  { key: 'LR', label: 'Lower right', ids: SIDE.map(n => `LR${n}`), lower: true },
+  { key: 'LL', label: 'Lower left', ids: [...SIDE].reverse().map(n => `LL${n}`), lower: true },
+];
+const quadOf = (k: QuadKey) => QUADS.find(q => q.key === k)!;
+
+/** A tooth drawn in the overview — just a picture; the whole quadrant around it is the button. */
+function ToothArt({ id, on, uid }: { id: string; on: boolean; uid: string }) {
+  const fdi = fdiOf(id);
   return (
-    <button type="button" onClick={onTap} aria-pressed={on} aria-label={id} style={{ flexGrow: toothWeight(n), flexBasis: 0 }}
-      className={cx('min-w-0 flex flex-col items-center gap-1 py-1 active:scale-95 transition', lower && 'flex-col-reverse')}>
-      <span className={cx('w-full h-9 border transition',
-        lower ? 'rounded-b-[10px] rounded-t-[5px]' : 'rounded-t-[10px] rounded-b-[5px]',
-        n >= 6 ? '' : n === 3 ? (lower ? 'rounded-b-[14px]' : 'rounded-t-[14px]') : '',
-        on ? 'go-grad border-transparent go-glow' : 'bg-go-raised border-go-line')} />
-      <span className={cx('text-[10px] font-bold tabular-nums leading-none', on ? 'text-go-brand' : 'text-go-faint')}>{n}</span>
+    <span className="min-w-0 block" style={{ flexGrow: slotOf(fdi), flexBasis: 0 }}>
+      <ToothSvg id={fdi} uid={uid} look={{ lit: on }} tint="off" />
+    </span>
+  );
+}
+
+/** A tooth in the zoomed quadrant: thumb-sized, with its number under (or over) it. */
+function Tooth({ id, on, lower, uid, onTap }: { id: string; on: boolean; lower?: boolean; uid: string; onTap: () => void }) {
+  const fdi = fdiOf(id);
+  return (
+    <button type="button" onClick={onTap} aria-pressed={on} aria-label={id} style={{ flexGrow: slotOf(fdi), flexBasis: 0 }}
+      className={cx('group min-w-0 flex flex-col items-center gap-1.5 rounded-xl py-1.5 transition active:scale-95',
+        on ? 'bg-go-brand/10' : 'active:bg-go-line/40', lower ? 'flex-col-reverse justify-end' : 'justify-end')}>
+      <span className="block w-full px-0.5"><ToothSvg id={fdi} uid={uid} look={{ lit: on }} tint={on ? 'off' : 'hover'} /></span>
+      <span className={cx('text-[13px] font-bold tabular-nums leading-none', on ? 'text-go-brand' : 'text-go-muted')}>{Number(id.slice(2))}</span>
     </button>
   );
 }
 
-/** Every tooth at once, as the mouth looks from the front: upper row on top, patient's right on the left. */
+/** The whole mouth as four tappable quadrants; tapping one zooms in to its eight teeth at thumb size. */
 const onlyTeeth = (v: string[]) => v.filter(x => !(ARCH_TOKENS as readonly string[]).includes(x));
 function ToothChart({ value, onChange }: { value: string[]; onChange: (next: (prev: string[]) => string[]) => void }) {
   const teeth = onlyTeeth(value);
   const toggle = (t: string) => onChange(prev => { const cur = onlyTeeth(prev); return cur.includes(t) ? cur.filter(x => x !== t) : [...cur, t]; });
-  const wholeOn = (a: 'Upper arch' | 'Lower arch') => ARCH_OF[a].every(t => teeth.includes(t));
-  const whole = (a: 'Upper arch' | 'Lower arch') => onChange(prev => {
+  const setAll = (ids: string[]) => onChange(prev => {
     const cur = onlyTeeth(prev);
-    return ARCH_OF[a].every(t => cur.includes(t)) ? cur.filter(t => !ARCH_OF[a].includes(t)) : [...new Set([...cur, ...ARCH_OF[a]])];
+    return ids.every(t => cur.includes(t)) ? cur.filter(t => !ids.includes(t)) : [...new Set([...cur, ...ids])];
   });
-  const row = (ids: string[], lower?: boolean) => (
-    <div className="flex items-stretch gap-[3px]">
-      {ids.slice(0, 8).map(t => <Tooth key={t} id={t} on={teeth.includes(t)} lower={lower} onTap={() => toggle(t)} />)}
-      <span className="w-px bg-go-line mx-0.5 flex-shrink-0" aria-hidden />
-      {ids.slice(8).map(t => <Tooth key={t} id={t} on={teeth.includes(t)} lower={lower} onTap={() => toggle(t)} />)}
-    </div>
-  );
-  const pan = useRef<HTMLDivElement>(null);
-  // Opens centred on the front teeth; the back teeth are a swipe away.
-  useLayoutEffect(() => { const el = pan.current; if (el) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2; }, []);
+  const wholeOn = (a: 'Upper arch' | 'Lower arch') => ARCH_OF[a].every(t => teeth.includes(t));
+  const countIn = (q: QuadKey) => teeth.filter(t => t.startsWith(q)).length;
+  const uid = `go-teeth-${useId().replace(/:/g, '')}`;
+  const [quad, setQuad] = useState<QuadKey | null>(null);
+  const card = useRef<HTMLDivElement>(null);
+
+  // First visit with nothing picked: a thumb taps the upper-right quadrant twice, so it's clear the chart opens up.
+  // It goes away on the first touch of the chart, or once it has played.
+  const [hint, setHint] = useState<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    if (teeth.length) return;
+    const box = card.current, t = box?.querySelector<HTMLElement>('[data-quad="UR"]');
+    if (!box || !t) return;
+    const b = box.getBoundingClientRect(), r = t.getBoundingClientRect();
+    const scale = b.width / box.offsetWidth || 1; // the phone frame may be scaled down
+    setHint({ x: (r.left + r.width * 0.62 - b.left) / scale, y: (r.top + r.height * 0.55 - b.top) / scale });
+  }, []);
+
+  // Overview: each half-row is one big button (~150px wide) — far easier to hit than a single 20px tooth.
+  const zone = (k: QuadKey) => {
+    const q = quadOf(k), n = countIn(k);
+    return (
+      <button type="button" data-quad={k} onClick={() => setQuad(k)} aria-label={`${q.label}, ${n ? `${n} selected` : 'none selected'} — open`}
+        className={cx('relative flex-1 min-w-0 flex rounded-2xl px-1 transition active:scale-[.98] border',
+          q.lower ? 'items-start pt-1.5 pb-5' : 'items-end pt-5 pb-1.5',
+          n ? 'bg-go-brand/[.06] border-go-brand/30' : 'bg-go-line/20 border-transparent hover:bg-go-line/35')}>
+        <span className={cx('absolute flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide leading-none',
+          q.lower ? 'bottom-1.5' : 'top-1.5', k.endsWith('R') ? 'left-2' : 'right-2', n ? 'text-go-brand' : 'text-go-faint')}>
+          {q.label}{n > 0 && <span className="min-w-[15px] h-[15px] px-1 rounded-full bg-go-brand text-white text-[9.5px] grid place-items-center">{n}</span>}
+        </span>
+        {q.ids.map(t => <ToothArt key={t} id={t} uid={uid} on={teeth.includes(t)} />)}
+      </button>
+    );
+  };
+
+  const open = quad ? quadOf(quad) : null;
+  const openAll = open ? open.ids.every(t => teeth.includes(t)) : false;
   return (
     <div>
-      <div className="relative rounded-[22px] bg-go-surface border border-go-line/80 go-card-shadow overflow-hidden">
-        <div ref={pan} className="go-scroll overflow-x-auto overscroll-x-contain" aria-label="Teeth chart, scroll sideways for the back teeth">
-          <div className="min-w-[620px] px-3 pt-3 pb-2.5">
-            <div className="flex justify-between px-1 text-[10.5px] font-bold text-go-faint mb-1"><span>UPPER RIGHT</span><span>UPPER LEFT</span></div>
-            {row(ARCH_OF['Upper arch'])}
-            <div className="h-px bg-go-line my-2" />
-            {row(ARCH_OF['Lower arch'], true)}
-            <div className="flex justify-between px-1 text-[10.5px] font-bold text-go-faint mt-1"><span>LOWER RIGHT</span><span>LOWER LEFT</span></div>
+      <div ref={card} onPointerDown={() => setHint(null)}
+        className="relative rounded-[22px] bg-go-surface border border-go-line/80 go-card-shadow p-2" aria-label="Teeth chart">
+        {hint && (
+          <span aria-hidden className="go-tap-hint pointer-events-none absolute z-10" style={{ left: hint.x, top: hint.y }}
+            onAnimationEnd={e => { if (e.animationName === 'go-tap-hand') setHint(null); }}>
+            <span className="go-tap-ripple absolute -left-4 -top-4 w-8 h-8 rounded-full bg-go-brand/40" />
+            <span className="go-tap-hand absolute"><TapThumb /></span>
+          </span>
+        )}
+        <ToothDefs uid={uid} />
+        {!open ? (
+          <div className="go-fade-in">
+            <div className="flex gap-1.5">{zone('UR')}{zone('UL')}</div>
+            <div className="h-1.5" />
+            <div className="flex gap-1.5">{zone('LR')}{zone('LL')}</div>
           </div>
-        </div>
-        {/* Soft edges say there's more to either side. */}
-        <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-5 bg-gradient-to-r from-go-surface to-transparent" />
-        <span aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-5 bg-gradient-to-l from-go-surface to-transparent" />
+        ) : (
+          <div key={open.key} className="go-rise">
+            <div className="flex items-center gap-1 mb-2">
+              <button type="button" onClick={() => setQuad(null)} aria-label="Back to all teeth"
+                className="h-9 pl-1.5 pr-2.5 rounded-xl flex items-center gap-0.5 text-[12.5px] font-semibold text-go-ink2 active:bg-go-line/40">
+                <ChevronLeft className="w-4 h-4" /> All teeth
+              </button>
+              <button type="button" onClick={() => setAll(open.ids)}
+                className={cx('ml-auto h-8 px-3 rounded-full text-[12px] font-semibold border transition active:scale-[.97]',
+                  openAll ? 'bg-go-brand text-white border-go-brand' : 'bg-go-surface text-go-ink2 border-go-line')}>
+                {openAll ? 'All 8 picked' : 'Pick all 8'}
+              </button>
+            </div>
+            {/* Jump between quadrants without going back. */}
+            <div className="grid grid-cols-4 gap-1 p-1 rounded-2xl bg-go-line/25 mb-2">
+              {QUADS.map(q => {
+                const n = countIn(q.key), cur = q.key === open.key;
+                return (
+                  <button key={q.key} type="button" onClick={() => setQuad(q.key)} aria-pressed={cur}
+                    className={cx('h-9 rounded-xl flex items-center justify-center gap-1 text-[12px] font-bold transition',
+                      cur ? 'bg-go-surface text-go-ink shadow-sm' : 'text-go-muted')}>
+                    {q.key}
+                    {n > 0 && <span className="min-w-[15px] h-[15px] px-1 rounded-full bg-go-brand text-white text-[9.5px] grid place-items-center">{n}</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <div className={cx('flex gap-0.5 px-0.5', open.lower ? 'items-start' : 'items-end')}>
+              {open.ids.map(t => <Tooth key={t} id={t} uid={uid} on={teeth.includes(t)} lower={open.lower} onTap={() => toggle(t)} />)}
+            </div>
+            <p className={cx('mt-1.5 text-[10.5px] font-semibold text-go-faint flex', open.key.endsWith('R') ? 'justify-end' : 'justify-start')}>
+              {open.key.endsWith('R') ? 'Front teeth →' : '← Front teeth'}
+            </p>
+          </div>
+        )}
       </div>
       <div className="flex gap-2 mt-3">
         {(['Upper arch', 'Lower arch'] as const).map(a => (
-          <button key={a} type="button" onClick={() => whole(a)}
+          <button key={a} type="button" onClick={() => setAll(ARCH_OF[a])}
             className={cx('flex-1 h-10 rounded-2xl text-[13px] font-semibold border transition active:scale-[.98]',
               wholeOn(a) ? 'bg-go-brand text-white border-go-brand' : 'bg-go-surface text-go-ink2 border-go-line')}>
             Whole {a.split(' ')[0].toLowerCase()}
@@ -262,9 +359,22 @@ function ToothChart({ value, onChange }: { value: string[]; onChange: (next: (pr
         ))}
       </div>
       <p className="mt-2.5 px-1 text-[12.5px] text-go-muted min-h-[18px]">
-        {teeth.length ? <>Selected: <span className="font-semibold text-go-ink">{teeth.length > 6 ? `${teeth.length} teeth` : teeth.join(', ')}</span></> : 'Tap the teeth on the chart.'}
+        {teeth.length
+          ? <>Selected: <span className="font-semibold text-go-ink">{teeth.length > 6 ? `${teeth.length} teeth` : teeth.join(', ')}</span></>
+          : open ? 'Tap the teeth to pick them.' : 'Tap a side of the mouth to open it.'}
       </p>
     </div>
+  );
+}
+
+/** A thumb seen from above, coming in from the bottom right; its pad (12, 3.6 in CSS px) is the touch point. */
+function TapThumb() {
+  return (
+    <svg viewBox="0 0 20 34" width="24" height="40.8" className="go-tap-thumb drop-shadow-md" fill="none" stroke="#2A2F3A" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 34V10a7 7 0 0 1 14 0v24" fill="white" />
+      <path d="M6.2 9.6a3.8 3.8 0 0 1 7.6 0v3.2c-2.5 1-5.1 1-7.6 0Z" fill="#EEF0F4" />
+      <path d="M6 22.5c2.6.9 5.4.9 8 0" opacity=".55" />
+    </svg>
   );
 }
 
@@ -316,114 +426,202 @@ function Field({ label, optional, children, hint }: { label: string; optional?: 
   );
 }
 
-function ServicePage({ it, set }: { it: FormItem; set: (p: Partial<FormItem> | ((cur: FormItem) => Partial<FormItem>)) => void }) {
+/** One closed row per detail, like the web flow: the label, what's set so far, and a chevron; tap to edit. */
+function Fold({ label, optional, required, summary, open, onToggle, hint, children }: {
+  label: string; optional?: boolean; required?: boolean; summary?: string; open: boolean; onToggle: () => void; hint?: React.ReactNode; children: React.ReactNode;
+}) {
+  const id = `fold-${useId().replace(/:/g, '')}`;
+  return (
+    <section className={cx('rounded-[20px] bg-go-surface border transition-colors', open ? 'border-go-brand/40 go-card-shadow' : 'border-go-line/80')}>
+      <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={id}
+        className="w-full min-h-[56px] px-4 py-3 flex items-center gap-3 text-left">
+        <span className="flex-shrink-0 flex items-baseline gap-1.5">
+          <span className="text-[15px] font-bold text-go-ink">{label}</span>
+          {optional && !summary && <span className="text-[12px] text-go-faint">optional</span>}
+        </span>
+        <span className={cx('flex-1 min-w-0 text-right truncate text-[13px]',
+          summary ? 'font-semibold text-go-brand' : required ? 'font-semibold text-go-warn' : 'text-go-faint')}>
+          {summary || (required ? 'Needed' : '')}
+        </span>
+        <ChevronDown className={cx('w-5 h-5 flex-shrink-0 text-go-faint transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div id={id} className="go-rise px-4 pb-4 -mt-0.5">
+          {children}
+          {hint && <p className="px-1 mt-2 text-[12px] text-go-muted">{hint}</p>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const shortDay = (d: string) => new Date(`${d}T12:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const asText = (v: string | string[] | undefined) => ([] as string[]).concat(v ?? []).filter(Boolean).join(', ');
+
+/** The case a denture follow-up is added to — shown on the service page and on Review. */
+function MatchNote({ match }: { match: DentureMatch }) {
+  return (
+    <div className="mt-4 rounded-[18px] border border-go-ok/30 bg-go-ok-soft px-4 py-3 flex gap-3">
+      <CheckCircle2 className="w-5 h-5 text-go-ok flex-shrink-0 mt-0.5" />
+      <p className="text-[13px] leading-snug text-go-ink2">
+        <span className="font-bold text-go-ink">Matching case found · {match.c.id}.</span> Its earlier stages are already ordered, so the new stage is added to that case. No new case is created.
+      </p>
+    </div>
+  );
+}
+
+function ServicePage({ it, set, match }: { it: FormItem; set: (p: Partial<FormItem> | ((cur: FormItem) => Partial<FormItem>)) => void; match?: DentureMatch | null }) {
   const cat = getCategoryForItem(it.itemId) ?? 'others';
   const fields = detailFields(it.itemId).filter(f => f.key !== 'stages');
   const stagesField = detailFields(it.itemId).find(f => f.key === 'stages');
-  // The first few (and every required) extra stay open; rarely used ones fold under "More details".
-  const shown = fields.filter((f, i) => f.required || i < 2);
-  const more = fields.filter(f => !shown.includes(f));
-  const [moreOpen, setMoreOpen] = useState(more.some(f => it.details[f.key]));
   const kind = itemStaged(it);
-  const chosen = STAGE_NAMES.filter(n => ([] as string[]).concat(it.details.stages ?? []).includes(n));
+  const locked = new Map((match?.stages ?? []).map(l => [l.name, l]));
+  const chosen = STAGE_NAMES.filter(n => !locked.has(n) && ([] as string[]).concat(it.details.stages ?? []).includes(n));
+  // Everything under the teeth starts closed; one section opens at a time.
+  // A matched denture opens on its stages: picking the next one is the whole job.
+  const [open, setOpen] = useState<string | null>(match ? 'stages' : null);
+  const fold = (key: string) => ({ open: open === key, onToggle: () => setOpen(o => (o === key ? null : key)) });
+  const material = needsMaterial(it.itemId);
   return (
     <div>
+      {match && <MatchNote match={match} />}
       {ARCH_ONLY.has(it.itemId)
         ? <Field label="Which arch?"><ArchPicker value={it.teeth} onChange={teeth => set({ teeth })} /></Field>
         : <Field label="Teeth" hint={cat === 'bridge' ? 'Tap every tooth in the bridge, ends included.' : undefined}><ToothChart value={it.teeth} onChange={next => set(cur => ({ teeth: next(cur.teeth) }))} /></Field>}
 
-      {needsMaterial(it.itemId) && freeTextMaterial(it.itemId) && (
-        <>
-          <Field label="Material" optional><Input value={it.material ?? ''} onChange={e => set({ material: e.target.value })} placeholder="Type the material" /></Field>
-          <Field label="Shade" optional><Input value={it.shade ?? ''} onChange={e => set({ shade: e.target.value })} placeholder="Type the shade" /></Field>
-        </>
-      )}
-      {needsMaterial(it.itemId) && !freeTextMaterial(it.itemId) && (
-        <>
-          <Field label="Material" optional>
-            <ChoiceWithOther options={MATERIALS} value={it.material} onChange={material => set({ material })} placeholder="Type the material" />
-          </Field>
-          <Field label="Shade" optional>
-            <div className="grid grid-cols-6 gap-2">
-              {SHADES.map(s => {
-                const on = it.shade === s;
+      <div className="mt-6 space-y-2.5">
+        {material && (
+          <Fold label="Material" optional summary={it.material ?? ''} {...fold('material')}>
+            {freeTextMaterial(it.itemId)
+              ? <Input value={it.material ?? ''} onChange={e => set({ material: e.target.value })} placeholder="Type the material" />
+              : <ChoiceWithOther options={MATERIALS} value={it.material} onChange={material => set({ material })} placeholder="Type the material" />}
+          </Fold>
+        )}
+        {material && (
+          <Fold label="Shade" optional summary={it.shade ?? ''} {...fold('shade')}>
+            {freeTextMaterial(it.itemId)
+              ? <Input value={it.shade ?? ''} onChange={e => set({ shade: e.target.value })} placeholder="Type the shade" />
+              : (
+                <div className="grid grid-cols-6 gap-2">
+                  {SHADES.map(s => {
+                    const on = it.shade === s;
+                    return (
+                      <button key={s} type="button" onClick={() => set({ shade: on ? null : s })} aria-pressed={on}
+                        className={cx('h-14 rounded-2xl border flex flex-col items-center justify-center gap-1 transition active:scale-95',
+                          on ? 'border-go-brand ring-4 ring-go-brand/15 bg-go-brand-soft' : 'border-go-line bg-go-surface')}>
+                        <span className="w-5 h-5 rounded-md border border-black/10" style={{ background: shadeTint(s) }} />
+                        <span className={cx('text-[11.5px] font-bold', on ? 'text-go-brand-ink' : 'text-go-ink2')}>{s}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+          </Fold>
+        )}
+
+        {stagesField && (
+          <Fold label={match ? 'Next stage' : 'Stages'} required summary={chosen.length ? (chosen.length > 2 ? `${chosen.length} stages` : chosen.join(', ')) : ''}
+            hint={match ? `Stages with a lock are already on ${match.c.id}.` : 'Tick the stages to order, then give each a date.'} {...fold('stages')}>
+            <div className="rounded-2xl border border-go-line/80 overflow-hidden divide-y divide-go-line/70">
+              {STAGE_NAMES.map((n, i) => {
+                const l = locked.get(n);
+                if (l) return (
+                  <div key={n} className="px-3.5 py-3 flex items-center gap-3 bg-go-raised/60">
+                    <span className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 bg-go-line/60 text-go-muted"><Lock className="w-3.5 h-3.5" /></span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[15px] font-semibold text-go-muted">{n}</span>
+                      <span className="block text-[11.5px] text-go-faint">{lockedLine(l)} · {match!.c.id}</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-go-faint">{i + 1}</span>
+                  </div>
+                );
+                const on = chosen.includes(n);
+                const d = it.stageDates[n] ?? '';
                 return (
-                  <button key={s} type="button" onClick={() => set({ shade: on ? null : s })} aria-pressed={on}
-                    className={cx('h-14 rounded-2xl border flex flex-col items-center justify-center gap-1 transition active:scale-95',
-                      on ? 'border-go-brand ring-4 ring-go-brand/15 bg-go-brand-soft' : 'border-go-line bg-go-surface')}>
-                    <span className="w-5 h-5 rounded-md border border-black/10" style={{ background: shadeTint(s) }} />
-                    <span className={cx('text-[11.5px] font-bold', on ? 'text-go-brand-ink' : 'text-go-ink2')}>{s}</span>
-                  </button>
+                  <div key={n} className={cx('px-3.5 py-3', on && 'bg-go-brand-soft/40')}>
+                    <button type="button" onClick={() => set({ details: { ...it.details, stages: on ? chosen.filter(x => x !== n) : STAGE_NAMES.filter(x => x === n || chosen.includes(x)) } })}
+                      className="w-full flex items-center gap-3 text-left" aria-pressed={on}>
+                      <span className={cx('w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 transition', on ? 'go-grad text-white' : 'border-2 border-go-line')}>{on && <Check className="w-3.5 h-3.5" />}</span>
+                      <span className="flex-1 text-[15px] font-semibold text-go-ink">{n}</span>
+                      <span className="text-[11px] font-bold text-go-faint">{i + 1}</span>
+                    </button>
+                    {on && <div className="mt-2.5 pl-9"><DateField compact allowPast value={d} label={`${n} · delivery date`} onChange={v => set({ stageDates: { ...it.stageDates, [n]: v } })} /></div>}
+                  </div>
                 );
               })}
             </div>
-          </Field>
-        </>
-      )}
+          </Fold>
+        )}
 
-      {stagesField && (
-        <Field label="Stages" hint="Tick the stages to order, then give each a date.">
-          <div className="rounded-[22px] bg-go-surface border border-go-line/80 go-card-shadow overflow-hidden divide-y divide-go-line/70">
-            {STAGE_NAMES.map((n, i) => {
-              const on = chosen.includes(n);
-              const d = it.stageDates[n] ?? '';
-              return (
-                <div key={n} className={cx('px-4 py-3', on && 'bg-go-brand-soft/40')}>
-                  <button type="button" onClick={() => set({ details: { ...it.details, stages: on ? chosen.filter(x => x !== n) : STAGE_NAMES.filter(x => x === n || chosen.includes(x)) } })}
-                    className="w-full flex items-center gap-3 text-left" aria-pressed={on}>
-                    <span className={cx('w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 transition', on ? 'go-grad text-white' : 'border-2 border-go-line')}>{on && <Check className="w-3.5 h-3.5" />}</span>
-                    <span className="flex-1 text-[15px] font-semibold text-go-ink">{n}</span>
-                    <span className="text-[11px] font-bold text-go-faint">{i + 1}</span>
-                  </button>
-                  {on && <div className="mt-2.5 pl-9"><DateField compact allowPast value={d} label={`${n} · delivery date`} onChange={v => set({ stageDates: { ...it.stageDates, [n]: v } })} /></div>}
+        {fields.map(f => (
+          <Fold key={f.key} label={f.label} optional={!f.required} required={f.required} summary={asText(it.details[f.key])} {...fold(`d:${f.key}`)}>
+            <DetailInput bare field={f} value={it.details[f.key]} onChange={v => set({ details: { ...it.details, [f.key]: v } })} />
+          </Fold>
+        ))}
+
+        {kind === 'phase' ? (
+          <Fold label="Delivery dates" summary={(() => { const n = it.phases.filter(Boolean).length; return n ? `${n} of ${it.phases.length} dated` : ''; })()}
+            hint="A date for each phase. You can order the next phase later from the case." {...fold('phases')}>
+            <div className="space-y-2">
+              {it.phases.map((d, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="w-16 text-[13px] font-semibold text-go-ink2 flex-shrink-0">{phaseName(i + 1)}</span>
+                  <div className="flex-1 min-w-0"><DateField compact value={d} label={`${phaseName(i + 1)} · delivery date`} onChange={v => set({ phases: it.phases.map((x, j) => (j === i ? v : x)) })} /></div>
+                  {it.phases.length > 1 && <button type="button" onClick={() => set({ phases: it.phases.filter((_, j) => j !== i) })} aria-label={`Remove ${phaseName(i + 1)}`}
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-go-muted active:bg-go-raised"><X className="w-4 h-4" /></button>}
                 </div>
-              );
-            })}
-          </div>
-        </Field>
-      )}
-
-      {shown.map(f => (
-        <div key={f.key} className="mt-6"><DetailInput field={f} value={it.details[f.key]} onChange={v => set({ details: { ...it.details, [f.key]: v } })} /></div>
-      ))}
-      {more.length > 0 && (
-        <div className="mt-6">
-          <button type="button" onClick={() => setMoreOpen(o => !o)} aria-expanded={moreOpen}
-            className="w-full h-12 px-4 rounded-2xl bg-go-surface border border-go-line flex items-center gap-2 text-[14px] font-semibold text-go-ink2">
-            <span className="flex-1 text-left">More details</span>
-            <span className="text-[12px] text-go-faint font-medium">{(() => { const n = more.filter(f => it.details[f.key] && String(it.details[f.key]).length).length; return n ? `${n} of ${more.length} set` : `${more.length} items`; })()}</span>
-            <ChevronDown className={cx('w-5 h-5 text-go-faint transition', moreOpen && 'rotate-180')} />
-          </button>
-          {moreOpen && <div className="go-rise">{more.map(f => (
-            <div key={f.key} className="mt-5"><DetailInput field={f} value={it.details[f.key]} onChange={v => set({ details: { ...it.details, [f.key]: v } })} /></div>
-          ))}</div>}
-        </div>
-      )}
-
-      {kind === 'phase' ? (
-        <Field label="Delivery dates" hint="A date for each phase. You can order the next phase later from the case.">
-          <div className="space-y-2">
-            {it.phases.map((d, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <span className="w-16 text-[13px] font-semibold text-go-ink2 flex-shrink-0">{phaseName(i + 1)}</span>
-                <div className="flex-1 min-w-0"><DateField compact value={d} label={`${phaseName(i + 1)} · delivery date`} onChange={v => set({ phases: it.phases.map((x, j) => (j === i ? v : x)) })} /></div>
-                {it.phases.length > 1 && <button type="button" onClick={() => set({ phases: it.phases.filter((_, j) => j !== i) })} aria-label={`Remove ${phaseName(i + 1)}`}
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-go-muted active:bg-go-raised"><X className="w-4 h-4" /></button>}
-              </div>
-            ))}
-          </div>
-          <button type="button" onClick={() => set({ phases: [...it.phases, ''] })} className="mt-2.5 inline-flex items-center gap-1.5 h-10 text-[13.5px] font-semibold text-go-brand px-1">
-            <PlusCircle className="w-4 h-4" />Add {phaseName(it.phases.length + 1)}
-          </button>
-        </Field>
-      ) : kind !== 'stage' && (
-        <Field label="Delivery date" optional>
-          <DateField value={it.returnBy} optional label="Delivery date" onChange={returnBy => set({ returnBy })} />
-        </Field>
-      )}
+              ))}
+            </div>
+            <button type="button" onClick={() => set({ phases: [...it.phases, ''] })} className="mt-2.5 inline-flex items-center gap-1.5 h-10 text-[13.5px] font-semibold text-go-brand px-1">
+              <PlusCircle className="w-4 h-4" />Add {phaseName(it.phases.length + 1)}
+            </button>
+          </Fold>
+        ) : kind !== 'stage' && (
+          <Fold label="Delivery date" optional summary={it.returnBy ? shortDay(it.returnBy) : ''} {...fold('date')}>
+            <DateField value={it.returnBy} optional label="Delivery date" onChange={returnBy => { set({ returnBy }); }} />
+          </Fold>
+        )}
+      </div>
     </div>
   );
 }
+
+// ─── Denture follow-ups ─────────────────────────────────────────────────────
+// Same as the photo flow and the web Quick Create: a denture for a patient, practice and dentist that already have that
+// denture on a case is its next stage. The stages already on that case are locked; the new ones are added to it.
+
+export interface DentureMatch { c: LabCase; index: number; stages: StageLine[] }
+function dentureMatch(cases: LabCase[], f: CaseForm): DentureMatch | null {
+  const [it, ...more] = f.items;
+  if (!it || more.length || itemStaged(it) !== 'stage' || !f.patientId || !f.practice || !f.clinician) return null;
+  const name = serviceLabel(it.itemId).toLowerCase();
+  for (const c of cases) {
+    if (c.patientId !== f.patientId || c.practice !== f.practice || c.clinician !== f.clinician || c.stage === 'draft') continue;
+    const index = allItems(c).findIndex(x => x.service.toLowerCase() === name && x.stages?.length);
+    if (index >= 0) return { c, index, stages: allItems(c)[index].stages! };
+  }
+  return null;
+}
+const lockedLine = (l: StageLine) => (l.state === 'done-earlier' ? 'Done elsewhere' : l.state === 'received' ? 'Received' : l.date ? `Ordered · ${shortDay(l.date.slice(0, 10))}` : 'Ordered');
+
+/** Jump-to-screen demos (?demo=…): a denture case already filled in, opened on its service page or Review. */
+type Demo = 'denture' | 'denture-match' | 'partial-match' | 'denture-match-review';
+const DEMO_OF: Record<Demo, { patientId: string; practice: NonNullable<CaseForm['practice']>; clinician: string; lab: string; itemId: string; teeth: string[]; stageDates?: Record<string, number>; review?: boolean }> = {
+  // No case to match: every stage is open to order
+  'denture': { patientId: 'P-10231', practice: 'cds', clinician: 'reed', lab: 'northstar', itemId: 'de-full-denture', teeth: ['Both arches'] },
+  // SG-28488 (James Williams): Special Tray + Bite Registration done elsewhere, Try In ordered → only Finish is left
+  'denture-match': { patientId: 'P-10188', practice: 'isc', clinician: 'okafor', lab: 'precision', itemId: 'de-full-denture', teeth: ['Both arches'] },
+  // SG-28497 (Ella Brooks): partial denture with Special Tray done elsewhere, Bite Registration + Try In ordered
+  'partial-match': { patientId: 'P-10402', practice: 'isc', clinician: 'okafor', lab: 'precision', itemId: 'de-partial-denture', teeth: ['Upper arch'] },
+  // As denture-match, with Finish picked and dated: Review offers "Add to SG-28488" or a new case
+  'denture-match-review': { patientId: 'P-10188', practice: 'isc', clinician: 'okafor', lab: 'precision', itemId: 'de-full-denture', teeth: ['Both arches'], stageDates: { Finish: 10 }, review: true },
+};
+const demoForm = (d: Demo, base: CaseForm): CaseForm => {
+  const x = DEMO_OF[d];
+  const stageDates = Object.fromEntries(Object.entries(x.stageDates ?? {}).map(([n, days]) => [n, plusDays(days)]));
+  const it = newItem(x.itemId, { teeth: x.teeth, details: Object.keys(stageDates).length ? { stages: Object.keys(stageDates) } : {}, stageDates });
+  return { ...base, patientId: x.patientId, practice: x.practice, clinician: x.clinician, lab: x.lab, items: [it] };
+};
 
 // ─── The flow ───────────────────────────────────────────────────────────────
 
@@ -434,22 +632,27 @@ export default function LiteManual() {
   const { cases, addCase, updateCase, toast, soloPractice } = useGo();
   const draftId = params.get('draft');
   const draftCase = useMemo(() => (draftId ? cases.find(c => c.id === draftId && !!c.draftForm) : undefined), []); // eslint-disable-line react-hooks/exhaustive-deps
-  const [f, setF] = useState<CaseForm>(() => (draftCase ? normForm({ ...emptyForm(), ...(draftCase.draftForm as CaseForm) }) : { ...emptyForm(), practice: soloPractice ?? 'cds' }));
+  const demo = (Object.keys(DEMO_OF) as Demo[]).find(d => d === params.get('demo'));
+  const [f, setF] = useState<CaseForm>(() => (draftCase ? normForm({ ...emptyForm(), ...(draftCase.draftForm as CaseForm) })
+    : demo ? demoForm(demo, emptyForm()) : { ...emptyForm(), practice: soloPractice ?? 'cds' }));
   const set = (p: Partial<CaseForm>) => setF(x => ({ ...x, ...p }));
   // A draft reopens on its first gap (or Review once it has everything).
   const [step, setStep] = useState<StepId>(() => {
+    if (demo) return DEMO_OF[demo].review ? 'review' : 'services';
     if (!draftCase) return 'patient';
     const d = draftCase.draftForm as CaseForm;
     return !d.patientId ? 'patient' : !d.lab ? 'lab' : !d.items?.length ? 'services' : 'review';
   });
   const [dir, setDir] = useState<1 | -1>(1);
-  const [editing, setEditing] = useState<string | null>(null); // a service's own page
+  const [editing, setEditing] = useState<string | null>(() => (demo && !DEMO_OF[demo].review ? f.items[0]?.uid ?? null : null)); // a service's own page
   const [adding, setAdding] = useState(false);                  // the catalogue, once a service exists
   const [stepsOpen, setStepsOpen] = useState(false);
   const [patientSheet, setPatientSheet] = useState(false);
   const [labSheet, setLabSheet] = useState(false);
+  // Who is prescribing: two quick picks in bottom sheets — the practice, then (on its own) the dentist.
+  const [whoSheet, setWhoSheet] = useState<'practice' | 'dentist' | null>(null);
   const [tried, setTried] = useState(false);
-  const [created, setCreated] = useState<LabCase | null>(null);
+  const [created, setCreated] = useState<{ c: LabCase; added?: string[] } | null>(null);
   // Changing something from Review (or the Steps sheet once everything needed is in) comes back to Review.
   const [returnTo, setReturnTo] = useState<StepId | null>(null);
   const [q, setQ] = useState('');
@@ -474,13 +677,19 @@ export default function LiteManual() {
     review: null,
   };
   const missing = STEPS.filter(s => !okOf[s.id]);
+  const match = dentureMatch(cases, f);
 
   const go = (to: StepId, from?: StepId) => {
     window.clearTimeout(advanceTimer.current);
     setReturnTo(from === 'review' && to !== 'review' ? 'review' : null);
     const ti = STEPS.findIndex(s => s.id === to);
     setDir(ti >= idx ? 1 : -1);
-    setStep(to); setEditing(null); setAdding(false); setTried(false); setQ(''); setStepsOpen(false);
+    setStep(to); setEditing(null); setAdding(false); setTried(false); setQ(''); setStepsOpen(false); setWhoSheet(null);
+    // Arriving on the dentist step opens the first picker once the page has slid in; from Review it waits for a tap.
+    if (to === 'dentist' && from !== 'review') {
+      window.clearTimeout(advanceTimer.current);
+      advanceTimer.current = window.setTimeout(() => setWhoSheet(soloPractice ? 'dentist' : 'practice'), 340);
+    }
   };
   const next = () => {
     if (!okOf[step]) { setTried(true); return; }
@@ -513,13 +722,32 @@ export default function LiteManual() {
   const removeItem = (uid: string) => { setF(x => ({ ...x, items: x.items.filter(i => i.uid !== uid) })); setDir(-1); setEditing(null); toast('Service removed', 'info'); };
 
   const freeId = (base: () => string) => { let id = base(); while (cases.some(c => c.id === id || c.id === id.replace('SG-D', 'SG-2'))) id = base(); return id; };
-  const send = () => {
+  const send = (forceNew = false) => {
     if (missing.length) { toast(`Please add the ${missing[0].name.toLowerCase()}`, 'info'); go(missing[0].id); setTried(true); return; }
+    // A denture follow-up: the new stages go onto the case that already has the earlier ones
+    if (match && !forceNew) {
+      const it = f.items[0];
+      const have = new Set(match.stages.map(x => x.name));
+      const fresh = STAGE_NAMES.filter(n => !have.has(n) && ([] as string[]).concat(it.details.stages ?? []).includes(n));
+      if (!fresh.length || fresh.some(n => !it.stageDates[n])) {
+        toast(fresh.length ? 'Please give each new stage a date' : 'Please pick the next stage to order', 'info');
+        go('services', 'review'); setEditing(it.uid); return;
+      }
+      const now = new Date().toISOString();
+      const added: StageLine[] = fresh.map(n => ({ name: n, date: new Date(`${it.stageDates[n]}T12:00`).toISOString(), orderedAt: now }));
+      updateCase(match.c.id, x => ({
+        ...patchItemStages(x, match.index, [...(allItems(x)[match.index].stages ?? []), ...added].sort((p, q) => STAGE_NAMES.indexOf(p.name) - STAGE_NAMES.indexOf(q.name))),
+        events: [...x.events, { stage: 'note', at: now, by: ME.name, text: `Ordered ${fresh.join(', ')} · ${allItems(x)[match.index].service}` }],
+      }));
+      toast(`${fresh.join(', ')} added to ${match.c.id}`);
+      setCreated({ c: match.c, added: fresh });
+      return;
+    }
     const built = buildCase(f, 'manual');
     const c: LabCase = draftCase ? { ...built, id: draftCase.id.replace('SG-D', 'SG-2') } : { ...built, id: freeId(() => `SG-${28510 + Math.floor(Math.random() * 400)}`) };
     if (draftCase) updateCase(draftCase.id, { ...c, draftForm: undefined }); else addCase(c);
     toast('Case created. Ready to dispatch');
-    setCreated(c);
+    setCreated({ c });
   };
   const saveDraft = () => {
     if (!f.patientId) { toast('Please add a patient before saving a draft', 'info'); go('patient'); return; }
@@ -529,7 +757,7 @@ export default function LiteManual() {
     navigate(`${LITE}/work?f=draft`, { replace: true });
   };
 
-  if (created) return <Created c={created} onAnother={() => navigate(`${LITE}/new/manual`, { replace: true, state: { again: location.key } })} />;
+  if (created) return <Created c={created.c} added={created.added} onAnother={() => navigate(`${LITE}/new/manual`, { replace: true, state: { again: location.key } })} />;
 
   // ── Header: back / title / Save draft, then the step bar (tap = all steps).
   const title = editItem ? itemName(editItem) : adding ? 'Add a service' : cur.name;
@@ -563,7 +791,10 @@ export default function LiteManual() {
     const miss = itemMissing(editItem).filter(m => m !== 'material' && m !== 'shade');
     footer = <Btn block icon={<Check className="w-5 h-5" />} onClick={closeService}>{miss.length ? 'Done for now' : 'Done'}</Btn>;
   } else if (step === 'review') {
-    footer = <Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={send}>Ready for Dispatch</Btn>;
+    // The earlier stages are already on a case: adding to it is the main action, a separate case the alternative
+    footer = match
+      ? <div className="flex gap-2"><Btn variant="secondary" className="!px-4 whitespace-nowrap" onClick={() => send(true)}>Create new</Btn><Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => send()}>Add to {match.c.id}</Btn></div>
+      : <Btn block icon={<CheckCircle2 className="w-5 h-5" />} onClick={() => send()}>Ready for Dispatch</Btn>;
   } else if (step === 'services' && (adding || !f.items.length)) {
     footer = undefined;
   } else {
@@ -604,7 +835,7 @@ export default function LiteManual() {
     page = (
       <div className="pt-2">
         <div className="flex items-center gap-3 pt-2">
-          <Lead>{CATEGORY_ICON[getCategoryForItem(editItem.itemId) ?? 'others']}</Lead>
+          <Lead><ServiceIcon itemId={editItem.itemId} /></Lead>
           <div className="flex-1 min-w-0">
             <h1 className="text-[24px] font-bold text-go-ink tracking-tight leading-tight truncate">{itemName(editItem)}</h1>
             <p className="text-[12.5px] text-go-muted">{SERVICE_CATEGORIES.find(c => c.id === getCategoryForItem(editItem.itemId))?.label}</p>
@@ -612,7 +843,7 @@ export default function LiteManual() {
           <button type="button" onClick={() => removeItem(editItem.uid)} aria-label={`Remove ${itemName(editItem)}`}
             className="w-10 h-10 rounded-full bg-go-bad-soft text-go-bad flex items-center justify-center active:scale-95"><Trash className="w-[18px] h-[18px]" /></button>
         </div>
-        <ServicePage it={editItem} set={p => setItem(editItem.uid, p)} />
+        <ServicePage it={editItem} match={match} set={p => setItem(editItem.uid, p)} />
       </div>
     );
   } else if (step === 'services' && (adding || !f.items.length)) {
@@ -630,7 +861,7 @@ export default function LiteManual() {
                 {items.map(s => (
                   <button key={s.id} type="button" onClick={() => addService(s.id)}
                     className="rounded-[20px] bg-go-surface border border-go-line/80 go-card-shadow p-3.5 text-left flex flex-col gap-3 min-h-[96px] active:scale-[.97] transition">
-                    <Lead>{CATEGORY_ICON[cat.id] ?? CATEGORY_ICON.others}</Lead>
+                    <Lead><ServiceIcon itemId={s.id} /></Lead>
                     <span className="text-[14px] font-semibold text-go-ink leading-snug">{cat.id === 'bridge' ? serviceLabel(s.id) : s.label}</span>
                   </button>
                 ))}
@@ -711,6 +942,11 @@ export default function LiteManual() {
     page = (
       <div>
         {heading}
+        {/* Order type first — a quick two-way pick — then the longer list of scan sources. */}
+        <section className="mb-5">
+          <h3 className="px-1 mb-2 text-[12px] font-semibold text-go-muted">Order type</h3>
+          <Segmented options={[{ value: 'NHS', label: 'NHS' }, { value: 'Private', label: 'Private' }]} value={f.funding ?? 'NHS'} onChange={v => set({ funding: v as 'NHS' | 'Private' })} />
+        </section>
         <Group title="Scans source">
           {CASE_SOURCES.map(s => (
             <Row key={s} lead={<Lead tone="teal">{SOURCE_ICON[s] ?? SOURCE_ICON.Other}</Lead>} title={s}
@@ -718,28 +954,61 @@ export default function LiteManual() {
               selected={f.caseSource === s} onClick={() => set({ caseSource: f.caseSource === s ? null : s })} />
           ))}
         </Group>
-        <section className="mt-5">
-          <h3 className="px-1 mb-2 text-[12px] font-semibold text-go-muted">Order type</h3>
-          <Segmented options={[{ value: 'NHS', label: 'NHS' }, { value: 'Private', label: 'Private' }]} value={f.funding ?? 'NHS'} onChange={v => set({ funding: v as 'NHS' | 'Private' })} />
-        </section>
       </div>
     );
   } else if (step === 'dentist') {
+    const doc = f.clinician ? CLINICIANS.find(c => c.id === f.clinician) : undefined;
+    const prac = f.practice ? PRACTICES.find(p => p.id === f.practice) : undefined;
+    // One search box per sheet; switching sheet starts it empty.
+    const open = (w: 'practice' | 'dentist' | null) => { setQ(''); setWhoSheet(w); };
+    const needle = q.trim().toLowerCase();
+    const pracs = PRACTICES.filter(p => !needle || `${p.name} ${p.area}`.toLowerCase().includes(needle));
+    const docs = CLINICIANS.filter(c => !needle || `${c.name} ${c.gdc}`.toLowerCase().includes(needle));
+    const none = (what: string) => <p className="px-2 py-6 text-center text-[13.5px] text-go-muted">No {what} matches “{q.trim()}”.</p>;
     page = (
       <div>
         {heading}
-        <Group title="Dentist">
-          {CLINICIANS.map(c => (
-            <Row key={c.id} lead={<Avatar name={c.name} size={40} />} title={c.name} sub={`GDC ${c.gdc}`} selected={f.clinician === c.id} onClick={() => (soloPractice ? pickAndGo({ clinician: c.id }) : set({ clinician: c.id }))} />
-          ))}
+        <Group title={soloPractice ? 'Dentist' : 'Practice and dentist'}>
+          {!soloPractice && (
+            <Row lead={<Lead tone="brand"><Building2 className="w-5 h-5" /></Lead>} title={prac?.name ?? 'Choose the practice'}
+              sub={prac ? prac.area : 'Practice'} chevron onClick={() => open('practice')} />
+          )}
+          <Row lead={doc ? <Avatar name={doc.name} size={40} /> : <Lead tone="warn"><User className="w-5 h-5" /></Lead>}
+            title={doc?.name ?? 'Choose the dentist'} sub={doc ? `GDC ${doc.gdc}` : 'Required'} warn={!doc && tried} chevron onClick={() => open('dentist')} />
         </Group>
-        {!soloPractice && (
-          <Group title="Practice">
-            {PRACTICES.map(p => (
-              <Row key={p.id} lead={<Lead tone="brand"><Building2 className="w-5 h-5" /></Lead>} title={p.name} sub={p.area} selected={f.practice === p.id} onClick={() => set({ practice: p.id })} />
-            ))}
-          </Group>
-        )}
+
+        <Sheet open={whoSheet === 'practice'} onClose={() => open(null)} title="Which practice?" sub="Step 1 of 2 · then the dentist">
+          <div className="px-4 pb-6">
+            <div className="mb-3"><SearchBox value={q} onChange={setQ} placeholder="Practice name or area" /></div>
+            {!pracs.length ? none('practice') : (
+            <div className="rounded-[22px] bg-go-surface border border-go-line/80 overflow-hidden divide-y divide-go-line/70">
+              {pracs.map(p => (
+                <Row key={p.id} lead={<Lead tone="brand"><Building2 className="w-5 h-5" /></Lead>} title={p.name} sub={p.area} selected={f.practice === p.id}
+                  onClick={() => { set({ practice: p.id }); open(null); window.setTimeout(() => setWhoSheet('dentist'), 280); }} />
+              ))}
+            </div>
+            )}
+          </div>
+        </Sheet>
+        <Sheet open={whoSheet === 'dentist'} onClose={() => open(null)} title="Which dentist?"
+          sub={soloPractice ? 'The case is created on behalf of this dentist.' : `Step 2 of 2${prac ? ` · ${prac.name}` : ''}`}>
+          <div className="px-4 pb-6">
+            <div className="mb-3"><SearchBox value={q} onChange={setQ} placeholder="Dentist name or GDC number" /></div>
+            {!docs.length ? none('dentist') : (
+            <div className="rounded-[22px] bg-go-surface border border-go-line/80 overflow-hidden divide-y divide-go-line/70">
+              {docs.map(c => (
+                <Row key={c.id} lead={<Avatar name={c.name} size={40} />} title={c.name} sub={`GDC ${c.gdc}`} selected={f.clinician === c.id}
+                  onClick={() => { open(null); pickAndGo({ clinician: c.id }); }} />
+              ))}
+            </div>
+            )}
+            {!soloPractice && (
+              <button type="button" onClick={() => open('practice')} className="mt-3 h-10 px-1 inline-flex items-center gap-1 text-[13.5px] font-semibold text-go-brand">
+                <ChevronLeft className="w-4 h-4" />Change practice
+              </button>
+            )}
+          </div>
+        </Sheet>
       </div>
     );
   } else {
@@ -753,6 +1022,7 @@ export default function LiteManual() {
           <Row lead={f.clinician ? <Avatar name={clinicianName(f.clinician)} size={40} /> : <Lead tone="warn"><User className="w-5 h-5" /></Lead>} title={f.clinician ? clinicianName(f.clinician) : 'Choose the dentist'}
             sub={f.practice ? practiceName(f.practice) : undefined} chevron onClick={() => go('dentist', 'review')} />
         </Group>
+        {match && <MatchNote match={match} />}
         <Group title={`Services · ${f.items.length}`}>
           {f.items.map((it, i) => (
             <Row key={it.uid} lead={<span className="w-8 h-8 rounded-xl go-grad text-white text-[13px] font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>}

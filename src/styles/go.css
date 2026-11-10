@@ -131,5 +131,29 @@
 @keyframes go-shot { from { opacity: .9; } to { opacity: 0; } }
 .go-shot { animation: go-shot .4s ease-out forwards; }
 
+/* Tooth chart tap hint: a thumb glides in, taps a tooth (twice), and a ripple shows the tap. The hand's
+   thumb's pad sits on the anchor point; the thumb leans in from the bottom right and fades out at its base. */
+@keyframes go-tap-hand {
+  0%   { opacity: 0; transform: translate(26px, 30px) scale(1); }
+  18%  { opacity: 1; }
+  38%  { transform: translate(0, 0) scale(1); }
+  48%  { transform: translate(0, 0) scale(.82); }
+  60%  { transform: translate(0, 0) scale(1); }
+  82%  { opacity: 1; transform: translate(0, 0) scale(1); }
+  100% { opacity: 0; transform: translate(10px, 14px) scale(1); }
+}
+@keyframes go-tap-ripple {
+  0%, 44% { opacity: 0; transform: scale(.3); }
+  50%     { opacity: 1; transform: scale(.5); }
+  80%     { opacity: 0; transform: scale(1.6); }
+  100%    { opacity: 0; transform: scale(1.6); }
+}
+.go-tap-hand { left: -12px; top: -3.6px; transform-origin: 12px 3.6px; opacity: 0;
+  animation: go-tap-hand 1.9s cubic-bezier(.4,0,.2,1) .6s 2 both; }
+.go-tap-thumb { display: block; transform: rotate(-24deg); transform-origin: 12px 3.6px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 95%); mask-image: linear-gradient(to bottom, #000 55%, transparent 95%); }
+.go-tap-ripple { opacity: 0; animation: go-tap-ripple 1.9s ease-out .6s 2 both; }
+@media (prefers-reduced-motion: reduce) { .go-tap-hint { display: none; } }
+
 /* Simulated keyboard open: the tab bar hides behind it like on iOS */
 .go-kb-open .go-tabbar { opacity: 0; pointer-events: none; transition: opacity .15s; }
