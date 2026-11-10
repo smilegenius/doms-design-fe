@@ -63,7 +63,7 @@ src/theme/ThemeRoot.tsx     Sets the go-* CSS variables (NativeWind vars()), use
 
 | Component | Use |
 |---|---|
-| `Screen({header, footer, tabs, scroll})` | Every screen. Safe areas, keyboard avoiding, scrolling body, sticky `footer`. `tabs` leaves room for the tab bar |
+| `Screen({header, footer, tabs, scroll, floating})` | Every screen. Safe areas, keyboard avoiding, scrolling body, sticky `footer`. `tabs` leaves room for the tab bar. `floating(compact)` hovers just above the footer, and `compact` is true while scrolling down |
 | `TopBar({title, sub, back, fallback, right, large})` | Screen header. `back` uses router history with a fallback (`useBack`) |
 | `TabBar` / `NewWorkSheet` | Floating tab bar; the centre (+) opens "Create lab work" |
 | `T`, `Grad`, `Rows`, `useCardShadow` | Text, brand gradient, divided rows, card shadow |
@@ -100,10 +100,11 @@ src/theme/ThemeRoot.tsx     Sets the go-* CSS variables (NativeWind vars()), use
 - The statuses always appear in this order: **Overdue · To dispatch · On hold · Draft** (Home tiles and Lab work filters).
 - Readiness (`readiness()` in data.ts) answers "will the work be back before the patient's appointment?" Its levels are at-risk / attention / arriving / on-track / in-practice.
 
-**Lab work list** is a plain list of cases, with **no timeline and no grouping by day**. It is sorted by delivery date, soonest first, and cases with no date (such as drafts) go last.
+**Lab work list** is a plain list of cases, with **no timeline and no grouping by day**. It is sorted by delivery date, soonest first, and cases with no date (such as drafts) go last. For now (demo), cases with several services come first (`multiFirst`), so the chips with a count are easy to find.
 - **List only, for now.** Each row has:
   - the patient's initials, the patient and case ID
-  - the dentist (blue User icon) and lab (violet beaker icon), with no service
+  - the dentist (blue User icon) and lab (violet beaker icon)
+  - **service chips** (designer, 30 Oct 2026): the first two services when both fit on the line, else the first, then a "+N" pill for the rest (`ServiceChips`, measured with onLayout). "Next: …" for a staged date sits on its own line under them.
   - a status pill. An overdue case's pill says how late it is, e.g. "2 days late", via `pillLabel`.
   - the delivery date
 - A **card view** exists but is **switched off**: `FEATURES.labCardView = false` in store.tsx. If it is turned on, a list/grid toggle appears in the header (`?view=cards`). Keep it off unless the client asks for it.
@@ -121,7 +122,27 @@ src/theme/ThemeRoot.tsx     Sets the go-* CSS variables (NativeWind vars()), use
 - **Clear aligners with Phasing = Yes:** ordered in **phases**: Phase 1, Phase 2… each with its own date, plus "Add phase". With Phasing = No, it is a normal single date.
 - **Case-level date:** `LabCase.returnBy` is the **soonest open date** across all services, stages and phases (`soonestDate`). Readiness, Overdue and sorting all use it.
 - **Lab work list:** shows "Next: Try In" under the dentist/lab line when that date belongs to a stage or phase (`dueLabel`).
-- **Case detail:** a Services card shows every service with its delivery, and staged services list each stage or phase with Done earlier / Received / Due / Late.
+- **Case detail:** a Services card shows every service with its delivery, and staged services list each stage or phase with Done earlier / Received / Due / Late. There is no separate "Next delivery" fact tile.
+
+**Case documents** (`src/screens/CaseDocs.tsx`, designer, 30 Oct 2026):
+- **Where:** "Order form" and "Files & scans" are a **floating capsule** (designer, 30 Oct 2026). They are not in the Details tab or the bottom bar.
+  - It hovers over the content, centred, 12px above the next-step bar (Dispatch / Reply / Mark as received…). With no next step, it sits just above the bottom safe area. It goes through `Screen`'s `floating` prop.
+  - **The pill:** a surface background, hairline border and soft shadow. It holds two buttons, each a round primary-gradient icon (`<Grad>`) plus an ink label and a small arrow. The Files count is a badge on its icon. There's no blur natively, so the pill is near-solid.
+  - **While scrolling down** (`compact`), the labels tuck away and only the two round icons stay. Scrolling up, or reaching the top, brings the labels back.
+  - The next-step action stays the one big gradient. A full-gradient strip and a row of raised buttons in the bar were both tried and dropped.
+  - It is hidden on the Comments tab, where the composer needs the room.
+- **Order form** (sheet):
+  - the case as the lab's Dental Order Form: heading with Order ID, Received via and a QR, then patient / dentist / practice / lab / ship to / order type
+  - service details, stage or phase history, instructions, files
+  - "Print order form"
+- **Files & scans** (sheet):
+  - the 3D scan (Both / Upper / Lower, zoom, reset, and a full-screen button), then every file, scans and impressions first
+  - with no scan, a dashed "No 3D scan on this case" card
+  - "Download all"
+- **File viewer:**
+  - Tapping a file (in the sheet or on the Files tab) opens it full screen: a scan in the 3D viewer, a photo or document as a preview.
+  - Download is in the header. Back / Next at the bottom step through the files, with "2 of 3".
+  - Impressions travel by post, so they don't open.
 - **Ordering later:** **Order next stage** (denture, picks from the remaining stages) and **Order Phase N** (aligners) add to the **same case** with their own dates, stamped `orderedAt`, and logged in Activity. The real system should create a stage order for the lab.
 - **Data:**
   - `RxItem.staged` ('stage' | 'phase') and `RxItem.stages: StageLine[]` (name, date, state 'done-earlier' | 'received', orderedAt).

@@ -768,7 +768,7 @@ export default function ManualCaseScreen() {
           {step > 0 && <Btn variant="secondary" onPress={() => { setStep(step - 1); setTried(false); }}>Back</Btn>}
           <View className="flex-1">
             <Btn block onPress={next} icon={step === 3 ? <Check className="w-5 h-5 text-white" /> : undefined}>
-              {step === 3 ? 'Create case' : step === 1 && !f.items.length ? 'Add a service to continue' : read ? 'Confirm' : 'Continue'}
+              {step === 3 ? 'Ready for Dispatch' : step === 1 && !f.items.length ? 'Add a service to continue' : read ? 'Confirm' : 'Continue'}
             </Btn>
           </View>
         </View>

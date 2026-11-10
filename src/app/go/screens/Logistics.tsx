@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Building, CheckCircle2, Info, PackageCheck, Printer, Truck } from '../icons';
 import { ME, useGo } from '../store';
 import {
-  COURIERS, LabCase, caseTitle, PROBLEMS, RECEIVE_CHECKS, STORAGE, fmtDate, fmtDateTime, labName, LABS, nowIso, patientById, practiceName, shortName,
+  COURIERS, LabCase, PROBLEMS, RECEIVE_CHECKS, STORAGE, clinicianName, fmtDateTime, labName, nowIso, patientById, practiceName,
 } from '../data';
+import { DispatchLabelPage } from '../../components/DispatchLabel';
 import { Btn, Card, CheckRow, Chips, EmptyState, Input, Label, Screen, Section, Sheet, Stepper, TextArea, TopBar, cx } from '../ui';
 
 function useCase() {
@@ -13,72 +14,84 @@ function useCase() {
   return cases.find(c => c.id === id);
 }
 
-function Missing() {
-  return <Screen header={<TopBar back fallback="/go/work" />}><EmptyState icon={<Info className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
+function Missing({ list = '/go/work' }: { list?: string }) {
+  return <Screen header={<TopBar back fallback={list} />}><EmptyState icon={<Info className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
 }
 
-/** Deterministic QR-ish pattern from the order ID — demo only. */
-function FakeCode({ seed }: { seed: string }) {
-  const cells = useMemo(() => {
-    let h = 0;
-    for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return Array.from({ length: 121 }, (_, i) => {
-      const x = i % 11, y = Math.floor(i / 11);
-      const finder = (x < 3 && y < 3) || (x > 7 && y < 3) || (x < 3 && y > 7);
-      if (finder) return !(x === 1 && y === 1) && !(x === 9 && y === 1) && !(x === 1 && y === 9);
-      h = (h * 1103515245 + 12345) >>> 0;
-      return (h >> 16) % 2 === 0;
-    });
-  }, [seed]);
+/** The A4 lab ticket, scaled down to fit the phone. Always printed black on white. */
+function A4Label({ c }: { c: LabCase }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(340);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    ro.observe(el);
+    setWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  const scale = width / 794;
   return (
-    <div className="grid grid-cols-11 gap-[1.5px] w-[74px] h-[74px] flex-shrink-0">
-      {cells.map((on, i) => <span key={i} className={on ? 'bg-[#030213] rounded-[1px]' : ''} />)}
+    <div ref={box} className="w-full overflow-hidden rounded-xl bg-white border border-[#E0E0E6] shadow-[0_12px_32px_-16px_rgba(16,24,64,.35)]" style={{ height: 1123 * scale }}>
+      <div style={{ width: 794, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+        <DispatchLabelPage
+          caseNumber={c.id}
+          labName={labName(c.lab)}
+          details={{ patient: patientById(c.patientId).name, dentist: clinicianName(c.clinician), clinic: practiceName(c.practice) }}
+        />
+      </div>
     </div>
   );
 }
 
-/** Physical label — always printed black on white, whatever the app theme. */
-function LabelPreview({ c }: { c: LabCase }) {
-  const lab = LABS.find(l => l.id === c.lab)!;
+/** Print several labels: the portal's A4 sheet for each case (as in its Print labels window), then Print. */
+export function PrintLabelsSheet({ cases, open, onClose, onPrinted }: { cases: LabCase[]; open: boolean; onClose: () => void; onPrinted: () => void }) {
+  const { toast } = useGo();
+  const n = cases.length;
   return (
-    <div className="rounded-2xl bg-white text-[#030213] p-4 shadow-[0_12px_32px_-16px_rgba(16,24,64,.35)] border border-[#E0E0E6] aspect-[100/62] flex flex-col">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#717182]">Smile Genius · Lab work</span>
-        <span className="text-[10px] font-semibold text-[#717182]">{c.funding}</span>
+    <Sheet open={open && n > 0} onClose={onClose} tall title={`Print ${n} label${n === 1 ? '' : 's'}`} sub="One A4 sheet per case. Put each in its parcel with the impressions."
+      footer={(
+        <Btn block icon={<Printer className="w-5 h-5" />} onClick={() => { toast(n === 1 ? 'Printing label…' : `Printing ${n} labels…`, 'info'); onPrinted(); }}>
+          Print {n} label{n === 1 ? '' : 's'}
+        </Btn>
+      )}>
+      <div className="space-y-4">
+        {cases.map((c, i) => (
+          <div key={c.id}>
+            <p className="mb-1.5 px-1 text-[12px] text-go-muted"><span className="font-semibold text-go-ink2">{i + 1} of {n}</span> · <span className="font-mono">{c.id}</span> · {patientById(c.patientId).name}</p>
+            <A4Label c={c} />
+          </div>
+        ))}
       </div>
-      <div className="flex-1 flex items-center gap-4 mt-2">
-        <FakeCode seed={c.id} />
-        <div className="min-w-0">
-          <p className="text-[22px] font-bold font-mono leading-none tracking-tight">{c.id}</p>
-          <p className="text-[13px] font-semibold mt-1.5">{shortName(patientById(c.patientId).name)} · {caseTitle(c)}</p>
-          <p className="text-[12px] text-[#5A5568] mt-0.5">To: {lab.name}, {lab.town}</p>
-          <p className="text-[12px] text-[#5A5568]">Delivery date {fmtDate(c.returnBy)}</p>
-        </div>
-      </div>
-      <p className="text-[10px] text-[#A0A0B0] mt-1">From {practiceName(c.practice)}</p>
-    </div>
+    </Sheet>
   );
 }
 
-export function DispatchScreen() {
+/** list = where Back and "done" return to; the light version passes its To dispatch list. */
+export function DispatchScreen({ list }: { list?: string }) {
   const c = useCase();
-  const { updateCase, toast } = useGo();
+  const { updateCase, toast, notify } = useGo();
   const navigate = useNavigate();
   const [printed, setPrinted] = useState(false);
+  const [open, setOpen] = useState(false);
   const [courier, setCourier] = useState<string | null>(null);
+  // "Other" asks for the courier's name, which is what gets recorded.
+  const [otherCourier, setOtherCourier] = useState('');
   const [tracking, setTracking] = useState('');
   const [collected, setCollected] = useState(() => new Date().toISOString().slice(0, 10));
   const [bags, setBags] = useState(1);
   const [notes, setNotes] = useState('');
-  if (!c) return <Missing />;
+  if (!c) return <Missing list={list} />;
+  const back = list ?? `/go/work/${c.id}`;
   const lab = labName(c.lab);
+  const courierName = courier === 'Other' ? otherCourier.trim() : courier;
   const needsTracking = courier && !["Lab's own courier", 'Hand delivered'].includes(courier);
 
   if (c.stage !== 'ready') {
     return (
-      <Screen header={<TopBar back fallback={`/go/work/${c.id}`} title="Dispatch to lab" sub={c.id} />}>
+      <Screen header={<TopBar back fallback={back} title="Dispatch to lab" sub={c.id} />}>
         <EmptyState icon={<Truck className="w-7 h-7" />} title="Already dispatched" body={`${c.id} left the practice${c.dispatch ? ` with ${c.dispatch.courier}` : ''}.`}
-          action={<Btn variant="secondary" onClick={() => navigate(`/go/work/${c.id}`, { replace: true })}>View case</Btn>} />
+          action={<Btn variant="secondary" onClick={() => navigate(back, { replace: true })}>{list ? 'Back to the list' : 'View case'}</Btn>} />
       </Screen>
     );
   }
@@ -86,50 +99,53 @@ export function DispatchScreen() {
   const submit = () => {
     updateCase(c.id, x => ({
       stage: 'dispatched',
-      dispatch: { courier: courier!, tracking: tracking || undefined, bags, notes: notes || undefined },
-      events: [...x.events, { stage: 'dispatched', at: nowIso(), by: ME.name, text: [courier, tracking].filter(Boolean).join(' · ') }],
+      dispatch: { courier: courierName!, tracking: tracking || undefined, bags, notes: notes || undefined },
+      events: [...x.events, { stage: 'dispatched', at: nowIso(), by: ME.name, text: [courierName, tracking].filter(Boolean).join(' · ') }],
     }));
     toast(`Dispatched to ${lab}`);
-    navigate(`/go/work/${c.id}`, { replace: true });
+    notify('lab', `New case ${c.id} from ${practiceName(c.practice)}`, 'info');
+    setOpen(false);
+    navigate(back, { replace: true });
   };
 
   return (
-    <Screen header={<TopBar back fallback={`/go/work/${c.id}`} title="Dispatch to lab" sub={`${c.id} · ${lab}`} />}
+    <Screen header={<TopBar back fallback={back} title="Dispatch to lab" sub={`${c.id} · ${lab}`} />}
       footer={
         <div className="flex gap-2">
-          <Btn variant={printed ? 'secondary' : 'soft'} className="!px-4" aria-label={printed ? 'Print label again' : 'Print label'}
+          <Btn variant="secondary" className="!px-4 whitespace-nowrap" aria-label={printed ? 'Print label again' : 'Print label'}
             icon={printed ? <CheckCircle2 className="w-5 h-5 text-go-ok" /> : <Printer className="w-5 h-5" />}
             onClick={() => { setPrinted(true); toast('Label sent to the reception printer', 'info'); }}>
-            {printed ? 'Printed' : 'Print'}
+            {printed ? 'Printed' : 'Print label'}
           </Btn>
-          <Btn className="flex-1 min-w-0" disabled={!courier} onClick={submit} icon={<Truck className="w-5 h-5" />}>Mark as dispatched</Btn>
+          <Btn className="flex-1 min-w-0 whitespace-nowrap !px-3" onClick={() => setOpen(true)} icon={<Truck className="w-5 h-5" />}>Mark as dispatched</Btn>
         </div>
       }>
-      <Section title="1 · Print label" className="!mt-2">
-        <LabelPreview c={c} />
-        <p className="text-[12px] text-go-muted mt-2 px-1">100 × 62 mm. Stick it on the lab bag before sending.</p>
-      </Section>
+      <section className="px-4 pt-2">
+        <A4Label c={c} />
+        <p className="text-[12px] text-go-muted mt-2 px-1">A4. Put this sheet in the parcel with the impressions, bite registration and signed lab form.</p>
+      </section>
 
-      <Section title="2 · Pack">
-        <Card className="p-4 flex gap-3">
-          <PackageCheck className="w-5 h-5 text-go-brand flex-shrink-0 mt-0.5" />
-          <p className="text-[13px] text-go-ink2 leading-relaxed">Include the impressions, bite registration and signed lab form.</p>
-        </Card>
-      </Section>
-
-      <Section title="3 · Courier">
-        <div className="space-y-5">
-          <div><Label>Courier</Label><Chips options={COURIERS} value={courier} onChange={setCourier} /></div>
+      <Sheet open={open} onClose={() => setOpen(false)} title="Mark as dispatched" sub={`${c.id} · ${lab}`}
+        footer={
+          <div className="flex gap-2">
+            <Btn variant="secondary" className="!px-5" onClick={() => setOpen(false)}>Cancel</Btn>
+            <Btn className="flex-1 min-w-0 whitespace-nowrap !px-3" disabled={!courierName || !collected} onClick={submit} icon={<Truck className="w-5 h-5" />}>Mark as dispatched</Btn>
+          </div>
+        }>
+        <div className="space-y-5 pb-2">
+          <div><Label>Courier</Label><Chips options={COURIERS} value={courier} onChange={setCourier} />
+            {courier === 'Other' && <Input className="mt-3" value={otherCourier} onChange={e => setOtherCourier(e.target.value)} placeholder="Enter courier name" autoFocus />}
+          </div>
           {needsTracking && (
             <div><Label optional>Tracking number</Label><Input value={tracking} onChange={e => setTracking(e.target.value.toUpperCase())} placeholder="e.g. AB123456789GB" className="font-mono" /></div>
           )}
           <div className="flex gap-3">
-            <div className="flex-1"><Label>Collected on</Label><Input type="date" value={collected} onChange={e => setCollected(e.target.value)} /></div>
+            <div className="flex-1"><Label>Dispatched on</Label><Input type="date" value={collected} onChange={e => setCollected(e.target.value)} /></div>
             <div><Label>Bags or boxes</Label><Stepper value={bags} onChange={setBags} /></div>
           </div>
           <div><Label optional>Contents or notes</Label><TextArea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Impressions, bite registration, models…" /></div>
         </div>
-      </Section>
+      </Sheet>
     </Screen>
   );
 }
@@ -144,7 +160,7 @@ const NOTE_MAX = 1000;
 
 /** Same as the portal: a confirm with optional delivery notes. The lab is notified. */
 export function ReceiveSheet({ c, open, onClose }: { c: LabCase; open: boolean; onClose: () => void }) {
-  const { updateCase, toast } = useGo();
+  const { updateCase, toast, notify } = useGo();
   const [note, setNote] = useState('');
   const lab = labName(c.lab);
   const receive = () => {
@@ -155,6 +171,7 @@ export function ReceiveSheet({ c, open, onClose }: { c: LabCase; open: boolean; 
       events: [...x.events, { stage: 'received', at: nowIso(), by: ME.name, text: text || undefined }],
     }));
     toast(`Marked as received · ${lab} notified`);
+    notify('lab', `${practiceName(c.practice)} received ${c.id}`, 'ok');
     setNote('');
     onClose();
   };

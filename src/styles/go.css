@@ -122,6 +122,9 @@
 .go-rise { animation: go-rise .35s cubic-bezier(.2,.8,.2,1) both; }
 .go-scanline { animation: go-scan 2.6s ease-in-out infinite; }
 .go-pulse { animation: go-pulse 1.4s ease-in-out infinite; }
+/* Camera shutter: a quick white flash over the viewfinder */
+@keyframes go-shot { from { opacity: .9; } to { opacity: 0; } }
+.go-shot { animation: go-shot .4s ease-out forwards; }
 
 /* Simulated keyboard open: the tab bar hides behind it like on iOS */
 .go-kb-open .go-tabbar { opacity: 0; pointer-events: none; transition: opacity .15s; }

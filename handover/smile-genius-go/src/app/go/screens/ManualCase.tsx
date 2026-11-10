@@ -840,7 +840,7 @@ export default function ManualCaseScreen() {
         <div className="flex gap-2.5">
           {step > 0 && <Btn variant="secondary" onClick={() => { setStep(step - 1); setTried(false); }}>Back</Btn>}
           <Btn block onClick={next} icon={step === 3 ? <Check className="w-5 h-5" /> : undefined}>
-            {step === 3 ? 'Create case' : step === 1 && !f.items.length ? 'Add a service to continue' : read ? 'Confirm' : 'Continue'}
+            {step === 3 ? 'Ready for Dispatch' : step === 1 && !f.items.length ? 'Add a service to continue' : read ? 'Confirm' : 'Continue'}
           </Btn>
         </div>
       }>

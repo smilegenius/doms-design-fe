@@ -4,7 +4,7 @@ import { useToast } from './context/ToastContext';
 import Layout from './components/Layout';
 import LabOverviewPage from './pages/LabOverviewPage';
 import LabAnalyticsPage from './pages/LabAnalyticsPage';
-import CasesPage, { draftCases } from './pages/CasesPage';
+import CasesPage, { draftCases, mockCases } from './pages/CasesPage';
 import QuickCreateCasePage from './pages/QuickCreateCasePage';
 import InvoicesPage from './pages/InvoicesPage';
 import SettingsPage from './pages/SettingsPage';
@@ -75,7 +75,7 @@ export default function LabApp() {
   const caseInitialId = parsed.caseId;
   const invoiceInitialId = parsed.invoiceId;
   const prefillDraft = useMemo(
-    () => (parsed.prefillDraftId ? draftCases.find(d => d.id === parsed.prefillDraftId) ?? null : null),
+    () => (parsed.prefillDraftId ? [...draftCases, ...mockCases].find(d => d.id === parsed.prefillDraftId) ?? null : null),
     [parsed.prefillDraftId],
   );
 

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, Fragment } from 'react';
+import { useState, useRef, useEffect, useMemo, Fragment, createContext, useContext } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, AlertTriangle, MessageSquare, MessageCircle, ChevronDown, ChevronUp,
@@ -8,11 +8,13 @@ import {
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply, Pencil,
   Copy, Plug, GitBranch, Lock as LockIcon,
-  History as HistoryIcon,
+  History as HistoryIcon, Truck, Package,
 } from 'lucide-react';
+import { PrintLabelsModal } from '../components/DispatchLabel';
 import SideDrawer from '../components/SideDrawer';
 import ActionMenu from '../components/ActionMenu';
 import ModalPortal from '../components/ModalPortal';
+import CasesIcon from '../components/icons/CasesIcon';
 import UrgentBadge from '../components/UrgentBadge';
 import UrgentConfirmModal from '../components/UrgentConfirmModal';
 import { OfflineLabNotice, offlineLabStatusFor } from '../components/OfflineLabNotice';
@@ -36,7 +38,7 @@ import {
   whatsappNumberFor,
 } from '../data/whatsappComms';
 import { recordEmail, recordInboundEmail, sendWhatsAppMessage, useCaseCommunications } from '../data/caseCommunications';
-import { dentistPhoneFor, useDentistPrivateInfo } from '../data/dentistPrivateInfo';
+import { dentistPhoneFor, dentistPrivateEmailFor, useDentistPrivateInfo } from '../data/dentistPrivateInfo';
 import PrivateInformationModal from '../components/PrivateInformationModal';
 import WhatsAppAutomationSimulator from '../components/WhatsAppAutomationSimulator';
 import { WHATSAPP_DEMO_CASE_ID } from './CasesPage';
@@ -44,10 +46,12 @@ import RelatedCasesCard, { RelationshipPill } from '../components/RelatedCasesCa
 import RescanDecisionModal from '../components/RescanDecisionModal';
 import type { Case as RescanCase } from './CasesPage';
 import { CURRENT_USER } from './CasesPage';
+import { recordDispatch, updateDispatch, useDispatchRecord } from '../data/dispatchRecords';
+import type { DispatchRecord } from '../data/dispatchRecords';
 import CreatedByIcon from '../components/CreatedByIcon';
 import { AiReviewNotice } from '../components/AiReviewNotice';
 import { SCANNER_SYNC_COPY, caseCreatedBy, needsReview, type CreatedSide, type StatusReach, type ViewerPortal } from '../data/caseProvenance';
-import { ensureCaseValidation, latestDueDateChange, recordDueDateChange, recordReceipt, summariseCase, summaryLabel, SUMMARY_META, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
+import { COURIERS as LAB_COURIERS, updateShipment, ensureCaseValidation, latestDueDateChange, recordDueDateChange, recordReceipt, summariseCase, summaryLabel, SUMMARY_META, useCareStackEnabled, useCaseCareStack } from '../data/carestack';
 import type { CaseCareStack, CaseLike as CareStackCaseLike } from '../data/carestack';
 import CareStackCaseSection from '../components/carestack/CareStackCaseSection';
 import { MappingIcon } from '../components/carestack/shared';
@@ -63,7 +67,7 @@ import {
   subjectFromCase,
   useRescanLinks,
 } from '../data/rescanDetection';
-import { DENTURE_SERVICES, DENTURE_STAGES, archLabel, isDentureService, nextStageRow, stageOrdersFor, stageRowsFor, stageRowsFromOrders, isoToCaseDate as isoToStageDate, caseDateToISO, type StageRow } from '../data/dentureStages';
+import { DENTURE_SERVICES, DENTURE_STAGES, archLabel, isDentureService, findFollowUpMatch, nextStageRow, stageOrdersFor, stageRowsFor, stageRowsFromOrders, isoToCaseDate as isoToStageDate, caseDateToISO, type StageRow } from '../data/dentureStages';
 import { StageDatePicker, StageStatusCell } from '../components/DentureStages';
 
 // Conversation hub entry point — parked while the CareStack flow is reviewed.
@@ -71,7 +75,7 @@ const SHOW_CONVERSATION_HUB = false;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type CaseStatus = 'draft' | 'new' | 'sent-for-review' | 'submitted' | 'in-production' | 'quality-check' | 'shipped' | 'delivered' | 'refinement' | 'on-hold' | 'completed';
+type CaseStatus = 'draft' | 'new' | 'sent-for-review' | 'ready-for-dispatch' | 'submitted' | 'in-production' | 'quality-check' | 'shipped' | 'delivered' | 'refinement' | 'on-hold' | 'completed';
 type Tab = 'prescription' | 'timeline' | 'invoice' | 'shipping';
 type ViewerFormat = '3D' | 'PLY' | 'STL' | 'OBJ';
 
@@ -90,6 +94,8 @@ export interface StageOrder {
   stageDates?: Record<string, string | null>;
   /** Per-stage status once the stages of one order move apart. */
   stageStatuses?: Record<string, CaseStatus>;
+  /** Case instructions for this stage order (edited in Quick Stage Order). */
+  instructions?: string;
   /** Set when this order arrived as a follow-up prescription (draft / Rx id). */
   followUpFrom?: string;
   /** Denture stages done before the case reached Smile Genius. */
@@ -138,7 +144,7 @@ export interface ServiceItem {
   attachmentCount?: number;        // number of attachments for this service
 }
 
-interface CaseForDetail {
+export interface CaseForDetail {
   id: string;
   patientName: string;
   practice: string;
@@ -181,11 +187,20 @@ interface CaseForDetail {
   /** Who submitted it through Quick Create (see data/caseProvenance). */
   createdBySide?: CreatedSide;
   createdBy?: string;
+  /** Identity-card patient details, where the host has them ("—" when absent). */
+  patientAge?: number;
+  patientGender?: string;
+  patientRef?: string;
+  /** The person under Created By (the practice's account when absent). */
+  creatorName?: string;
+  /** How it arrived, when the host words it itself (e.g. a scan still to follow). */
+  receivedVia?: string;
 }
 
 // "Received via" label — derived from the real case source so the detail view
 // always matches the case's origin (no more hardcoded "Manual upload").
 function receivedViaLabel(c: CaseForDetail): string {
+  if (c.receivedVia) return c.receivedVia;
   const hasScans = (c.serviceItems ?? []).some(si => (si.scanFileCount ?? 0) > 0);
   if (c.source === 'manual') return 'Manual upload';
   if (c.source === 'scanner') return `Scanner · ${c.scanner ?? '—'}`;
@@ -271,6 +286,8 @@ interface CaseDetailPageProps {
   /** Open another case in place — used by the Related Cases section to move
       between an original and its rescans. */
   onOpenRelatedCase?: (caseId: string) => void;
+  /** Opens a draft prescription that is linked to this case. */
+  onOpenDraftCase?: (draftId: string) => void;
   /** Lab portal only — when this case has been scored and the lab has NO
       business email connected, show the "Connect Email" notice (automated
       case scoring emails can't be sent until an account is connected). */
@@ -289,13 +306,37 @@ interface CaseDetailPageProps {
   viewerPortal?: ViewerPortal;
   /** What the host calls its list — "Lab Work" in the clinic portal. */
   listLabel?: string;
+  /** yyyy-mm-dd the Ready for Dispatch panel's "Dispatched on" starts at
+      (today by default) — a demo host passes its own clock. */
+  dispatchToday?: string;
+  /** Who dispatches, edits and receipts made here are recorded as (this
+      portal's user by default) — a demo host passes its own signed-in user. */
+  currentUser?: string;
+  /** False while the lab doesn't have the case yet (e.g. its scan is still
+      to follow): no Mark as Received. */
+  canMarkReceived?: boolean;
+  /** The Delivery Date field follows caseData.requestedDelivery when the host moves it (the New Case Flow demo). Off for the Cases page. */
+  followRequestedDelivery?: boolean;
 }
+
+/**
+ * A host's own case status, for lab statuses the portal doesn't have yet (the Accept-on-print flow: Received,
+ * Accepted…): its control in the identity card, its look on the service card and the steps of the status strip.
+ * Nothing in the portal sets it, so the status dropdown, pills and pipeline show as they are.
+ */
+export interface CaseStatusHost {
+  control: React.ReactNode;
+  look: { label: string; bg: string; color: string; border: string; dot: string };
+  steps: { label: string; actor: string; when: string; state?: 'current' | 'blocked' }[];
+}
+export const CaseStatusSlot = createContext<CaseStatusHost | null>(null);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export const STATUS_MAP: Record<CaseStatus, { label: string; bg: string; color: string; border: string; banner: string; dot: string }> = {
   draft:          { label: 'Draft',         bg: '#F3F3F5', color: '#5A5568', border: '#E0E0E6', banner: '#F8F9FC', dot: '#A0A0B0' },
   new:            { label: 'New',           bg: '#EEF4FF', color: '#1565C0', border: '#BFDBFE', banner: '#EFF6FF', dot: '#4D8EF7' },
+  'ready-for-dispatch':{ label: 'Ready for Dispatch', bg: '#FFF8E1', color: '#B45309', border: '#FDE68A', banner: '#FFFBEB', dot: '#F59E0B' },
   'sent-for-review':{ label: 'Sent for Review', bg: '#EEF2FF', color: '#4338CA', border: '#C7D2FE', banner: '#EEF2FF', dot: '#6366F1' },
   submitted:      { label: 'Submitted',     bg: '#FFF7ED', color: '#C2410C', border: '#FED7AA', banner: '#FFF7ED', dot: '#F97316' },
   'in-production':{ label: 'In Production', bg: '#F5F3FF', color: '#6D28D9', border: '#DDD6FE', banner: '#F5F3FF', dot: '#8B5CF6' },
@@ -401,7 +442,7 @@ const PIPELINE_RANK: Record<CaseStatus, number> = {
   shipped: 4, delivered: 5,
   // Soft states stay where the case currently sits in the pipeline.
   // "Sent for Review" is an early hold — the case is paused waiting on the dentist.
-  'sent-for-review': 1, refinement: 3, 'on-hold': 2, completed: 5,
+  'sent-for-review': 1, 'ready-for-dispatch': 0, refinement: 3, 'on-hold': 2, completed: 5,
 };
 
 function buildCasePipeline(c: CaseForDetail): CaseTimelineStep[] {
@@ -886,8 +927,11 @@ export function LabNotesModal({ onClose, expanded, onToggleExpand }: { onClose: 
 // ─── Viewer & Order-form panels ───────────────────────────────────────────────
 
 function ScanViewer({ format, onFormatChange }: { format: ViewerFormat; onFormatChange: (f: ViewerFormat) => void }) {
+  // A host's own order form (OrderFormSlot) sets the height of the row beside it: side by side, the viewer
+  // stretches to match it. Without one (the portal) it keeps its fixed height.
+  const matchForm = !!useContext(OrderFormSlot)?.render;
   return (
-    <div className="relative bg-[#F0F2F7] rounded-xl border border-[#E0E0E6] h-[320px] overflow-hidden flex items-center justify-center">
+    <div className={`relative bg-[#F0F2F7] rounded-xl border border-[#E0E0E6] overflow-hidden flex items-center justify-center ${matchForm ? 'h-[320px] lg:h-auto lg:min-h-[320px]' : 'h-[320px]'}`}>
       {/* Format tabs */}
       <div className="absolute top-3 left-3 inline-flex items-center bg-white border border-[#E0E0E6] rounded-lg overflow-hidden text-[11px] font-semibold">
         {(['3D','PLY','STL','OBJ'] as ViewerFormat[]).map((f) => (
@@ -946,9 +990,11 @@ function ScanViewer({ format, onFormatChange }: { format: ViewerFormat; onFormat
 // Compact centered modal — shows ONLY the Order form + Lab Documents tabs.
 // Opened from the Eye icon in the Cases list so users can scan the form
 // details without leaving the listing or loading the 3D viewer.
-export function OrderFormModal({ caseData, onClose }: {
+export function OrderFormModal({ caseData, onClose, onPrint }: {
   caseData: CaseForDetail;
   onClose: () => void;
+  /** When given, Print is live: a footer Print button runs it (the offline-lab dispatch step). */
+  onPrint?: () => void;
 }) {
   const [orderTab, setOrderTab] = useState<'order-form' | 'lab-documents'>('order-form');
 
@@ -988,7 +1034,7 @@ export function OrderFormModal({ caseData, onClose }: {
               <FolderOpen className="w-4 h-4" />
               Lab Documents
             </button>
-            <button className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
+            <button onClick={onPrint} className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
               <Printer className="w-3 h-3" />
               Print
             </button>
@@ -1008,6 +1054,15 @@ export function OrderFormModal({ caseData, onClose }: {
               <p className="text-sm text-[#A0A0B0]">No lab documents uploaded for this case yet.</p>
             </div>
           )}
+          {onPrint && (
+            <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#F0EFF6]">
+              <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">Close</button>
+              <button onClick={onPrint} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity">
+                <Printer className="w-3.5 h-3.5" />
+                Print order form
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </ModalPortal>
@@ -1025,6 +1080,7 @@ export function FullViewModal({ caseData, onClose, onOpenNotes }: {
 }) {
   const [viewerFormat, setViewerFormat] = useState<ViewerFormat>('3D');
   const [orderTab, setOrderTab] = useState<'order-form' | 'lab-documents'>('order-form');
+  const orderFormHost = useContext(OrderFormSlot);
 
   return (
     <ModalPortal>
@@ -1137,7 +1193,7 @@ export function FullViewModal({ caseData, onClose, onOpenNotes }: {
           )}
 
           {/* Floating Print button — sits over the Order form panel */}
-          <button className="absolute bottom-5 right-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-[#4D8EF7]/30">
+          <button onClick={orderFormHost?.onPrint} className="absolute bottom-5 right-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-[#4D8EF7]/30">
             <Printer className="w-4 h-4" />
             Print
           </button>
@@ -1221,10 +1277,7 @@ function PrescriptionTab({ caseData, onOpenNotes, onOpenFullView }: {
               <FolderOpen className="w-3.5 h-3.5" />
               Lab Documents
             </button>
-            <button className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
-              <Printer className="w-3 h-3" />
-              Print
-            </button>
+            <OrderFormTools />
           </div>
 
           {orderTab === 'order-form' ? (
@@ -1382,6 +1435,15 @@ function ServiceMiniTimeline({ status, onClick }: { status: CaseStatus; onClick?
   );
 }
 
+/** A draft prescription linked to this case: only its new stage(s) are drafts. */
+interface MatchedDraft {
+  id: string;
+  serviceName: string;
+  stages: string[];
+  dates: Record<string, string | null>;
+  createdAt: string;
+}
+
 // ─── Case Summary Overview — shown on the default "Case Summary" top tab ────────
 // One card per service item. Cards are clickable (navigates to that service tab)
 // and surface: status-change dropdown, mini pipeline timeline, and a quick
@@ -1419,7 +1481,17 @@ function CaseSummaryOverview({
   onSelectService,
   onOpenTimeline,
   onMarkReceived,
+  drafts = [],
+  onOpenDraft,
+  readOnlyStatus = false,
+  canReceive = true,
 }: {
+  /** Clinics can't change a status; their only route is receiving. */
+  readOnlyStatus?: boolean;
+  /** False while the lab doesn't have the case yet: no receiving on the cards, denture stages included. */
+  canReceive?: boolean;
+  drafts?: MatchedDraft[];
+  onOpenDraft?: (draftId: string) => void;
   serviceItems: ServiceItem[];
   caseData: CaseForDetail;
   onSelectService: (id: string) => void;
@@ -1446,8 +1518,62 @@ function CaseSummaryOverview({
       .map(r => receivedStages.has(`${si.id}::${r.stage}`) ? { ...r, status: 'delivered' as CaseStatus } : r)
       .sort((a, b) => DENTURE_STAGES.indexOf(a.stage) - DENTURE_STAGES.indexOf(b.stage));
 
+  const summaryFiller = (
+    <div className="relative flex-1 min-h-0 overflow-hidden pointer-events-none" aria-hidden>
+      <div className="absolute inset-0 flex items-center justify-center py-2 select-none">
+        <CasesIcon className="h-full max-h-28 w-auto aspect-square max-w-full text-[#A0A0B0] opacity-[0.06]" />
+      </div>
+    </div>
+  );
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4" onClick={() => setOpenStatusId(null)}>
+    <div className="grid grid-cols-1 md:grid-cols-2 md:auto-rows-fr gap-4" onClick={() => setOpenStatusId(null)}>
+      {/* Latest card: a linked draft prescription, only its new stage(s) are drafts. */}
+      {drafts.map(d => (
+        <div
+          key={d.id}
+          onClick={() => onOpenDraft?.(d.id)}
+          className="relative bg-[#FFFDF5] border border-dashed border-[#FDE68A] rounded-xl p-5 hover:shadow-md hover:border-[#F5C84C] transition-all cursor-pointer flex flex-col gap-3"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-[#FFF8E1]">
+                <Pencil className="w-5 h-5 text-[#A16207]" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[#030213]">{d.serviceName}</p>
+                <p className="text-[11px] text-[#717182]">{d.stages.length} new stage{d.stages.length === 1 ? '' : 's'} · from {d.id}</p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border bg-[#FFF8E1] text-[#A16207] border-[#FDE68A] whitespace-nowrap">
+              <Pencil className="w-3 h-3" />
+              Draft - New Stage
+            </span>
+          </div>
+          <div className="border border-[#FDE68A]/70 rounded-lg divide-y divide-[#FDE68A]/50 bg-white overflow-hidden">
+            {d.stages.map(st => (
+              <div key={st} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                <span className="text-xs font-semibold text-[#030213]">{st}</span>
+                <span className="text-[11px] text-[#717182]">{d.dates[st] ?? 'No date'}</span>
+              </div>
+            ))}
+          </div>
+          <div className="relative flex-1 min-h-0 overflow-hidden pointer-events-none" aria-hidden>
+            <div className="absolute inset-0 flex items-center justify-center py-2 select-none">
+              <Pencil className="h-full max-h-24 w-auto aspect-square max-w-full text-[#A16207] opacity-[0.07]" strokeWidth={1.25} />
+            </div>
+          </div>
+          <div className="mt-auto flex justify-end pt-3 border-t border-[#FDE68A]/60">
+            <button
+              onClick={(e) => { e.stopPropagation(); onOpenDraft?.(d.id); }}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#A16207] border border-[#FDE68A] hover:bg-[#FFF8E1] transition-colors whitespace-nowrap"
+            >
+              Open draft
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      ))}
       {serviceItems.map((si) => {
         const currentStatus = (cardStatuses[si.id] ?? si.status) as CaseStatus;
         const s       = STATUS_MAP[currentStatus];
@@ -1509,19 +1635,21 @@ function CaseSummaryOverview({
                       return si.phases ? `${si.phases.length} phases` : 'Single phase';
                     })()}
                   </p>
+                  <p className="text-[10px] text-[#A0A0B0] mt-0.5">Updated: {caseData.updatedAt}</p>
                 </div>
               </div>
 
               {/* Clickable status pill → opens per-card status-change dropdown */}
-              <div className="relative flex-shrink-0 z-10" onClick={(e) => e.stopPropagation()}>
+              <div className={`relative flex-shrink-0 z-10 ${dentureRows ? "hidden" : ""}`} onClick={(e) => e.stopPropagation()}>
                 <button
-                  onClick={() => setOpenStatusId(openStatusId === si.id ? null : si.id)}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border hover:opacity-80 transition-opacity"
+                  onClick={() => { if (!readOnlyStatus) setOpenStatusId(openStatusId === si.id ? null : si.id); }}
+                  disabled={readOnlyStatus}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-opacity ${readOnlyStatus ? 'cursor-default' : 'hover:opacity-80'}`}
                   style={{ background: s.bg, color: s.color, borderColor: s.border }}
                 >
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.dot }} />
                   {s.label}
-                  <ChevronDown className="w-3 h-3 opacity-60" />
+                  {!readOnlyStatus && <ChevronDown className="w-3 h-3 opacity-60" />}
                 </button>
                 {openStatusId === si.id && (
                   <div className="absolute right-0 top-full mt-1 z-30 bg-white border border-[#E0E0E6] rounded-lg shadow-xl py-1 min-w-[180px]">
@@ -1570,8 +1698,7 @@ function CaseSummaryOverview({
                 {orderType}
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]" title={`${scanCount} scan file${scanCount === 1 ? '' : 's'}`}>
-                <Eye className="w-2.5 h-2.5" />
-                {scanCount}
+                {scanCount} scan{scanCount === 1 ? '' : 's'}
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#F5F3FF] text-[#7C3AED] border border-[#DDD6FE]" title={`${attachCount} attachment${attachCount === 1 ? '' : 's'}`}>
                 <Paperclip className="w-2.5 h-2.5" />
@@ -1610,36 +1737,15 @@ function CaseSummaryOverview({
                 editable delivery date (a denture has no single service date). ── */}
             {dentureRows ? (
               <div className="border border-[#F0EFF6] rounded-lg divide-y divide-[#F0EFF6] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                {/* One simple row per stage — name, status, date, and receiving at the end. */}
                 {dentureRows.map(r => {
                   const key = `${si.id}::${r.stage}`;
                   const date = key in dateEdits ? dateEdits[key] : r.date;
                   const received = receivedStages.has(key);
                   const closed = r.status === 'completed' || r.status === 'delivered';
                   return (
-                    <div key={r.stage} className={`flex items-center gap-2 px-3 py-1.5 ${r.doneEarlier ? 'bg-[#FAFAFB]' : 'bg-white'}`}>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-xs font-semibold truncate ${r.doneEarlier ? 'text-[#717182]' : 'text-[#030213]'}`}>{r.stage}</p>
-                        {/* Mark as received — a light tick per stage (undo while it's local). */}
-                        {!r.doneEarlier && (!closed || received) && (
-                          <button
-                            type="button"
-                            onClick={() => setReceivedStages(prev => {
-                              const next = new Set(prev);
-                              if (next.has(key)) next.delete(key); else next.add(key);
-                              return next;
-                            })}
-                            title={received ? 'Undo — not received yet' : `Mark ${r.stage} as received`}
-                            className={`mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold transition-colors ${
-                              received ? 'text-[#15803D]' : 'text-[#A0A0B0] hover:text-[#4D8EF7]'
-                            }`}
-                          >
-                            <span className={`w-3 h-3 rounded-full border flex items-center justify-center ${received ? 'bg-[#16A34A] border-[#16A34A]' : 'border-current'}`}>
-                              <Check className={`w-2 h-2 ${received ? 'text-white' : ''}`} strokeWidth={3.5} />
-                            </span>
-                            {received ? 'Received' : 'Mark received'}
-                          </button>
-                        )}
-                      </div>
+                    <div key={r.stage} className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 ${r.doneEarlier ? 'bg-[#FAFAFB]' : 'bg-white'}`}>
+                      <p className={`flex-1 basis-[110px] min-w-0 text-xs font-semibold truncate ${r.doneEarlier ? 'text-[#717182]' : 'text-[#030213]'}`}>{r.stage}</p>
                       <StageStatusCell row={r} size="xs" />
                       {r.doneEarlier ? (
                         <span className="w-[124px] text-[11px] text-[#A0A0B0] whitespace-nowrap text-right">{r.date ? `Done ${r.date}` : 'Done'}</span>
@@ -1652,50 +1758,95 @@ function CaseSummaryOverview({
                           className={`w-[124px] px-2 py-1 text-[11px] text-[#030213] border rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] transition-colors ${date ? 'border-[#E0E0E6]' : 'border-[#FCD34D]'}`}
                         />
                       )}
+                      {/* Receiving — at the end of the row (undo while it's local). */}
+                      <span className="w-[112px] flex justify-end">
+                        {canReceive && !r.doneEarlier && (!closed || received) && (
+                          <button
+                            type="button"
+                            onClick={() => setReceivedStages(prev => {
+                              const next = new Set(prev);
+                              if (next.has(key)) next.delete(key); else next.add(key);
+                              return next;
+                            })}
+                            title={received ? 'Undo — not received yet' : `Mark ${r.stage} as received`}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border whitespace-nowrap transition-colors ${
+                              received
+                                ? 'text-[#15803D] bg-[#DCFCE7] border-[#BBF7D0]'
+                                : 'text-[#4D8EF7] border-[#C8D8FC] hover:bg-[#EEF4FF]'
+                            }`}
+                          >
+                            <Check className="w-3 h-3" strokeWidth={3} />
+                            {received ? 'Received' : 'Mark received'}
+                          </button>
+                        )}
+                      </span>
                     </div>
                   );
                 })}
               </div>
             ) : (
             /* ── Mini pipeline timeline — click to open full timeline modal ── */
-            <div onClick={(e) => e.stopPropagation()}>
-              <ServiceMiniTimeline
-                status={currentStatus}
-                onClick={() => onOpenTimeline?.()}
-              />
+            <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+              <div className="flex-1 min-w-0">
+                <ServiceMiniTimeline
+                  status={currentStatus}
+                  onClick={() => onOpenTimeline?.()}
+                />
+              </div>
+              <div className="flex-shrink-0 flex items-center gap-1.5">
+                {/* Editable in place — the service's delivery date. */}
+                <input
+                  type="date"
+                  value={cardDelivery ? caseDateToISO(cardDelivery) : ''}
+                  disabled={isReceived}
+                  aria-label={`${si.name} delivery date`}
+                  onChange={(e) => setDateEdits(prev => ({ ...prev, [dateKey]: e.target.value ? isoToStageDate(e.target.value) : null }))}
+                  className="px-2 py-1 text-xs font-medium text-[#030213] border border-[#E0E0E6] rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] disabled:bg-transparent disabled:border-transparent disabled:px-0 transition-colors"
+                />
+                {countdown && !isReceived && (
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold border whitespace-nowrap ${countdownTone}`}>
+                    {countdown.label}
+                  </span>
+                )}
+              </div>
             </div>
             )}
+
+            {/* Fills any leftover height (cards share one row height) with a very faint icon. */}
+            {summaryFiller}
 
             {/* ── Footer: delivery date + countdown + action ── */}
             <div
               className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 pt-3 border-t border-[#F0EFF6] mt-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* A denture's dates live on its stage list above. */}
-              {!dentureRows && <div className="flex-shrink-0">
-                <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-0.5 whitespace-nowrap">{nextStage ? `Next stage · ${nextStage.stage}` : 'Delivery'}</p>
-                <div className="flex items-center gap-1.5">
-                  {/* Editable in place — the service's date, or the next
-                      stage's date for a denture. */}
-                  <input
-                    type="date"
-                    value={cardDelivery ? caseDateToISO(cardDelivery) : ''}
-                    disabled={isReceived}
-                    aria-label={nextStage ? `${si.name} ${nextStage.stage} delivery date` : `${si.name} delivery date`}
-                    onChange={(e) => setDateEdits(prev => ({ ...prev, [dateKey]: e.target.value ? isoToStageDate(e.target.value) : null }))}
-                    className="px-2 py-1 text-xs font-medium text-[#030213] border border-[#E0E0E6] rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] disabled:bg-transparent disabled:border-transparent disabled:px-0 transition-colors"
-                  />
-                  {countdown && !isReceived && (
-                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold border whitespace-nowrap ${countdownTone}`}>
-                      {countdown.label}
-                    </span>
-                  )}
-                </div>
-              </div>}
               <div className="flex items-center gap-2 ml-auto">
                 {/* Denture — receiving happens per stage (tick above); the
                     card's main action orders the next stage(s). */}
-                {dentureRows ? (
+                {dentureRows ? (<>
+                  {/* Two or more stage orders still to receive — one CTA for all. */}
+                  {(() => {
+                    const pending = dentureRows.filter(r =>
+                      !r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered' && !receivedStages.has(`${si.id}::${r.stage}`));
+                    if (!canReceive || pending.length < 1 || dentureRows.length < 2) return null;
+                    return (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setReceivedStages(prev => {
+                            const next = new Set(prev);
+                            pending.forEach(r => next.add(`${si.id}::${r.stage}`));
+                            return next;
+                          });
+                        }}
+                        title={`Mark ${pending.map(r => r.stage).join(' + ')} as received`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm whitespace-nowrap"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        Mark all as Received
+                      </button>
+                    );
+                  })()}
                   <button
                     onClick={(e) => { e.stopPropagation(); setStagePickerFor(si); }}
                     disabled={DENTURE_STAGES.every(st => dentureRows.some(r => r.stage === st))}
@@ -1705,20 +1856,20 @@ function CaseSummaryOverview({
                     <Plus className="w-3.5 h-3.5" />
                     New Stage Order
                   </button>
-                ) : isReceived ? (
+                </>) : isReceived ? (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#DCFCE7] text-[#15803D] border border-[#BBF7D0] whitespace-nowrap">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     Received
                   </span>
-                ) : (
+                ) : onMarkReceived ? (
                   <button
-                    onClick={(e) => { e.stopPropagation(); onMarkReceived?.(si); }}
+                    onClick={(e) => { e.stopPropagation(); onMarkReceived(si); }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm whitespace-nowrap"
                   >
                     <Check className="w-3.5 h-3.5" />
                     Mark as Received
                   </button>
-                )}
+                ) : null}
                 <button
                   onClick={(e) => { e.stopPropagation(); onSelectService(si.id); }}
                   className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors border border-[#C8D8FC] whitespace-nowrap"
@@ -1820,8 +1971,9 @@ function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseNa
   nextPhaseName: string;
   onCancel: () => void;
   /** `dates` — ISO per picked stage (denture only). */
-  onConfirm: (stages: string[], dates: Record<string, string>) => void;
+  onConfirm: (stages: string[], dates: Record<string, string>, instructions: string) => void;
 }) {
+  const [instructions, setInstructions] = useState(service.instructions ?? '');
   // Catalog mode pre-selects the first remaining stage so the common
   // "next stage" path is one click. Phased mode has no selection.
   const [picked, setPicked] = useState<string[]>(remaining.length ? [remaining[0]] : []);
@@ -1836,7 +1988,7 @@ function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseNa
         <div className={`relative w-full ${isPhased ? 'max-w-md' : 'max-w-lg'} max-h-[90vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150`}>
           {/* Header */}
           <div className="px-5 pt-5 pb-3 border-b border-[#F0EFF6] flex-shrink-0">
-            <h3 className="text-sm font-bold text-[#030213]">{isPhased ? 'New Phase Order' : 'New Stage Order'}</h3>
+            <h3 className="text-sm font-bold text-[#030213]">{isPhased ? 'Quick Phase Order' : 'Quick Stage Order'}</h3>
             <p className="text-xs text-[#717182] mt-0.5">
               {service.name} · {isPhased ? `adds ${nextPhaseName}, auto-filled from the case` : 'pick the stage(s) to order next'}
             </p>
@@ -1891,6 +2043,21 @@ function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseNa
               </>
             )}
           </div>
+          <div className="px-5 pb-4">
+            <label className="block text-[11px] font-semibold text-[#5A5568] uppercase tracking-wider mb-1.5">
+              Case instructions
+              {(isPhased ? [nextPhaseName] : picked).length > 0 && (
+                <span className="normal-case tracking-normal font-medium text-[#4D8EF7]"> · for {(isPhased ? [nextPhaseName] : picked).join(', ')}</span>
+              )}
+            </label>
+            <textarea
+              value={instructions}
+              onChange={e => setInstructions(e.target.value)}
+              rows={2}
+              placeholder="Add instructions for this order…"
+              className="w-full px-3 py-2 rounded-lg border border-[#E0E0E6] text-xs text-[#030213] placeholder:text-[#A0A0B0] resize-none focus:outline-none focus:ring-2 focus:ring-[#4D8EF7]/30 focus:border-[#4D8EF7]"
+            />
+          </div>
           {/* Footer */}
           <div className="px-5 py-4 border-t border-[#F0EFF6] flex items-center justify-end gap-2 bg-[#FAFBFC] flex-shrink-0">
             <button
@@ -1901,7 +2068,7 @@ function StageOrderPickerModal({ service, mode, remaining, existing, nextPhaseNa
             </button>
             <button
               disabled={!canCreate}
-              onClick={() => onConfirm(isPhased ? [nextPhaseName] : picked, dates)}
+              onClick={() => onConfirm(isPhased ? [nextPhaseName] : picked, dates, instructions.trim())}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
             >
               <Plus className="w-4 h-4" />
@@ -2169,9 +2336,9 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived,
   // The dentist's email on file. Email-sourced cases carry it (they wrote
   // in); otherwise it's unknown and the compose modal asks for it on the
   // spot — no email, no send.
-  const dentistEmailOnFile = caseData.source === 'email'
+  const dentistEmailOnFile = dentistPrivateEmailFor(caseData.dentist) ?? (caseData.source === 'email'
     ? `${(caseData.dentist.split(' ').filter(Boolean).slice(-1)[0] ?? 'dentist').toLowerCase()}@${String((caseData as any).practice ?? 'practice').toLowerCase().replace(/[^a-z0-9]+/g, '')}.co.uk`
-    : undefined;
+    : undefined);
   const templateGroups: { label: string; dot?: string; items: ScoringEmailTemplate[] }[] = [
     { label: CATEGORY_META['needs-review'].label, dot: CATEGORY_META['needs-review'].dot, items: DEFAULT_TEMPLATES['needs-review'] },
     { label: CATEGORY_META.incomplete.label, dot: CATEGORY_META.incomplete.dot, items: DEFAULT_TEMPLATES.incomplete },
@@ -2855,17 +3022,28 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived,
   );
 }
 
-function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onMarkReceived, shipment }: {
+function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onMarkReceived, canReceive = true, shipment, dispatch, canEditDispatch, canEditShipment, currentUser }: {
   service: ServiceItem;
   caseData: CaseForDetail;
   onOpenNotes: () => void;
   onOpenFullView: () => void;
   /** "Mark as Received" on a phase — the host confirms receipt. */
   onMarkReceived?: (label: string) => void;
+  /** False while the lab doesn't have the case yet: no receiving here (stages and phases). */
+  canReceive?: boolean;
   /** Shipment recorded through the CareStack flow — fills the Shipping sub-tab. */
   shipment?: CaseCareStack['shipment'];
+  /** What the clinic posted to the lab when it dispatched the case. */
+  dispatch?: DispatchRecord;
+  /** Only the clinic that dispatched the case can edit the dispatch details. */
+  canEditDispatch?: boolean;
+  /** Only the lab that shipped the work can edit its shipment details. */
+  canEditShipment?: boolean;
+  /** Who a dispatch edit is recorded as. */
+  currentUser?: string;
 }) {
-  const [subTab, setSubTab] = useState<ServiceSubTab>('details');
+  // ?sub=shipping opens straight on the Shipping tab (walkthrough links).
+  const [subTab, setSubTab] = useState<ServiceSubTab>(() => new URLSearchParams(window.location.search).get('sub') === 'shipping' ? 'shipping' : 'details');
   // ── Stage / phase orders (denture catalog · aligner phasing) ────────────
   // Denture: one flat vertical list of stages, each with its own status and
   // date; "New Stage Order" picks from the remaining catalog. Aligners
@@ -2878,6 +3056,35 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
     () => seedStageOrders(service, caseData.id, caseData.createdAt)
   );
   const [activeStageId, setActiveStageId] = useState<string>(() => seedStageOrders(service, caseData.id, caseData.createdAt)[0]?.id ?? '');
+  // The host can move a stage's date itself (the New Case Flow demo: a corrected post day moves a partial's
+  // back-by day): the order those dates seeded follows. Same case and service only, and only dates the host
+  // gives per stage; follow-up orders and receipts made here are kept.
+  const stageDatesKey = service.stageDates ? JSON.stringify(service.stageDates) : '';
+  const seenStageDates = useRef({ caseId: caseData.id, serviceId: service.id, key: stageDatesKey });
+  useEffect(() => {
+    const was = seenStageDates.current;
+    seenStageDates.current = { caseId: caseData.id, serviceId: service.id, key: stageDatesKey };
+    if (was.caseId !== caseData.id || was.serviceId !== service.id || was.key === stageDatesKey) return;
+    if (!stageCatalog || !service.stageDates || service.stageOrders?.length) return;
+    const seeded = seedStageOrders(service, caseData.id, caseData.createdAt)[0];
+    if (!seeded) return;
+    setStageOrders(prev => prev.map(o => (o.id === seeded.id
+      ? { ...o, deliveryDate: seeded.deliveryDate, stageDates: { ...(o.stageDates ?? {}), ...seeded.stageDates } }
+      : o)));
+  }, [caseData.id, service.id, stageDatesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { toast: stageToast } = useToast();
+  // Receiving a stage (or all open ones) marks just those stages delivered —
+  // not the whole case.
+  const receiveStages = (stages: string[]) => {
+    setStageOrders(prev => prev.map(o => {
+      const hit = o.stages.filter(st => stages.includes(st));
+      if (!hit.length) return o;
+      const stageStatuses = { ...(o.stageStatuses ?? {}) };
+      hit.forEach(st => { stageStatuses[st] = 'delivered'; });
+      return { ...o, stageStatuses };
+    }));
+    stageToast.success(`${stages.join(', ')} marked as received`);
+  };
   const [stagePickerOpen, setStagePickerOpen] = useState(false);
   const orderedStages = new Set(stageOrders.flatMap(o => o.stages));
   // Catalog services run out of stages; phased services never do.
@@ -2914,7 +3121,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   const effectiveStatus = dentureNextStage ? dentureNextStage.status
     : (staging && activeStageOrder) ? activeStageOrder.status : service.status;
   const effectiveDelivery = (staging && activeStageOrder) ? activeStageOrder.deliveryDate : service.deliveryDate;
-  const s = STATUS_MAP[effectiveStatus];
+  const s = useContext(CaseStatusSlot)?.look ?? STATUS_MAP[effectiveStatus];
   const iStyle = SERVICE_ICON_COLOR[service.name] ?? { bg: '#FFF7ED', color: '#F59E0B' };
 
   // The email thread now lives in a case-level side drawer (opened from the
@@ -2933,6 +3140,8 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   const lowerTeeth = fdiList.filter(t => t >= 30);
   const scanCount  = service.scanFileCount ?? 0;
   const attachCount = service.attachmentCount ?? 0;
+  // Multi-service cases carry no case-level dates, so each service shows when it was created.
+  const showCreatedOn = (caseData.serviceItems?.length ?? 0) > 1 && !stageCatalog;
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden mt-3 mx-6 mb-6 gap-3 min-h-0">
@@ -2951,6 +3160,20 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                 </p>
               )}
             </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+            {(() => {
+              const pending = (activeDentureTab?.rows ?? []).filter(r => !r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered');
+              return canReceive && pending.length > 1 ? (
+                <button
+                  onClick={() => receiveStages(pending.map(r => r.stage))}
+                  title="Confirm receipt of every open stage in this order"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm whitespace-nowrap"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Mark all as Received
+                </button>
+              ) : null;
+            })()}
             <button
               onClick={() => setStagePickerOpen(true)}
               disabled={!canAddOrder}
@@ -2960,6 +3183,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               <Plus className="w-3.5 h-3.5" />
               New Stage Order
             </button>
+            </div>
           </div>
           {doneElsewhereRows.length > 0 && (
             <p className="mx-4 mt-2 inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#717182]">
@@ -2970,25 +3194,36 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               ))}
             </p>
           )}
-          {/* Tabs — one per stage order */}
-          <div className="flex items-center gap-1 px-1.5 pt-2 overflow-x-auto border-b border-[#F0EFF6]">
-            {dentureTabs.map(({ order, rows }) => (
-              <button
-                key={order.id}
-                onClick={() => setActiveStageId(order.id)}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-xs font-semibold border-b-2 transition-colors whitespace-nowrap flex-shrink-0 max-w-[320px] ${
-                  activeDentureTab?.order.id === order.id
-                    ? 'border-[#7C3AED] text-[#5B21B6] bg-[#F5F3FF]'
-                    : 'border-transparent text-[#717182] hover:text-[#030213] hover:bg-[#F8F9FC]'
-                }`}
-                title={rows.map(r => r.stage).join(' + ')}
-              >
-                <span className="truncate">{rows.map(r => r.stage).join(' + ')}</span>
-                {order.followUpFrom && (
-                  <span className="inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">Follow-up Rx</span>
-                )}
-              </button>
-            ))}
+          {/* Tabs — one per stage; stages ordered together sit close inside
+              one group, a new order is a separate group. */}
+          <div className="flex items-end gap-4 px-3 pt-2 overflow-x-auto border-b border-[#F0EFF6]">
+            {dentureTabs.map(({ order, rows }) => {
+              const active = activeDentureTab?.order.id === order.id;
+              return (
+                <div
+                  key={order.id}
+                  className={`flex items-center gap-0.5 px-1 rounded-t-lg border-b-2 flex-shrink-0 transition-colors ${
+                    active ? 'border-[#7C3AED] bg-[#F5F3FF]' : 'border-transparent bg-[#F8F9FC]'
+                  }`}
+                >
+                  {rows.map(r => (
+                    <button
+                      key={r.stage}
+                      onClick={() => setActiveStageId(order.id)}
+                      title={rows.length > 1 ? `${r.stage} — ordered with ${rows.filter(x => x !== r).map(x => x.stage).join(', ')}` : r.stage}
+                      className={`px-2.5 py-2 text-xs font-semibold whitespace-nowrap transition-colors ${
+                        active ? 'text-[#5B21B6]' : 'text-[#717182] hover:text-[#030213]'
+                      }`}
+                    >
+                      {r.stage}
+                    </button>
+                  ))}
+                  {order.followUpFrom && (
+                    <span className="mr-1 inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wider bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC]">New stage</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {/* Active order's stages — status + editable delivery date */}
           {activeDentureTab && (
@@ -2997,7 +3232,10 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                 <tr className="text-[10px] text-[#A0A0B0] uppercase tracking-wider">
                   <th className="text-left font-semibold px-4 py-1.5">Stage</th>
                   <th className="text-left font-semibold px-4 py-1.5">Status</th>
+                  <th className="text-left font-semibold px-4 py-1.5">Created on</th>
+                  <th className="text-left font-semibold px-4 py-1.5">Updated on</th>
                   <th className="text-left font-semibold px-4 py-1.5">Delivery date</th>
+                  <th className="px-4 py-1.5" />
                 </tr>
               </thead>
               <tbody>
@@ -3005,6 +3243,8 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                   <tr key={r.stage} className="border-t border-[#F5F5F9]">
                     <td className="px-4 py-2 font-semibold whitespace-nowrap text-[#030213]">{r.stage}</td>
                     <td className="px-4 py-2"><StageStatusCell row={r} size="xs" /></td>
+                    <td className="px-4 py-2 whitespace-nowrap text-[#030213]">{activeDentureTab.order.createdAt || caseData.createdAt}</td>
+                    <td className="px-4 py-2 whitespace-nowrap text-[#030213]">{caseData.updatedAt}</td>
                     <td className="px-4 py-1.5 whitespace-nowrap">
                       <input
                         type="date"
@@ -3018,6 +3258,19 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                         }}
                         className={`px-2 py-1 text-xs text-[#030213] border rounded-md bg-white outline-none focus:border-[#4D8EF7] hover:border-[#C8D8FC] transition-colors ${r.date ? 'border-[#E0E0E6]' : 'border-[#FCD34D]'}`}
                       />
+                    </td>
+                    <td className="px-4 py-1.5 whitespace-nowrap text-right">
+                      {canReceive && !r.doneEarlier && r.status !== 'completed' && r.status !== 'delivered' && (
+                        <button
+                          type="button"
+                          onClick={() => receiveStages([r.stage])}
+                          title={`Mark ${r.stage} as received`}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-[#4D8EF7] border border-[#C8D8FC] hover:bg-[#EEF4FF] transition-colors"
+                        >
+                          <Check className="w-3 h-3" />
+                          Mark received
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -3141,8 +3394,14 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                   {s.label}
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                <div>
+              <div className={`grid ${showCreatedOn ? 'grid-cols-3' : 'grid-cols-2'} gap-4 text-xs`}>
+                {showCreatedOn && (
+                  <div>
+                    <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">Created on</p>
+                    <p className="font-medium text-[#030213]">{caseData.createdAt}</p>
+                  </div>
+                )}
+                <div className={stageCatalog ? 'hidden' : ''}>
                   <p className="text-[10px] text-[#A0A0B0] uppercase tracking-wider mb-1">{stageCatalog ? 'Next stage' : 'Delivery Date'}</p>
                   <p className="font-medium text-[#030213]">
                     {stageCatalog
@@ -3202,10 +3461,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                     <FolderOpen className="w-3.5 h-3.5" />
                     Lab Documents
                   </button>
-                  <button className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
-                    <Printer className="w-3 h-3" />
-                    Print
-                  </button>
+                  <OrderFormTools />
                 </div>
 
                 {orderTab === 'order-form' ? (
@@ -3296,7 +3552,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                                   <CheckCircle2 className="w-3.5 h-3.5" />
                                   Received
                                 </span>
-                              ) : (
+                              ) : canReceive ? (
                                 <button
                                   onClick={() => onMarkReceived?.(`${service.name} · ${phase.label}`)}
                                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] text-white hover:opacity-90 transition-opacity shadow-sm"
@@ -3304,7 +3560,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
                                   <Check className="w-3.5 h-3.5" />
                                   Mark as Received
                                 </button>
-                              )}
+                              ) : null}
                             </div>
                           </div>
                         );
@@ -3384,7 +3640,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
           </div>
         )}
         {subTab === 'invoice'  && <InvoiceTab  caseId={caseData.id} />}
-        {subTab === 'shipping' && <ShippingTab shipment={shipment} serviceName={activeOrderLabel ? `${service.name} · ${activeOrderLabel}` : service.name} />}
+        {subTab === 'shipping' && <ShippingTab caseId={caseData.id} currentUser={currentUser} canEdit={canEditDispatch} canEditShipment={canEditShipment} shipment={shipment} dispatch={dispatch} dispatchServices={(caseData.serviceItems?.length ?? 0) > 1 ? caseData.serviceItems?.map(si => si.name).join(', ') : undefined} serviceName={activeOrderLabel ? `${service.name} · ${activeOrderLabel}` : service.name} />}
       </div>
       </div>
 
@@ -3397,7 +3653,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
           existing={stageRows}
           nextPhaseName={nextPhaseName}
           onCancel={() => setStagePickerOpen(false)}
-          onConfirm={(stages, dates) => {
+          onConfirm={(stages, dates, instructions) => {
             // Denture: each stage keeps its own date; the order's headline
             // date is the earliest of them.
             const stageDates = Object.fromEntries(stages.map(st => [st, dates[st] ? isoToStageDate(dates[st]) : null]));
@@ -3408,6 +3664,7 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               status: 'submitted',
               deliveryDate: earliest ? isoToStageDate(earliest) : null,
               createdAt: caseData.updatedAt,
+              ...(instructions ? { instructions } : {}),
               ...(stageCatalog ? { stageDates } : {}),
             };
             setStageOrders(prev => [...prev, newOrder]);
@@ -3416,6 +3673,45 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * A host's own order form, drawn wherever this page shows one (the service panel, Full View, the Order
+ * Form modal). With onFullView / onPrint, the Order form tab bar gets a full-screen button and a working
+ * Print. Nothing sets it in the portal, so the form and tab bar below show as they are; the New Case Flow sets it.
+ * A host with no render keeps the portal's form and only takes the Print (the Accept-on-print flow).
+ */
+export type OrderFormRender = (o: { caseData: CaseForDetail; service: ServiceItem | null; wide: boolean }) => React.ReactNode;
+export interface OrderFormHost { render?: OrderFormRender; onFullView?: () => void; onPrint?: () => void }
+export const OrderFormSlot = createContext<OrderFormHost | null>(null);
+
+/** The Order form tab bar's right-hand tools: the portal's Print link, or a host's full screen + Print. */
+function OrderFormTools() {
+  const host = useContext(OrderFormSlot);
+  if (!host?.onFullView) {
+    return (
+      <button onClick={host?.onPrint} className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[#4D8EF7] hover:underline">
+        <Printer className="w-3 h-3" />
+        Print
+      </button>
+    );
+  }
+  return (
+    <div className="ml-auto flex items-center gap-1">
+      <button
+        onClick={host.onFullView}
+        title="Full view"
+        aria-label="Order form full view"
+        className="w-7 h-7 rounded-md flex items-center justify-center text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors"
+      >
+        <Maximize2 className="w-3.5 h-3.5" />
+      </button>
+      <button onClick={host.onPrint} className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[11px] font-medium text-[#4D8EF7] hover:bg-[#EEF4FF] transition-colors">
+        <Printer className="w-3 h-3" />
+        Print
+      </button>
     </div>
   );
 }
@@ -3431,7 +3727,9 @@ function OrderFormBody({ caseData, service, wide = false }: {
   service?: ServiceItem | null;
   wide?: boolean;
 }) {
+  const custom = useContext(OrderFormSlot);
   const svc = service ?? caseData.serviceItems?.[0] ?? null;
+  if (custom?.render) return <>{custom.render({ caseData, service: svc, wide })}</>;
   const svcName = svc?.name ?? caseData.services[0] ?? 'Service';
   const fdiList = svc?.fdi ?? [];
   // A denture covers a whole jaw — it reads as an arch, not tooth numbers.
@@ -3482,6 +3780,22 @@ function OrderFormBody({ caseData, service, wide = false }: {
         {svc?.material && <KV label="Material" value={svc.material} />}
         {svc?.shade && <KV label="Tooth Shade" value={svc.shade} />}
       </Section>
+      {svc?.stages && svc.stages.length > 0 && (
+        <Section title="Stages">
+          {svc.stages.map(st => {
+            const elsewhere = svc.doneElsewhere?.includes(st);
+            const date = svc.stageDates?.[st];
+            return (
+              <KV
+                key={st}
+                label={st}
+                value={elsewhere ? `Done elsewhere${date ? ` · ${date}` : ''}` : date ?? '—'}
+                muted={!elsewhere && !date}
+              />
+            );
+          })}
+        </Section>
+      )}
       <Section title="Scan Files">
         {scanCount > 0
           ? <p className="text-xs text-[#030213]">{scanCount} scan file{scanCount === 1 ? '' : 's'} included in this order.</p>
@@ -3754,17 +4068,46 @@ function InvoiceTab({ caseId }: { caseId: string }) {
 
 // ─── Shipping Tab ─────────────────────────────────────────────────────────────
 
-function ShippingTab({ shipment, serviceName }: { shipment?: CaseCareStack['shipment']; serviceName?: string }) {
+// Who sent the parcel, so clinic and lab can both tell which way it travelled.
+function SentByPill({ from }: { from: 'clinic' | 'lab' }) {
+  return from === 'clinic'
+    ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#EEF4FF] text-[#1565C0] border border-[#C8D8FC] whitespace-nowrap">Clinic <ArrowRight className="w-2.5 h-2.5" /> Lab</span>
+    : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F5F3FF] text-[#6D28D9] border border-[#DDD6FE] whitespace-nowrap">Lab <ArrowRight className="w-2.5 h-2.5" /> Clinic</span>;
+}
+
+// Exported for the New Case Flow demo's dispatched cases (src/app/newCase/dispatch.tsx).
+export function ShippingTab({ shipment, dispatch, dispatchServices, serviceName, caseId, canEdit, canEditShipment, currentUser }: { shipment?: CaseCareStack['shipment']; dispatch?: DispatchRecord; /** Who a dispatch edit is recorded as (this portal's user by default). */ currentUser?: string; /** Every service in the parcel the clinic posted. */ dispatchServices?: string; serviceName?: string; caseId?: string; /** Only the clinic that dispatched the case can edit it. */ canEdit?: boolean; /** Only the lab that shipped the work can edit its shipment. */ canEditShipment?: boolean }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [shipmentOpen, setShipmentOpen] = useState(false);
+  const fmtDay = (d: string) => new Date(`${d}T12:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const fmtAt = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   return (
     <div className="bg-white border border-[#E0E0E6] rounded-xl overflow-hidden">
-      <div className="grid grid-cols-5 px-5 py-3 border-b border-[#F0EFF6] bg-[#F8F9FC]">
-        {['Tracking ID', 'Service(s)', 'Courier', 'Tracking Link', 'Shipment Date'].map(h => (
+      <div className="grid grid-cols-6 px-5 py-3 border-b border-[#F0EFF6] bg-[#F8F9FC]">
+        {['Sent by', 'Tracking ID', 'Service(s)', 'Courier', 'Tracking Link', 'Shipment Date'].map(h => (
           <p key={h} className="text-[10px] font-semibold text-[#A0A0B0] uppercase tracking-wider">{h}</p>
         ))}
       </div>
-      {shipment ? (
+      {dispatch && (
         <>
-          <div className="grid grid-cols-5 px-5 py-3 items-center">
+          <button onClick={() => setDetailsOpen(true)} title="Open dispatch details" className="grid grid-cols-6 w-full text-left px-5 py-3 items-center hover:bg-[#F8F9FC] transition-colors">
+            <div><SentByPill from="clinic" /></div>
+            <p className="text-xs font-semibold text-[#030213] font-mono">{dispatch.tracking || '—'}</p>
+            <p className="text-xs text-[#5A5568]">{dispatchServices ?? serviceName ?? '—'}</p>
+            <p className="text-xs text-[#5A5568]">{dispatch.courier}</p>
+            <p className="text-xs"><span className="text-[#A0A0B0]">—</span></p>
+            <p className="text-xs text-[#030213] tabular-nums">{fmtDay(dispatch.dispatchedOn)}</p>
+          </button>
+          <p className="px-5 py-2.5 border-t border-[#F0EFF6] text-[10px] text-[#A0A0B0]">
+            Dispatched by the clinic · {dispatch.packaging.toLowerCase()} · recorded by {dispatch.by} · {fmtAt(dispatch.at)}{dispatch.editedAt && ` · edited by ${dispatch.editedBy} · ${fmtAt(dispatch.editedAt)}`}{dispatch.comment && <> · <span className="text-[#030213]"><span className="font-semibold">Comment:</span> {dispatch.comment}</span></>}
+          </p>
+          {detailsOpen && caseId && <DispatchDetailsModal caseId={caseId} record={dispatch} canEdit={!!canEdit} onClose={() => setDetailsOpen(false)} currentUser={currentUser} />}
+        </>
+      )}
+      {shipment && (
+        <>
+          <button onClick={() => setShipmentOpen(true)} title="Open shipment details" className={`grid grid-cols-6 w-full text-left px-5 py-3 items-center hover:bg-[#F8F9FC] transition-colors ${dispatch ? 'border-t border-[#F0EFF6]' : ''}`}>
+            <div><SentByPill from="lab" /></div>
             <p className="text-xs font-semibold text-[#030213] font-mono">{shipment.trackingNumber || '—'}</p>
             <p className="text-xs text-[#5A5568]">{serviceName ?? '—'}</p>
             <p className="text-xs text-[#5A5568]">{shipment.courier}</p>
@@ -3774,12 +4117,14 @@ function ShippingTab({ shipment, serviceName }: { shipment?: CaseCareStack['ship
                 : <span className="text-[#A0A0B0]">—</span>}
             </p>
             <p className="text-xs text-[#030213] tabular-nums">{shipment.shipmentDate}</p>
-          </div>
+          </button>
           <p className="px-5 py-2.5 border-t border-[#F0EFF6] text-[10px] text-[#A0A0B0]">
-            Expected delivery {shipment.expectedDelivery || '—'} · recorded by {shipment.by} · {new Date(shipment.at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            Expected delivery {shipment.expectedDelivery || '—'} · recorded by {shipment.by} · {fmtAt(shipment.at)}{shipment.editedAt && ` · edited by ${shipment.editedBy} · ${fmtAt(shipment.editedAt)}`}{shipment.comment && <> · <span className="text-[#030213]"><span className="font-semibold">Comment:</span> {shipment.comment}</span></>}
           </p>
+          {shipmentOpen && caseId && <ShipmentDetailsView caseId={caseId} shipment={shipment} canEdit={!!canEditShipment} onClose={() => setShipmentOpen(false)} />}
         </>
-      ) : (
+      )}
+      {!shipment && !dispatch && (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
           <div className="w-16 h-16 rounded-2xl bg-[#F0EFF6] flex items-center justify-center">
             <MapPin className="w-8 h-8 text-[#C8C0F0]" />
@@ -3800,12 +4145,332 @@ const NAV_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'shipping',      label: 'Shipping',       icon: <MapPin   className="w-3.5 h-3.5" /> },
 ];
 
-export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onPickStatus, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach, viewerPortal, listLabel = 'Cases' }: CaseDetailPageProps) {
+// ─── Ready for dispatch · print the order form + label and ship ───────────────
+// A clinic's manual case (Impressions by post) is created as Ready for Dispatch:
+// it is not with the lab yet. The receptionist prints the order form and label,
+// picks a courier and packaging, optionally adds a tracking number, and sends
+// it — which submits the case to the lab.
+const DISPATCH_COURIERS = ['Lab Courier', 'Royal Mail', 'DPD', 'DHL'];
+const OTHER_COURIER = 'Other';
+
+// Dispatch details: opened from the Shipping tab. Everyone who can see the case can read
+// them; only the clinic that dispatched it can edit.
+function DispatchDetailsModal({ caseId, record, canEdit, onClose, currentUser = CURRENT_USER }: { caseId: string; record: DispatchRecord; canEdit: boolean; onClose: () => void; /** Who an edit is recorded as (this portal's user by default). */ currentUser?: string }) {
+  const { toast } = useToast();
+  const known = DISPATCH_COURIERS.includes(record.courier);
+  const [courier, setCourier] = useState(known ? record.courier : OTHER_COURIER);
+  const [otherCourier, setOtherCourier] = useState(known ? '' : record.courier);
+  const [packaging, setPackaging] = useState(record.packaging);
+  const [tracking, setTracking] = useState(record.tracking);
+  const [dispatchedOn, setDispatchedOn] = useState(record.dispatchedOn);
+  const [comment, setComment] = useState(record.comment ?? '');
+  const courierName = courier === OTHER_COURIER ? otherCourier.trim() : courier;
+  const pick = (active: boolean) =>
+    `px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${active ? 'bg-[#EEF4FF] border-[#4D8EF7] text-[#1565C0]' : 'bg-white border-[#E0E0E6] text-[#5A5568] hover:bg-[#F8F9FC]'}`;
+  const field = 'w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg';
+  const save = () => {
+    updateDispatch(caseId, { courier: courierName, packaging, tracking: tracking.trim(), comment: comment.trim() || undefined, dispatchedOn, editedBy: currentUser, editedAt: new Date().toISOString() });
+    toast.success('Dispatch details updated');
+    onClose();
+  };
+  const readOnly = (label: string, value: string) => (
+    <div><p className="text-[11px] font-semibold text-[#5A5568] mb-1">{label}</p><p className="text-xs text-[#030213] font-medium">{value || '—'}</p></div>
+  );
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6]">
+            <div>
+              <p className="text-sm font-semibold text-[#030213]">Dispatch details · {caseId}</p>
+              <p className="text-[11px] text-[#717182] mt-0.5">{canEdit ? 'Only you, as the clinic that sent it, can edit these.' : 'Only the clinic that sent this can edit it.'}</p>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            {canEdit ? (
+              <>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Courier</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[...DISPATCH_COURIERS, OTHER_COURIER].map(c => <button key={c} onClick={() => setCourier(c)} className={pick(courier === c)}>{c}</button>)}
+                  </div>
+                  {courier === OTHER_COURIER && <input value={otherCourier} onChange={e => setOtherCourier(e.target.value)} placeholder="Enter courier name" className={`${field} mt-2`} />}
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Delivery method</p>
+                  <div className="flex gap-1.5">{['Bag', 'Box'].map(p => <button key={p} onClick={() => setPackaging(p.toLowerCase())} className={pick(packaging.toLowerCase() === p.toLowerCase())}>{p}</button>)}</div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Tracking number <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <input value={tracking} onChange={e => setTracking(e.target.value)} placeholder="e.g. RM123456789GB" className={field} />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Dispatched on</p>
+                  <input type="date" value={dispatchedOn} onChange={e => setDispatchedOn(e.target.value)} className={field} />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Comment <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <textarea rows={2} value={comment} onChange={e => setComment(e.target.value)} placeholder="e.g. impressions and bite registration" className={`${field} resize-none`} />
+                </div>
+              </>
+            ) : (
+              <>
+                {readOnly('Courier', record.courier)}
+                {readOnly('Delivery method', record.packaging.charAt(0).toUpperCase() + record.packaging.slice(1))}
+                {readOnly('Tracking number', record.tracking)}
+                {readOnly('Dispatched on', new Date(`${record.dispatchedOn}T12:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }))}
+                {readOnly('Comment', record.comment ?? '')}
+                {readOnly('Recorded by', record.by)}
+              </>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#F0EFF6]">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">{canEdit ? 'Cancel' : 'Close'}</button>
+            {canEdit && (
+              <button
+                onClick={save}
+                disabled={!courierName || !dispatchedOn}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save changes
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+// The lab's shipment details: open to everyone, editable only by the lab that recorded them.
+function ShipmentDetailsView({ caseId, shipment, canEdit, onClose }: { caseId: string; shipment: NonNullable<CaseCareStack['shipment']>; canEdit: boolean; onClose: () => void }) {
+  const { toast } = useToast();
+  const [courier, setCourier] = useState(shipment.courier);
+  const [tracking, setTracking] = useState(shipment.trackingNumber);
+  const [trackingUrl, setTrackingUrl] = useState(shipment.trackingUrl ?? '');
+  const [comment, setComment] = useState(shipment.comment ?? '');
+  const field = 'w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg';
+  const row = (label: string, value?: string) => (
+    <div><p className="text-[11px] font-semibold text-[#5A5568] mb-1">{label}</p><p className="text-xs text-[#030213] font-medium">{value || '—'}</p></div>
+  );
+  const save = () => {
+    updateShipment(caseId, { courier, trackingNumber: tracking.trim(), trackingUrl: trackingUrl.trim() || undefined, comment: comment.trim() || undefined }, CURRENT_USER);
+    toast.success('Shipment details updated');
+    onClose();
+  };
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6]">
+            <div>
+              <p className="text-sm font-semibold text-[#030213]">Shipment details · {caseId}</p>
+              <p className="text-[11px] text-[#717182] mt-0.5">{canEdit ? 'Only you, as the lab that shipped it, can edit these.' : 'Only the lab that shipped this can edit it.'}</p>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            {canEdit ? (
+              <>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Courier</p>
+                  <select value={courier} onChange={e => setCourier(e.target.value)} className={field}>
+                    {(LAB_COURIERS.includes(courier) ? LAB_COURIERS : [courier, ...LAB_COURIERS]).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Tracking number</p>
+                  <input value={tracking} onChange={e => setTracking(e.target.value)} className={field} />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Tracking link <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <input value={trackingUrl} onChange={e => setTrackingUrl(e.target.value)} placeholder="https://" className={field} />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Comment <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <textarea rows={2} value={comment} onChange={e => setComment(e.target.value)} className={`${field} resize-none`} />
+                </div>
+              </>
+            ) : (
+              <>
+                {row('Courier', shipment.courier)}
+                {row('Tracking number', shipment.trackingNumber)}
+                {row('Tracking link', shipment.trackingUrl)}
+                {row('Shipment date', shipment.shipmentDate)}
+                {row('Expected delivery', shipment.expectedDelivery)}
+                {row('Comment', shipment.comment)}
+                {row('Recorded by', shipment.by)}
+              </>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#F0EFF6]">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">{canEdit ? 'Cancel' : 'Close'}</button>
+            {canEdit && <button onClick={save} disabled={!courier} className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50">Save changes</button>}
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+// Exported so the New Case Flow demo (src/app/newCase/dispatch.tsx) shows this same panel; the defaults keep this page unchanged.
+export function ReadyForDispatchPanel({ lab, caseId, patient, dentist, clinic, offline, orderCase, onDispatch, className = 'mx-6 mt-1', today }: { lab: string; caseId: string; patient: string; dentist: string; clinic: string; offline?: boolean; orderCase?: CaseForDetail; onDispatch: (details: { courier: string; packaging: string; tracking: string; dispatchedOn: string; comment: string }) => void; /** Where the banner sits: this page's margins by default. */ className?: string; /** yyyy-mm-dd "Dispatched on" starts at (today by default). */ today?: string }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [courier, setCourier] = useState(DISPATCH_COURIERS[0]);
+  const [packaging, setPackaging] = useState('Bag');
+  const [otherCourier, setOtherCourier] = useState('');
+  const [tracking, setTracking] = useState('');
+  const [dispatchedOn, setDispatchedOn] = useState(() => today ?? new Date().toISOString().slice(0, 10));
+  const [comment, setComment] = useState('');
+  const courierName = courier === OTHER_COURIER ? otherCourier.trim() : courier;
+  const pick = (active: boolean) =>
+    `px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${active ? 'bg-[#EEF4FF] border-[#4D8EF7] text-[#1565C0]' : 'bg-white border-[#E0E0E6] text-[#5A5568] hover:bg-[#F8F9FC]'}`;
+  return (
+    <>
+      <div className={`${className} flex items-center gap-3 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-5 py-3`}>
+        <Package className="w-4 h-4 text-[#B45309] flex-shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-[#92400E]">Ready for dispatch</p>
+          <p className="text-[11px] text-[#92400E]/80 leading-snug mt-0.5">
+            {offline
+              ? 'Print the order form and post it with the impressions. This lab doesn’t use Smile Genius, so contact them for progress.'
+              : `This case is not with ${lab} yet. Print the label, post the impressions, then mark it as dispatched.`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => setPrintOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-[#5A5568] bg-white border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors whitespace-nowrap"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            {offline ? 'Print Order Form' : 'Print label'}
+          </button>
+          <button
+            onClick={() => setOpen(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity whitespace-nowrap"
+          >
+            <Truck className="w-3.5 h-3.5" />
+            Mark as dispatched
+          </button>
+        </div>
+      </div>
+      {open && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6]">
+                <div>
+                  <p className="text-sm font-semibold text-[#030213]">Mark as dispatched · {lab}</p>
+                  <p className="text-[11px] text-[#717182] mt-0.5">Add the shipping details. The case is submitted to the lab.</p>
+                </div>
+                <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-lg hover:bg-[#F8F9FC] flex items-center justify-center text-[#717182] transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Courier</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[...DISPATCH_COURIERS, OTHER_COURIER].map(c => <button key={c} onClick={() => setCourier(c)} className={pick(courier === c)}>{c}</button>)}
+                  </div>
+                  {courier === OTHER_COURIER && (
+                    <input
+                      autoFocus
+                      value={otherCourier}
+                      onChange={e => setOtherCourier(e.target.value)}
+                      placeholder="Enter courier name"
+                      className="w-full mt-2 px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg"
+                    />
+                  )}
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Delivery method</p>
+                  <div className="flex gap-1.5">
+                    {['Bag', 'Box'].map(p => <button key={p} onClick={() => setPackaging(p)} className={pick(packaging === p)}>{p}</button>)}
+                  </div>
+                  <p className="text-[10px] text-[#8B8B9E] mt-1">Collected from the clinic.</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Dispatched on</p>
+                  <input
+                    type="date"
+                    value={dispatchedOn}
+                    onChange={e => setDispatchedOn(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg"
+                  />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Comment <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <textarea
+                    rows={2}
+                    value={comment}
+                    onChange={e => setComment(e.target.value)}
+                    placeholder="e.g. impressions and bite registration"
+                    className="w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg resize-none"
+                  />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-[#5A5568] mb-1.5">Tracking number <span className="font-normal text-[#8B8B9E]">(optional)</span></p>
+                  <input
+                    value={tracking}
+                    onChange={e => setTracking(e.target.value)}
+                    placeholder="e.g. RM123456789GB"
+                    className="w-full px-3 py-2 text-xs bg-white border border-[#E0E0E6] rounded-lg"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#F0EFF6]">
+                <button onClick={() => setOpen(false)} className="px-4 py-2 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={() => { setOpen(false); onDispatch({ courier: courierName, packaging, tracking, dispatchedOn, comment: comment.trim() }); }}
+                  disabled={!courierName || !dispatchedOn}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  Mark as dispatched
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+      {printOpen && offline && orderCase && <OrderFormModal caseData={orderCase} onClose={() => setPrintOpen(false)} onPrint={() => { toast.success('Printing order form…'); setPrintOpen(false); }} />}
+      {printOpen && !offline && <PrintLabelsModal caseNumbers={[caseId]} labNames={[lab]} details={[{ patient, dentist, clinic }]} title={`Print label · ${caseId}`} subtitle="Put this sheet in the parcel with the impressions." onClose={() => setPrintOpen(false)} />}
+    </>
+  );
+}
+
+export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRequestStatusChange, onPickStatus, onSetStatus, showOfflineLabNotice, showConnectEmailNotice, allCases, onOpenRelatedCase, onOpenDraftCase, onDeliveryDateChange, onRequestShipmentDetails, statusReach, viewerPortal, listLabel = 'Cases', dispatchToday, currentUser = CURRENT_USER, canMarkReceived = true, followRequestedDelivery = false }: CaseDetailPageProps) {
+  const statusHost = useContext(CaseStatusSlot);
   const [activeTab, setActiveTab] = useState<Tab>('prescription');
   const [timelineOpen, setTimelineOpen] = useState(false);
   // The lab's latest due-date change (if any) is the date the case is working
   // to — same rule as the Delivery Date column on the list.
   const [deliveryDate, setDeliveryDate] = useState(latestDueDateChange(caseData.id)?.next ?? caseData.requestedDelivery ?? '');
+  // The host can move the date itself (the New Case Flow demo: a corrected post day moves the back-by day).
+  // The field follows it, unless a due-date change was recorded here or it's this page's own edit coming back
+  // (a host may write it back reworded mid-typing). Same case only, and only when the host asks for it
+  // (followRequestedDelivery): the Cases page re-selects a case from its own list, which would undo an edit.
+  const ownDateEdit = useRef(false);
+  const seenRequested = useRef({ id: caseData.id, date: caseData.requestedDelivery });
+  useEffect(() => {
+    const own = ownDateEdit.current;
+    ownDateEdit.current = false;
+    const was = seenRequested.current;
+    seenRequested.current = { id: caseData.id, date: caseData.requestedDelivery };
+    if (!followRequestedDelivery || was.id !== caseData.id || was.date === caseData.requestedDelivery || own || latestDueDateChange(caseData.id)) return;
+    setDeliveryDate(caseData.requestedDelivery ?? '');
+  }, [caseData.id, caseData.requestedDelivery, deliveryDate]);
   // Conversion helpers — the rest of the app uses "DD-MMM-YYYY"; the date input expects ISO.
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] as const;
   const toIsoDate = (d: string): string => {
@@ -3859,6 +4524,21 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const [topTab, setTopTab] = useState<string>(
     isMultiService ? 'summary' : (serviceItems[0]?.id ?? 'summary')
   );
+  // Draft prescriptions linked to this case (a follow-up for one of its stages).
+  const matchedDrafts: MatchedDraft[] = useMemo(() => {
+    if (!allCases?.length) return [];
+    return allCases.flatMap((d): MatchedDraft[] => {
+      if (d.status !== 'draft' || d.serviceItems.length !== 1 || !isDentureService(d.serviceItems[0].name)) return [];
+      const si = d.serviceItems[0];
+      const m = findFollowUpMatch(
+        { patientName: d.patientName, practice: d.practice, dentist: d.dentist, serviceName: si.name },
+        si.stages ?? [],
+        allCases as any,
+      );
+      if (!m || m.case.id !== caseData.id) return [];
+      return [{ id: d.id, serviceName: si.name, stages: m.toAdd, dates: (si.stageDates ?? {}) as Record<string, string | null>, createdAt: d.createdAt }];
+    });
+  }, [allCases, caseData.id]);
   // Details card collapses by default to reclaim vertical space.
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Email thread lives in a case-level side drawer, opened from the header.
@@ -3880,6 +4560,8 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // The lab's private record for this case's dentist. Opens on demand, and
   // automatically when a WhatsApp send has no number to go to.
   const [privateInfoOpen, setPrivateInfoOpen] = useState(false);
+  // Which chase was blocked for want of a contact: the modal focuses that field, and saving it retries the send.
+  const [blockedChannel, setBlockedChannel] = useState<'email' | 'whatsapp'>('whatsapp');
 
   const { toast } = useToast();
   const { scoreCase } = useCaseScoring();
@@ -3905,6 +4587,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // captures receipt details before the case moves to Delivered.
   const csEnabled = useCareStackEnabled();
   const csRecord = useCaseCareStack(caseData.id);
+  const dispatchRecord = useDispatchRecord(caseData.id);
   const csCase: CareStackCaseLike = {
     id: caseData.id, patientName: caseData.patientName, practice: caseData.practice, dentist: caseData.dentist,
     lab: caseData.lab ?? '', services: caseData.services, createdAt: caseData.createdAt,
@@ -3946,12 +4629,21 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   const whatsappChaseReady =
     whatsappBlockReason(headerWhatsapp) === null && headerWhatsapp.automation[chaseCategory].enabled;
 
-  function sendMissingInfoEmail() {
+  function sendMissingInfoEmail(afterSave = false) {
     // Manual sending mode (Settings → Case Scoring → Case Scoring Emails):
     // nothing sends automatically — just open the Conversation hub, where the
     // user picks a template and sends it themselves.
     if (emailSendMode === 'manual') {
       setThreadOpen(true, 'email');
+      return;
+    }
+    // No email on file (no private address, and the case didn't arrive by email):
+    // nothing can be sent. Say why and open the lab's private record for this
+    // dentist; saving an address retries the send straight away.
+    if (!afterSave && !dentistPrivateEmailFor(caseData.dentist) && caseData.source !== 'email') {
+      toast.error(`No email on file for ${caseData.dentist} — add a private email to email them.`);
+      setBlockedChannel('email');
+      setPrivateInfoOpen(true);
       return;
     }
     setEmailSent(true);
@@ -3963,12 +4655,23 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
   // The WhatsApp twin of the button above: same outcome, same recipient, same
   // "case has been chased" result — only the channel differs.
   function sendMissingInfoWhatsApp() {
+    // The channel itself must be on and connected before anything else matters.
+    const channelBlocked = whatsappBlockReason(headerWhatsapp);
+    if (channelBlocked) {
+      toast.error(`${BLOCK_REASON_TEXT[channelBlocked]} ${channelBlocked === 'disabled' ? 'Turn it on' : 'Connect one'} in Settings to message dentists on WhatsApp.`);
+      return;
+    }
+    if (!headerWhatsapp.automation[chaseCategory].enabled && headerWhatsapp.sendMode !== 'manual') {
+      toast.error('WhatsApp chasing is switched off for this kind of case. Turn it on in Settings → Case Scoring.');
+      return;
+    }
     // No number on file — nothing can be sent, on either sending mode. Say why
     // and open the lab's private record for this dentist, which is where a
     // number gets added; saving it retries the send straight away.
     const phone = dentistPhoneFor(caseData.dentist);
     if (!phone) {
       toast.error(`No phone number on file for ${caseData.dentist} — add a private number to message them on WhatsApp.`);
+      setBlockedChannel('whatsapp');
       setPrivateInfoOpen(true);
       return;
     }
@@ -4102,7 +4805,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                  lab running both picks how to chase this case. */
               <span className="inline-flex items-center gap-1.5">
                 <button
-                  onClick={sendMissingInfoEmail}
+                  onClick={() => sendMissingInfoEmail()}
                   title={emailSendMode === 'manual'
                     ? 'Open the conversation — manual sending is on, pick a template and send it yourself'
                     : 'Auto-email the dentist the list of missing items'}
@@ -4111,7 +4814,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                   <Send className="w-3.5 h-3.5" />
                   Email dentist
                 </button>
-                {whatsappChaseReady && (
+                {/* Both chase channels are always offered on an incomplete case; if WhatsApp
+                    isn't switched on, pressing it says why instead of hiding the button. */}
+                {(
                   <button
                     onClick={sendMissingInfoWhatsApp}
                     title={headerWhatsapp.sendMode === 'manual'
@@ -4195,7 +4900,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
       {/* ── Offline-lab notice — sits ABOVE the scroll area (like the back nav
           and identity card), so it stays pinned while the case content
           scrolls underneath. ── */}
-      {offlineLabStatus && caseData.lab && (
+      {offlineLabStatus && caseData.lab && caseData.status !== 'ready-for-dispatch' && (
         <div className="mx-6 mt-1">
           <OfflineLabNotice labName={caseData.lab} status={offlineLabStatus} variant="detailed" />
         </div>
@@ -4226,6 +4931,24 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         </div>
       )}
 
+      {caseData.status === 'ready-for-dispatch' && (
+        <ReadyForDispatchPanel
+          lab={caseData.lab ?? 'the lab'}
+          caseId={caseData.id}
+          patient={caseData.patientName}
+          dentist={caseData.dentist}
+          clinic={caseData.practice}
+          offline={!!offlineLabStatusFor(caseData.lab)}
+          orderCase={caseData}
+          today={dispatchToday}
+          onDispatch={({ courier, packaging, tracking, dispatchedOn, comment }) => {
+            recordDispatch(caseData.id, { courier, packaging, tracking, comment: comment || undefined, dispatchedOn, by: currentUser, at: new Date().toISOString() });
+            onSetStatus?.('submitted');
+            toast.success(`${caseData.id} marked as dispatched — ${courier} (${packaging.toLowerCase()})${tracking ? `, tracking ${tracking}` : ''}. Case submitted to the lab.`);
+          }}
+        />
+      )}
+
       {/* ── Status timeline strip — mirrors the live portal: each status the
             case has passed through, who did it and when, above the case card.
             Click any step for the full timeline modal. ── */}
@@ -4234,7 +4957,19 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
         title="Open the full case timeline"
         className="mx-6 mt-2 rounded-xl border border-[#DBEAFE] bg-[#EEF4FF]/60 px-5 py-3 flex items-start gap-8 overflow-x-auto text-left hover:bg-[#EEF4FF] transition-colors"
       >
-        {buildCasePipeline(caseData).filter(s => s.done || s.state === 'current' || s.state === 'blocked').map((s, i, arr) => {
+        {statusHost ? statusHost.steps.map((s, i, arr) => {
+          const current = s.state === 'current';
+          const blocked = s.state === 'blocked';
+          return (
+            <span key={`${s.label}-${i}`} className="relative flex flex-col items-start min-w-[150px] flex-shrink-0">
+              {i < arr.length - 1 && <span className="absolute left-2 top-1 h-px w-[calc(100%+2rem)] bg-[#C8D8FC]" />}
+              <span className={`relative w-2 h-2 rounded-full mb-2 ${blocked ? 'bg-[#C62828]' : current ? 'bg-[#A59DFF] ring-4 ring-[#A59DFF]/25' : 'bg-[#4D8EF7]'}`} />
+              <span className="text-sm font-semibold text-[#030213] leading-tight">{s.label}</span>
+              <span className="text-[11px] text-[#717182] mt-0.5 truncate max-w-[150px]">{s.actor}</span>
+              <span className="text-[11px] text-[#717182]">{s.when}</span>
+            </span>
+          );
+        }) : buildCasePipeline(caseData).filter(s => s.done || s.state === 'current' || s.state === 'blocked').map((s, i, arr) => {
           const current = s.state === 'current';
           const blocked = s.state === 'blocked';
           const actor = i <= 1 || s.label === 'Delivered' ? caseData.practice : (caseData.lab ?? 'Lab');
@@ -4259,7 +4994,10 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               portal pattern). The host applies the pick, or opens the compact
               override / Smile Genius-only popup first. Also flips
               automatically through the missing-info email loop. */}
-          <StatusDropdown status={caseData.status} onPick={onPickStatus} />
+          {/* Multi-service / staged cases show status per service or stage instead. */}
+          {statusHost?.control ?? (!((caseData.serviceItems?.length ?? 0) > 1 || caseData.serviceItems?.some(si => (si.stages?.length ?? 0) > 1 || isDentureService(si.name))) && (
+            <StatusDropdown status={caseData.status} onPick={onPickStatus} />
+          ))}
 
           <CreatedByIcon createdBy={caseCreatedBy(caseData, viewerPortal)} showName />
 
@@ -4286,12 +5024,15 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               layout. The timeline is reachable from the strip above and the
               menu; the details grid below is always open. */}
           <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-            {caseData.status !== 'delivered' && caseData.status !== 'completed' && (
+            {/* Multi-service / multi-stage cases are received per service or stage on their cards. */}
+            {caseData.status !== 'delivered' && caseData.status !== 'completed' && caseData.status !== 'ready-for-dispatch' && canMarkReceived
+              && (caseData.serviceItems?.length ?? 0) <= 1
+              && !caseData.serviceItems?.some(si => (si.stages?.length ?? 0) > 1 || isDentureService(si.name)) && (
               <button
                 onClick={() => setReceivedModal({})}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity shadow-sm"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity shadow-sm whitespace-nowrap"
               >
-                <Check className="w-4 h-4" />
+                <Check className="w-3.5 h-3.5" />
                 Mark as Received
               </button>
             )}
@@ -4316,9 +5057,9 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 {csEnabled && csRecord && <MappingIcon mapping={csRecord.patient} entity="Patient" />}
               </p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Age / Gender</p>
-              <p className="text-[11px] text-[#717182]">—</p>
+              <p className="text-[11px] text-[#717182]">{caseData.patientAge != null || caseData.patientGender ? `${caseData.patientAge ?? '—'} / ${caseData.patientGender ?? '—'}` : '—'}</p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Patient ID</p>
-              <p className="text-[11px] text-[#717182]">—</p>
+              <p className="text-[11px] text-[#717182]">{caseData.patientRef ?? '—'}</p>
             </div>
 
             {/* Clinic */}
@@ -4352,7 +5093,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 </button>
               </p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Created By</p>
-              <p className="text-[11px] text-[#717182]">Smile Genius Lab <span className="text-[#A0A0B0]">(Clinic)</span></p>
+              <p className="text-[11px] text-[#717182]">{caseData.creatorName ?? 'Smile Genius Lab'} <span className="text-[#A0A0B0]">(Clinic)</span></p>
               <p className="text-[10px] text-[#A0A0B0] mt-2">Received via</p>
               <p className="text-[11px] text-[#717182]">{receivedVia}</p>
             </div>
@@ -4383,6 +5124,7 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                   // With CareStack on, a real change is a due-date change: capture
                   // the reason and mirror it (note + email) before committing.
                   if (csEnabled && next && next !== deliveryDate) { setDueDateModal({ previous: deliveryDate, next }); return; }
+                  ownDateEdit.current = true;
                   setDeliveryDate(next);
                   onDeliveryDateChange?.(next);
                 }}
@@ -4478,6 +5220,20 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
               </button>
             );
           })}
+          {/* Drafts tab: shown when a draft prescription is linked to this case */}
+          {matchedDrafts.length > 0 && (
+            <button
+              onClick={() => setTopTab('__drafts')}
+              className={`inline-flex items-center gap-1.5 px-4 py-3.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap flex-shrink-0 ${
+                topTab === '__drafts'
+                  ? 'border-[#F59E0B] text-[#A16207]'
+                  : 'border-transparent text-[#717182] hover:text-[#030213]'
+              }`}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              Drafts ({matchedDrafts.length})
+            </button>
+          )}
         </div>
       </div>
 
@@ -4490,8 +5246,36 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             caseData={caseData}
             onSelectService={(id) => setTopTab(id)}
             onOpenTimeline={() => setTimelineOpen(true)}
-            onMarkReceived={(si) => setReceivedModal({ label: si.name })}
+            onMarkReceived={canMarkReceived ? (si) => setReceivedModal({ label: si.name }) : undefined}
+            canReceive={canMarkReceived}
+            drafts={matchedDrafts}
+            onOpenDraft={onOpenDraftCase}
+            readOnlyStatus={viewerPortal === 'clinic'}
           />
+        </div>
+      ) : topTab === '__drafts' ? (
+        /* Drafts: one row per linked draft prescription */
+        <div className="mt-3 mx-6 mb-6 flex-1 overflow-y-auto">
+          <div className="bg-white border border-[#E0E0E6] rounded-xl divide-y divide-[#F0EFF6] overflow-hidden">
+            {matchedDrafts.map(d => (
+              <button
+                key={d.id}
+                onClick={() => onOpenDraftCase?.(d.id)}
+                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[#F8F9FC] transition-colors"
+              >
+                <span className="inline-flex items-center gap-1.5 px-2 py-px rounded-full text-[10px] font-medium border bg-[#FFF8E1] text-[#A16207] border-[#FDE68A] whitespace-nowrap">
+                  <Pencil className="w-2.5 h-2.5" />
+                  Draft - New Stage
+                </span>
+                <span className="text-xs font-bold text-[#030213]">{d.id}</span>
+                <span className="text-xs text-[#5A5568] flex-1 min-w-0 truncate">
+                  {d.serviceName} · {d.stages.map(st => `${st}${d.dates[st] ? ` (${d.dates[st]})` : ''}`).join(', ')}
+                </span>
+                <span className="text-[11px] text-[#A0A0B0] whitespace-nowrap">Created {d.createdAt}</span>
+                <ArrowRight className="w-3.5 h-3.5 text-[#4D8EF7] flex-shrink-0" />
+              </button>
+            ))}
+          </div>
         </div>
       ) : (
         // Per-service view — find the matching ServiceItem and render its detail
@@ -4504,7 +5288,12 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
                 onOpenNotes={() => setNotesOpen(true)}
                 onOpenFullView={() => setFullViewOpen(true)}
                 onMarkReceived={(label) => setReceivedModal({ label })}
+                canReceive={canMarkReceived}
                 shipment={csRecord?.shipment}
+                dispatch={dispatchRecord}
+                canEditDispatch={viewerPortal === 'clinic'}
+                canEditShipment={viewerPortal === 'lab'}
+                currentUser={currentUser}
               />
             : null;
         })()
@@ -4553,9 +5342,12 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
       <PrivateInformationModal
         isOpen={privateInfoOpen}
         dentist={caseData.dentist}
-        focusField="phone"
+        focusField={blockedChannel === 'email' ? 'email' : 'phone'}
         onClose={() => setPrivateInfoOpen(false)}
-        onSaved={(info) => { if (info.phone) sendMissingInfoWhatsApp(); }}
+        onSaved={(info) => {
+          if (blockedChannel === 'email') { if (info.email) sendMissingInfoEmail(true); }
+          else if (info.phone) sendMissingInfoWhatsApp();
+        }}
       />
 
       {/* CareStack side drawer — mapping status, the CareStack appointment and
@@ -4573,8 +5365,8 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
             variant="drawer"
             caseData={csCase}
             onRequestShipmentDetails={() => { setCsDrawerOpen(false); onRequestShipmentDetails?.(); }}
-            onMarkReceived={() => { setCsDrawerOpen(false); setReceivedModal({}); }}
-            currentUser={CURRENT_USER}
+            onMarkReceived={canMarkReceived ? () => { setCsDrawerOpen(false); setReceivedModal({}); } : undefined}
+            currentUser={currentUser}
           />
         </SideDrawer>
       )}
@@ -4629,9 +5421,10 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           onCancel={() => setDueDateModal(null)}
           onConfirm={(reason) => {
             const { previous, next } = dueDateModal;
+            ownDateEdit.current = true;
             setDeliveryDate(next);
             onDeliveryDateChange?.(next);
-            recordDueDateChange({ ...csCase, requestedDelivery: next }, { previous: previous || null, next, reason }, CURRENT_USER);
+            recordDueDateChange({ ...csCase, requestedDelivery: next }, { previous: previous || null, next, reason }, currentUser);
             setDueDateModal(null);
             toast.success(`Due date updated to ${next} — practice notified`);
           }}
@@ -4644,10 +5437,10 @@ export default function CaseDetailPage({ caseData, onBack, onArchiveToggle, onRe
           caseId={caseData.id}
           patientName={caseData.patientName}
           serviceLabel={receivedModal.label}
-          currentUser={CURRENT_USER}
+          currentUser={currentUser}
           onClose={() => setReceivedModal(null)}
           onConfirm={({ receivedAt, notes }) => {
-            if (csEnabled) recordReceipt(csCase, { receivedAt, receivedBy: CURRENT_USER, notes });
+            if (csEnabled) recordReceipt(csCase, { receivedAt, receivedBy: currentUser, notes });
             onSetStatus?.('delivered');
             setReceivedModal(null);
             toast.success(`${caseData.id} marked as received`);

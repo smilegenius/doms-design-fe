@@ -1,6 +1,8 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Workflow, Wrench, Plug, MessageCircle, CalendarDays, Layers, UserX, Truck, Play, FilePlus2, BarChart3, FileText, Printer } from 'lucide-react';
+import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
+import { setUserId, setUx } from '../newCase/store';
 
 // ─── Flows ───────────────────────────────────────────────────────────────────
 // Everything that isn't "sign in and look around a portal": the standalone
@@ -23,14 +25,100 @@ export interface FlowEntry {
   date?: string;
   /** Timeline group, as 'YYYY-MM'. The page lists months newest first. */
   month: string;
+  /** Optional secondary button for flows that are a click-through simulation. */
+  simulate?: { label: string; path: string; before?: () => void };
 }
 
 export const FLOWS: FlowEntry[] = [
   {
+    // Print on the order form asks the lab first, so labs start changing statuses.
+    title: 'Accept case on print',
+    description: 'Printing the Smile Genius order form asks the lab first. Not yet accepted: “Do you have everything needed to process this case?” → Accept & print, or Something missing to put it On Hold. Posted and not marked received: “Has the parcel arrived…?” → Mark received, accept & print. Already accepted: “Print the order form?” → Print form. On the Cases list and Case Details.',
+    detail: 'Lab · Cases · Case Details',
+    icon: <Printer className="w-5 h-5 text-[#15803D]" />,
+    badge: 'Walkthrough',
+    accent: '#15803D',
+    accentSoft: '#F0FDF4',
+    path: '/flows/accept-on-print',
+    date: '3 Nov 2026',
+    month: '2026-11',
+  },
+  {
+    // Proposed first tab of the DSO portal's Analytics. Lives only here until
+    // approved; /supplier/analytics is unchanged.
+    title: 'DSO analytics — Group Overview',
+    description: 'An executive view for the dental group: lab spend, orders, cost per case, on-time delivery, remakes and potential savings, with the spend trend, spend by treatment type and by clinic, clinic benchmarking against the group average and the key opportunities by clinic, dentist and lab.',
+    detail: 'DSO · Analytics',
+    icon: <BarChart3 className="w-5 h-5 text-[#4D8EF7]" />,
+    badge: 'Preview',
+    accent: '#4D8EF7',
+    accentSoft: '#EEF4FF',
+    path: '/flows/dso-analytics',
+    date: '29 Oct 2026',
+    month: '2026-10',
+  },
+  {
+    // The new Dental Order Form, on the New case flow's View Case only; the portal's form is unchanged.
+    title: 'Order form in Case Details',
+    description: 'The new Dental Order Form on a case: patient, dentist, practice, lab and ship-to address, the Tooth Chart, the service details, instructions and the scan and attachment files. A full denture keeps its stage history, so each new stage adds a row with its dates and status and its own instruction card. An order with several cases gives each case its own section.',
+    detail: 'Clinic · Case Details',
+    icon: <FileText className="w-5 h-5 text-[#1565C0]" />,
+    badge: 'Walkthrough',
+    accent: '#1565C0',
+    accentSoft: '#EEF4FF',
+    path: '/flows/order-form',
+    date: '29 Oct 2026',
+    month: '2026-10',
+  },
+  {
+    // Guided steps only: five flows, one per kind of order.
+    title: 'New case flow',
+    description: 'The simplest way for a clinic to create lab work, in Guided steps: lab first, each service on one card with the Teeth Chart beside its questions and its own Delivery date, then Scan Source and Review. Five flows: a crown, whitening trays or a night guard, a full denture, aligners and a multi-service order.',
+    detail: 'Clinic · 5 flows',
+    icon: <FilePlus2 className="w-5 h-5 text-[#2F62D6]" />,
+    badge: 'Walkthrough',
+    accent: '#2F62D6',
+    accentSoft: '#EEF4FF',
+    path: '/flows/new-case',
+    date: '22 Oct 2026',
+    month: '2026-10',
+    // An earlier session may have left Conversation or One page, or another user (Jess, Dr Ellery), in the demo
+    // store: Lab Work opens in Guided as Dr Khan, as every walkthrough flow does.
+    simulate: { label: 'Open Lab Work', path: '/flows/new-case/cases', before: () => { setUx('guided'); setUserId('khan'); } },
+  },
+  {
+    // Clinic manual creation now ends in print & ship, not a direct hand-off.
+    title: 'Addition of new stage in manual case creation',
+    description: 'A clinic creating New Lab Work starts on Impressions (By Post). The case does not go straight to the lab: it becomes Ready for dispatch, the receptionist prints the order form and label, picks a courier, and only then is it Submitted.',
+    detail: 'Clinic · Simulation',
+    icon: <Truck className="w-5 h-5 text-[#B45309]" />,
+    badge: 'Simulation',
+    accent: '#B45309',
+    accentSoft: '#FFF8E1',
+    path: '/flows/manual-case-dispatch',
+    date: '20 Oct 2026',
+    month: '2026-10',
+    // Straight onto the real clinic screen, signed in as the demo account.
+    simulate: { label: 'Run simulation', path: '/clinic/cases/quick-new' },
+  },
+  {
+    // Negative scenarios: chasing a dentist who has no email / no number on file.
+    title: 'Dentist with no contact on file',
+    description: 'Email dentist and WhatsApp dentist when there is no email address or phone number for the dentist: nothing is sent, the lab is told why, and the private record opens on the missing field. Saving it retries the send. A third scenario shows a case where both channels are available.',
+    detail: 'Lab · 3 scenarios',
+    icon: <UserX className="w-5 h-5 text-[#D4183D]" />,
+    badge: 'Negative',
+    accent: '#D4183D',
+    accentSoft: '#FEF2F2',
+    path: '/flows/dentist-contact',
+    date: '13 Oct 2026',
+    month: '2026-10',
+  },
+  {
     // Five developer tasks across the clinic + lab creation and case screens.
     title: 'Denture stages & service-level dates',
-    description: 'Delivery dates move from the case to each service, every denture stage gets its own date (with copy-to-selected), follow-up prescriptions join the existing case, and stages done before a case reached DOMS show as done elsewhere. Round 2: arch picker, stages upfront and one row per stage.',
-    detail: 'Clinic · Lab · 5 tasks',
+    description: 'Four clinic scenarios, each on the list, detail and create / draft screens: a single manual case, a multi-service manual case with a denture, and a scanner case that matches a multi-service case with its earlier stages matched or done elsewhere.',
+    detail: 'Clinic · 4 scenarios',
     icon: <Layers className="w-5 h-5 text-[#B45309]" />,
     badge: 'Walkthrough',
     accent: '#B45309',
@@ -101,10 +189,15 @@ function flowsByMonth(flows: FlowEntry[]) {
 }
 
 export function FlowCard({ flow, onOpen }: { flow: FlowEntry; onOpen: () => void }) {
+  const navigate = useNavigate();
+  const { user, login } = useAuth();
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
-      className="group relative w-full h-full text-left bg-white border border-[#E0E0E6] rounded-2xl p-5 overflow-hidden hover:shadow-xl hover:border-current transition-all"
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+      className="group relative w-full h-full cursor-pointer text-left bg-white border border-[#E0E0E6] rounded-2xl p-5 overflow-hidden hover:shadow-xl hover:border-current transition-all"
       style={{ color: flow.accent }}
     >
       <div
@@ -135,10 +228,25 @@ export function FlowCard({ flow, onOpen }: { flow: FlowEntry; onOpen: () => void
           <p className="text-[10px] font-semibold uppercase tracking-widest mt-2.5" style={{ color: flow.accent }}>
             {flow.detail}
           </p>
+          {flow.simulate && (
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                if (!user) login(DEMO_ACCOUNT_EMAIL, 'demo');
+                flow.simulate!.before?.();
+                navigate(flow.simulate!.path);
+              }}
+              className="relative mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+              style={{ background: flow.accent }}
+            >
+              <Play className="w-3 h-3 fill-current" />
+              {flow.simulate.label}
+            </button>
+          )}
         </div>
         <ArrowRight className="w-4 h-4 flex-shrink-0 mt-1 group-hover:translate-x-0.5 transition-transform" />
       </div>
-    </button>
+    </div>
   );
 }
 
