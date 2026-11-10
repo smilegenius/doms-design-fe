@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCheck, Eye, Lock, PauseCircle, PlayCircle, Search, Send, Sparkles, X } from 'lucide-react';
 import Modal from '../../../src/app/components/Modal';
@@ -23,7 +23,16 @@ export default function BillingHome() {
   const h = headline(s);
   const pending = pendingInvoices(s);
   const [ticked, setTicked] = useState<string[]>([]);
-  const [filter, setFilter] = useState<'all' | 'sent' | 'overdue' | 'paid' | 'void'>(() => (new URLSearchParams(window.location.search).get('filter') as never) || 'all');
+  const [filter, setFilter] = useState<'all' | 'sent' | 'overdue' | 'paid' | 'void'>(() => {
+    const f = new URLSearchParams(window.location.search).get('filter');
+    return f && ['sent', 'overdue', 'paid', 'void'].includes(f) ? (f as 'sent') : 'all';
+  });
+  // ?filter=pending (What's new, month-end check) jumps to the flagged and waiting invoices.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('filter') !== 'pending') return;
+    const t = window.setTimeout(() => document.getElementById('needs-you')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+    return () => window.clearTimeout(t);
+  }, []);
   const [q, setQ] = useState('');
   const [statements, setStatements] = useState(false);
   const nudges = assists(s);
