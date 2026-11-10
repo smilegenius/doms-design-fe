@@ -98,6 +98,8 @@ interface LayoutProps {
   // lab's view — incoming cases from its clinic/dental-group clients, plus the
   // Case Scoring configuration.
   portal?: 'supplier' | 'clinic' | 'lab';
+  /** Start on the icon rail (the new-case flow needs the width for the chart). */
+  defaultCollapsed?: boolean;
 }
 
 // Flat sidebar — Spending parent removed; all items live at one level.
@@ -139,11 +141,11 @@ const labNavItems = [
   { id: 'analytics',     label: 'Analytics',     icon: FilledBarChart,  isCustom: false },
 ];
 
-export default function Layout({ children, activePage = 'overview', onNavigate, portal = 'supplier' }: LayoutProps) {
+export default function Layout({ children, activePage = 'overview', onNavigate, portal = 'supplier', defaultCollapsed = false }: LayoutProps) {
   const mainNavItems = portal === 'clinic' ? clinicNavItems : portal === 'lab' ? labNavItems : supplierNavItems;
   const navigate = useNavigate();
   const { logout, user } = useAuth();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);

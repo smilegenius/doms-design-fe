@@ -17,7 +17,7 @@ import {
   InformationCircleIcon, LinkIcon, LockClosedIcon, MagnifyingGlassIcon, MoonIcon, PaperAirplaneIcon, PaperClipIcon, PencilSquareIcon, PhotoIcon,
   PlusIcon, PrinterIcon, ShieldCheckIcon, SparklesIcon, Square3Stack3DIcon, SunIcon, TruckIcon, UserIcon, WalletIcon, WrenchScrewdriverIcon,
   XCircleIcon, XMarkIcon, FunnelIcon, MicrophoneIcon, StopIcon, UserPlusIcon, PlusCircleIcon, TrashIcon, StarIcon, PauseIcon, PlayIcon,
-  ListBulletIcon, Squares2X2Icon, ChatBubbleOvalLeftEllipsisIcon,
+  ListBulletIcon, Squares2X2Icon, ChatBubbleOvalLeftEllipsisIcon, CubeTransparentIcon, MagnifyingGlassPlusIcon, MagnifyingGlassMinusIcon, ArrowsPointingOutIcon, ArrowDownTrayIcon,
 } from 'react-native-heroicons/solid';
 import Svg, { Path } from 'react-native-svg';
 import { useTheme } from '../theme/ThemeRoot';
@@ -138,6 +138,11 @@ export const ZapOff = filled(BoltSlashIcon);
 export const Filter = filled(FunnelIcon);
 export const List = filled(ListBulletIcon);
 export const LayoutGrid = filled(Squares2X2Icon);
+export const Cube3D = filled(CubeTransparentIcon);
+export const ZoomIn = filled(MagnifyingGlassPlusIcon);
+export const ZoomOut = filled(MagnifyingGlassMinusIcon);
+export const Expand = filled(ArrowsPointingOutIcon);
+export const Download = filled(ArrowDownTrayIcon);
 export const Mic = filled(MicrophoneIcon);
 export const Stop = filled(StopIcon);
 export const UserPlus = filled(UserPlusIcon);

@@ -9,11 +9,12 @@ import type { ComponentType, SVGProps } from 'react';
 import {
   ArrowLeftIcon, ArrowPathIcon, ArrowRightStartOnRectangleIcon, ArrowUpTrayIcon, BackspaceIcon, BeakerIcon, BellIcon, BoltIcon, BoltSlashIcon,
   BuildingOffice2Icon, BuildingOfficeIcon, CalendarDaysIcon, CameraIcon, ChatBubbleLeftEllipsisIcon, CheckCircleIcon, CheckIcon, ChevronDownIcon,
-  ChevronLeftIcon, ChevronRightIcon, ClipboardDocumentCheckIcon, ClockIcon, ComputerDesktopIcon, CubeIcon, DocumentCurrencyPoundIcon,
+  ChevronLeftIcon, ChevronRightIcon, ClipboardDocumentCheckIcon, ClockIcon, ComputerDesktopIcon, CubeIcon, CubeTransparentIcon, DocumentCurrencyPoundIcon,
+  MagnifyingGlassMinusIcon, MagnifyingGlassPlusIcon, ArrowsPointingOutIcon, ArrowDownTrayIcon,
   DocumentTextIcon, EnvelopeIcon, EnvelopeOpenIcon, ExclamationTriangleIcon, EyeIcon, EyeSlashIcon, HandThumbUpIcon, HomeIcon, InboxIcon,
   InformationCircleIcon, LinkIcon, LockClosedIcon, MagnifyingGlassIcon, MoonIcon, PaperAirplaneIcon, PaperClipIcon, PencilSquareIcon, PhotoIcon,
   PlusIcon, PrinterIcon, ShieldCheckIcon, SparklesIcon, Square3Stack3DIcon, SunIcon, TruckIcon, UserIcon, WalletIcon, WrenchScrewdriverIcon,
-  XCircleIcon, XMarkIcon, FunnelIcon, ListBulletIcon, Squares2X2Icon, MicrophoneIcon, StopIcon, UserPlusIcon, PlusCircleIcon, TrashIcon, StarIcon, PauseIcon, PlayIcon,
+  XCircleIcon, XMarkIcon, FunnelIcon, ListBulletIcon, Squares2X2Icon, MicrophoneIcon, StopIcon, UserPlusIcon, PlusCircleIcon, TrashIcon, StarIcon, PauseIcon, PlayIcon, QuestionMarkCircleIcon,
 } from '@heroicons/react/24/solid';
 
 export { ArrowBigUp, CornerDownLeft, Loader2 } from 'lucide-react';
@@ -94,3 +95,9 @@ export const Trash = filled(TrashIcon);
 export const Star = filled(StarIcon);
 export const Pause = filled(PauseIcon);
 export const Play = filled(PlayIcon);
+export const HelpCircle = filled(QuestionMarkCircleIcon);
+export const Cube3D = filled(CubeTransparentIcon);
+export const ZoomIn = filled(MagnifyingGlassPlusIcon);
+export const ZoomOut = filled(MagnifyingGlassMinusIcon);
+export const Expand = filled(ArrowsPointingOutIcon);
+export const Download = filled(ArrowDownTrayIcon);

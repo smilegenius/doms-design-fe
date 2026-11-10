@@ -363,7 +363,7 @@ export const SEED_CASES: LabCase[] = [
     id: 'SG-28491', appointment: { at: at(7, 10, 30), kind: 'Fit', room: 'Surgery 1' }, patientId: 'P-10231', practice: 'cds', lab: 'northstar', clinician: 'reed', createdBy: 'Dr Olivia Reed',
     service: 'Crown', teeth: ['UR6'], material: 'Layered zirconia', shade: 'A2', stumpShade: 'ND3', funding: 'Private',
     instructions: 'Light contacts mesial and distal. Natural characterisation, slight translucency at the incisal third.',
-    returnBy: at(6), stage: 'ready', attachments: ['Prescription photo', 'Shade photo'], source: 'photo',
+    returnBy: at(6), stage: 'ready', attachments: ['Prescription photo', 'Shade photo', 'Intraoral scan (3Shape)'], source: 'photo',
     events: [{ stage: 'authorised', at: at(-1, 16, 22), by: 'Dr Olivia Reed' }], messages: [],
   },
   {

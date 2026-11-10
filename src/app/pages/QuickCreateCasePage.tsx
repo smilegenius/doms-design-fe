@@ -109,7 +109,7 @@ import {
   findServiceItem,
 } from './CreateCasePage';
 import {
-  isDentureItem, isPastISO, caseDateToISO, archLabel, archOf, archTeeth, toggleArch, groupTeeth, findFollowUpMatch, addStageAppend, TODAY_ISO as TODAY_ISO_FOR_DATES,
+  isDentureItem, isUpperTooth, isPastISO, caseDateToISO, archLabel, archOf, archTeeth, toggleArch, groupTeeth, findFollowUpMatch, addStageAppend, TODAY_ISO as TODAY_ISO_FOR_DATES,
   type FollowUpMatch,
 } from '../data/dentureStages';
 import { ArchPicker, StageDatePicker, StageDateList, StageStatusCell, stagesComplete } from '../components/DentureStages';
@@ -1238,6 +1238,10 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       caseSource: prefillDraft.source === 'email' ? 'Email' : '',
     };
   }, [prefillDraft]);
+  // New Lab Work in the clinic portal starts on Impressions (By Post) — the
+  // case is then printed and shipped by the clinic rather than sent straight
+  // to the lab. Still editable.
+  const defaultCaseSource = !isLab && !prefillDraft ? 'Impressions (By Post)' : '';
   const [isResumedDraft, setIsResumedDraft] = useState(!!draft);
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(draft?.savedAt ?? null);
 
@@ -1248,7 +1252,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // default so the user explicitly picks Via Scanner / Impressions / SMS
   // / etc. rather than silently committing to "Via Scanner" on every case.
   // Email-sourced drafts default to 'Email' so the lab can see the origin.
-  const [caseSource, setCaseSource]                 = useState(draft?.caseSource ?? prefillDraftSeed?.caseSource ?? '');
+  const [caseSource, setCaseSource]                 = useState(draft?.caseSource ?? prefillDraftSeed?.caseSource ?? defaultCaseSource);
   const [caseSourceFiles, setCaseSourceFiles]       = useState<Record<string, string | null>>(draft?.caseSourceFiles ?? {});
   const [caseSourceExtraFiles, setCaseSourceExtras] = useState<string[]>(draft?.caseSourceExtraFiles ?? []);
   const [caseSourceScanner, setCaseSourceScanner]   = useState(draft?.caseSourceScanner ?? '');
@@ -1483,7 +1487,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // The incoming prescription's own practice/dentist win when it came from a
   // draft — that's what the prescription says, whatever the pickers show.
   const createdCases = useCreatedCases();
-  const followUp: FollowUpMatch | null = useMemo(() => {
+  const followUpMatch: FollowUpMatch | null = useMemo(() => {
     if (selections.length !== 1 || !isDentureItem(selections[0].itemId)) return null;
     const sel = selections[0];
     return findFollowUpMatch(
@@ -1497,6 +1501,12 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       [...createdCases, ...mockCases],
     );
   }, [selections, patientName, prefillDraft, isLab, selectedLab, selectedDentist, createdCases]);
+  // The matched case can be ignored: "Create a new case" in the submit menu.
+  const [submitMode, setSubmitMode] = useState<'append' | 'new'>('append');
+  const [submitMenuOpen, setSubmitMenuOpen] = useState(false);
+  const followUp: FollowUpMatch | null = submitMode === 'append' ? followUpMatch : null;
+  // Past ("done elsewhere") stages come only from a prescription; manual entry has no old dates.
+  const allowDoneElsewhere = !!prefillDraft;
   const activeDetailsService = activeDetailsId
     ? selections.find(s => s.itemId === activeDetailsId) ?? null
     : null;
@@ -1675,12 +1685,15 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
   // freshly created case sits inside the lookback window with the mock data.
   function buildCaseRecord(id: string): Case {
     const created = formatCaseDate(DEMO_TODAY);
+    // A clinic's impressions-by-post case waits for the clinic to print and
+    // ship it; it only becomes Submitted (at the lab) once dispatched.
+    const initialStatus: Case['status'] = !isLab && caseSource === 'Impressions (By Post)' ? 'ready-for-dispatch' : 'submitted';
     // Dates are per service; a denture has none of its own — each stage
     // carries one instead.
     const serviceItems = selections.map((sel, i) => ({
       id: `${id}-s${i + 1}`,
       name: CATALOG_ID_TO_SERVICE_NAME[sel.itemId] ?? getServiceDisplayName(sel),
-      status: 'submitted' as const,
+      status: initialStatus,
       deliveryDate: !isDentureItem(sel.itemId) && sel.requestedDelivery ? isoToCaseDate(sel.requestedDelivery) : null,
       stageDates: isDentureItem(sel.itemId)
         ? Object.fromEntries((sel.stages ?? []).map(s => [s, sel.stageDates?.[s] ? isoToCaseDate(sel.stageDates[s]) : null]))
@@ -1703,7 +1716,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       lab: isLab ? LAB_PORTAL_LAB : (selectedLab?.name ?? LAB_PORTAL_LAB),
       services: serviceItems.map(si => si.name),
       serviceItems,
-      status: 'submitted',
+      status: initialStatus,
       createdAt: created,
       updatedAt: created,
       requestedDelivery: earliestRequestedISO ? isoToCaseDate(earliestRequestedISO) : null,
@@ -2800,6 +2813,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                               stages={sel.stages ?? []}
                               dates={sel.stageDates ?? {}}
                               doneElsewhere={sel.doneElsewhere}
+                              allowDoneElsewhere={allowDoneElsewhere || (sel.doneElsewhere?.length ?? 0) > 0}
                               existing={followUp?.existing}
                               onChange={(stages, stageDates, doneElsewhere) => updateService(sel.itemId, { stages, stageDates, doneElsewhere })}
                             />
@@ -2909,19 +2923,30 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                 <span className="text-[9px] font-bold text-[#A0A0B0] uppercase tracking-wider">Shade</span>
                                 {/* Data row — spans the 3 parent cols with
                                     subgrid so its cells align to header. */}
+                                {/* One row; a denture with both jaws stacks an Upper and a Lower pill in its first cell. */}
+                                {[sortedTeeth].map((rowTeeth, rowIdx) => (
                                 <div
+                                  key={rowIdx}
                                   className="col-span-3 grid grid-cols-subgrid items-center px-1.5 py-1 rounded-md border"
                                   style={{ background: rowBg, borderColor: rowBorder }}
                                 >
                                   <div className="flex flex-wrap items-center gap-1">
                                     {/* A denture reads as its arch, not tooth by tooth. */}
-                                    {isDentureItem(sel.itemId) && sortedTeeth.length > 0 ? (
-                                      <span
-                                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white border whitespace-nowrap"
-                                        style={{ color, borderColor: rowBorder }}
-                                      >
-                                        {archLabel(sortedTeeth)}
-                                      </span>
+                                    {isDentureItem(sel.itemId) && rowTeeth.length > 0 ? (
+                                      <div className="flex flex-col items-start gap-1">
+                                        {(rowTeeth.some(t => isUpperTooth(t)) && rowTeeth.some(t => !isUpperTooth(t))
+                                          ? ['Upper arch', 'Lower arch']
+                                          : [archLabel(rowTeeth)]
+                                        ).map(label => (
+                                          <span
+                                            key={label}
+                                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white border whitespace-nowrap"
+                                            style={{ color, borderColor: rowBorder }}
+                                          >
+                                            {label}
+                                          </span>
+                                        ))}
+                                      </div>
                                     ) : sortedTeeth.length > 0 ? [
                                       ...groupTeeth(sortedTeeth).arches.map(a => (
                                         <span
@@ -2953,6 +2978,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                                     {!aiPrefilled && sel.shade && aiFields[`service:${sel.itemId}:shade`] != null && <AiSparkle label confidence={aiFields[`service:${sel.itemId}:shade`]} />}
                                   </span>
                                 </div>
+                                ))}
                               </div>
                               {/* Other non-per-tooth chips, if any */}
                               {(sel.brand || sel.retainerType || sel.applianceOption || (sel.stages?.length ?? 0) > 0) && (
@@ -3125,15 +3151,65 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                 </span>
               ))}
             </div>
+            <div className="relative flex items-center gap-2">
+              {followUpMatch && (
+                <span
+                  tabIndex={0}
+                  title={`A matching denture case (${followUpMatch.case.id}) already exists for this patient. Add the new stage(s) to it, or create a separate case instead.`}
+                  className="text-[#A0A0B0] hover:text-[#4D8EF7] cursor-help"
+                >
+                  <Info className="w-4 h-4" />
+                </span>
+              )}
+              <div className="flex items-stretch">
             <button
               onClick={handleSubmit}
               disabled={!canSubmit}
               title={followUp ? `Add the new stages to ${followUp.case.id}` : canSubmit ? 'Submit this case' : 'Fill patient, lab, and at least one service to submit'}
-              className="inline-flex items-center gap-2 px-7 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 shadow-[0_4px_12px_rgba(77,142,247,0.35)] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
+              className={`inline-flex items-center gap-2 px-7 py-3 rounded-l-xl ${followUpMatch ? "" : "rounded-r-xl"} text-sm font-bold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-95 shadow-[0_4px_12px_rgba(77,142,247,0.35)] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none`}
             >
               {followUp ? <GitMerge className="w-4 h-4" /> : <Check className="w-4 h-4" strokeWidth={3} />}
-              {followUp ? `Add to ${followUp.case.id}` : 'Create case'}
+              {followUp ? `Add to ${followUp.case.id}` : !isLab && caseSource === 'Impressions (By Post)' ? 'Ready for Dispatch' : 'Create case'}
             </button>
+
+                {followUpMatch && (
+                  <button
+                    type="button"
+                    onClick={() => setSubmitMenuOpen(o => !o)}
+                    aria-label="More ways to submit"
+                    aria-expanded={submitMenuOpen}
+                    className="px-2.5 rounded-r-xl text-white bg-gradient-to-r from-[#8F9CF9] to-[#A59DFF] border-l border-white/30 hover:opacity-95 shadow-[0_4px_12px_rgba(77,142,247,0.35)]"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              {followUpMatch && submitMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSubmitMenuOpen(false)} />
+                  <div className="absolute right-0 bottom-full mb-2 z-50 w-72 bg-white border border-[#E0E0E6] rounded-xl shadow-xl py-1">
+                    {([
+                      { mode: 'append' as const, icon: <GitMerge className="w-4 h-4" />, label: `Add to ${followUpMatch.case.id}`, hint: 'New stage order on the existing case' },
+                      { mode: 'new' as const, icon: <Plus className="w-4 h-4" />, label: 'Create a new case', hint: 'Ignore the match and make a separate case' },
+                    ]).map(o => (
+                      <button
+                        key={o.mode}
+                        type="button"
+                        onClick={() => { setSubmitMode(o.mode); setSubmitMenuOpen(false); }}
+                        className="w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-[#F8F9FC]"
+                      >
+                        <span className="mt-0.5 text-[#4D8EF7]">{o.icon}</span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-xs font-semibold text-[#030213]">{o.label}</span>
+                          <span className="block text-[11px] text-[#717182]">{o.hint}</span>
+                        </span>
+                        {submitMode === o.mode && <Check className="w-3.5 h-3.5 text-[#4D8EF7] mt-1" strokeWidth={3} />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -3181,6 +3257,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
         <ServicePickerWithDetails
           selections={selections}
           followUp={followUp}
+          allowDoneElsewhere={allowDoneElsewhere}
           initialActiveId={activeDetailsId}
           caseInstructions={caseInstructions}
           onCaseInstructionsChange={setCaseInstructions}
@@ -3208,6 +3285,7 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
       {/* ── Case Source popup ── method selector + optional file uploads ── */}
       {caseSourceOpen && (
         <CaseSourcePopup
+          title={isLab ? 'Case Source' : 'Scan Source'}
           method={caseSource}
           files={caseSourceFiles}
           extraFiles={caseSourceExtraFiles}
@@ -3489,10 +3567,12 @@ function PatientExtrasDrawer({ value, onChange, onClose }: {
 function ServicePickerWithDetails({
   selections, initialActiveId,
   caseInstructions, onCaseInstructionsChange,
-  onToggle, onUpdate, onRemove, onClose, followUp,
+  onToggle, onUpdate, onRemove, onClose, followUp, allowDoneElsewhere,
 }: {
   selections: ServiceSelection[];
   followUp?: FollowUpMatch | null;
+  /** "Done elsewhere" is offered only when the case came from a prescription (email / AI), not manual entry. */
+  allowDoneElsewhere?: boolean;
   initialActiveId: string | null;
   /** Shared case-level instructions — same text across every service. */
   caseInstructions: string;
@@ -3659,6 +3739,7 @@ function ServicePickerWithDetails({
               <ServiceDetailsBody
                 selection={activeSel}
                 followUp={followUp}
+                allowDoneElsewhere={allowDoneElsewhere}
                 caseInstructions={caseInstructions}
                 onCaseInstructionsChange={onCaseInstructionsChange}
                 onUpdate={(patch) => onUpdate(activeSel.itemId, patch)}
@@ -3987,10 +4068,11 @@ function AlignerSpecifics({ selection, onUpdate }: {
 // The set of form fields that render for a single service selection. Used by
 // the standalone ServiceDetailsDrawer + the right pane of
 // ServicePickerWithDetails.
-function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, onCaseInstructionsChange, followUp }: {
+function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, onCaseInstructionsChange, followUp, allowDoneElsewhere }: {
   selection: ServiceSelection;
   /** Denture follow-up match — its ordered stages show locked in the picker. */
   followUp?: FollowUpMatch | null;
+  allowDoneElsewhere?: boolean;
   onUpdate: (patch: Partial<ServiceSelection>) => void;
   onRemove?: () => void;
   /** Shared case-level instructions — same value across all services. */
@@ -4089,6 +4171,7 @@ function ServiceDetailsBody({ selection, onUpdate, onRemove, caseInstructions, o
                 stages={selection.stages ?? []}
                 dates={selection.stageDates ?? {}}
                 doneElsewhere={selection.doneElsewhere}
+                allowDoneElsewhere={allowDoneElsewhere || (selection.doneElsewhere?.length ?? 0) > 0}
                 existing={followUp?.existing}
                 onChange={(stages, stageDates, doneElsewhere) => onUpdate({ stages, stageDates, doneElsewhere })}
               />
@@ -4487,8 +4570,9 @@ function ServiceDetailsDrawer({ selection, onUpdate, onClose }: {
 // state until the user clicks Save — that way Cancel truly discards the
 // in-progress edits.
 function CaseSourcePopup({
-  method, files, extraFiles, scanner, courier, onSave, onClose,
+  method, files, extraFiles, scanner, courier, title = 'Case Source', onSave, onClose,
 }: {
+  title?: string;
   method: string;
   files: Record<string, string | null>;
   extraFiles: string[];
@@ -4627,7 +4711,7 @@ function CaseSourcePopup({
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#F0EFF6] flex-shrink-0">
-          <h3 className="text-lg font-bold text-[#030213]">Case Source</h3>
+          <h3 className="text-lg font-bold text-[#030213]">{title}</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#F3F3F5] hover:bg-[#E8E8EC] flex items-center justify-center text-[#717182]">
             <X className="w-4 h-4" />
           </button>

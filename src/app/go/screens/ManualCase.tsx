@@ -247,8 +247,11 @@ export function ToothPicker({ value, onChange, invalid }: { value: string[]; onC
 
 const GENDERS = ['Female', 'Male', 'Other', 'Prefer not to say'];
 
-export function PatientPicker({ value, onChange, invalid }: { value: string | null; onChange: (id: string) => void; invalid?: boolean }) {
-  const [open, setOpen] = useState(false);
+/** open / onOpenChange / bare let a parent drive the sheet (bare = no field, just the sheet). */
+export function PatientPicker({ value, onChange, invalid, open: openProp, onOpenChange, bare }: { value: string | null; onChange: (id: string) => void; invalid?: boolean; open?: boolean; onOpenChange?: (o: boolean) => void; bare?: boolean }) {
+  const [openInner, setOpenInner] = useState(false);
+  const open = openProp ?? openInner;
+  const setOpen = (v: boolean) => { setOpenInner(v); onOpenChange?.(v); };
   const [q, setQ] = useState('');
   const [creating, setCreating] = useState(false);
   // Editing the details of a patient added on the spot (web: "+ Add additional details")
@@ -284,7 +287,7 @@ export function PatientPicker({ value, onChange, invalid }: { value: string | nu
   const extras = p?.isNew ? [p.dob !== '—' && `DOB ${p.dob}`, p.gender, p.phone, p.email].filter(Boolean) as string[] : [];
 
   return (
-    <div>
+    <div className={bare ? 'hidden' : undefined}>
       <Label>Patient</Label>
       <button type="button" onClick={() => setOpen(true)}
         className={cx('w-full min-h-[52px] rounded-2xl bg-go-surface border px-3 py-2 flex items-center gap-3 text-left transition',
@@ -398,8 +401,10 @@ export function PatientPicker({ value, onChange, invalid }: { value: string | nu
 
 // ─── Lab: search, favourites, or add an offline lab on the spot ─────────────
 
-export function LabPicker({ value, onChange, invalid }: { value: string | null; onChange: (id: string) => void; invalid?: boolean }) {
-  const [open, setOpen] = useState(false);
+export function LabPicker({ value, onChange, invalid, open: openProp, onOpenChange, bare, header }: { value: string | null; onChange: (id: string) => void; invalid?: boolean; open?: boolean; onOpenChange?: (o: boolean) => void; bare?: boolean; header?: React.ReactNode }) {
+  const [openInner, setOpenInner] = useState(false);
+  const open = openProp ?? openInner;
+  const setOpen = (v: boolean) => { setOpenInner(v); onOpenChange?.(v); };
   const [q, setQ] = useState('');
   const [tab, setTab] = useState<'all' | 'fav'>('all');
   const [favs, setFavs] = useState<string[]>(['northstar']);
@@ -413,7 +418,7 @@ export function LabPicker({ value, onChange, invalid }: { value: string | null; 
   const create = () => { const id = addLab({ name: nl.name.trim(), town: nl.town.trim() || '—', email: nl.email || undefined, phone: nl.phone || undefined }); onChange(id); close(); };
 
   return (
-    <div>
+    <div className={bare ? 'hidden' : undefined}>
       <Label>Lab</Label>
       <button type="button" onClick={() => setOpen(true)}
         className={cx('w-full min-h-[52px] rounded-2xl bg-go-surface border px-3 py-2 flex items-center gap-3 text-left transition',
@@ -445,6 +450,7 @@ export function LabPicker({ value, onChange, invalid }: { value: string | null; 
         ) : undefined}>
         {!creating ? (
           <>
+            {header}
             <div className="sticky top-0 bg-go-surface pb-3 z-10 space-y-2">
               <SearchBox value={q} onChange={setQ} placeholder="Lab name or town" />
               <Segmented value={tab} onChange={setTab} options={[{ value: 'all', label: 'All labs', count: LABS.length }, { value: 'fav', label: 'Favourites', count: favs.length }]} />
@@ -840,7 +846,7 @@ export default function ManualCaseScreen() {
         <div className="flex gap-2.5">
           {step > 0 && <Btn variant="secondary" onClick={() => { setStep(step - 1); setTried(false); }}>Back</Btn>}
           <Btn block onClick={next} icon={step === 3 ? <Check className="w-5 h-5" /> : undefined}>
-            {step === 3 ? 'Create case' : step === 1 && !f.items.length ? 'Add a service to continue' : read ? 'Confirm' : 'Continue'}
+            {step === 3 ? 'Ready for Dispatch' : step === 1 && !f.items.length ? 'Add a service to continue' : read ? 'Confirm' : 'Continue'}
           </Btn>
         </div>
       }>

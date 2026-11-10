@@ -1,11 +1,11 @@
 // ─── Smile Genius Go — mobile UI kit ─────────────────────────────────────────
 // Small set of touch-first primitives. Every colour comes from the `go-*`
 // tokens so each component works in light and dark without variants.
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronDown, Check, Search, X, Home, Layers, Plus, Receipt, Wallet, User, CheckCircle2, AlertTriangle, Info, Camera, PenLine, Mic,
+  ChevronLeft, ChevronDown, Check, Search, X, Home, Layers, Plus, Receipt, Wallet, User, Truck, PackageCheck, CheckCircle2, AlertTriangle, Info, Camera, PenLine, Mic,
 } from './icons';
 import { FEATURES, useGo, useScoped } from './store';
 import { LabCase, ReadinessLevel, STAGES, Stage, invoiceNeedsAction, isOverdue, readiness, stageIndex, stageLabel } from './data';
@@ -14,25 +14,61 @@ export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Bool
 
 // ─── Layout ─────────────────────────────────────────────────────────────────
 
-// bg defaults to transparent so the phone's .go-wash gradient shows behind every screen
-export function Screen({ header, children, footer, tabs, bg = 'bg-transparent' }: {
-  header?: React.ReactNode; children: React.ReactNode; footer?: React.ReactNode; tabs?: boolean; bg?: string;
+// bg defaults to transparent so the phone's .go-wash gradient shows behind every screen.
+// floating: something that hovers over the content just above the footer (e.g. the case's Order form / Files capsule).
+// It is told `compact` while the page scrolls down, so it can shrink out of the way.
+export function Screen({ header, children, footer, tabs, bg = 'bg-transparent', floating }: {
+  header?: React.ReactNode; children: React.ReactNode; footer?: React.ReactNode; tabs?: boolean | React.ReactNode; bg?: string;
+  floating?: (compact: boolean) => React.ReactNode;
 }) {
+  const [compact, setCompact] = useState(false);
+  const lastY = useRef(0);
+  const onScroll = floating ? (e: React.UIEvent<HTMLDivElement>) => {
+    const y = e.currentTarget.scrollTop;
+    const d = y - lastY.current;
+    lastY.current = y;
+    if (y < 24) setCompact(false); else if (d > 4) setCompact(true); else if (d < -4) setCompact(false);
+  } : undefined;
   return (
     <div className={cx('absolute inset-0 flex flex-col', bg)}>
       {header}
-      <div className="go-scroll flex-1 overflow-y-auto overflow-x-hidden">
+      <div className="go-scroll flex-1 overflow-y-auto overflow-x-hidden" onScroll={onScroll}>
         {children}
-        <div className={tabs ? 'h-28' : 'h-6'} />
+        <div className={tabs ? 'h-28' : floating ? 'h-20' : 'h-6'} />
       </div>
+      {floating && (
+        <div className="relative z-20 h-0">
+          <div className={cx('absolute inset-x-0 flex justify-center pointer-events-none', footer ? 'bottom-3' : 'bottom-[calc(env(safe-area-inset-bottom)+18px)]')}>
+            <div className="pointer-events-auto">{floating(compact)}</div>
+          </div>
+        </div>
+      )}
       {footer && (
         <div className="relative z-10 border-t border-go-line bg-go-surface/90 backdrop-blur-xl px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+14px)]">
           {footer}
         </div>
       )}
-      {tabs && <TabBar />}
+      {tabs && (tabs === true ? <TabBar /> : tabs)}
     </div>
   );
+}
+
+/** '/go' for the full app, '/go/lite' in the light version. Shared screens build their links from it. */
+export function useBase() {
+  const p = useLocation().pathname;
+  return p.startsWith('/go/lite') ? '/go/lite' : '/go';
+}
+
+/** Re-render when the next prescription photo still being read is done, so "Reading" turns into the draft by itself. */
+export function useReadTick(cases: LabCase[]) {
+  const [, setTick] = useState(0);
+  const now = Date.now();
+  const next = Math.min(...cases.map(c => c.scan?.readyAt ?? Infinity).filter(t => t > now));
+  useEffect(() => {
+    if (!Number.isFinite(next)) return;
+    const t = setTimeout(() => setTick(x => x + 1), next - Date.now() + 30);
+    return () => clearTimeout(t);
+  }, [next]);
 }
 
 /** Back = browser back when there is history inside the app, else `fallback`. */
@@ -42,16 +78,20 @@ export function useBack(fallback = '/go/home') {
   return () => (location.key !== 'default' ? navigate(-1) : navigate(fallback));
 }
 
-export function TopBar({ title, sub, back, fallback, right, large }: {
+export function TopBar({ title, sub, back, fallback, right, large, compact, onClose }: {
   title?: React.ReactNode; sub?: React.ReactNode; back?: boolean; fallback?: string; right?: React.ReactNode; large?: boolean;
+  /** Large title with no back button or actions: drop the empty row above it. */
+  compact?: boolean;
+  /** A close (×) button instead of back, with its own action. */
+  onClose?: () => void;
 }) {
   const goBack = useBack(fallback);
   return (
     <div className="relative z-10 bg-go-bg/80 backdrop-blur-xl">
-      <div className="flex items-center gap-2 px-3 h-14">
-        {back ? (
-          <button onClick={goBack} aria-label="Go back" className="w-10 h-10 -ml-1 rounded-full flex items-center justify-center text-go-ink hover:bg-go-raised active:scale-95 transition">
-            <ChevronLeft className="w-6 h-6" />
+      <div className={cx('flex items-center gap-2 px-3', large && compact && !back && !right ? 'h-3' : 'h-14')}>
+        {back || onClose ? (
+          <button onClick={onClose ?? goBack} aria-label={onClose ? 'Close' : 'Go back'} className="w-10 h-10 -ml-1 rounded-full flex items-center justify-center text-go-ink hover:bg-go-raised active:scale-95 transition">
+            {onClose ? <X className="w-5 h-5" /> : <ChevronLeft className="w-6 h-6" />}
           </button>
         ) : <div className="w-1" />}
         {!large && (
@@ -89,6 +129,55 @@ export function IconBtn({ children, onClick, label, badge }: { children: React.R
 // ─── Tab bar ────────────────────────────────────────────────────────────────
 
 export function TabBar() {
+  return useBase() === '/go' ? <FullTabBar /> : <LiteTabBar />;
+}
+
+/** Light version: Home · Deliveries (to dispatch, arriving, received) · + · Lab work · Me. The + goes straight to the prescription scan. */
+function LiteTabBar() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const { cases } = useScoped();
+  const toDispatch = cases.filter(c => c.stage === 'ready' && !c.onHold).length;
+  const arriving = cases.filter(c => c.stage === 'shipped').length;
+  const L = '/go/lite';
+  const tabs = [
+    { to: `${L}/home`, label: 'Home', icon: Home },
+    { to: `${L}/deliveries`, label: 'Deliveries', icon: Truck, badge: toDispatch + arriving, also: `${L}/dispatch` },
+    null,
+    { to: `${L}/work`, label: 'Lab work', icon: Layers },
+    { to: `${L}/account`, label: 'Me', icon: User },
+  ];
+  // Docked to the bottom edge, full width: it fills down to the edge, with the labels kept above the home indicator.
+  return (
+    <nav className="go-tabbar absolute bottom-0 inset-x-0 z-20 bg-go-surface/90 backdrop-blur-2xl border-t border-go-line pb-[max(env(safe-area-inset-bottom),14px)]">
+      <div className="relative flex items-center justify-around h-16">
+        {tabs.map(t => {
+          if (!t) {
+            return (
+              <button key="new" onClick={() => navigate(`${L}/new`)} aria-label="Create lab work"
+                className="-mt-7 w-14 h-14 rounded-[20px] go-grad go-glow text-white flex items-center justify-center active:scale-95 transition ring-4 ring-go-bg">
+                <Plus className="w-6 h-6" strokeWidth={2.5} />
+              </button>
+            );
+          }
+          const active = pathname.startsWith(t.to) || (!!t.also && pathname.startsWith(t.also));
+          const Icon = t.icon;
+          return (
+            <button key={t.to} onClick={() => navigate(t.to)} className="relative flex-1 flex flex-col items-center gap-0.5 py-1">
+              <span className={cx('relative flex items-center justify-center w-10 h-7 rounded-full transition', active && 'bg-go-brand-soft')}>
+                <Icon className={cx('w-[20px] h-[20px] transition', active ? 'text-go-brand' : 'text-go-muted')} />
+                {!!t.badge && <span className="absolute -top-1 right-0 min-w-[16px] h-4 px-1 rounded-full bg-go-bad text-white text-[9px] font-bold flex items-center justify-center">{t.badge}</span>}
+              </span>
+              <span className={cx('text-[10px] font-semibold', active ? 'text-go-brand' : 'text-go-muted')}>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function FullTabBar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { invoices } = useScoped();
@@ -558,7 +647,9 @@ export function ProgressRail({ stage, className }: { stage: Stage; className?: s
 // ─── Toasts ─────────────────────────────────────────────────────────────────
 
 export function Toaster() {
-  const { toasts } = useGo();
+  const { toasts: all, phoneSide } = useGo();
+  // Each phone shows its own messages (and the ones sent to it)
+  const toasts = all.filter(t => t.side === phoneSide);
   return (
     <div className="absolute top-3 sm:top-[54px] inset-x-3 z-[60] flex flex-col gap-2 pointer-events-none">
       {toasts.map(t => (
@@ -570,5 +661,18 @@ export function Toaster() {
         </div>
       ))}
     </div>
+  );
+}
+
+/** Teeth as text, but a whole arch shows as chips: "Both arches" becomes "Upper Arch" and "Lower Arch". */
+export function TeethChips({ teeth, className }: { teeth: string[]; className?: string }) {
+  const arches = teeth.flatMap(t => (/both arches/i.test(t) ? ['Upper Arch', 'Lower Arch'] : /^(upper|lower) arch$/i.test(t) ? [t.replace(/\b\w/g, c => c.toUpperCase())] : []));
+  const rest = teeth.filter(t => !/arch/i.test(t));
+  if (!arches.length) return <>{teeth.join(', ')}</>;
+  return (
+    <span className={cx('inline-flex flex-wrap items-center gap-1 align-middle', className)}>
+      {arches.map(a => <span key={a} className="inline-flex items-center h-5 px-2 rounded-full bg-go-brand-soft text-go-brand-ink text-[10.5px] font-semibold">{a}</span>)}
+      {rest.length > 0 && <span>{rest.join(', ')}</span>}
+    </span>
   );
 }

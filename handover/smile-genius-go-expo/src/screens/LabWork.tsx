@@ -2,7 +2,7 @@
 // A plain list of cases (no timeline / day grouping), soonest delivery date
 // first, narrowed by the status chips, search and dentist / lab filters.
 // Ported 1:1 from the web prototype (screens/LabWork.tsx).
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import {
@@ -12,6 +12,7 @@ import {
 import type { IconType } from '../components/icons';
 import { FEATURES, ME, useGo, useScoped } from '../store/store';
 import { ReceiveSheet } from './Logistics';
+import { CaseDocBar, FileViewer, StageRow, SmallPill, canOpen } from './CaseDocs';
 import {
   ATTENTION, Attention, CLINICIANS, labStatusOf, LABS, LabCase, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
   createdOn, initials, patientById, STAGE_NAMES, StageLine, dueLabel, patchItemStages, phaseName, remainingStages, stagedKindOf, practiceName, readiness, relDay, shortName, stageIndex,
@@ -76,7 +77,40 @@ const Initials = ({ c, size = 40 }: { c: LabCase; size?: number }) => (
   </View>
 );
 
-/** List view: initials · patient + case ID · dentist + lab · status + delivery date. */
+/**
+ * The case's services as small chips: the first two when both fit on the line (else the first), then "+N" for
+ * the rest. Measured with onLayout: the line's width against the chips' natural width.
+ */
+function ServiceChips({ c }: { c: LabCase }) {
+  const items = allItems(c);
+  const [two, setTwo] = useState(true);
+  const [lineW, setLineW] = useState(0);
+  const [chipsW, setChipsW] = useState(0);
+  // Try two again whenever the case changes; drop to one if they don't fit.
+  useEffect(() => { setTwo(true); }, [c.id, items.length]);
+  useEffect(() => { if (two && items.length > 1 && lineW > 0 && chipsW > lineW + 1) setTwo(false); }, [two, items.length, lineW, chipsW]);
+  if (!items.length) return null;
+  const shown = items.slice(0, two ? 2 : 1);
+  const more = items.length - shown.length;
+  return (
+    <View className="mt-1 overflow-hidden" onLayout={e => setLineW(e.nativeEvent.layout.width)}>
+      <View className="flex-row items-center gap-1 self-start" onLayout={e => setChipsW(e.nativeEvent.layout.width)}>
+        {shown.map((it, i) => (
+          <View key={i} className={cx('h-5 px-2 rounded-full bg-go-raised border border-go-line justify-center flex-shrink-0', shown.length === 1 && 'max-w-[180px]')}>
+            <T className="text-[10.5px] font-semibold text-go-ink2" numberOfLines={1}>{it.service}</T>
+          </View>
+        ))}
+        {more > 0 && (
+          <View className="h-5 px-1.5 rounded-full bg-go-brand-soft justify-center flex-shrink-0">
+            <T className="text-[10.5px] font-bold text-go-brand-ink">+{more}</T>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+/** List view: initials · patient + case ID · dentist + lab · service chips (+ next stage) · status + delivery date. */
 function CaseRow({ c }: { c: LabCase }) {
   const r = readiness(c);
   const due = dueLabel(c);
@@ -90,7 +124,8 @@ function CaseRow({ c }: { c: LabCase }) {
           <T className="text-[10.5px] text-go-faint flex-shrink-0" style={MONO}>{c.id}</T>
         </View>
         <WhoLine c={c} className="mt-0.5" />
-        {/* Denture stage / aligner phase that the date belongs to */}
+        <ServiceChips c={c} />
+        {/* Denture stage / aligner phase that the date belongs to: its own line, so the chips keep theirs */}
         {!!due && <T className="text-[11.5px] font-medium text-go-violet mt-0.5 truncate">Next: {due}</T>}
       </View>
       <View className="items-end flex-shrink-0">
@@ -167,10 +202,32 @@ const createdIn = (c: LabCase, b: [string, string] | null) => {
   const d = createdOn(c);
   return !!d && ymd(new Date(d)) >= b[0] && ymd(new Date(d)) <= b[1];
 };
+/** Requested delivery date filter: the next few days, then a custom from / to. */
+type DueRange = '7' | '14' | '30' | 'custom';
+const DUE_PRESETS: { id: DueRange | null; label: string }[] = [
+  { id: null, label: 'Any date' }, { id: '7', label: 'Next 7 days' }, { id: '14', label: 'Next 2 weeks' },
+  { id: '30', label: 'Next 30 days' }, { id: 'custom', label: 'Custom' },
+];
+/** Inclusive day range [from, to] as yyyy-mm-dd, starting today; null when no delivery filter. */
+function dueBoundsFor(range: DueRange | null, from: string | null, to: string | null): [string, string] | null {
+  if (!range) return null;
+  if (range === 'custom') return from || to ? [from ?? '0000-01-01', to ?? '9999-12-31'] : null;
+  const end = new Date(); end.setDate(end.getDate() + Number(range) - 1);
+  return [ymd(new Date()), ymd(end)];
+}
+/** A case's requested delivery date is its soonest open one (returnBy); cases without one never match. */
+const dueIn = (c: LabCase, b: [string, string] | null) => {
+  if (!b) return true;
+  if (!c.returnBy) return false;
+  const d = ymd(new Date(c.returnBy));
+  return d >= b[0] && d <= b[1];
+};
 const fmtYmd = (s: string) => new Date(`${s}T12:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
+/** Demo: cases with several services come first, so the chips with a count are easy to find. */
+const multiFirst = (x: LabCase, y: LabCase) => Number(allItems(y).length > 1) - Number(allItems(x).length > 1);
 /** Soonest delivery date first; cases with no date (e.g. drafts) at the end. */
-const byDelivery = (x: LabCase, y: LabCase) => (x.returnBy || '9').localeCompare(y.returnBy || '9');
+const byDelivery = (x: LabCase, y: LabCase) => multiFirst(x, y) || (x.returnBy || '9').localeCompare(y.returnBy || '9');
 
 /** Removable active-filter chip (brand fill, ×). */
 function FilterChip({ label, onPress }: { label: string; onPress: () => void }) {
@@ -185,7 +242,7 @@ function FilterChip({ label, onPress }: { label: string; onPress: () => void }) 
 
 export function LabWorkScreen() {
   const { cases } = useScoped();
-  const params = useLocalSearchParams<{ f?: string; r?: string; day?: string; dentist?: string; lab?: string; created?: string; from?: string; to?: string; view?: string }>();
+  const params = useLocalSearchParams<{ f?: string; r?: string; day?: string; dentist?: string; lab?: string; created?: string; from?: string; to?: string; due?: string; dfrom?: string; dto?: string; view?: string }>();
   const dayP = one(params.day);
   const day = dayP ? Number(dayP) : null;
   // Status filter from the Home tiles: ready | arriving | questions | overdue
@@ -202,7 +259,12 @@ export function LabWorkScreen() {
   const cFrom = one(params.from);
   const cTo = one(params.to);
   const bounds = createdBounds(created, cFrom, cTo);
-  const nFilters = (status ? 1 : 0) + (dentist ? 1 : 0) + (labF ? 1 : 0) + (bounds ? 1 : 0);
+  // Requested delivery date: ?due=7|14|30|custom (+ ?dfrom=&dto= for custom)
+  const due = (['7', '14', '30', 'custom'] as const).find(x => x === one(params.due)) ?? null;
+  const dFrom = one(params.dfrom);
+  const dTo = one(params.dto);
+  const dueBounds = dueBoundsFor(due, dFrom, dTo);
+  const nFilters = (status ? 1 : 0) + (dentist ? 1 : 0) + (labF ? 1 : 0) + (bounds ? 1 : 0) + (dueBounds ? 1 : 0);
   // Card view is switched off for now (FEATURES.labCardView). When on: list
   // (default) or cards, in the route params so scenarios can deep-link (?view=cards).
   const labCardView = FEATURES.labCardView;
@@ -211,14 +273,14 @@ export function LabWorkScreen() {
   const base = useMemo(() => cases.filter(c => {
     return matchesSearch(c, q) && (day === null || (c.appointment && dayOffset(c.appointment.at) === day))
       && (!status || matchesAttention(c, status))
-      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds);
+      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds) && dueIn(c, dueBounds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [cases, q, day, status, dentist, labF, bounds?.[0], bounds?.[1]]);
+  }), [cases, q, day, status, dentist, labF, bounds?.[0], bounds?.[1], dueBounds?.[0], dueBounds?.[1]]);
   const baseNoStatus = useMemo(() => cases.filter(c => {
     return matchesSearch(c, q) && (day === null || (c.appointment && dayOffset(c.appointment.at) === day))
-      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds);
+      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds) && dueIn(c, dueBounds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [cases, q, day, dentist, labF, bounds?.[0], bounds?.[1]]);
+  }), [cases, q, day, dentist, labF, bounds?.[0], bounds?.[1], dueBounds?.[0], dueBounds?.[1]]);
   const shown = base.filter(c => rf === 'all' || readiness(c).level === rf);
   // Several keys in one update (undefined removes a param)
   const setMany = (kv: Record<string, string | null>) => {
@@ -230,6 +292,9 @@ export function LabWorkScreen() {
   const createdLabel = created === 'custom'
     ? `Created ${cFrom ? fmtYmd(cFrom) : '…'} – ${cTo ? fmtYmd(cTo) : '…'}`
     : `Created: ${CREATED_PRESETS.find(p => p.id === created)?.label.toLowerCase()}`;
+  const dueLabelText = due === 'custom'
+    ? `Delivery ${dFrom ? fmtYmd(dFrom) : '…'} – ${dTo ? fmtYmd(dTo) : '…'}`
+    : `Delivery: ${DUE_PRESETS.find(p => p.id === due)?.label.toLowerCase()}`;
   const sorted = [...shown].sort(byDelivery);
 
   const VIEWS: [string, IconType, string][] = [['list', List, 'List view'], ['cards', LayoutGrid, 'Card view']];
@@ -272,6 +337,7 @@ export function LabWorkScreen() {
         {!!dentist && <FilterChip label={clinicianName(dentist)} onPress={() => setParam('dentist', null)} />}
         {!!labF && <FilterChip label={labName(labF)} onPress={() => setParam('lab', null)} />}
         {!!bounds && <FilterChip label={createdLabel} onPress={() => setMany({ created: null, from: null, to: null })} />}
+        {!!dueBounds && <FilterChip label={dueLabelText} onPress={() => setMany({ due: null, dfrom: null, dto: null })} />}
         {day !== null && <FilterChip label={fmtDate(new Date(Date.now() + day * 864e5).toISOString())} onPress={() => setParam('day', null)} />}
         {/* Status chips — same statuses as the Home tiles */}
         {[{ id: null as Attention | null, label: 'All' }, ...ATTENTION.filter(x => x.home || x.id === status).map(x => ({ id: x.id as Attention | null, label: x.short }))].map(f => {
@@ -302,7 +368,7 @@ export function LabWorkScreen() {
         title={<View className="flex-row items-center gap-2"><Filter className="w-5 h-5 text-go-brand" /><T className="text-[19px] font-bold leading-[24px]">Lab work</T></View>}
         footer={
           <View className="flex-row gap-2">
-            <Btn variant="secondary" onPress={() => setMany({ f: null, dentist: null, lab: null, created: null, from: null, to: null })} disabled={!nFilters && !created}>Clear</Btn>
+            <Btn variant="secondary" onPress={() => setMany({ f: null, dentist: null, lab: null, created: null, from: null, to: null, due: null, dfrom: null, dto: null })} disabled={!nFilters && !created && !due}>Clear</Btn>
             <Btn className="flex-1" onPress={() => setFiltersOpen(false)}>Show {base.length} result{base.length === 1 ? '' : 's'}</Btn>
           </View>
         }>
@@ -333,6 +399,27 @@ export function LabWorkScreen() {
                 <View className="flex-1 min-w-0">
                   <T className="text-[11.5px] text-go-muted mb-1 px-0.5">To</T>
                   <DateField value={cTo ?? ''} min={cFrom ?? undefined} onChange={v => setParam('to', v || null)} accessibilityLabel="To" className="!h-12 !px-3" />
+                </View>
+              </View>
+            )}
+          </View>
+          <View>
+            <Label>Requested delivery date</Label>
+            <Chips options={DUE_PRESETS.map(p => p.label)} value={DUE_PRESETS.find(p => p.id === due)!.label}
+              onChange={(lbl: string) => {
+                const v = DUE_PRESETS.find(p => p.label === lbl)?.id ?? null; setMany(v === 'custom'
+                  ? { due: 'custom', dfrom: dFrom ?? ymd(new Date()), dto: dTo ?? ymd(new Date(Date.now() + 7 * 864e5)) }
+                  : { due: v, dfrom: null, dto: null });
+              }} />
+            {due === 'custom' && (
+              <View className="flex-row gap-2 mt-3">
+                <View className="flex-1 min-w-0">
+                  <T className="text-[11.5px] text-go-muted mb-1 px-0.5">From</T>
+                  <DateField value={dFrom ?? ''} max={dTo ?? undefined} onChange={v => setParam('dfrom', v || null)} accessibilityLabel="Delivery from" className="!h-12 !px-3" />
+                </View>
+                <View className="flex-1 min-w-0">
+                  <T className="text-[11.5px] text-go-muted mb-1 px-0.5">To</T>
+                  <DateField value={dTo ?? ''} min={dFrom ?? undefined} onChange={v => setParam('dto', v || null)} accessibilityLabel="Delivery to" className="!h-12 !px-3" />
                 </View>
               </View>
             )}
@@ -460,30 +547,6 @@ type Tab = 'details' | 'activity' | 'messages' | 'files';
 
 const isoFromYmd = (d: string) => (d ? new Date(`${d}T12:00`).toISOString() : '');
 const tomorrowYmd = () => new Date(Date.now() + 864e5).toISOString().slice(0, 10);
-
-/** Small pill (the web `!h-[22px] !px-2`). */
-const SmallPill = ({ tone, children }: { tone: Tone; children: React.ReactNode }) => <Pill tone={tone} className="!h-[22px] !px-2">{children}</Pill>;
-
-/** One stage / phase row: name, date and where it is. */
-function StageRow({ s, n }: { s: StageLine; n: number }) {
-  const late = !s.state && !!s.date && dayOffset(s.date) < 0;
-  const tag = s.state === 'done-earlier' ? <SmallPill tone="neutral">Done earlier</SmallPill>
-    : s.state === 'received' ? <SmallPill tone="ok">Received</SmallPill>
-    : late ? <SmallPill tone="bad">Late</SmallPill>
-    : <SmallPill tone="brand">{s.date ? 'Due' : 'No date'}</SmallPill>;
-  return (
-    <View className="flex-row items-center gap-2.5 py-2">
-      <View className={cx('w-5 h-5 rounded-md items-center justify-center flex-shrink-0', s.state ? 'bg-go-raised' : 'bg-go-violet-soft')}>
-        <T className={cx('text-[10.5px] font-bold', s.state ? 'text-go-faint' : 'text-go-violet')}>{n}</T>
-      </View>
-      <View className="flex-1 min-w-0">
-        <T className={cx('text-[13px] font-semibold truncate', s.state ? 'text-go-muted' : 'text-go-ink')}>{s.name}</T>
-        <T className="text-[11.5px] text-go-muted">{s.date ? fmtDate(s.date) : 'Date not set'}{s.orderedAt ? ` · ordered ${fmtDate(s.orderedAt)}` : ''}</T>
-      </View>
-      {tag}
-    </View>
-  );
-}
 
 function ServicesCard({ c, onOrder }: { c: LabCase; onOrder: (index: number) => void }) {
   const items = allItems(c);
@@ -616,6 +679,7 @@ export function CaseDetailScreen() {
   const [chase, setChase] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(one(params.receive) === '1');
   const [orderFor, setOrderFor] = useState<number | null>(null);
+  const [fileOpen, setFileOpen] = useState<string | null>(null);
   if (!c) {
     return <Screen header={<TopBar back fallback="/work" title="Lab work" />}><EmptyState icon={<Search className="w-7 h-7 text-go-muted" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
   }
@@ -646,7 +710,7 @@ export function CaseDetailScreen() {
     ['Dentist', clinicianName(c.clinician)],
     ['Material', c.material],
     ['Shade', [c.shade, c.stumpShade && `stump ${c.stumpShade}`].filter(Boolean).join(' · ') || '—'],
-    ['Next delivery', `${dueLabel(c) ? `${dueLabel(c)} · ` : ''}${fmtDate(c.returnBy)}`],
+    // No Next delivery tile: each service card above shows its own delivery date.
     ['Order type', c.funding],
     ['Practice', practiceName(c.practice)],
     ['Created by', c.source === 'photo' ? `${c.createdBy} · from photo` : c.createdBy],
@@ -656,20 +720,25 @@ export function CaseDetailScreen() {
     brand: 'text-go-brand-ink', violet: 'text-go-violet', ok: 'text-go-ok', warn: 'text-go-warn', bad: 'text-go-bad', teal: 'text-go-teal', pink: 'text-go-pink', neutral: 'text-go-ink2',
   };
 
+  // Sticky next-step bar: Dispatch / Reply / Mark as received / Chase stay in thumb reach.
+  // Hidden on the Comments tab while replying — the composer there is the action.
+  const cta = step.cta && !((a === 'reply' || a === 'on-hold') && tab === 'messages') ? (
+    <View className="flex-row items-center gap-3">
+      <IconTile icon={step.icon} tone={step.tone} size="sm" />
+      <View className="flex-1 min-w-0">
+        <T className="text-[13.5px] font-semibold truncate">{step.title}</T>
+        <T className="text-[11.5px] text-go-muted truncate">{step.body}</T>
+      </View>
+      <StepBtn label={step.cta.label} onPress={step.cta.run} danger={a === 'chase'} />
+    </View>
+  ) : null;
+  // Order form and Files & scans float in a capsule just above the next step; it shrinks to icons while scrolling
+  // down (off on Comments, where the composer needs the room).
+  const docs = tab !== 'messages' ? (compact: boolean) => <CaseDocBar c={c} compact={compact} /> : undefined;
+
   return (
     <Screen header={<TopBar back fallback="/work" title={p.name} sub={`${c.id} · DOB ${p.dob}`} />}
-      // Sticky next-step bar: Dispatch / Reply / Mark as received / Chase stay in thumb reach.
-      // Hidden on the Comments tab while replying — the composer there is the action.
-      footer={step.cta && !((a === 'reply' || a === 'on-hold') && tab === 'messages') ? (
-        <View className="flex-row items-center gap-3">
-          <IconTile icon={step.icon} tone={step.tone} size="sm" />
-          <View className="flex-1 min-w-0">
-            <T className="text-[13.5px] font-semibold truncate">{step.title}</T>
-            <T className="text-[11.5px] text-go-muted truncate">{step.body}</T>
-          </View>
-          <StepBtn label={step.cta.label} onPress={step.cta.run} danger={a === 'chase'} />
-        </View>
-      ) : undefined}>
+      footer={cta ?? undefined} floating={docs}>
       {/* Summary */}
       <View className="px-4 pt-1">
         <View className="min-w-0">
@@ -774,12 +843,14 @@ export function CaseDetailScreen() {
           c.attachments.length ? (
             <Grid2>
               {c.attachments.map(f => (
-                <View key={f} className="rounded-2xl bg-go-surface border border-go-line p-3 aspect-[4/3] justify-between">
+                // Tap to open it (a scan opens the 3D viewer full screen); impressions travel by post, so nothing to open
+                <Pressable key={f} disabled={!canOpen(f)} onPress={() => setFileOpen(f)} accessibilityRole="button" accessibilityLabel={`Open ${f}`}
+                  className="rounded-2xl bg-go-surface border border-go-line p-3 aspect-[4/3] justify-between active:opacity-90">
                   <View className="w-9 h-9 rounded-xl bg-go-raised items-center justify-center">
                     {/photo/i.test(f) ? <ImageIcon className="w-[18px] h-[18px] text-go-brand" /> : /pdf/i.test(f) ? <FileText className="w-[18px] h-[18px] text-go-violet" /> : <Paperclip className="w-[18px] h-[18px] text-go-muted" />}
                   </View>
                   <T className="text-[12.5px] font-medium leading-[17px] line-clamp-2">{f}</T>
-                </View>
+                </Pressable>
               ))}
             </Grid2>
           ) : <EmptyState icon={<Inbox className="w-7 h-7 text-go-muted" />} title="No files" />
@@ -789,6 +860,7 @@ export function CaseDetailScreen() {
       <ChaseSheet c={c} open={chase} onClose={() => setChase(false)} />
       <ReceiveSheet c={c} open={receiveOpen} onClose={() => setReceiveOpen(false)} />
       <OrderStageSheet c={c} index={orderFor} onClose={() => setOrderFor(null)} />
+      <FileViewer c={c} name={fileOpen} onChange={setFileOpen} onClose={() => setFileOpen(null)} />
     </Screen>
   );
 }

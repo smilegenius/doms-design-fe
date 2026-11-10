@@ -8,16 +8,29 @@ import LoginPage from './pages/LoginPage';
 import InvitePage from './pages/InvitePage';
 import OnboardingPage from './pages/OnboardingPage';
 import PortalSelectPage from './pages/PortalSelectPage';
+// Growth Team Feedback (SALES Feedbacks/): its card on portal select, /growth, and the public review / upload / intake links
+import { GrowthLabGuard, GrowthPathTracker, PortalSelectWithGrowth, growthRoutes } from '../../SALES Feedbacks/mountInPortal';
 import DowntimePage from './pages/DowntimePage';
 import FlowsPage from './pages/FlowsPage';
 import CareStackFlowPage from './pages/CareStackFlowPage';
 import WhatsAppFlowPage from './pages/WhatsAppFlowPage';
 import HotfixesFlowPage from './pages/HotfixesFlowPage';
+import ManualCaseDispatchFlowPage from './pages/ManualCaseDispatchFlowPage';
 import DentureStagesFlowPage from './pages/DentureStagesFlowPage';
+import DentistContactFlowPage from './pages/DentistContactFlowPage';
+import NewCaseWalkthroughPage from './pages/NewCaseWalkthroughPage';
+import NewCaseFlowPage from './pages/NewCaseFlowPage';
+import FlowCasesPage from './newCase/FlowCasesPage';
+import FlowCaseDetail from './newCase/FlowCaseDetail';
+import OrderFormFlowPage from './pages/OrderFormFlowPage';
+import DsoAnalyticsFlowPage from './dsoAnalytics/DsoAnalyticsFlowPage';
+import AcceptOnPrintFlowPage from './acceptOnPrint/AcceptOnPrintFlowPage';
+import LabCaseDetail from './acceptOnPrint/LabCaseDetail';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import ClinicApp from './ClinicApp';
 import LabApp from './LabApp';
 import GoApp from './go/GoApp';
+import GoVersionSelect from './go/lite/VersionSelect';
 import SuppliersPage from './pages/SuppliersPage';
 import SupplierDetailPage from './pages/SupplierDetailPage';
 import InvoicesPage from './pages/InvoicesPage';
@@ -416,9 +429,11 @@ export default function App() {
     <ToastProvider>
     <SupplierFieldsProvider>
     <CaseScoringProvider>
+    <GrowthPathTracker />
     <Routes>
-      <Route path="/" element={<PortalSelectPage />} />
-      <Route path="/portal-select" element={<PortalSelectPage />} />
+      <Route path="/" element={<PortalSelectWithGrowth />} />
+      <Route path="/portal-select" element={<PortalSelectWithGrowth />} />
+      {growthRoutes}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/invite" element={<InvitePage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
@@ -431,8 +446,28 @@ export default function App() {
       <Route path="/flows/whatsapp" element={<WhatsAppFlowPage />} />
       <Route path="/flows/hotfixes-30-sep" element={<HotfixesFlowPage />} />
       <Route path="/flows/denture-stages" element={<DentureStagesFlowPage />} />
+      <Route path="/flows/dentist-contact" element={<DentistContactFlowPage />} />
+      <Route path="/flows/manual-case-dispatch" element={<ManualCaseDispatchFlowPage />} />
+      {/* New case flow (Oct 2026) — its own Lab Work list and case page, so the
+          portal's Cases screens stay as they are. Signs in with the demo account. */}
+      <Route path="/flows/new-case" element={<NewCaseWalkthroughPage />} />
+      <Route path="/flows/new-case/cases" element={<FlowCasesPage />} />
+      <Route path="/flows/new-case/case/:id" element={<NewCaseFlowPage />} />
+      {/* View Case: a finished flow case in the portal's own Case Details. */}
+      <Route path="/flows/new-case/view/:id" element={<FlowCaseDetail />} />
+      {/* Order form in Case Details (Oct 2026): the new Dental Order Form on View Case. */}
+      <Route path="/flows/order-form" element={<OrderFormFlowPage />} />
+      {/* DSO analytics — Group Overview (Oct 2026), proposed in Flows before it
+          replaces anything in /supplier/analytics. */}
+      <Route path="/flows/dso-analytics" element={<DsoAnalyticsFlowPage />} />
+      {/* [Lab] Accept case on print (Nov 2026): the walkthrough opens the portal's Case Details on
+          the flow's own demo cases, so the portal's Cases screens stay as they are. */}
+      <Route path="/flows/accept-on-print" element={<AcceptOnPrintFlowPage />} />
+      <Route path="/flows/accept-on-print/case/:id" element={<LabCaseDetail />} />
       {/* Smile Genius Go — clinician / dentist mobile app. Has its own demo
           sign-in, so it sits outside ProtectedRoute. */}
+      <Route path="/go" element={<GoVersionSelect />} />
+      <Route path="/go/lite/*" element={<GoApp variant="lite" />} />
       <Route path="/go/*" element={<GoApp />} />
       <Route
         path="/supplier/*"
@@ -461,9 +496,11 @@ export default function App() {
       <Route
         path="/lab/*"
         element={
-          <ProtectedRoute>
-            <LabApp />
-          </ProtectedRoute>
+          <GrowthLabGuard>
+            <ProtectedRoute>
+              <LabApp />
+            </ProtectedRoute>
+          </GrowthLabGuard>
         }
       />
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -21,6 +21,7 @@ export default function ShipmentDetailsModal({
   const [tracking, setTracking] = useState('');
   const [trackingUrl, setTrackingUrl] = useState('');
   const [expected, setExpected] = useState(dmyToIso(caseData.requestedDelivery));
+  const [comment, setComment] = useState('');
 
   const save = () => {
     recordShipment(caseData, {
@@ -29,6 +30,7 @@ export default function ShipmentDetailsModal({
       trackingNumber: tracking.trim(),
       trackingUrl: trackingUrl.trim() || undefined,
       expectedDelivery: isoToDmy(expected),
+      comment: comment.trim() || undefined,
     }, currentUser);
     toast.success(`Shipment recorded for ${caseData.id} — practice notified`);
     onClose();
@@ -73,6 +75,10 @@ export default function ShipmentDetailsModal({
           <div className="sm:col-span-2">
             <label className={labelCls}>Tracking link <span className="normal-case tracking-normal text-[#A0A0B0]">(optional)</span></label>
             <input value={trackingUrl} onChange={e => setTrackingUrl(e.target.value)} placeholder="https://" className={inputCls} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={labelCls}>Comment <span className="normal-case tracking-normal text-[#A0A0B0]">(optional)</span></label>
+            <textarea rows={2} value={comment} onChange={e => setComment(e.target.value)} placeholder="e.g. fragile, signature needed" className={`${inputCls} resize-none`} />
           </div>
         </div>
         <p className="text-[10px] text-[#A0A0B0] leading-relaxed">

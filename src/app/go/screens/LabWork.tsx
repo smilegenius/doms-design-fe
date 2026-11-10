@@ -1,27 +1,40 @@
 // ─── Lab work — list and case ────────────────────────────────────────────────
 // A plain list of cases (no timeline / day grouping), soonest delivery date
 // first, narrowed by the status chips, search and dentist / lab filters.
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  CalendarClock, CheckCircle2, ClipboardCheck, Clock, FileText, FlaskConical, Image as ImageIcon, Inbox, MessageSquare, PackageCheck,
-  Paperclip, Pause, PlusCircle, Search, Send, Truck, X, Hammer, Building, Filter, User, List, LayoutGrid,
+  AlertTriangle, CalendarClock, CheckCircle2, ClipboardCheck, Clock, FileText, FlaskConical, Image as ImageIcon, Inbox, Loader2, MessageSquare, PackageCheck,
+  Paperclip, Pause, PlusCircle, Search, Send, Sparkles, Truck, X, Hammer, Building, Filter, User, List, LayoutGrid,
 } from '../icons';
 import { FEATURES, ME, useGo, useScoped } from '../store';
 import { ReceiveSheet } from './Logistics';
+import { CaseDocBar, FileViewer, StageRow, canOpen } from './CaseDocs';
+import { PaperRx } from './ReadSource';
 import {
-  ATTENTION, Attention, CLINICIANS, labStatusOf, LABS, LabCase, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
-  createdOn, initials, patientById, STAGE_NAMES, StageLine, dueLabel, patchItemStages, phaseName, remainingStages, stagedKindOf, practiceName, readiness, relDay, shortName, stageIndex,
+  ATTENTION, Attention, CLINICIANS, labStatusOf, LABS, LabCase, LabStatus, READINESS_ORDER, matchesAttention, allItems, caseTitle, ReadinessLevel, STAGES, Stage, clinicianName, dayOffset, fmtDate, fmtDateTime, labName, nextAction, nowIso,
+  createdOn, initials, isReading, patientById, STAGE_NAMES, StageLine, dueLabel, patchItemStages, phaseName, remainingStages, stagedKindOf, practiceName, readiness, relDay, shortName, stageIndex,
 } from '../data';
-import { Btn, Card, Chips, EmptyState, IconTile, Input, Label, Pill, PickerField, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, cx } from '../ui';
+import { NOTIFIES_CLINIC } from '../lab/labData';
+import { Btn, Card, Chips, EmptyState, IconTile, Input, Label, Pill, PickerField, READINESS_TONE, Screen, SearchBox, Segmented, Sheet, TextArea, TopBar, Tone, TeethChips, cx, useBase, useReadTick } from '../ui';
 
 // ─── Rows and cards ─────────────────────────────────────────────────────────
 // Two views of the same cases: a dense list (default) and roomier cards.
 // Both show dentist + lab with their icons, since search matches those.
 
+/** A lab "Status changed to X · reason" note, taken apart. */
+function labStatusNote(e: LabCase['events'][number]): { status: string; title: string; reason?: string } | null {
+  const m = /^Status changed to (.+?)(?: · (.*))?$/.exec(e.text ?? '');
+  return m ? { status: m[1], title: `Lab status: ${m[1]}`, reason: m[2] } : null;
+}
+
 const drShort = (c: LabCase) => clinicianName(c.clinician).replace(/^Dr (\S)\S* /, 'Dr $1. ');
 const labShort = (c: LabCase) => labName(c.lab).replace(/ (Dental )?(Lab|Laboratory|Works)$/, '');
-const openCase = (c: LabCase) => (c.stage === 'draft' ? `/go/new/manual?draft=${c.id}` : `/go/work/${c.id}`);
+// The light version has no step-by-step form, so a draft opens its case page there. A draft made from a
+// prescription photo opens the light version's review page, filled in from the read.
+const openCase = (c: LabCase, base = '/go') => (c.stage === 'draft' && base === '/go' ? `/go/new/manual?draft=${c.id}`
+  : c.scan && base !== '/go' ? `${base}/new?draft=${c.id}` : `${base}/work/${c.id}`);
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
 /** Status pill text; an overdue case shows how late it is ("2 days late") instead of "Late". */
 const pillLabel = (c: LabCase, label: string) => {
@@ -52,12 +65,63 @@ const Initials = ({ c, size = 40 }: { c: LabCase; size?: number }) => (
   </span>
 );
 
-/** List view: initials · patient + case ID · dentist + lab · status + delivery date. */
+/**
+ * The case's services as small chips: the first two when both fit on the line (else the first), then "+N" for
+ * the rest. All of them on hover.
+ */
+function ServiceChips({ c }: { c: LabCase }) {
+  const items = allItems(c);
+  const line = useRef<HTMLSpanElement>(null);
+  const [two, setTwo] = useState(true);
+  // Try two (again whenever the case changes); drop to one if the line overflows.
+  useLayoutEffect(() => { setTwo(true); }, [c.id, items.length]);
+  useLayoutEffect(() => {
+    const el = line.current;
+    if (two && items.length > 1 && el && el.scrollWidth > el.clientWidth + 1) setTwo(false);
+  });
+  if (!items.length) return null;
+  const shown = items.slice(0, two ? 2 : 1);
+  const more = items.length - shown.length;
+  return (
+    <span ref={line} title={items.map(it => it.service).join(', ')} className="flex items-center gap-1 min-w-0 mt-1 overflow-hidden">
+      {shown.map((it, i) => (
+        <span key={i} className={cx('inline-flex items-center h-5 px-2 rounded-full bg-go-raised border border-go-line text-[10.5px] font-semibold text-go-ink2 whitespace-nowrap',
+          'flex-shrink-0', shown.length === 1 && 'max-w-[55%]')}>
+          <span className="truncate min-w-0">{it.service}</span>
+        </span>
+      ))}
+      {more > 0 && <span className="h-5 px-1.5 rounded-full bg-go-brand-soft text-[10.5px] font-bold text-go-brand-ink flex items-center flex-shrink-0">+{more}</span>}
+    </span>
+  );
+}
+
+/** A prescription photo still being read: its thumbnail, when it was taken, and "Reading". Opens the scan screen. */
+function ReadingRow({ c }: { c: LabCase }) {
+  const navigate = useNavigate();
+  const base = useBase();
+  return (
+    <button onClick={() => navigate(openCase(c, base))} className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-go-raised transition">
+      <span className="relative w-10 h-10 rounded-xl overflow-hidden bg-white border border-go-line flex-shrink-0">
+        {c.scan?.photoUrl ? <img src={c.scan.photoUrl} alt="" className="w-full h-full object-cover" /> : <PaperRx className="w-full h-full" />}
+        <span className="go-scanline absolute left-0 right-0 h-0.5 go-grad" />
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[14px] font-semibold text-go-ink truncate">Reading the prescription…</span>
+        <span className="block text-[12px] text-go-muted truncate mt-0.5">Photo taken {timeOf(c.scan!.takenAt)} · the details will appear here</span>
+      </span>
+      <Pill tone="brand" className="!h-[22px] !px-2 flex-shrink-0"><Loader2 className="w-3 h-3 animate-spin" />Reading</Pill>
+    </button>
+  );
+}
+
+/** List view: initials · patient + case ID · dentist + lab · service (+ next stage) · status + delivery date. */
 function CaseRow({ c }: { c: LabCase }) {
   const navigate = useNavigate();
+  const base = useBase();
   const r = readiness(c);
+  if (isReading(c)) return <ReadingRow c={c} />;
   return (
-    <button onClick={() => navigate(openCase(c))} className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-go-raised transition">
+    <button onClick={() => navigate(openCase(c, base))} className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-go-raised transition">
       <Initials c={c} />
       <span className="flex-1 min-w-0">
         <span className="flex items-baseline gap-1.5 min-w-0">
@@ -65,8 +129,16 @@ function CaseRow({ c }: { c: LabCase }) {
           <span className="text-[10.5px] text-go-faint font-mono flex-shrink-0">{c.id}</span>
         </span>
         <WhoLine c={c} className="mt-0.5" />
-        {/* Denture stage / aligner phase that the date belongs to */}
+        <ServiceChips c={c} />
+        {/* Denture stage / aligner phase that the date belongs to: its own line, so the chips keep theirs */}
         {dueLabel(c) && <span className="block text-[11.5px] font-medium text-go-violet mt-0.5 truncate">Next: {dueLabel(c)}</span>}
+        {/* A draft read from a photo: what is left to check before it can be sent */}
+        {c.scan && (
+          <span className={cx('flex items-center gap-1 text-[11.5px] font-medium mt-0.5 min-w-0', c.scan.toCheck ? 'text-go-warn' : 'text-go-ok')}>
+            {c.scan.toCheck ? <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" /> : <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />}
+            <span className="truncate">From photo · {c.scan.toCheck ? `${c.scan.toCheck} detail${c.scan.toCheck === 1 ? '' : 's'} to check` : 'all details found'}</span>
+          </span>
+        )}
       </span>
       <span className="flex flex-col items-end flex-shrink-0">
         <Pill tone={READINESS_TONE[r.level]} className="!h-[22px] !px-2">{pillLabel(c, r.label)}</Pill>
@@ -79,10 +151,11 @@ function CaseRow({ c }: { c: LabCase }) {
 /** Card view: one card per case with the service, dentist, lab and delivery date spelled out. */
 function CaseCard({ c }: { c: LabCase }) {
   const navigate = useNavigate();
+  const base = useBase();
   const r = readiness(c);
   const p = patientById(c.patientId);
   return (
-    <Card onClick={() => navigate(openCase(c))} className="p-3.5">
+    <Card onClick={() => navigate(openCase(c, base))} className="p-3.5">
       <span className="flex items-center gap-3">
         <Initials c={c} size={36} />
         <span className="flex-1 min-w-0">
@@ -149,13 +222,38 @@ const createdIn = (c: LabCase, b: [string, string] | null) => {
   const d = createdOn(c);
   return !!d && ymd(new Date(d)) >= b[0] && ymd(new Date(d)) <= b[1];
 };
+/** Requested delivery date filter: the next few days, then a custom from / to. */
+type DueRange = '7' | '14' | '30' | 'custom';
+const DUE_PRESETS: { id: DueRange | null; label: string }[] = [
+  { id: null, label: 'Any date' }, { id: '7', label: 'Next 7 days' }, { id: '14', label: 'Next 2 weeks' },
+  { id: '30', label: 'Next 30 days' }, { id: 'custom', label: 'Custom' },
+];
+/** Inclusive day range [from, to] as yyyy-mm-dd, starting today; null when no delivery filter. */
+function dueBoundsFor(range: DueRange | null, from: string | null, to: string | null): [string, string] | null {
+  if (!range) return null;
+  if (range === 'custom') return from || to ? [from ?? '0000-01-01', to ?? '9999-12-31'] : null;
+  const end = new Date(); end.setDate(end.getDate() + Number(range) - 1);
+  return [ymd(new Date()), ymd(end)];
+}
+/** A case's requested delivery date is its soonest open one (returnBy); cases without one never match. */
+const dueIn = (c: LabCase, b: [string, string] | null) => {
+  if (!b) return true;
+  if (!c.returnBy) return false;
+  const d = ymd(new Date(c.returnBy));
+  return d >= b[0] && d <= b[1];
+};
 const fmtYmd = (s: string) => new Date(`${s}T12:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
+/** Demo: cases with several services come right after the pinned ones, so the chips with a count are easy to find. */
+const multiFirst = (x: LabCase, y: LabCase) => Number(allItems(y).length > 1) - Number(allItems(x).length > 1);
+/** Drafts from prescription photos come first, in the order they were taken, so a batch just saved is on top. */
+const scansFirst = (x: LabCase, y: LabCase) => Number(!!y.scan) - Number(!!x.scan) || (x.scan && y.scan ? x.scan.takenAt.localeCompare(y.scan.takenAt) : 0);
 /** Soonest delivery date first; cases with no date (e.g. drafts) at the end. */
-const byDelivery = (x: LabCase, y: LabCase) => (x.returnBy || '9').localeCompare(y.returnBy || '9');
+const byDelivery = (x: LabCase, y: LabCase) => scansFirst(x, y) || (x.pin ?? 99) - (y.pin ?? 99) || multiFirst(x, y) || (x.returnBy || '9').localeCompare(y.returnBy || '9');
 
 export function LabWorkScreen() {
   const { cases } = useScoped();
+  useReadTick(cases);
   const [params, setParams] = useSearchParams();
   const day = params.get('day') ? Number(params.get('day')) : null;
   // Status filter from the Home tiles: ready | arriving | questions | overdue
@@ -172,7 +270,12 @@ export function LabWorkScreen() {
   const cFrom = params.get('from');
   const cTo = params.get('to');
   const bounds = createdBounds(created, cFrom, cTo);
-  const nFilters = (status ? 1 : 0) + (dentist ? 1 : 0) + (labF ? 1 : 0) + (bounds ? 1 : 0);
+  // Requested delivery date: ?due=7|14|30|custom (+ ?dfrom=&dto= for custom)
+  const due = (['7', '14', '30', 'custom'] as const).find(x => x === params.get('due')) ?? null;
+  const dFrom = params.get('dfrom');
+  const dTo = params.get('dto');
+  const dueBounds = dueBoundsFor(due, dFrom, dTo);
+  const nFilters = (status ? 1 : 0) + (dentist ? 1 : 0) + (labF ? 1 : 0) + (bounds ? 1 : 0) + (dueBounds ? 1 : 0);
   // Card view is switched off for now (FEATURES.labCardView). When on: list
   // (default) or cards, in the URL so scenarios can deep-link (?view=cards).
   const labCardView = FEATURES.labCardView;
@@ -181,13 +284,14 @@ export function LabWorkScreen() {
   const base = useMemo(() => cases.filter(c => {
     return matchesSearch(c, q) && (day === null || (c.appointment && dayOffset(c.appointment.at) === day))
       && (!status || matchesAttention(c, status))
-      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds);
-  }), [cases, q, day, status, dentist, labF, bounds?.[0], bounds?.[1]]);
+      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds) && dueIn(c, dueBounds);
+  }), [cases, q, day, status, dentist, labF, bounds?.[0], bounds?.[1], dueBounds?.[0], dueBounds?.[1]]);
   const baseNoStatus = useMemo(() => cases.filter(c => {
     return matchesSearch(c, q) && (day === null || (c.appointment && dayOffset(c.appointment.at) === day))
-      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds);
-  }), [cases, q, day, dentist, labF, bounds?.[0], bounds?.[1]]);
+      && (!dentist || c.clinician === dentist) && (!labF || c.lab === labF) && createdIn(c, bounds) && dueIn(c, dueBounds);
+  }), [cases, q, day, dentist, labF, bounds?.[0], bounds?.[1], dueBounds?.[0], dueBounds?.[1]]);
   const shown = base.filter(c => rf === 'all' || readiness(c).level === rf);
+  const reading = shown.filter(isReading).length;
   // Several keys in one update (two setParam calls in a row would overwrite each other)
   const setMany = (kv: Record<string, string | null>) => {
     const n = new URLSearchParams(params);
@@ -198,6 +302,9 @@ export function LabWorkScreen() {
   const createdLabel = created === 'custom'
     ? `Created ${cFrom ? fmtYmd(cFrom) : '…'} – ${cTo ? fmtYmd(cTo) : '…'}`
     : `Created: ${CREATED_PRESETS.find(p => p.id === created)?.label.toLowerCase()}`;
+  const dueLabelText = due === 'custom'
+    ? `Delivery ${dFrom ? fmtYmd(dFrom) : '…'} – ${dTo ? fmtYmd(dTo) : '…'}`
+    : `Delivery: ${DUE_PRESETS.find(p => p.id === due)?.label.toLowerCase()}`;
 
   return (
     <Screen tabs header={
@@ -242,6 +349,11 @@ export function LabWorkScreen() {
                 {createdLabel}<X className="w-3.5 h-3.5" />
               </button>
             )}
+            {dueBounds && (
+              <button onClick={() => setMany({ due: null, dfrom: null, dto: null })} className="h-8 pl-3 pr-2 rounded-full text-[12.5px] font-semibold bg-go-brand text-white inline-flex items-center gap-1 flex-shrink-0 whitespace-nowrap">
+                {dueLabelText}<X className="w-3.5 h-3.5" />
+              </button>
+            )}
             {day !== null && (
               <button onClick={() => setParam('day', null)} className="h-8 pl-3 pr-2 rounded-full text-[12.5px] font-semibold bg-go-brand text-white inline-flex items-center gap-1 flex-shrink-0">
                 {fmtDate(new Date(Date.now() + day * 864e5).toISOString())}<X className="w-3.5 h-3.5" />
@@ -261,6 +373,15 @@ export function LabWorkScreen() {
             })}
           </div>
           <div className="px-4 mt-3 space-y-4">
+            {/* Prescription photos still being read (Light version: several taken in a row) */}
+            {reading > 0 && (
+              <div className="flex items-center gap-3 rounded-2xl border border-go-brand/25 bg-go-brand-soft px-3.5 py-2.5">
+                <Sparkles className="w-5 h-5 text-go-brand go-pulse flex-shrink-0" />
+                <p className="text-[12.5px] text-go-brand-ink leading-snug">
+                  <span className="font-semibold">Reading {reading} prescription{reading === 1 ? '' : 's'}…</span> Each one becomes a draft for you to check and send.
+                </p>
+              </div>
+            )}
             {!!shown.length && (view === 'cards' ? (
               <div className="space-y-2.5">{[...shown].sort(byDelivery).map(c => <CaseCard key={c.id} c={c} />)}</div>
             ) : (
@@ -275,7 +396,7 @@ export function LabWorkScreen() {
       <Sheet open={filtersOpen} onClose={() => setFiltersOpen(false)} label="Lab work filters" title={<span className="inline-flex items-center gap-2"><Filter className="w-5 h-5 text-go-brand" />Lab work</span>}
         footer={
           <div className="flex gap-2">
-            <Btn variant="secondary" onClick={() => setMany({ f: null, dentist: null, lab: null, created: null, from: null, to: null })} disabled={!nFilters && !created}>Clear</Btn>
+            <Btn variant="secondary" onClick={() => setMany({ f: null, dentist: null, lab: null, created: null, from: null, to: null, due: null, dfrom: null, dto: null })} disabled={!nFilters && !created && !due}>Clear</Btn>
             <Btn block onClick={() => setFiltersOpen(false)}>Show {base.length} result{base.length === 1 ? '' : 's'}</Btn>
           </div>
         }>
@@ -304,6 +425,25 @@ export function LabWorkScreen() {
                 <label className="block">
                   <span className="block text-[11.5px] text-go-muted mb-1 px-0.5">To</span>
                   <Input type="date" value={cTo ?? ''} min={cFrom ?? undefined} onChange={e => setParam('to', e.target.value || null)} className="h-12 px-3 text-[14px]" />
+                </label>
+              </div>
+            )}
+          </div>
+          <div>
+            <Label>Requested delivery date</Label>
+            <Chips options={DUE_PRESETS.map(p => p.label)} value={DUE_PRESETS.find(p => p.id === due)!.label}
+              onChange={(lbl: string) => { const v = DUE_PRESETS.find(p => p.label === lbl)?.id ?? null; setMany(v === 'custom'
+                ? { due: 'custom', dfrom: dFrom ?? ymd(new Date()), dto: dTo ?? ymd(new Date(Date.now() + 7 * 864e5)) }
+                : { due: v, dfrom: null, dto: null }); }} />
+            {due === 'custom' && (
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <label className="block">
+                  <span className="block text-[11.5px] text-go-muted mb-1 px-0.5">From</span>
+                  <Input type="date" aria-label="Delivery from" value={dFrom ?? ''} max={dTo ?? undefined} onChange={e => setParam('dfrom', e.target.value || null)} className="h-12 px-3 text-[14px]" />
+                </label>
+                <label className="block">
+                  <span className="block text-[11.5px] text-go-muted mb-1 px-0.5">To</span>
+                  <Input type="date" aria-label="Delivery to" value={dTo ?? ''} min={dFrom ?? undefined} onChange={e => setParam('dto', e.target.value || null)} className="h-12 px-3 text-[14px]" />
                 </label>
               </div>
             )}
@@ -348,7 +488,7 @@ function Stepper({ c }: { c: LabCase }) {
 const QUICK_REPLIES = ['New bite registration posted today', 'Proceed with the current bite', 'Call me to discuss'];
 
 function Messages({ c }: { c: LabCase }) {
-  const { updateCase, toast } = useGo();
+  const { updateCase, toast, notify } = useGo();
   const [text, setText] = useState('');
   const send = () => {
     updateCase(c.id, x => ({
@@ -357,6 +497,7 @@ function Messages({ c }: { c: LabCase }) {
       events: [...x.events, { stage: 'note', at: nowIso(), by: ME.name, text: 'Replied to the lab' }],
     }));
     toast(`Comment sent to ${labName(c.lab)}`);
+    notify('lab', `New comment from ${practiceName(c.practice)} on ${c.id}`, 'info');
     setText('');
   };
   return (
@@ -417,25 +558,6 @@ const ymdOf = (iso: string) => iso.slice(0, 10);
 const isoFromYmd = (d: string) => (d ? new Date(`${d}T12:00`).toISOString() : '');
 const tomorrowYmd = () => new Date(Date.now() + 864e5).toISOString().slice(0, 10);
 
-/** One stage / phase row: name, date and where it is. */
-function StageRow({ s, n }: { s: StageLine; n: number }) {
-  const late = !s.state && !!s.date && dayOffset(s.date) < 0;
-  const tag = s.state === 'done-earlier' ? <Pill tone="neutral" className="!h-[22px] !px-2">Done earlier</Pill>
-    : s.state === 'received' ? <Pill tone="ok" className="!h-[22px] !px-2">Received</Pill>
-    : late ? <Pill tone="bad" className="!h-[22px] !px-2">Late</Pill>
-    : <Pill tone="brand" className="!h-[22px] !px-2">{s.date ? 'Due' : 'No date'}</Pill>;
-  return (
-    <div className="flex items-center gap-2.5 py-2">
-      <span className={cx('w-5 h-5 rounded-md text-[10.5px] font-bold flex items-center justify-center flex-shrink-0',
-        s.state ? 'bg-go-raised text-go-faint' : 'bg-go-violet-soft text-go-violet')}>{n}</span>
-      <span className="flex-1 min-w-0">
-        <span className={cx('block text-[13px] font-semibold truncate', s.state ? 'text-go-muted' : 'text-go-ink')}>{s.name}</span>
-        <span className="block text-[11.5px] text-go-muted">{s.date ? fmtDate(s.date) : 'Date not set'}{s.orderedAt ? ` · ordered ${fmtDate(s.orderedAt)}` : ''}</span>
-      </span>
-      {tag}
-    </div>
-  );
-}
 
 function ServicesCard({ c, onOrder }: { c: LabCase; onOrder: (index: number) => void }) {
   const items = allItems(c);
@@ -449,7 +571,7 @@ function ServicesCard({ c, onOrder }: { c: LabCase; onOrder: (index: number) => 
             <div className="flex items-center gap-3">
               <span className="w-6 h-6 rounded-lg go-grad text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
               <div className="flex-1 min-w-0">
-                <p className="text-[13.5px] font-semibold text-go-ink truncate">{it.service} · {it.teeth.join(', ')}</p>
+                <p className="text-[13.5px] font-semibold text-go-ink truncate">{it.service} · <TeethChips teeth={it.teeth} /></p>
                 <p className="text-[11.5px] text-go-muted truncate">{[it.material, it.shade && `shade ${it.shade}`].filter(Boolean).join(' · ') || '—'}</p>
               </div>
               {!kind && (
@@ -541,29 +663,38 @@ export function CaseDetailScreen() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const { cases, updateCase, toast } = useGo();
+  const base = useBase();
   const c = cases.find(x => x.id === id);
   const tab = (params.get('tab') as Tab) || 'details';
   const setTab = (t: Tab) => setParams(t === 'details' ? {} : { tab: t }, { replace: true });
   const [chase, setChase] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(params.get('receive') === '1');
   const [orderFor, setOrderFor] = useState<number | null>(null);
+  const [fileOpen, setFileOpen] = useState<string | null>(null);
   if (!c) {
-    return <Screen header={<TopBar back fallback="/go/work" title="Lab work" />}><EmptyState icon={<Search className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
+    return <Screen header={<TopBar back fallback={`${base}/work`} title="Lab work" />}><EmptyState icon={<Search className="w-7 h-7" />} title="Case not found" body="We couldn’t find this case. It may have been removed." /></Screen>;
   }
-  if (c.stage === 'draft') return <Navigate to={`/go/new/manual?draft=${c.id}`} replace />;
+  if (c.stage === 'draft' && base === '/go') return <Navigate to={`/go/new/manual?draft=${c.id}`} replace />;
+  if (c.scan) return <Navigate to={openCase(c, base)} replace />;
   const p = patientById(c.patientId);
   const r = readiness(c);
   const a = nextAction(c);
   const shipped = c.events.find(e => e.stage === 'shipped');
+  // The lab has more statuses than the practice sees. The practice's timeline keeps the few it is notified about
+  // (Accepted, On Hold (Practice), Shipped, Not Approved) and the stages; the lab's internal ones stay on the lab side.
+  const timeline = [...c.events].filter(e => {
+    if (e.stage === 'note') { const n = labStatusNote(e); return !n || NOTIFIES_CLINIC.has(n.status as LabStatus); }
+    return !c.events.some(n => n.stage === 'note' && n.at === e.at && !!labStatusNote(n));
+  }).reverse();
 
   // One-line next step with its action — reads like a to-do, not a card.
   const step: { icon: React.ReactNode; tone: Tone; title: string; body: string; cta?: { label: string; run: () => void } } = {
-    finish: { icon: <ClipboardCheck className="w-5 h-5" />, tone: 'neutral' as Tone, title: 'Draft not sent yet', body: 'Finish the details and send it to the lab.', cta: { label: 'Finish case', run: () => navigate(`/go/new/manual?draft=${c.id}`) } },
+    finish: { icon: <ClipboardCheck className="w-5 h-5" />, tone: 'neutral' as Tone, title: 'Draft not sent yet', body: 'Finish the details and send it to the lab.', cta: { label: 'Finish case', run: () => navigate(base === '/go' ? `/go/new/manual?draft=${c.id}` : `${base}/new`) } },
     // Only the lab can put a case on or off hold. The practice answers in Comments when the lab is waiting on it.
     'on-hold': c.onHold?.side === 'Practice'
       ? { icon: <Pause className="w-5 h-5" />, tone: 'warn' as Tone, title: 'On hold · the lab is waiting for you', body: c.onHold.reason, cta: { label: 'Reply', run: () => setTab('messages') } }
       : { icon: <Pause className="w-5 h-5" />, tone: 'warn' as Tone, title: 'On hold by the lab', body: `${c.onHold?.reason ?? ''} · Only the lab can take it off hold.` },
-    dispatch: { icon: <Truck className="w-5 h-5" />, tone: 'warn' as Tone, title: 'Send it to the lab', body: 'Include the impressions, bite and signed lab form.', cta: { label: 'Dispatch', run: () => navigate(`/go/work/${c.id}/dispatch`) } },
+    dispatch: { icon: <Truck className="w-5 h-5" />, tone: 'warn' as Tone, title: 'Send it to the lab', body: 'Include the impressions, bite and signed lab form.', cta: { label: 'Dispatch', run: () => navigate(base === '/go' ? `/go/work/${c.id}/dispatch` : `${base}/dispatch/${c.id}`) } },
     reply: { icon: <MessageSquare className="w-5 h-5" />, tone: 'pink' as Tone, title: `${labName(c.lab)} needs more information`, body: 'The case is paused until you reply.', cta: { label: 'Reply', run: () => setTab('messages') } },
     'check-in': { icon: <PackageCheck className="w-5 h-5" />, tone: 'brand' as Tone, title: 'Arriving from the lab', body: shipped ? `Shipped ${fmtDate(shipped.at)}${shipped.text ? ` · ${shipped.text}` : ''}` : 'On its way back.', cta: { label: 'Mark as received', run: () => setReceiveOpen(true) } },
     chase: { icon: <Clock className="w-5 h-5" />, tone: 'bad' as Tone, title: 'Chase the lab', body: c.appointment ? 'Or move the patient’s appointment.' : `Delivery date was ${fmtDate(c.returnBy)}.`, cta: { label: 'Chase', run: () => setChase(true) } },
@@ -577,26 +708,31 @@ export function CaseDetailScreen() {
     ['Dentist', clinicianName(c.clinician)],
     ['Material', c.material],
     ['Shade', [c.shade, c.stumpShade && `stump ${c.stumpShade}`].filter(Boolean).join(' · ') || '—'],
-    ['Next delivery', `${dueLabel(c) ? `${dueLabel(c)} · ` : ''}${fmtDate(c.returnBy)}`],
+    // No Next delivery tile: each service card above shows its own delivery date.
     ['Order type', c.funding],
     ['Practice', practiceName(c.practice)],
     ['Created by', c.source === 'photo' ? `${c.createdBy} · from photo` : c.createdBy],
   ];
 
+  // Sticky next-step bar: Dispatch / Reply / Mark as received / Chase stay in thumb reach.
+  // Hidden on the Comments tab while replying — the composer there is the action.
+  const cta = step.cta && !((a === 'reply' || a === 'on-hold') && tab === 'messages') ? (
+    <div className="flex items-center gap-3">
+      <IconTile icon={step.icon} tone={step.tone} size="sm" />
+      <div className="flex-1 min-w-0">
+        <p className="text-[13.5px] font-semibold text-go-ink truncate">{step.title}</p>
+        <p className="text-[11.5px] text-go-muted truncate">{step.body}</p>
+      </div>
+      <Btn size="md" onClick={step.cta.run} className={cx('!h-11 !px-5', a === 'chase' && '!bg-none !bg-go-bad !shadow-none')}>{step.cta.label}</Btn>
+    </div>
+  ) : null;
+  // Order form and Files & scans float in a capsule just above the next step; it shrinks to icons while scrolling
+  // down (off on Comments, where the composer needs the room).
+  const docs = tab !== 'messages' ? (compact: boolean) => <CaseDocBar c={c} compact={compact} /> : undefined;
+
   return (
-    <Screen header={<TopBar back fallback="/go/work" title={p.name} sub={`${c.id} · DOB ${p.dob}`} />}
-      // Sticky next-step bar: Dispatch / Reply / Mark as received / Chase stay in thumb reach.
-      // Hidden on the Comments tab while replying — the composer there is the action.
-      footer={step.cta && !((a === 'reply' || a === 'on-hold') && tab === 'messages') ? (
-        <div className="flex items-center gap-3">
-          <IconTile icon={step.icon} tone={step.tone} size="sm" />
-          <div className="flex-1 min-w-0">
-            <p className="text-[13.5px] font-semibold text-go-ink truncate">{step.title}</p>
-            <p className="text-[11.5px] text-go-muted truncate">{step.body}</p>
-          </div>
-          <Btn size="md" onClick={step.cta.run} className={cx('!h-11 !px-5', a === 'chase' && '!bg-none !bg-go-bad !shadow-none')}>{step.cta.label}</Btn>
-        </div>
-      ) : undefined}>
+    <Screen header={<TopBar back fallback={`${base}/work`} title={p.name} sub={`${c.id} · DOB ${p.dob}`} />}
+      footer={cta ?? undefined} floating={docs}>
       {/* Summary */}
       <div className="px-4 pt-1">
         <div className="flex items-end justify-between gap-3">
@@ -665,10 +801,11 @@ export function CaseDetailScreen() {
               <p className="text-[10.5px] uppercase tracking-wider font-semibold text-go-faint">Case instructions</p>
               <p className="text-[13px] text-go-ink mt-0.5 leading-relaxed">{c.instructions}</p>
             </div>
-            {(c.dispatch || c.receipt) && (
+            {(c.dispatch || c.receipt || c.labShipment) && (
               <div className="rounded-2xl bg-go-surface border border-go-line px-3 py-2.5 mt-2">
                 <p className="text-[10.5px] uppercase tracking-wider font-semibold text-go-faint">Courier and storage</p>
                 {c.dispatch && <p className="text-[13px] text-go-ink mt-0.5">Sent: {c.dispatch.courier}{c.dispatch.tracking ? ` · ${c.dispatch.tracking}` : ''} · {c.dispatch.bags} bag{c.dispatch.bags > 1 ? 's' : ''}</p>}
+                {c.labShipment && <p className="text-[13px] text-go-ink mt-0.5">Shipped by {labName(c.lab)}: {[c.labShipment.courier, c.labShipment.tracking].filter(Boolean).join(' · ') || 'no details given'}{c.labShipment.eta ? ` · arriving ${c.labShipment.eta}` : ''}</p>}
                 {c.receipt && <p className="text-[13px] text-go-ink mt-0.5">Received: stored in {c.receipt.storedIn}{c.receipt.comment ? ` · ${c.receipt.comment}` : ''}</p>}
               </div>
             )}
@@ -678,15 +815,15 @@ export function CaseDetailScreen() {
         {tab === 'activity' && (
           <Card className="p-4">
             <ol className="relative">
-              {[...c.events].reverse().map((e, i, arr) => (
+              {timeline.map((e, i, arr) => (
                 <li key={e.at + i} className="relative flex gap-3 pb-4 last:pb-0">
                   {i < arr.length - 1 && <span className="absolute left-[5px] top-4 bottom-0 w-0.5 bg-go-line" />}
                   <span className={cx('relative z-[1] w-3 h-3 rounded-full mt-1 flex-shrink-0', i === 0 ? 'go-grad ring-4 ring-go-brand/15' : 'bg-go-line')} />
                   <div className="min-w-0">
                     <p className="text-[13.5px] font-semibold text-go-ink">
-                      {e.stage === 'authorised' ? 'Prescription authorised' : e.stage === 'note' ? e.text : STAGES[stageIndex(e.stage)].label}
+                      {e.stage === 'authorised' ? 'Prescription authorised' : e.stage === 'note' ? (labStatusNote(e)?.title ?? e.text) : STAGES[stageIndex(e.stage)].label}
                     </p>
-                    <p className="text-[11.5px] text-go-muted">{fmtDateTime(e.at)} · {e.by}{e.text && e.stage !== 'note' ? ` · ${e.text}` : ''}</p>
+                    <p className="text-[11.5px] text-go-muted">{fmtDateTime(e.at)} · {e.by}{e.stage === 'note' ? (labStatusNote(e)?.reason ? ` · ${labStatusNote(e)!.reason}` : '') : e.text ? ` · ${e.text}` : ''}</p>
                   </div>
                 </li>
               ))}
@@ -699,12 +836,14 @@ export function CaseDetailScreen() {
         {tab === 'files' && (
           <div className="grid grid-cols-2 gap-2">
             {c.attachments.map(f => (
-              <div key={f} className="rounded-2xl bg-go-surface border border-go-line p-3 aspect-[4/3] flex flex-col justify-between">
+              // Tap to open it (a scan opens the 3D viewer full screen); impressions travel by post, so nothing to open
+              <button key={f} disabled={!canOpen(f)} onClick={() => setFileOpen(f)}
+                className="rounded-2xl bg-go-surface border border-go-line p-3 aspect-[4/3] flex flex-col justify-between text-left active:opacity-90 disabled:active:opacity-100">
                 <span className="w-9 h-9 rounded-xl bg-go-raised flex items-center justify-center text-go-muted">
                   {/photo/i.test(f) ? <ImageIcon className="w-[18px] h-[18px] text-go-brand" /> : /pdf/i.test(f) ? <FileText className="w-[18px] h-[18px] text-go-violet" /> : <Paperclip className="w-[18px] h-[18px]" />}
                 </span>
                 <p className="text-[12.5px] font-medium text-go-ink leading-snug line-clamp-2">{f}</p>
-              </div>
+              </button>
             ))}
             {!c.attachments.length && <EmptyState icon={<Inbox className="w-7 h-7" />} title="No files" />}
           </div>
@@ -714,6 +853,7 @@ export function CaseDetailScreen() {
       <ChaseSheet c={c} open={chase} onClose={() => setChase(false)} />
       <ReceiveSheet c={c} open={receiveOpen} onClose={() => setReceiveOpen(false)} />
       <OrderStageSheet c={c} index={orderFor} onClose={() => setOrderFor(null)} />
+      <FileViewer c={c} name={fileOpen} onChange={setFileOpen} onClose={() => setFileOpen(null)} />
     </Screen>
   );
 }

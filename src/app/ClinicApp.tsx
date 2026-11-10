@@ -4,7 +4,7 @@ import { useToast } from './context/ToastContext';
 import Layout from './components/Layout';
 import ClinicOverviewPage from './pages/ClinicOverviewPage';
 import ClinicAnalyticsPage from './pages/ClinicAnalyticsPage';
-import CasesPage, { draftCases } from './pages/CasesPage';
+import CasesPage, { draftCases, mockCases } from './pages/CasesPage';
 import CreateCasePage from './pages/CreateCasePage';
 import QuickCreateCasePage from './pages/QuickCreateCasePage';
 import InvoicesPage from './pages/InvoicesPage';
@@ -94,7 +94,7 @@ export default function ClinicApp() {
   const supplierInitialId = parsed.supplierId;
   const prefillDraftId = parsed.prefillDraftId;
   const prefillDraft = useMemo(
-    () => (prefillDraftId ? draftCases.find(d => d.id === prefillDraftId) ?? null : null),
+    () => (prefillDraftId ? [...draftCases, ...mockCases].find(d => d.id === prefillDraftId) ?? null : null),
     [prefillDraftId],
   );
 
