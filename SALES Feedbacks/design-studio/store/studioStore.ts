@@ -17,12 +17,23 @@ interface StudioState { cases: Record<string, StudioCase> }
 
 const LS_KEY = 'salesFeedbacks.designStudio.v1';
 
+/** The demo's review links carry fixed dates; keep them open while the demo is in use
+ *  (rv_expired01 stays expired on purpose, to show the expired page). */
+const ROLLING_DEMO_LINKS = ['rv_8kq2m4x9', 'rv_2hd6n1t4', 'rv_3fp7w2c5'];
+function keepDemoLinksOpen(st: StudioState): StudioState {
+  const soon = new Date(Date.now() + 14 * 86_400_000).toISOString();
+  for (const c of Object.values(st.cases)) for (const l of c.links) {
+    if (ROLLING_DEMO_LINKS.includes(l.token) && l.expiresAt < soon) l.expiresAt = soon;
+  }
+  return st;
+}
+
 function load(): StudioState {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) { const parsed = JSON.parse(raw); if (parsed?.cases) return parsed; }
+    if (raw) { const parsed = JSON.parse(raw); if (parsed?.cases) return keepDemoLinksOpen(parsed); }
   } catch { /* corrupt or blocked: reseed */ }
-  return { cases: seedStudioCases() };
+  return keepDemoLinksOpen({ cases: seedStudioCases() });
 }
 
 let state: StudioState = load();
@@ -288,7 +299,7 @@ export function shareDesign(input: ShareInput): ReviewLink {
 }
 
 export function resetDesignStudioDemo() {
-  commit({ cases: seedStudioCases() });
+  commit(keepDemoLinksOpen({ cases: seedStudioCases() }));
   Object.keys(state.cases).forEach(syncPortalCase);
 }
 
