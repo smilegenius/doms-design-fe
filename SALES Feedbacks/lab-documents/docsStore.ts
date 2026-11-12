@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { EU_DEFAULT, UK_DEFAULT } from './templates';
+import { EU_DEFAULT, OLD_DEFAULTS, UK_DEFAULT } from './templates';
 
 // ── Settings › Order form: lab-branded order form, conformity statement, case label ──
 // Spec: "Lab-branded order form & patient statement" (11 Nov 2026), as revised
@@ -68,7 +68,12 @@ const LS_KEY = 'salesFeedbacks.docs.v2';
 function load(): DocsSettings {
   try {
     const p = JSON.parse(localStorage.getItem(LS_KEY) ?? 'null');
-    if (p) return { ...DEFAULT_SETTINGS, ...p, ...LAB_INFO };
+    if (p) {
+      // Unedited wording follows the current standard text (it now cites the exact clauses).
+      if (OLD_DEFAULTS.includes(p.ukText)) p.ukText = UK_DEFAULT;
+      if (OLD_DEFAULTS.includes(p.euText)) p.euText = EU_DEFAULT;
+      return { ...DEFAULT_SETTINGS, ...p, ...LAB_INFO };
+    }
   } catch { /* corrupt or blocked */ }
   return DEFAULT_SETTINGS;
 }

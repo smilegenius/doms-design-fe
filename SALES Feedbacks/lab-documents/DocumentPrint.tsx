@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import type { Case } from '../../src/app/pages/CasesPage';
 import type { DocsSettings } from './docsStore';
 import { caseBlockers, fillTokens, jurisdictions, placeOfIssue } from './engine';
+import { PoweredBy } from '../bulk-actions/printForms';
 
 // ── The printed pieces of Settings › Order form ───────────────────────────────
 // The identity band lives with the order form itself (printForms.tsx). Here:
@@ -49,29 +50,40 @@ export function StatementBlock({ c, s }: { c: Case; s: DocsSettings }) {
   );
 }
 
-/** The case label for the outgoing box. Works with every other setting off. */
+/**
+ * The case label for the outgoing box: the lab's logo (or name), the case ID
+ * big, patient, practice, product and teeth, "Custom-made device", and
+ * "Powered by Smile Genius" at the foot. Black on white for thermal printers.
+ */
 export function CaseLabel({ c, s }: { c: Case; s: DocsSettings }) {
   const big = s.labelStock === '102x152';
-  const summary = (c.serviceItems ?? []).map(si => `${si.name}${si.fdi?.length ? ` (${si.fdi.join(', ')})` : ''}`).join(' · ') || c.services?.join(' · ');
-  const row = (k: string, v: ReactNode, strong = false) => (
-    <div style={{ marginBottom: big ? 6 : 4 }}>
-      <p style={{ fontSize: big ? 9 : 7, color: '#555', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{k}</p>
-      <p style={{ fontSize: strong ? (big ? 18 : 13) : (big ? 12 : 9.5), fontWeight: strong ? 800 : 600, margin: 0, lineHeight: 1.2 }}>{v}</p>
+  const k = big ? 1 : 0.72; // scale everything to the stock
+  const px = (n: number) => Math.round(n * k * 10) / 10;
+  const logo = s.brandingOn && s.logo ? s.logo : null;
+  const summary = (c.serviceItems ?? []).map(si => `${si.name}${si.fdi?.length ? ` · ${si.fdi.join(', ')}` : ''}`).join('\n') || c.services?.join(', ') || '—';
+  const field = (label: string, value: ReactNode) => (
+    <div style={{ marginTop: px(9) }}>
+      <p style={{ fontSize: px(8.5), letterSpacing: '0.08em', textTransform: 'uppercase', color: '#555', margin: 0 }}>{label}</p>
+      <p style={{ fontSize: px(13.5), fontWeight: 600, margin: `${px(1)}px 0 0`, lineHeight: 1.25, whiteSpace: 'pre-line' }}>{value}</p>
     </div>
   );
   return (
-    <div style={{ ...exact, width: big ? '96mm' : '56mm', height: big ? '146mm' : '94mm', boxSizing: 'border-box', padding: big ? '5mm' : '3mm', border: '1px solid #000', color: '#000', fontFamily: 'Arial, Helvetica, sans-serif', display: 'flex', flexDirection: 'column', background: '#fff' }}>
-      <div style={{ borderBottom: '1.5px solid #000', paddingBottom: big ? 6 : 4, marginBottom: big ? 8 : 5 }}>
-        <p style={{ fontSize: big ? 14 : 10.5, fontWeight: 800, margin: 0 }}>{s.displayName}</p>
-        <p style={{ fontSize: big ? 9 : 7, margin: '1px 0 0' }}>{s.address.split('\n').filter(Boolean).join(', ')}</p>
-        <p style={{ fontSize: big ? 9 : 7, margin: '1px 0 0' }}>{[s.phone, s.email].filter(Boolean).join(' · ')}</p>
+    <div style={{ ...exact, width: big ? '96mm' : '56mm', height: big ? '146mm' : '94mm', boxSizing: 'border-box', padding: big ? '6mm' : '3.5mm', borderRadius: big ? '3mm' : '2mm', border: '1px solid #000', color: '#000', background: '#fff', fontFamily: 'Arial, Helvetica, sans-serif', display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: px(10), paddingBottom: px(9), borderBottom: '1.5px solid #000' }}>
+        {logo && <img src={logo} alt="" style={{ height: px(40), width: 'auto', maxWidth: '52%', objectFit: 'contain', objectPosition: 'left', filter: 'grayscale(1)' }} />}
+        <div style={{ minWidth: 0, textAlign: logo ? 'right' : 'left' }}>
+          <p style={{ fontSize: px(logo ? 12 : 15), fontWeight: 800, margin: 0, lineHeight: 1.15 }}>{s.displayName}</p>
+          <p style={{ fontSize: px(8.5), margin: `${px(2)}px 0 0`, lineHeight: 1.3 }}>{[s.phone, s.email].filter(Boolean).join(' · ') || s.address.split('\n')[0]}</p>
+        </div>
       </div>
-      {row('Case ID', c.id, true)}
-      {row('Patient', c.patientName)}
-      {row('Practice', c.practice)}
-      {row(c.serviceItems?.some(si => si.fdi?.length) ? 'Product · teeth' : 'Product', summary || '—')}
-      <div style={{ marginTop: 'auto', border: '1.5px solid #000', textAlign: 'center', padding: big ? '6px 0' : '3px 0' }}>
-        <p style={{ fontSize: big ? 15 : 10.5, fontWeight: 800, margin: 0, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Custom-made device</p>
+      <p style={{ fontSize: px(8.5), letterSpacing: '0.08em', textTransform: 'uppercase', color: '#555', margin: `${px(10)}px 0 0` }}>Case</p>
+      <p style={{ fontSize: px(24), fontWeight: 800, margin: 0, letterSpacing: '-0.01em', lineHeight: 1.1 }}>{c.id}</p>
+      {field('Patient', c.patientName)}
+      {field('Practice', c.practice)}
+      {field(c.serviceItems?.some(si => si.fdi?.length) ? 'Product · teeth' : 'Product', summary)}
+      <div style={{ marginTop: 'auto' }}>
+        <p style={{ background: '#000', color: '#fff', textAlign: 'center', fontSize: px(12), fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase', padding: `${px(5)}px 0`, margin: 0, borderRadius: px(3) }}>Custom-made device</p>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: px(8) }}><PoweredBy height={px(22)} color="#000" /></div>
       </div>
     </div>
   );

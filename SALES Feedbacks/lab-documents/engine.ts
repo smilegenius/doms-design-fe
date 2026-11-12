@@ -66,3 +66,8 @@ export const placeOfIssue = (s: DocsSettings) => s.address.split('\n').map(x => 
 
 /** Download filename: case ID, patient surname, document type. */
 export const docFileName = (c: Case, type: string) => `${c.id}_${(c.patientName.trim().split(/\s+/).pop() ?? 'patient').replace(/[^\w-]/g, '')}_${type}`;
+
+/** "Crown, teeth 16, Zirconia, shade A2; …" for the full statement. */
+export const deviceSummary = (c: Case) =>
+  (c.serviceItems ?? []).map(si => [si.name, si.fdi?.length ? `teeth ${si.fdi.join(', ')}` : '', si.material, si.shade ? `shade ${si.shade}` : ''].filter(Boolean).join(', ')).join('; ')
+  || c.services?.join(', ') || '';

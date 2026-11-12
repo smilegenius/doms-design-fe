@@ -8,6 +8,7 @@ import type { DesignFile } from '../design-studio/data/designStudio';
 import { CLINICAL_HINT, storeClinicalFiles } from './clinicalFiles';
 import { accentFor, IntakeConfig, IntakeSubmission, submitFiles, submitIntake } from './intakeStore';
 import { exactMatch } from './fileMatching';
+import { PoweredBy } from '../bulk-actions/printForms';
 
 // ── LabLink: the lab's form for dentists ─────────────────────────────────────
 // Shared by the public page (/lablink/:slug, optionally embedded in an iframe)
@@ -312,7 +313,7 @@ export default function IntakeForm({ config, preview = false, initialMode = null
             {choice('files', FolderUp, 'Files for an existing case', 'More scans, CBCT, photos, a PDF or notes for a case the lab already has. No need for WeTransfer or Dropbox.')}
           </div>
         </div>
-        <p className="px-6 py-3 text-center text-[10px] text-[#A0A0B0] border-t border-[#F0EFF6]">Powered by Smile Genius · Your details go only to {config.labName}.</p>
+        <div className="px-6 py-3 border-t border-[#F0EFF6] flex flex-col items-center gap-1"><PoweredBy height={20} /><p className="text-center text-[11px] text-[#A0A0B0]">Your details go only to {config.labName}.</p></div>
       </div>
     );
   }
@@ -470,7 +471,7 @@ export default function IntakeForm({ config, preview = false, initialMode = null
           </button>
         )}
       </div>
-      <p className="px-6 py-3 text-center text-[10px] text-[#A0A0B0] border-t border-[#F0EFF6]">Powered by Smile Genius · Your details go only to {config.labName}.</p>
+      <div className="px-6 py-3 border-t border-[#F0EFF6] flex flex-col items-center gap-1"><PoweredBy height={20} /><p className="text-center text-[11px] text-[#A0A0B0]">Your details go only to {config.labName}.</p></div>
     </div>
   );
 }

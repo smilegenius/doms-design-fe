@@ -7,8 +7,26 @@ import { getDocs, type DocsSettings } from '../lab-documents/docsStore';
 import { statementOnForm, StatementBlock } from '../lab-documents/DocumentPrint';
 // The Smile Genius smile mark, inlined so it shows in downloaded (offline) forms too.
 import sgMark from '../../public/favicon.svg?raw';
+import SmileGeniusWordmark from '../../src/app/components/SmileGeniusWordmark';
 
 export const sgMarkSrc = `data:image/svg+xml;utf8,${encodeURIComponent(sgMark)}`;
+
+// The full Smile Genius wordmark, for "Powered by Smile Genius" on printed
+// documents. Rendered from the portal's own component; its gradient reference
+// is written as a literal string there, so it's fixed up here for the smile.
+const wordmarkSvg = renderToStaticMarkup(<SmileGeniusWordmark gradientId="sgwm" className="" />)
+  .replace(/url\(#\$\{gradientId\}\)/g, 'url(#sgwm)')
+  .replace(/ class=""/, '');
+export const sgWordmarkSrc = `data:image/svg+xml;utf8,${encodeURIComponent(wordmarkSvg)}`;
+
+/** "Powered by [smile genius]": big enough that the dentist can see who we are. */
+export function PoweredBy({ height = 18, color = '#5A5568' }: { height?: number; color?: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: Math.max(9, Math.round(height * 0.55)), color, whiteSpace: 'nowrap' }}>
+      Powered by <img src={sgWordmarkSrc} alt="Smile Genius" style={{ height, width: 'auto', display: 'block' }} />
+    </span>
+  );
+}
 
 // ── Printing order forms ─────────────────────────────────────────────────────
 // One print window for any number of forms: each page is rendered to static
@@ -108,10 +126,7 @@ export function SgOrderFormPrint({ c, docs, statement = true }: { c: Case; docs?
             </div>
           ) : (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, paddingBottom: 10, marginBottom: 10, borderBottom: '2px solid #030213' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <img src={sgMarkSrc} alt="" style={{ height: 26 }} />
-                <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.01em' }}>smile genius</span>
-              </span>
+              <img src={sgWordmarkSrc} alt="Smile Genius" style={{ height: 34, width: 'auto' }} />
               <div style={{ textAlign: 'right' }}>
                 <p style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Order form</p>
                 <p style={{ fontSize: 11, color: '#717182', margin: '2px 0 0' }}>{c.id} · printed {portalDate()}</p>
@@ -124,11 +139,7 @@ export function SgOrderFormPrint({ c, docs, statement = true }: { c: Case; docs?
         <tr><td style={{ padding: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #F0EFF6', marginTop: 12, paddingTop: 8 }}>
             <span style={{ fontSize: 10, color: '#A0A0B0' }}>{c.id} · {c.patientName}</span>
-            {branded && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9, color: '#A0A0B0' }}>
-                <img src={sgMarkSrc} alt="" style={{ height: 9 }} /> Powered by Smile Genius
-              </span>
-            )}
+            {branded && <PoweredBy height={24} />}
           </div>
         </td></tr>
       </tfoot>

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, Building2, CheckCircle2, ChevronDown, Eye, FileSignature, Image as ImageIcon, Info, Lock, PenLine, Plus, RotateCcw, Tag, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, Building2, ChevronDown, Eye, FileDown, FileSignature, Printer, Image as ImageIcon, Info, Lock, PenLine, Plus, RotateCcw, Tag, Trash2, Upload } from 'lucide-react';
 import { useToast } from '../../src/app/context/ToastContext';
 import { useAuth } from '../../src/app/context/AuthContext';
 import { teamMemberFor } from '../lab-prescription-inbox/data';
@@ -9,7 +9,12 @@ import { casesFor } from '../bulk-actions/BulkDialogs';
 import { SgOrderFormPrint } from '../bulk-actions/printForms';
 import { saveDocs, useDocs, type DocsSettings, type Jurisdiction } from './docsStore';
 import { euBlocker, saveErrors } from './engine';
-import { EU_DEFAULT, EU_PARTICULARS, TOKENS, UK_DEFAULT, UK_PARTICULARS } from './templates';
+import { FullStatement, fullStatementHtml } from './FullStatement';
+import { paperPageCss } from './DocumentPrint';
+import { printPages } from '../bulk-actions/printForms';
+import { saveBlob } from '../bulk-actions/zip';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { EU_DEFAULT, TOKENS, UK_DEFAULT } from './templates';
 import { SIGNATURE_FONT } from './DocumentPrint';
 import CasePicker from './CasePicker';
 
@@ -20,7 +25,7 @@ import CasePicker from './CasePicker';
 // shows the order form for any case as you change things. Validation runs on
 // save. Owners and admins edit; everyone else sees it read-only.
 
-type Group = 'branding' | 'statement' | 'label';
+type Group = 'branding' | 'statement' | 'label' | 'full';
 
 const input = 'w-full border border-[#E0E0E6] rounded-lg px-3 py-2 text-sm bg-white disabled:bg-[#F8F9FC] disabled:text-[#717182]';
 const lbl = 'block text-xs font-semibold text-[#030213] mb-1';
@@ -54,11 +59,12 @@ function Section({ id, open, onToggle, title, sub, icon: Icon, children, locked 
   );
 }
 
-/** One jurisdiction's card: what the law asks for, the wording, and (EU) the extra particulars. */
-function RegimeCard({ tone, title, law, active, particulars, text, onText, defaultText, children }: {
-  tone: 'uk' | 'eu'; title: string; law: string; active: boolean; particulars: { what: string; from: string }[];
+/** One jurisdiction's card: the law it cites, (EU) its extra details, and the wording behind "Edit wording". */
+function RegimeCard({ tone, title, law, active, text, onText, defaultText, children }: {
+  tone: 'uk' | 'eu'; title: string; law: string; active: boolean;
   text: string; onText: (v: string) => void; defaultText: string; children?: ReactNode;
 }) {
+  const [editing, setEditing] = useState(false);
   const c = tone === 'uk' ? { bar: '#1D4ED8', bg: '#EFF6FF', border: '#BFDBFE', chip: 'bg-[#DBEAFE] text-[#1E40AF]' } : { bar: '#B45309', bg: '#FFFBEB', border: '#FDE68A', chip: 'bg-[#FEF3C7] text-[#92400E]' };
   return (
     <div className={`rounded-xl border overflow-hidden ${active ? '' : 'opacity-60'}`} style={{ borderColor: c.border }}>
@@ -67,21 +73,22 @@ function RegimeCard({ tone, title, law, active, particulars, text, onText, defau
         <p className="text-sm font-semibold text-[#030213]">{title}</p>
         <span className="text-[11px] text-[#5A5568]">{law}</span>
         <span className="flex-1" />
-        <span className="text-[10px] font-semibold text-[#717182]">{active ? 'Prints on the form' : 'Not printing'}</span>
+        <button type="button" className="text-[11px] text-[#4D8EF7] font-medium" onClick={() => setEditing(v => !v)}>{editing ? 'Done' : 'Edit wording'}</button>
       </div>
-      <div className="p-3 space-y-3 bg-white">
-        <div>
-          <p className="text-[11px] font-semibold text-[#030213] mb-1">What it has to say, and where it comes from</p>
-          <ul className="grid sm:grid-cols-2 gap-x-4 gap-y-0.5">
-            {particulars.map(p => <li key={p.what} className="text-[11px] text-[#5A5568] flex items-start gap-1"><CheckCircle2 className="w-3 h-3 text-[#2E7D32] mt-0.5 flex-shrink-0" /><span>{p.what} <span className="text-[#A0A0B0]">· {p.from}</span></span></li>)}
-          </ul>
+      {(children || editing) && (
+        <div className="p-3 space-y-3 bg-white">
+          {children}
+          {editing && (
+            <div>
+              <textarea className={`${input} text-[12px] leading-relaxed`} rows={5} value={text} onChange={e => onText(e.target.value)} />
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <p className="text-[10px] text-[#A0A0B0] flex-1">Filled in for each case: {TOKENS.map(t => t.token).join(' ')}</p>
+                {text !== defaultText && <button type="button" className="text-[11px] text-[#4D8EF7] inline-flex items-center gap-1" onClick={() => onText(defaultText)}><RotateCcw className="w-3 h-3" /> Standard wording</button>}
+              </div>
+            </div>
+          )}
         </div>
-        {children}
-        <div>
-          <div className="flex items-center justify-between"><label className={lbl}>Wording</label>{text !== defaultText && <button type="button" className="text-[11px] text-[#4D8EF7] inline-flex items-center gap-1" onClick={() => onText(defaultText)}><RotateCcw className="w-3 h-3" /> Back to the standard wording</button>}</div>
-          <textarea className={`${input} text-[12px] leading-relaxed`} rows={5} value={text} onChange={e => onText(e.target.value)} />
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -108,6 +115,7 @@ export default function DocumentsSettings() {
   const canEdit = !asTech && (!me || me.role === 'Super Admin' || me.role === 'Admin');
   const [open, setOpen] = useState<Set<Group>>(() => new Set([(params.get('group') as Group) ?? 'branding']));
   const [previewId, setPreviewId] = useState('CASE-RS-2002');
+  const [showFull, setShowFull] = useState(false);
   useEffect(() => { setDraft(settings); }, [settings]);
   useEffect(() => {
     const g = params.get('group') as Group | null;
@@ -124,6 +132,14 @@ export default function DocumentsSettings() {
   const ukOn = draft.statementOn && draft.jurisdiction !== 'EU';
   const euOn = draft.statementOn && draft.jurisdiction !== 'UK';
 
+  function downloadFull() {
+    const name = 'full-statement-blank';
+    saveBlob(new Blob([fullStatementHtml(name, renderToStaticMarkup(<FullStatement s={draft} />), paperPageCss(draft))], { type: 'text/html' }), `${name}.html`);
+    toast.success('Downloaded. Open it to print, or save it as a PDF.');
+  }
+  function printFull() {
+    if (!printPages([{ key: 'full', node: <FullStatement s={draft} /> }], 'Full statement', paperPageCss(draft))) toast.error('Allow pop-ups to print');
+  }
   function save() {
     if (errors.length) { toast.error(errors[0]); return; }
     saveDocs(draft);
@@ -183,7 +199,7 @@ export default function DocumentsSettings() {
               </div>
             </div>
             <Toggle label="Show my logo on the order form" on={draft.brandingOn && !!draft.logo} disabled={!draft.logo} onChange={v => set('brandingOn', v)}
-              sub={draft.logo ? 'Your logo and details at the top; Smile Genius becomes a small “Powered by Smile Genius” line in the footer.' : 'Upload a logo first.'} />
+              sub={draft.logo ? 'Your logo and details at the top; “Powered by Smile Genius” moves to the footer.' : 'Upload a logo first.'} />
             <div className="grid sm:grid-cols-2 gap-3">
               <div><label className={lbl}>MHRA registration number</label><input className={input} maxLength={20} value={draft.mhra} onChange={e => set('mhra', e.target.value)} placeholder="e.g. CA012345" /><p className={hint}>Optional. Prints at the top and under the statement.</p></div>
               <div><label className={lbl}>DAMAS number <span className="font-normal text-[#717182]">(voluntary scheme)</span></label><input className={input} maxLength={20} value={draft.damas} onChange={e => set('damas', e.target.value)} /><p className={hint}>Optional. Prints when you hold one.</p></div>
@@ -195,12 +211,8 @@ export default function DocumentsSettings() {
           </Section>
 
           <Section id="statement" locked={!canEdit} open={open.has('statement')} onToggle={toggleGroup} icon={FileSignature} title="Conformity statement" sub="A short statement for a custom-made device at the bottom of the order form">
-            <div className="rounded-lg bg-[#F8F9FC] border border-[#E0E0E6] px-3 py-2 text-[11px] text-[#5A5568] space-y-1">
-              <p className="flex items-start gap-1.5"><Info className="w-3.5 h-3.5 text-[#4D8EF7] mt-0.5 flex-shrink-0" /><span><b className="text-[#030213]">Why this is here.</b> Every custom-made device you send must come with a signed statement from you, the manufacturer (UK Medical Devices Regulations 2002; EU MDR 2017/745 for work going into the EU). Most labs print it separately or feed the paper through the printer twice. Switch this on and it prints at the bottom of the order form instead.</span></p>
-              <p className="pl-5">It's short because the order form above it already names the patient, the prescriber and practice, and the device, teeth, materials and instructions. Together they carry everything the law asks for. Already produce statements in LabTrack, Transactor or another tool? Leave this off.</p>
-              <p className="pl-5">Your lab is the manufacturer and signs the statement; Smile Genius only prints your wording with the case details filled in.</p>
-            </div>
-            <Toggle label="Print the statement on the order form" on={draft.statementOn} onChange={v => set('statementOn', v)} sub="Prints with every order form while it's on. Turn it off any time." />
+            <p className="text-xs text-[#5A5568]">Prints your signed statement for a custom-made device at the bottom of every order form. Leave it off if you produce statements in another system.</p>
+            <Toggle label="Print the statement on the order form" on={draft.statementOn} onChange={v => set('statementOn', v)} />
 
             <div>
               <label className={lbl}>Where you send work</label>
@@ -210,14 +222,12 @@ export default function DocumentsSettings() {
                   return <button type="button" key={j} disabled={off} title={off ? euBlock ?? '' : undefined} onClick={() => set('jurisdiction', j)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-40 disabled:cursor-not-allowed ${draft.jurisdiction === j ? 'bg-[#EEF4FF] border-[#4D8EF7] text-[#1565C0]' : 'bg-white border-[#E0E0E6] text-[#5A5568]'}`}>{l}</button>;
                 })}
               </div>
-              {euBlock && <p className="text-[11px] text-[#B45309] mt-1">EU needs every manufacturing site and your EU authorised representative. Add them in the EU card below.</p>}
+              {euBlock && <p className="text-[11px] text-[#B45309] mt-1">For EU, add your manufacturing site and EU authorised representative below.</p>}
             </div>
 
-            <RegimeCard tone="uk" title="UK statement" law="UK MDR 2002 · MHRA" active={ukOn} particulars={UK_PARTICULARS} text={draft.ukText} onText={v => set('ukText', v)} defaultText={UK_DEFAULT}>
-              <p className="text-[11px] text-[#5A5568]">MHRA registration: {draft.mhra ? <b className="text-[#030213]">{draft.mhra}</b> : <span className="text-[#717182]">not added (optional; add it in Branding to print it)</span>}</p>
-            </RegimeCard>
+            <RegimeCard tone="uk" title="UK statement" law="UK Medical Devices Regulations 2002" active={ukOn} text={draft.ukText} onText={v => set('ukText', v)} defaultText={UK_DEFAULT} />
 
-            <RegimeCard tone="eu" title="EU statement" law="Regulation (EU) 2017/745 · Annex XIII" active={euOn} particulars={EU_PARTICULARS} text={draft.euText} onText={v => set('euText', v)} defaultText={EU_DEFAULT}>
+            <RegimeCard tone="eu" title="EU statement" law="EU MDR 2017/745" active={euOn} text={draft.euText} onText={v => set('euText', v)} defaultText={EU_DEFAULT}>
               <div>
                 <label className={lbl}>Manufacturing sites</label>
                 {draft.sites.map((st, i) => (
@@ -233,10 +243,8 @@ export default function DocumentsSettings() {
                 <div><label className={lbl}>EU authorised representative</label><input className={input} placeholder="Name" value={draft.authRep.name} onChange={e => set('authRep', { ...draft.authRep, name: e.target.value })} /></div>
                 <div><label className={lbl}>&nbsp;</label><input className={input} placeholder="Address in the EU" value={draft.authRep.address} onChange={e => set('authRep', { ...draft.authRep, address: e.target.value })} /></div>
               </div>
-              <p className={hint}>A lab outside the EU (including Great Britain) supplying Ireland or another EU country generally needs an EU authorised representative, named on the statement.</p>
             </RegimeCard>
 
-            <p className="text-[11px] text-[#717182]">Filled in from the case and Lab info: {TOKENS.map(t => <code key={t.token} title={t.label} className="mx-0.5 px-1 rounded bg-[#F3F3F5] text-[10px]">{t.token}</code>)}</p>
 
             <div className="border-t border-[#F0EFF6] pt-3 space-y-3">
               <p className="text-sm font-semibold text-[#030213] flex items-center gap-1.5"><PenLine className="w-4 h-4 text-[#4D8EF7]" /> Signed by</p>
@@ -257,8 +265,7 @@ export default function DocumentsSettings() {
                   </button>
                 ))}
               </div>
-              <p className={hint}>The name doesn't have to be a Smile Genius user. It's signed on behalf of the lab.</p>
-            </div>
+                          </div>
           </Section>
 
           <Section id="label" locked={!canEdit} open={open.has('label')} onToggle={toggleGroup} icon={Tag} title="Case label" sub={draft.labelOn ? 'On · a label for the outgoing box' : 'Off · optional label for the outgoing box'}>
@@ -272,6 +279,20 @@ export default function DocumentsSettings() {
                 </div>
                 <button type="button" className="text-xs text-[#4D8EF7] font-medium" onClick={() => navigate(`/growth/order-form/${encodeURIComponent(previewId)}?view=label`)}>Preview the label for {previewId}</button>
               </>
+            )}
+          </Section>
+
+          <Section id="full" open={open.has('full')} onToggle={toggleGroup} icon={FileDown} title="Full statement" sub="A blank full-page statement for when a dentist asks for one">
+            <p className="text-xs text-[#5A5568]">Your lab details are filled in; complete the case details and sign in ink.</p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#E0E0E6] bg-white hover:bg-[#F8F9FC]" onClick={() => setShowFull(v => !v)}><Eye className="w-3.5 h-3.5" /> {showFull ? 'Hide preview' : 'Preview'}</button>
+              <button type="button" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#E0E0E6] bg-white hover:bg-[#F8F9FC]" onClick={downloadFull}><FileDown className="w-3.5 h-3.5" /> Download blank</button>
+              <button type="button" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#E0E0E6] bg-white hover:bg-[#F8F9FC]" onClick={printFull}><Printer className="w-3.5 h-3.5" /> Print blank</button>
+            </div>
+            {showFull && (
+              <div className="bg-[#EEF0F4] rounded-lg p-3 overflow-hidden">
+                <div className="bg-white shadow rounded-sm p-8 mx-auto" style={{ zoom: 0.7, maxWidth: 794 }}><FullStatement s={draft} /></div>
+              </div>
             )}
           </Section>
         </div>

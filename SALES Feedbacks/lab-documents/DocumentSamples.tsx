@@ -25,11 +25,11 @@ const EU_READY: Partial<DocsSettings> = { sites: [{ name: 'Northgate Dental Lab'
 interface Sample { id: string; title: string; who: string; expect: string; settings: Partial<DocsSettings>; render: 'form' | 'eu-blocked' | 'label' }
 const SAMPLES: Sample[] = [
   { id: 'A', title: 'Nothing set up', who: 'Every lab, until they change something', expect: 'Smile Genius mark at the top, as today. Dentist, patient, delivery date and instructions highlighted (on by default).', settings: {}, render: 'form' },
-  { id: 'B', title: 'Lab logo', who: 'Asked for by DB Digital and CM Ceramics', expect: 'Lab logo with its name, address, phone, MHRA and DAMAS at the top; "Powered by Smile Genius" small in the footer.', settings: LAB, render: 'form' },
+  { id: 'B', title: 'Lab logo', who: 'Asked for by DB Digital and CM Ceramics', expect: 'Lab logo with its name, address, phone, MHRA and DAMAS at the top; "Powered by Smile Genius" in the footer.', settings: LAB, render: 'form' },
   { id: 'C', title: 'Logo and UK statement, typed signature', who: 'Asked for by K2 and Digident', expect: 'As B, plus the short UK statement at the bottom, signed with the signatory’s name in a handwriting style. One page.', settings: { ...LAB, ...SIGNER, statementOn: true, jurisdiction: 'UK', signatureMode: 'typed' }, render: 'form' },
   { id: 'D', title: 'UK and EU statements, signed in ink', who: 'For labs sending work to Ireland (Cinchortho)', expect: 'Both statements, UK first; the EU one names the manufacturing site and the EU authorised representative. A blank line to sign by hand.', settings: { ...LAB, ...SIGNER, ...EU_READY, statementOn: true, jurisdiction: 'Both', signatureMode: 'blank' }, render: 'form' },
   { id: 'E', title: 'EU without a representative', who: 'What a lab sees before it has one', expect: 'EU and "UK and EU" can’t be chosen, with the reason shown. Nothing EU prints.', settings: { ...LAB, ...SIGNER, statementOn: true }, render: 'eu-blocked' },
-  { id: 'F', title: 'Case label', who: 'Asked for by Digident', expect: 'Optional. When switched on, a thermal label with lab contact, case ID, patient, practice, product and teeth, and "custom-made device", printed from the bottom-right of the order form on any case.', settings: { labelOn: true }, render: 'label' },
+  { id: 'F', title: 'Case label', who: 'Asked for by Digident', expect: 'Optional. When switched on, a thermal label with the lab logo and contact, case ID, patient, practice, product and teeth, "custom-made device" and "Powered by Smile Genius", printed from the bottom-right of the order form on any case.', settings: { ...LAB, labelOn: true }, render: 'label' },
 ];
 
 const preset = (p: Partial<DocsSettings>): DocsSettings => ({ ...DEFAULT_SETTINGS, ...p });

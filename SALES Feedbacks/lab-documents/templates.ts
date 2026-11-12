@@ -21,15 +21,24 @@ export const TOKENS: { token: string; label: string }[] = [
 
 export const UK_DEFAULT =
   'This is a custom-made medical device, made by {{lab.name}}, {{lab.address}}, to the prescription of {{prescriber}} of {{practice}}, ' +
-  'with the design characteristics specified on this form (order {{caseId}}). It is intended for the exclusive use of {{patient}} and conforms to the relevant ' +
-  'essential requirements in Annex I of the Medical Devices Directive as applied by the UK Medical Devices Regulations 2002, except where stated on this form. ' +
+  'with the design characteristics specified on this form (order {{caseId}}), for the exclusive use of {{patient}}. It conforms to the requirements for ' +
+  'custom-made devices of the UK Medical Devices Regulations 2002 (SI 2002 No 618, as amended), except where stated on this form. ' +
   'A full statement is available from {{lab.name}} on request.';
 
 export const EU_DEFAULT =
-  'This is a custom-made device under Regulation (EU) 2017/745, made by {{lab.name}}, {{lab.address}}, at {{lab.sites}}, to the prescription of {{prescriber}} of {{practice}}, ' +
-  'with the specific characteristics set out on this form (order {{caseId}}). It is intended for the exclusive use of {{patient}} and conforms to the general safety ' +
-  'and performance requirements in Annex I of the Regulation, except where stated on this form. It contains no medicinal substance and no tissues or cells of human ' +
-  'or animal origin. EU authorised representative: {{lab.authRep}}. A full statement is available from {{lab.name}} on request.';
+  'This is a custom-made device under Regulation (EU) 2017/745 on medical devices (EU MDR), made by {{lab.name}}, {{lab.address}}, at {{lab.sites}}, ' +
+  'to the prescription of {{prescriber}} of {{practice}}, with the specific characteristics set out on this form (order {{caseId}}), for the exclusive use of {{patient}}. ' +
+  'It conforms to the general safety and performance requirements of the Regulation, except where stated on this form, and contains no medicinal substance and no tissues ' +
+  'or cells of human or animal origin. EU authorised representative: {{lab.authRep}}. A full statement is available from {{lab.name}} on request.';
+
+/** Earlier standard wording, so a lab that never edited it moves to the new standard text. */
+export const OLD_DEFAULTS = [
+  // With clause references (12 Nov)
+  'This is a custom-made medical device, made by {{lab.name}}, {{lab.address}}, to the prescription of {{prescriber}} of {{practice}}, with the design characteristics specified on this form (order {{caseId}}), for the exclusive use of {{patient}}. It is supplied under Part II of the UK Medical Devices Regulations 2002 (SI 2002 No 618, as amended) and Annex VIII as modified by Schedule 2A, and conforms to the relevant essential requirements of Annex I, except where stated on this form. A full statement is available from {{lab.name}} on request.',
+  'This is a custom-made device under Article 52(8) and Annex XIII of Regulation (EU) 2017/745, made by {{lab.name}}, {{lab.address}}, at {{lab.sites}}, to the prescription of {{prescriber}} of {{practice}}, with the specific characteristics set out on this form (order {{caseId}}), for the exclusive use of {{patient}}. It conforms to the general safety and performance requirements of Annex I, except where stated on this form, and contains no medicinal substance and no tissues or cells of human or animal origin. EU authorised representative: {{lab.authRep}}. A full statement is available from {{lab.name}} on request.',
+  'This is a custom-made medical device, made by {{lab.name}}, {{lab.address}}, to the prescription of {{prescriber}} of {{practice}}, with the design characteristics specified on this form (order {{caseId}}). It is intended for the exclusive use of {{patient}} and conforms to the relevant essential requirements in Annex I of the Medical Devices Directive as applied by the UK Medical Devices Regulations 2002, except where stated on this form. A full statement is available from {{lab.name}} on request.',
+  'This is a custom-made device under Regulation (EU) 2017/745, made by {{lab.name}}, {{lab.address}}, at {{lab.sites}}, to the prescription of {{prescriber}} of {{practice}}, with the specific characteristics set out on this form (order {{caseId}}). It is intended for the exclusive use of {{patient}} and conforms to the general safety and performance requirements in Annex I of the Regulation, except where stated on this form. It contains no medicinal substance and no tissues or cells of human or animal origin. EU authorised representative: {{lab.authRep}}. A full statement is available from {{lab.name}} on request.',
+];
 
 /** What each regime asks the statement to carry, and where it comes from on the printed sheet. */
 export const UK_PARTICULARS = [
