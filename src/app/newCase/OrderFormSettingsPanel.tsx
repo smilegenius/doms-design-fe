@@ -16,23 +16,26 @@
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  AlertTriangle, ChevronDown, Eye, FileSignature, Image as ImageIcon, LayoutList, Pencil, PenLine, Plus, Printer, RotateCcw,
-  SlidersHorizontal, Trash2, Upload, X,
+  AlertTriangle, ChevronDown, Eye, FileSignature, FileText, Image as ImageIcon, LayoutList, Pencil, PenLine, Plus, Printer, RotateCcw,
+  SlidersHorizontal, Tag, Trash2, Upload, X,
 } from 'lucide-react';
 import Toggle from '../components/Toggle';
 import Button from '../components/Button';
 import ModalPortal from '../components/ModalPortal';
 import { useToast } from '../context/ToastContext';
 import OrderFormSheet, { OrderFormFullView } from './OrderForm';
+import { CaseLabel } from './CaseLabel';
+import ScaledSheet from './ScaledSheet';
+import { FullStatementPage } from './FullStatement';
 import { orderFormModelFor } from './FlowCaseDetail';
 import { BRIDGE_CASE_ID, MULTI_CASE_ID, ensureBridgeDemo, ensureMultiCaseDemo } from './orderFormDemo';
 import {
-  DEFAULT_ORDER_FORM_SETTINGS, EU_DEFAULT, PAPER, SIGNATURE_FONT, TOKENS, UK_DEFAULT, euBlocker, saveErrors,
-  saveOrderFormSettings, useOrderFormSettings, type Jurisdiction, type OrderFormSettings, type PaperSize,
+  DEFAULT_ORDER_FORM_SETTINGS, EU_DEFAULT, LABEL_STOCK, PAPER, SIGNATURE_FONT, TOKENS, UK_DEFAULT, euBlocker, saveErrors,
+  saveOrderFormSettings, useOrderFormSettings, type Jurisdiction, type LabelStock, type OrderFormSettings, type PaperSize,
 } from './orderFormSettings';
 
-type Group = 'branding' | 'statement' | 'sections';
-const GROUPS: Group[] = ['branding', 'statement', 'sections'];
+type Group = 'branding' | 'statement' | 'sections' | 'label';
+const GROUPS: Group[] = ['branding', 'statement', 'sections', 'label'];
 
 /** The walkthrough's four examples (/flows/order-form), to preview the form on. */
 const PREVIEW_CASES: { id: string; label: string; ensure?: () => void }[] = [
@@ -52,6 +55,7 @@ const GROUP_META: Record<Group, { title: string; icon: typeof ImageIcon }> = {
   branding: { title: 'Branding', icon: ImageIcon },
   statement: { title: 'Conformity statement', icon: FileSignature },
   sections: { title: 'Sections on the form', icon: LayoutList },
+  label: { title: 'Case label', icon: Tag },
 };
 
 function groupSummary(g: Group, s: OrderFormSettings): string {
@@ -65,10 +69,11 @@ function groupSummary(g: Group, s: OrderFormSettings): string {
     ].filter(Boolean).join(' · ');
   }
   if (g === 'statement') {
-    if (!s.statementOn) return 'Off';
-    return [s.jurisdiction === 'Both' ? 'UK and EU' : `${s.jurisdiction} only`, s.signerName && `signed by ${s.signerName}`, { typed: 'typed signature', image: 'uploaded signature', blank: 'signed in ink' }[s.signatureMode]]
+    if (!s.statementOn) return s.fullStatementOn ? 'Short statement off · full statement on page 2' : 'Off';
+    return [s.jurisdiction === 'Both' ? 'UK and EU' : `${s.jurisdiction} only`, s.fullStatementOn && 'full statement on page 2', s.signerName && `signed by ${s.signerName}`, { typed: 'typed signature', image: 'uploaded signature', blank: 'signed in ink' }[s.signatureMode]]
       .filter(Boolean).join(' · ');
   }
+  if (g === 'label') return s.labelOn ? `On · ${LABEL_STOCK[s.labelStock].label}` : 'Off · optional label for the outgoing box';
   const off = [!s.showHowTo && 'how-to video', !s.showHelp && 'help', !s.showDuplicateCheck && 'duplicate check'].filter(Boolean);
   return off.length ? `Hidden: ${off.join(', ')}` : 'All shown';
 }
@@ -197,34 +202,6 @@ function readImage(file: File): Promise<{ url: string; width: number }> {
   });
 }
 
-/** The sheet at its print width, scaled down (never up) to the width it's given. */
-function ScaledSheet({ children, sheetWidth = 760 }: { children: ReactNode; sheetWidth?: number }) {
-  const outer = useRef<HTMLDivElement>(null);
-  const inner = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ scale: 0.5, h: 600 });
-  useLayoutEffect(() => {
-    const o = outer.current, i = inner.current;
-    if (!o || !i) return;
-    const measure = () => {
-      const scale = Math.min(1, o.clientWidth / sheetWidth);
-      setSize({ scale, h: i.scrollHeight * scale });
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(o);
-    ro.observe(i);
-    return () => ro.disconnect();
-  }, [sheetWidth]);
-  return (
-    <div ref={outer} className="relative overflow-hidden" style={{ height: size.h }}>
-      <div ref={inner} className="absolute top-0 left-0 origin-top-left" style={{ width: sheetWidth, transform: `scale(${size.scale})` }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 /** A preview case's order form; the two orders made for the walkthrough are added to the flow's demo when picked. */
 function usePreviewModel(caseId: string) {
   return useMemo(() => {
@@ -251,6 +228,36 @@ function PreviewPage({ caseId, settings }: { caseId: string; settings: OrderForm
         <OrderFormSheet model={model} settings={settings} roomy />
       </ScaledSheet>
     </div>
+  );
+}
+
+/** Everything the settings print, in order: the form, page 2 (full statement) and the case label, when on. */
+function PreviewPages({ caseId, settings }: { caseId: string; settings: OrderFormSettings }) {
+  const model = usePreviewModel(caseId);
+  const head = (icon: ReactNode, text: string) => (
+    <p className="text-xs font-semibold text-[#030213] mb-2 inline-flex items-center gap-1.5">{icon} {text}</p>
+  );
+  return (
+    <>
+      {model && (settings.fullStatementOn || settings.labelOn) && head(<FileText className="w-4 h-4 text-[#4D8EF7]" />, 'Page 1 · Order form')}
+      <PreviewPage caseId={caseId} settings={settings} />
+      {settings.fullStatementOn && model && (
+        <div data-of-part="full" className="mt-6">
+          {head(<FileSignature className="w-4 h-4 text-[#4D8EF7]" />, 'Page 2 · Full statement')}
+          <div className="bg-white rounded-md shadow-[0_4px_24px_-8px_rgba(3,2,19,0.18)] border border-[#E0E0E6] p-4 sm:p-6">
+            <ScaledSheet><FullStatementPage model={model} s={settings} /></ScaledSheet>
+          </div>
+        </div>
+      )}
+      {settings.labelOn && model && (
+        <div data-of-part="label" className="mt-6">
+          {head(<Tag className="w-4 h-4 text-[#4D8EF7]" />, `Case label · ${LABEL_STOCK[settings.labelStock].label}, actual size`)}
+          <div className="flex justify-center rounded-md bg-[#E9E9EE] p-6">
+            <div className="shadow-[0_2px_12px_rgba(0,0,0,0.15)] h-fit"><CaseLabel model={model} s={settings} /></div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -397,10 +404,20 @@ function SettingsForm({ draft, setDraft, open, onToggle }: {
           </div>
         </StatementCard>
 
+        {/* 13-Nov: the full statement, as page 2 of the order form (Growth's lab settings had it as a blank download). */}
+        <div className="rounded-xl border border-[#E0E0E6] px-3 py-3">
+          <SwitchRow
+            label="Add the full statement as page 2"
+            sub="The full statement for a custom-made device, filled in from each case and signed by the person below. It prints and downloads after the order form, for dentists who ask for it."
+            on={draft.fullStatementOn}
+            onChange={() => set('fullStatementOn', !draft.fullStatementOn)}
+          />
+        </div>
+
         <div className="border-t border-[#F0EFF6] pt-4 space-y-3">
           <p className="text-sm font-semibold text-[#030213] flex items-center gap-1.5"><PenLine className="w-4 h-4 text-[#4D8EF7]" /> Signed by</p>
           {/* 12-Nov: with the statement off, nothing here reaches the preview; say so where the user is typing. */}
-          {!draft.statementOn && (
+          {!draft.statementOn && !draft.fullStatementOn && (
             <div className="flex items-start gap-2 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2">
               <Eye className="w-3.5 h-3.5 text-[#B45309] mt-0.5 flex-shrink-0" />
               <p className="text-[11px] text-[#92400E] leading-snug flex-1">The statement is off, so it isn’t on the form or in the preview.</p>
@@ -474,6 +491,24 @@ function SettingsForm({ draft, setDraft, open, onToggle }: {
         <SwitchRow label="Need help?" sub="A QR code to book time with support, and the support email." on={draft.showHelp} onChange={() => set('showHelp', !draft.showHelp)} />
         <SwitchRow label="Duplicate check" sub="“Please check for duplicates” before the lab starts the work." on={draft.showDuplicateCheck} onChange={() => set('showDuplicateCheck', !draft.showDuplicateCheck)} />
       </Section>
+
+      {/* ─── Case label (12-Nov, optional) ─── */}
+      <Section id="label" open={open.has('label')} onToggle={onToggle} sub={groupSummary('label', draft)}>
+        <SwitchRow
+          label="Use case labels"
+          sub="A Label tab next to the order form on every case, to print a label for the outgoing box. On by default."
+          on={draft.labelOn}
+          onChange={() => set('labelOn', !draft.labelOn)}
+        />
+        <p className="text-xs text-[#5A5568] leading-relaxed">
+          Like a delivery label: the dentist, practice and full address first, then patient and product, your lab as sender, and “Custom-made device”, which UK rules ask for on the packaging.
+        </p>
+        <div className={draft.labelOn ? '' : 'opacity-50 pointer-events-none'}>
+          <p className={lbl}>Label stock</p>
+          <Segmented<LabelStock> value={draft.labelStock} onChange={v => set('labelStock', v)} options={(Object.keys(LABEL_STOCK) as LabelStock[]).map(k => [k, LABEL_STOCK[k].label])} />
+          <p className={hint}>62 mm rolls fit most label printers; 4 × 6 in is the usual shipping label.</p>
+        </div>
+      </Section>
     </div>
   );
 }
@@ -501,6 +536,22 @@ function OrderFormEditor({ startAt, caseId, onCaseId, onClose }: { startAt: Grou
     }
     wasOn.current = draft.statementOn;
   }, [draft.statementOn]);
+  // The same for page 2 (the full statement), drawn under the form.
+  const fullWasOn = useRef(draft.fullStatementOn);
+  useEffect(() => {
+    if (draft.fullStatementOn && !fullWasOn.current) {
+      requestAnimationFrame(() => previewScroll.current?.querySelector('[data-of-part="full"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    }
+    fullWasOn.current = draft.fullStatementOn;
+  }, [draft.fullStatementOn]);
+  // The same for the case label, drawn under the form.
+  const labelWasOn = useRef(draft.labelOn);
+  useEffect(() => {
+    if (draft.labelOn && !labelWasOn.current) {
+      requestAnimationFrame(() => previewScroll.current?.querySelector('[data-of-part="label"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    }
+    labelWasOn.current = draft.labelOn;
+  }, [draft.labelOn]);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
   const errors = saveErrors(draft);
@@ -587,7 +638,7 @@ function OrderFormEditor({ startAt, caseId, onCaseId, onClose }: { startAt: Grou
             </div>
             <div ref={previewScroll} className="flex-1 overflow-y-auto px-4 sm:px-6 pb-8">
               <div className="mx-auto max-w-[860px]">
-                <PreviewPage caseId={caseId} settings={draft} />
+                <PreviewPages caseId={caseId} settings={draft} />
               </div>
             </div>
           </section>
@@ -600,6 +651,12 @@ function OrderFormEditor({ startAt, caseId, onCaseId, onClose }: { startAt: Grou
 
 // ─── The Settings tab: a summary and the saved form ─────────────────────────
 
+/** The tab's quick switches: what prints alongside the form. */
+const QUICK: { key: 'labelOn' | 'fullStatementOn'; group: Group; title: string; icon: typeof Tag; sub: (s: OrderFormSettings) => string }[] = [
+  { key: 'labelOn', group: 'label', title: 'Case label', icon: Tag, sub: s => (s.labelOn ? `A Label tab on every case · ${LABEL_STOCK[s.labelStock].label}` : 'A label for the outgoing box, from a Label tab on every case') },
+  { key: 'fullStatementOn', group: 'statement', title: 'Full statement', icon: FileSignature, sub: s => (s.fullStatementOn ? `Page 2 of every order form${s.signerName ? ` · signed by ${s.signerName}` : ''}` : 'The full statement for a custom-made device, as page 2') },
+];
+
 export default function OrderFormSettingsPanel() {
   const [params, setParams] = useSearchParams();
   const saved = useOrderFormSettings();
@@ -609,6 +666,16 @@ export default function OrderFormSettingsPanel() {
   const editing: Group | null = groupParam && GROUPS.includes(groupParam) ? groupParam : null;
   const openEditor = (g: Group) => { const n = new URLSearchParams(params); n.set('group', g); setParams(n); };
   const closeEditor = () => { const n = new URLSearchParams(params); n.delete('group'); setParams(n); };
+  const { toast } = useToast();
+  // A quick switch saves at once; one that needs more first (a signer for the full statement) opens the editor there.
+  const quickToggle = (key: 'labelOn' | 'fullStatementOn', group: Group) => {
+    const next = { ...saved, [key]: !saved[key] };
+    const errors = saveErrors(next);
+    if (errors.length) { toast.info(errors[0]); openEditor(group); return; }
+    saveOrderFormSettings(next);
+    const what = key === 'labelOn' ? 'Case labels' : 'The full statement (page 2)';
+    toast.success(`${what} ${next[key] ? 'turned on' : 'turned off'}.`);
+  };
 
   return (
     <div className="bg-white rounded-xl border border-[#E0E0E6] overflow-hidden">
@@ -620,9 +687,22 @@ export default function OrderFormSettingsPanel() {
         </div>
         <Button size="sm" icon={<Pencil className="w-3.5 h-3.5" />} onClick={() => openEditor('branding')}>Edit</Button>
       </div>
+      {/* 13-Nov: what prints with the form, switched here without opening the editor. */}
+      <div className="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-[#F0EFF6] border-b border-[#F0EFF6]">
+        {QUICK.map(q => (
+          <div key={q.key} className="flex items-start gap-3 px-6 py-3">
+            <q.icon className="w-4 h-4 text-[#717182] mt-0.5 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-[#030213]">{q.title}</p>
+              <p className="text-[11px] text-[#717182] leading-snug">{q.sub(saved)}</p>
+            </div>
+            <Toggle on={saved[q.key]} onChange={() => quickToggle(q.key, q.group)} title={q.title} />
+          </div>
+        ))}
+      </div>
       <div className="p-4 sm:p-6 bg-[#F3F3F5]">
         <div className="mx-auto max-w-[760px]">
-          <PreviewPage caseId={caseId} settings={saved} />
+          <PreviewPages caseId={caseId} settings={saved} />
         </div>
       </div>
 

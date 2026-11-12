@@ -18,6 +18,10 @@ import { caseDateToISO, isoToCaseDate } from '../data/dentureStages';
 import { useToast } from '../context/ToastContext';
 import FlowFrame from './FlowFrame';
 import OrderFormSheet, { OrderFormFullView, type OrderFormModel, type StageStatus } from './OrderForm';
+import { CaseLabel, CaseLabelView } from './CaseLabel';
+import { FullStatementPage } from './FullStatement';
+import ScaledSheet from './ScaledSheet';
+import { LABEL_STOCK, useOrderFormSettings } from './orderFormSettings';
 import { CLINIC, Funding, Patient, PriorWork, ProductId, USERS, User, labById, userById } from './data';
 import { DEMO_NOW, demoNow, demoTimeOf, fmtFull, fmtShort, fromISO, lastWorkingDayBefore, toISO } from './dates';
 import {
@@ -476,7 +480,11 @@ function DetailBody() {
   const connections = useScannerConnections();
   const caseData = useMemo(() => (row && row.status !== 'Draft' ? toCaseForDetail(row, user, shipped) : null), [row, user, shipped]);
   // The order form at reading size: opened by the tab bar's full screen ('view') or Print ('print').
-  const [formView, setFormView] = useState<'view' | 'print' | null>(null);
+  // 'print' prints everything; 'print-form' / 'print-full' one page only (the split Print's menu, 13-Nov).
+  const [formView, setFormView] = useState<'view' | 'print' | 'print-form' | 'print-full' | null>(null);
+  // 12-Nov: the lab's case label (Settings › Order Form › Case label), from the Order form tab bar's Label.
+  const [labelView, setLabelView] = useState<'view' | 'print' | null>(null);
+  const formSettings = useOrderFormSettings();
 
   // Case IDs come back after Reset demo: a dispatch recorded before this case was sent belongs to an
   // earlier run, and the portal page reads the record as it is, so it goes.
@@ -538,13 +546,34 @@ function DetailBody() {
     render: ({ caseData: cd }) => <OrderFormSheet model={orderFormModel(row, user, cd)} />,
     onFullView: () => setFormView('view'),
     onPrint: () => setFormView('print'),
+    printOptions: [
+      { label: 'Order form only', sub: formSettings.fullStatementOn ? 'Page 1' : 'The form, without the case label', onClick: () => setFormView('print-form') },
+      ...(formSettings.fullStatementOn ? [{ label: 'Full statement only', sub: 'Page 2', onClick: () => setFormView('print-full') }] : []),
+      ...(formSettings.labelOn ? [{ label: 'Case label only', sub: `On its own stock · ${LABEL_STOCK[formSettings.labelStock].label}`, onClick: () => setLabelView('print') }] : []),
+    ],
+    // 13-Nov: page 2 (the full statement) and the case label, under the form in the Order form tab, when the lab uses them.
+    ...(formSettings.fullStatementOn ? {
+      renderFullStatement: (cd: CaseForDetail) => (
+        <div className="rounded border border-[#E0E0E6] p-2"><ScaledSheet><FullStatementPage model={orderFormModel(row, user, cd)} s={formSettings} /></ScaledSheet></div>
+      ),
+    } : {}),
+    ...(formSettings.labelOn ? {
+      renderLabel: (cd: CaseForDetail) => <CaseLabel model={orderFormModel(row, user, cd)} s={formSettings} />,
+      onLabelView: () => setLabelView('view'),
+      onPrintLabel: () => setLabelView('print'),
+    } : {}),
   };
 
   return (
     <OrderFormSlot.Provider value={orderForm}>
     {formView && (
-      <OrderFormFullView model={orderFormModel(row, user, caseData)} autoPrint={formView === 'print'} onClose={() => setFormView(null)} />
+      <OrderFormFullView
+        model={orderFormModel(row, user, caseData)}
+        autoPrint={formView === 'print' ? true : formView === 'print-form' ? 'form' : formView === 'print-full' ? 'full' : undefined}
+        onClose={() => setFormView(null)}
+      />
     )}
+    {labelView && <CaseLabelView model={orderFormModel(row, user, caseData)} autoPrint={labelView === 'print'} onClose={() => setLabelView(null)} />}
     <CaseDetailPage
       // A new status (Mark as dispatched) starts the page afresh; a moved date doesn't (the page follows it).
       key={`${row.id}:${row.status}`}

@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Boxes, Crown, Download, FileSignature, FileText, Link2, Loader2, Settings2, Smile } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Boxes, Crown, Download, FileSignature, FileText, Link2, Loader2, Settings2, Smile, Tag } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import { BRIDGE_CASE_ID, MULTI_CASE_ID, ensureBridgeDemo, ensureMultiCaseDemo } from '../newCase/orderFormDemo';
 import { orderFormModelFor } from '../newCase/FlowCaseDetail';
 import { OrderFormPdfJob, type OrderFormModel } from '../newCase/OrderForm';
+import { saveOrderFormSettings, useOrderFormSettings } from '../newCase/orderFormSettings';
+import Toggle from '../components/Toggle';
 
 // ─── Order form in Case Details · Oct-2026 ───────────────────────────────────
 // The new Dental Order Form, shown on the New Case Flow's View Case (the
@@ -29,7 +31,7 @@ interface Nav {
 const STEPS: { label: string; blurb: string; navs: Nav[] }[] = [
   {
     label: 'Crown',
-    blurb: 'William Grant’s crown on 46 at Northfield. Open Order form beside the 3D viewer, or Full View for the whole sheet, which prints on one A4 page (or Download PDF): the patient at the top with the QR and the Smile Genius logo, then dentist, practice, lab, ship-to address, received via and treatments in two rows, the Tooth Chart in the user’s tooth system, the service details and the instruction.',
+    blurb: 'William Grant’s crown on 46 at Northfield. Open Order form beside the 3D viewer, or Full View for the whole sheet, which prints on one A4 page (or Download PDF): the patient at the top with the QR and the Smile Genius logo, then dentist, practice, lab, ship-to address, received via and treatments in two rows, the Tooth Chart in the user’s tooth system, the service details and the instruction. With the switches above, the full statement follows as page 2 and the case label after it, in the Order form tab, Full View and the PDF.',
     navs: [
       {
         title: 'View Case — CAS-2026-098',
@@ -84,6 +86,7 @@ export default function OrderFormFlowPage() {
   const { user, login } = useAuth();
 
   const { toast } = useToast();
+  const formSettings = useOrderFormSettings();
   // The order form being saved as a PDF, straight from here (no View Case on the way).
   const [job, setJob] = useState<{ caseId: string; model: OrderFormModel } | null>(null);
 
@@ -142,6 +145,39 @@ export default function OrderFormFlowPage() {
             </p>
           </div>
 
+          {/* 13-Nov: what the samples carry with the form — the same switches as Settings › Order Form, so View Case,
+              Full View, Print and Download PDF all follow them. */}
+          <section className="bg-white border border-[#E0E0E6] rounded-2xl shadow-sm overflow-hidden mb-4">
+            <div className="px-4 sm:px-5 pt-4 pb-2">
+              <h2 className="text-sm font-bold text-[#030213]">What the samples include</h2>
+              <p className="text-xs text-[#717182] leading-relaxed mt-1">
+                Every case below opens and downloads with these. They are the lab’s own settings, so they stay until switched back.
+              </p>
+            </div>
+            <div className="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-[#F0EFF6] border-t border-[#F0EFF6]">
+              {([
+                ['fullStatementOn', 'Full statement', 'Page 2: the full statement for a custom-made device, filled in from the case.', FileSignature],
+                ['labelOn', 'Case label', 'A label for the outgoing box, under the form and as the PDF’s last page.', Tag],
+              ] as const).map(([key, title, sub, Icon]) => (
+                <div key={key} className="flex items-start gap-3 px-4 sm:px-5 py-3">
+                  <Icon className="w-4 h-4 text-[#717182] mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-[#030213]">{title}</p>
+                    <p className="text-[11px] text-[#717182] leading-snug">{sub}</p>
+                  </div>
+                  <Toggle
+                    on={formSettings[key]}
+                    title={title}
+                    onChange={() => {
+                      saveOrderFormSettings({ ...formSettings, [key]: !formSettings[key] });
+                      toast.success(`${title} ${formSettings[key] ? 'taken off' : 'added to'} the samples.`);
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
+
           <div className="space-y-4">
             {STEPS.map((sc, i) => (
               <section key={sc.label} className="bg-white border border-[#E0E0E6] rounded-2xl shadow-sm overflow-hidden">
@@ -192,14 +228,14 @@ export default function OrderFormFlowPage() {
                   <h2 className="text-sm font-bold text-[#030213] leading-snug">Lab settings</h2>
                 </div>
                 <p className="text-xs text-[#717182] leading-relaxed mt-1.5">
-                  The lab sets up its order form in Settings › Order Form: its logo and MHRA / DAMAS numbers, field emphasis and paper size, a short UK or EU statement for a custom-made device with who signs it, and the help sections at the foot. A live preview shows the form on any of the cases above, and Save applies it to every order form here.
+                  The lab sets up its order form in Settings › Order Form: its logo and MHRA / DAMAS numbers, field emphasis and paper size, a short UK or EU statement for a custom-made device with who signs it, the help sections at the foot, and a case label for the outgoing box (the Label tab beside the order form on View Case, on unless the lab turns it off). A live preview shows the form on any of the cases above, and Save applies it to every order form here.
                 </p>
               </div>
               <div className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-t border-[#F0EFF6]">
                 <span className="w-7 h-7 rounded-lg bg-[#F3F3F5] text-[#5A5568] flex items-center justify-center flex-shrink-0"><FileSignature className="w-4 h-4" /></span>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold text-[#030213] leading-snug">Lab portal — Settings › Order Form</p>
-                  <p className="text-[11px] text-[#717182] leading-snug truncate">Branding · Conformity statement · Sections on the form</p>
+                  <p className="text-[11px] text-[#717182] leading-snug truncate">Branding · Conformity statement · Sections on the form · Case label</p>
                 </div>
                 <button
                   onClick={() => {

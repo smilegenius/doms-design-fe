@@ -8,12 +8,13 @@ import {
   RotateCw, Maximize, Palette, FolderOpen, MoreHorizontal, Printer,
   Check, Clock, CheckCircle2, Archive, ArchiveRestore, Mail, Send, Info, Reply, Pencil,
   Copy, Plug, GitBranch, Lock as LockIcon,
-  History as HistoryIcon, Truck, Package,
+  History as HistoryIcon, Truck, Package, Tag,
 } from 'lucide-react';
 import { PrintLabelsModal } from '../components/DispatchLabel';
 import SideDrawer from '../components/SideDrawer';
 import ActionMenu from '../components/ActionMenu';
 import ModalPortal from '../components/ModalPortal';
+import SplitPrintButton, { type PrintOption } from '../components/SplitPrintButton';
 import CasesIcon from '../components/icons/CasesIcon';
 import UrgentBadge from '../components/UrgentBadge';
 import UrgentConfirmModal from '../components/UrgentConfirmModal';
@@ -1213,7 +1214,6 @@ function PrescriptionTab({ caseData, onOpenNotes, onOpenFullView }: {
 }) {
   const [orderOpen, setOrderOpen] = useState(true);
   const [viewerFormat, setViewerFormat] = useState<ViewerFormat>('3D');
-  const [orderTab, setOrderTab] = useState<'order-form' | 'lab-documents'>('order-form');
   const selectedTeeth = [11,12,13,17,18,21,22,23,24,25,26,27,28];
 
   return (
@@ -1256,44 +1256,8 @@ function PrescriptionTab({ caseData, onOpenNotes, onOpenFullView }: {
         {/* Left: scan viewer */}
         <ScanViewer format={viewerFormat} onFormatChange={setViewerFormat} />
 
-        {/* Right: Order form / Lab Documents tabs */}
-        <div className="bg-white border border-[#E0E0E6] rounded-xl flex flex-col">
-          <div className="flex items-center border-b border-[#F0EFF6] px-4">
-            <button
-              onClick={() => setOrderTab('order-form')}
-              className={`inline-flex items-center gap-1.5 px-3 py-3 text-xs font-semibold border-b-2 transition-colors ${
-                orderTab === 'order-form' ? 'border-[#4D8EF7] text-[#4D8EF7]' : 'border-transparent text-[#717182] hover:text-[#030213]'
-              }`}
-            >
-              <Eye className="w-3.5 h-3.5" />
-              Order form
-            </button>
-            <button
-              onClick={() => setOrderTab('lab-documents')}
-              className={`inline-flex items-center gap-1.5 px-3 py-3 text-xs font-semibold border-b-2 transition-colors ${
-                orderTab === 'lab-documents' ? 'border-[#4D8EF7] text-[#4D8EF7]' : 'border-transparent text-[#717182] hover:text-[#030213]'
-              }`}
-            >
-              <FolderOpen className="w-3.5 h-3.5" />
-              Lab Documents
-            </button>
-            <OrderFormTools />
-          </div>
-
-          {orderTab === 'order-form' ? (
-            <div className="p-4 space-y-4 overflow-y-auto max-h-[420px]">
-              {caseData.source === 'post' && <PostPrintBanner />}
-              <OrderFormBody caseData={caseData} />
-            </div>
-          ) : (
-            <div className="p-4 flex flex-col items-center justify-center text-center gap-3 min-h-[300px]">
-              <div className="w-12 h-12 rounded-2xl bg-[#F0EFF6] flex items-center justify-center">
-                <FolderOpen className="w-6 h-6 text-[#C8C0F0]" />
-              </div>
-              <p className="text-xs text-[#A0A0B0]">No lab documents uploaded for this case yet.</p>
-            </div>
-          )}
-        </div>
+        {/* Right: Order form / (Label) / Lab Documents tabs */}
+        <OrderFormPanel caseData={caseData} />
       </div>
 
       {/* ── Order details accordion ── */}
@@ -3110,7 +3074,6 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
   // Per-service viewer + order panel state — scoped to this view so each
   // service tab keeps its own viewer format and accordion state.
   const [viewerFormat, setViewerFormat] = useState<ViewerFormat>('3D');
-  const [orderTab, setOrderTab] = useState<'order-form' | 'lab-documents'>('order-form');
   const [orderOpen, setOrderOpen] = useState(true);
 
   // When the service is staged, the active stage order drives the status +
@@ -3440,44 +3403,8 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
               {/* Left: scan viewer */}
               <ScanViewer format={viewerFormat} onFormatChange={setViewerFormat} />
 
-              {/* Right: Order form / Lab Documents tabs */}
-              <div className="bg-white border border-[#E0E0E6] rounded-xl flex flex-col">
-                <div className="flex items-center border-b border-[#F0EFF6] px-4">
-                  <button
-                    onClick={() => setOrderTab('order-form')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-3 text-xs font-semibold border-b-2 transition-colors ${
-                      orderTab === 'order-form' ? 'border-[#4D8EF7] text-[#4D8EF7]' : 'border-transparent text-[#717182] hover:text-[#030213]'
-                    }`}
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    Order form
-                  </button>
-                  <button
-                    onClick={() => setOrderTab('lab-documents')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-3 text-xs font-semibold border-b-2 transition-colors ${
-                      orderTab === 'lab-documents' ? 'border-[#4D8EF7] text-[#4D8EF7]' : 'border-transparent text-[#717182] hover:text-[#030213]'
-                    }`}
-                  >
-                    <FolderOpen className="w-3.5 h-3.5" />
-                    Lab Documents
-                  </button>
-                  <OrderFormTools />
-                </div>
-
-                {orderTab === 'order-form' ? (
-                  <div className="p-4 space-y-4 overflow-y-auto max-h-[420px]">
-                    {caseData.source === 'post' && <PostPrintBanner />}
-                    <OrderFormBody caseData={caseData} service={service} />
-                  </div>
-                ) : (
-                  <div className="p-4 flex flex-col items-center justify-center text-center gap-3 min-h-[300px]">
-                    <div className="w-12 h-12 rounded-2xl bg-[#F0EFF6] flex items-center justify-center">
-                      <FolderOpen className="w-6 h-6 text-[#C8C0F0]" />
-                    </div>
-                    <p className="text-xs text-[#A0A0B0]">No lab documents uploaded for this service yet.</p>
-                  </div>
-                )}
-              </div>
+              {/* Right: Order form / (Label) / Lab Documents tabs */}
+              <OrderFormPanel caseData={caseData} service={service} />
             </div>
 
             {/* ── Order details accordion (per-service) ── */}
@@ -3684,7 +3611,118 @@ function ServiceDetailView({ service, caseData, onOpenNotes, onOpenFullView, onM
  * A host with no render keeps the portal's form and only takes the Print (the Accept-on-print flow).
  */
 export type OrderFormRender = (o: { caseData: CaseForDetail; service: ServiceItem | null; wide: boolean }) => React.ReactNode;
-export interface OrderFormHost { render?: OrderFormRender; onFullView?: () => void; onPrint?: () => void }
+/**
+ * 12-Nov: renderLabel / onLabelView / onPrintLabel — the lab's optional case label; 13-Nov it sits under the form (and
+ * page 2) in the one Order form tab. With a host's own form, Full view, Print label and Print float over the form, as
+ * the 3D viewer's controls do.
+ */
+export interface OrderFormHost {
+  render?: OrderFormRender; onFullView?: () => void; onPrint?: () => void;
+  renderLabel?: (caseData: CaseForDetail) => React.ReactNode; onLabelView?: () => void; onPrintLabel?: () => void;
+  /** 13-Nov: page 2 of the form (the full statement), drawn under the form in the same tab. */
+  renderFullStatement?: (caseData: CaseForDetail) => React.ReactNode;
+  /** 13-Nov: the parts that can print alone, under the Print button's arrow (Print itself prints everything). */
+  printOptions?: PrintOption[];
+}
+
+/** The viewer-style floating control pill, over the bottom of a panel. */
+function FloatingTools({ items, inline, trailing }: { items: { icon: typeof Printer; label: string; onClick?: () => void; primary?: boolean }[]; inline?: boolean; trailing?: React.ReactNode }) {
+  return (
+    <div className={`${inline ? 'flex-shrink-0' : 'absolute bottom-3 left-1/2 -translate-x-1/2 z-10'} inline-flex items-center gap-1 bg-[#1B1B2D] rounded-full px-2 py-1.5 shadow-lg`}>
+      {items.map(({ icon: Icon, label, onClick, primary }) => (
+        <button
+          key={label}
+          onClick={onClick}
+          title={label}
+          aria-label={label}
+          className={`h-7 rounded-full inline-flex items-center justify-center gap-1.5 text-[11px] font-semibold text-white transition-colors ${
+            primary ? 'px-3 bg-gradient-to-br from-[#4D8EF7] to-[#A59DFF] hover:opacity-90' : 'w-7 hover:bg-white/10'
+          }`}
+        >
+          <Icon className="w-3.5 h-3.5" />
+          {primary && label}
+        </button>
+      ))}
+      {trailing}
+    </div>
+  );
+}
+
+/**
+ * The Order form / (Label) / Lab Documents panel beside the 3D viewer. In the portal (no host form) it is as before,
+ * with Print in the tab bar; a host's own form gets the floating Full view + Print and, when it has one, the Label tab.
+ */
+function OrderFormPanel({ caseData, service }: { caseData: CaseForDetail; service?: ServiceItem | null }) {
+  const host = useContext(OrderFormSlot);
+  const floating = !!host?.onFullView;
+  // 13-Nov: no Label tab. A host's Order form tab scrolls through everything that prints: the form, page 2 (the
+  // full statement) and the case label, each under a small page heading.
+  const fullStatement = floating ? host?.renderFullStatement?.(caseData) : null;
+  const label = floating ? host?.renderLabel?.(caseData) : null;
+  const pages = !!(fullStatement || label);
+  const [tab, setTab] = useState<'order-form' | 'lab-documents'>('order-form');
+  const tabs: { id: typeof tab; label: string; icon: typeof Eye }[] = [
+    { id: 'order-form', label: 'Order form', icon: Eye },
+    { id: 'lab-documents', label: 'Lab Documents', icon: FolderOpen },
+  ];
+  const pageHead = (text: string) => (
+    <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-[#717182]">
+      <span className="h-px flex-1 bg-[#E0E0E6]" />{text}<span className="h-px flex-1 bg-[#E0E0E6]" />
+    </p>
+  );
+  return (
+    <div className="bg-white border border-[#E0E0E6] rounded-xl flex flex-col overflow-hidden">
+      <div className="flex items-center border-b border-[#F0EFF6] px-4">
+        {tabs.map(({ id, label: text, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={`inline-flex items-center gap-1.5 px-3 py-3 text-xs font-semibold whitespace-nowrap border-b-2 transition-colors ${
+              tab === id ? 'border-[#4D8EF7] text-[#4D8EF7]' : 'border-transparent text-[#717182] hover:text-[#030213]'
+            }`}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {text}
+          </button>
+        ))}
+        {!floating && <OrderFormTools />}
+      </div>
+
+      {tab === 'order-form' ? (
+        <div className="relative">
+          <div className={`p-4 space-y-4 overflow-y-auto max-h-[420px] ${floating ? 'pb-14' : ''}`}>
+            {caseData.source === 'post' && <PostPrintBanner />}
+            {pages && pageHead('Page 1 · Order form')}
+            <OrderFormBody caseData={caseData} service={service} />
+            {fullStatement && <>{pageHead('Page 2 · Full statement')}{fullStatement}</>}
+            {label && (
+              <>
+                {pageHead('Case label')}
+                <div className="flex justify-center rounded-lg bg-[#F3F3F5] p-4">
+                  <div className="shadow-[0_2px_12px_rgba(0,0,0,0.15)] h-fit">{label}</div>
+                </div>
+              </>
+            )}
+          </div>
+          {floating && (
+            // 13-Nov: Print prints everything; its arrow prints one part only (as in Full View).
+            <FloatingTools
+              items={[{ icon: Maximize2, label: 'Full view', onClick: host?.onFullView }]}
+              trailing={<SplitPrintButton variant="pill" onPrint={() => host?.onPrint?.()} options={host?.printOptions ?? []} />}
+            />
+          )}
+        </div>
+      ) : (
+        <div className="p-4 flex flex-col items-center justify-center text-center gap-3 min-h-[300px]">
+          <div className="w-12 h-12 rounded-2xl bg-[#F0EFF6] flex items-center justify-center">
+            <FolderOpen className="w-6 h-6 text-[#C8C0F0]" />
+          </div>
+          <p className="text-xs text-[#A0A0B0]">No lab documents uploaded for {service ? 'this service' : 'this case'} yet.</p>
+        </div>
+      )}
+    </div>
+  );
+}
 export const OrderFormSlot = createContext<OrderFormHost | null>(null);
 
 /** The Order form tab bar's right-hand tools: the portal's Print link, or a host's full screen + Print. */

@@ -16,6 +16,8 @@ import { useSyncExternalStore } from 'react';
 export type Jurisdiction = 'UK' | 'EU' | 'Both';
 export type SignatureMode = 'typed' | 'image' | 'blank';
 export type PaperSize = 'A4' | 'Letter';
+/** Label stock for the case label: a 62 mm roll (most label printers) or a 4 × 6 in shipping label. */
+export type LabelStock = '62x100' | '102x152';
 
 export interface Site { name: string; address: string }
 
@@ -38,11 +40,16 @@ export interface OrderFormSettings {
   signerName: string;
   signerTitle: string;
   signatureMode: SignatureMode;
+  /** 13-Nov: the full statement for a custom-made device, filled in from the case, as page 2 of the order form. */
+  fullStatementOn: boolean;
   signatureImage: string | null; // data URL, for signatureMode 'image'
   // Sections at the foot of the form
   showHowTo: boolean;
   showHelp: boolean;
   showDuplicateCheck: boolean;
+  // Case label (12-Nov, optional): Print label beside the order form's Print, for the outgoing box
+  labelOn: boolean;
+  labelStock: LabelStock;
 }
 
 /** Filled in from the case when the form is drawn. */
@@ -73,12 +80,19 @@ export const DEFAULT_ORDER_FORM_SETTINGS: OrderFormSettings = {
   logo: null, logoWidth: null, showLogo: false, mhra: '', damas: '', emphasis: true, paper: 'A4',
   statementOn: false, jurisdiction: 'UK', ukText: UK_DEFAULT, euText: EU_DEFAULT,
   sites: [], authRep: { name: '', address: '' },
-  signerName: '', signerTitle: '', signatureMode: 'typed', signatureImage: null,
+  signerName: '', signerTitle: '', signatureMode: 'typed', signatureImage: null, fullStatementOn: false,
   showHowTo: true, showHelp: true, showDuplicateCheck: true,
+  labelOn: true, labelStock: '62x100',
 };
 
 /** A handwriting face for the typed signature: system fonts only, as the form (and its PDF) uses no web fonts. */
 export const SIGNATURE_FONT = "'Snell Roundhand', 'Segoe Script', 'Brush Script MT', 'Lucida Handwriting', cursive";
+
+/** The case label's stock: the page it prints on and the label drawn inside its 3 mm margin. */
+export const LABEL_STOCK: Record<LabelStock, { label: string; page: { w: number; h: number }; w: number; h: number }> = {
+  '62x100': { label: '62 × 100 mm', page: { w: 62, h: 100 }, w: 56, h: 94 },
+  '102x152': { label: '102 × 152 mm (4 × 6 in)', page: { w: 102, h: 152 }, w: 96, h: 146 },
+};
 
 /** The printable area inside the 10 mm margins, in mm (a little short of the page, so rounding never adds one). */
 export const PAPER: Record<PaperSize, { label: string; w: number; h: number; inner: { w: number; h: number } }> = {
@@ -106,6 +120,8 @@ export function saveErrors(s: OrderFormSettings): string[] {
     if (s.jurisdiction !== 'EU' && !s.ukText.trim()) out.push('The UK statement is empty.');
     if (s.jurisdiction !== 'UK' && !s.euText.trim()) out.push('The EU statement is empty.');
   }
+  if (s.fullStatementOn && !s.statementOn && !s.signerName.trim()) out.push('Add the name of the person who signs the full statement.');
+  if (s.fullStatementOn && s.jurisdiction !== 'UK' && !s.statementOn && euBlocker(s)) out.push(euBlocker(s)!);
   return out;
 }
 

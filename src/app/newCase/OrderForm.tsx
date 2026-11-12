@@ -23,7 +23,10 @@
 
 import { ReactNode, RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Download, Loader2, Printer, X } from 'lucide-react';
+import { AlertTriangle, Download, Loader2, Printer, Tag, X } from 'lucide-react';
+import { CaseLabel, CaseLabelView } from './CaseLabel';
+import SplitPrintButton from '../components/SplitPrintButton';
+import { FullStatementPage } from './FullStatement';
 import { useToast } from '../context/ToastContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import ModalPortal from '../components/ModalPortal';
@@ -31,7 +34,7 @@ import { FakeQr } from '../components/DispatchLabel';
 import TeethChart from './TeethChart';
 import { NOTATIONS, Notation } from './rules';
 import {
-  PAPER, SIGNATURE_FONT, fillTokens, jurisdictions, useOrderFormSettings, type OrderFormSettings, type PaperSize,
+  LABEL_STOCK, PAPER, SIGNATURE_FONT, fillTokens, jurisdictions, useOrderFormSettings, type LabelStock, type OrderFormSettings, type PaperSize,
 } from './orderFormSettings';
 
 export type StageStatus = 'Done' | 'Done elsewhere' | 'In Progress' | 'Ready for Dispatch';
@@ -336,7 +339,7 @@ const pageBox = (paper: PaperSize) => ({ w: PAPER[paper].inner.w * MM, h: PAPER[
  * PAGE_W / s wide (so it fills the page once scaled) and must be no taller than PAGE_H / s. Laid out wider it gets
  * shorter, so a bisection finds it. The copy's width is kept set to match.
  */
-function usePageFit(ref: RefObject<HTMLDivElement>, paper: PaperSize) {
+function usePageFit(ref: RefObject<HTMLDivElement>, paper: PaperSize, on = true) {
   const { w: PAGE_W, h: PAGE_H } = pageBox(paper);
   const [fit, setFit] = useState(1);
   useLayoutEffect(() => {
@@ -361,7 +364,7 @@ function usePageFit(ref: RefObject<HTMLDivElement>, paper: PaperSize) {
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [ref, PAGE_W, PAGE_H]);
+  }, [ref, PAGE_W, PAGE_H, on]);
   return fit;
 }
 
@@ -370,24 +373,35 @@ function usePageFit(ref: RefObject<HTMLDivElement>, paper: PaperSize) {
  * off-screen, hidden holder) drawn to an image, the holder shown for the capture, and placed on an A4 page inside
  * the same 10 mm margins.
  */
-async function savePdf(el: HTMLElement, id: string, paper: PaperSize) {
+async function savePdf(els: HTMLElement[], id: string, paper: PaperSize, label?: { el: HTMLElement; stock: LabelStock } | null) {
   const page = PAPER[paper];
-  const holder = el.parentElement;
-  const was = holder?.style.visibility ?? '';
+  const holders = [...els, ...(label ? [label.el] : [])].map(el => el.parentElement);
+  const was = holders.map(h => h?.style.visibility ?? '');
   const [{ toJpeg }, { jsPDF }] = await Promise.all([import('html-to-image'), import('jspdf')]);
   try {
-    if (holder) holder.style.visibility = 'visible';
-    // JPEG, not PNG: a page drawn at twice the size is ~15 MB as PNG in the PDF, well under 1 MB as JPEG.
-    const img = await toJpeg(el, {
-      // The form is in the system font (FORM_FONT), which the drawing has without any web font to embed.
-      pixelRatio: 2, quality: 0.92, backgroundColor: '#ffffff', style: { transform: 'none' }, skipFonts: true,
-    });
+    holders.forEach(h => { if (h) h.style.visibility = 'visible'; });
     const pdf = new jsPDF({ unit: 'mm', format: paper === 'Letter' ? 'letter' : 'a4', compress: true });
-    // Laid out to the page's printable width once scaled, its height then fits the printable height.
-    pdf.addImage(img, 'JPEG', 10, 10, page.inner.w, (page.inner.w * el.scrollHeight) / el.offsetWidth);
+    // 13-Nov: one PDF page per page copy (the form, then the full statement when it's on).
+    for (const [i, el] of els.entries()) {
+      // JPEG, not PNG: a page drawn at twice the size is ~15 MB as PNG in the PDF, well under 1 MB as JPEG.
+      const img = await toJpeg(el, {
+        // The form is in the system font (FORM_FONT), which the drawing has without any web font to embed.
+        pixelRatio: 2, quality: 0.92, backgroundColor: '#ffffff', style: { transform: 'none' }, skipFonts: true,
+      });
+      if (i > 0) pdf.addPage();
+      // Laid out to the page's printable width once scaled, its height then fits the printable height.
+      pdf.addImage(img, 'JPEG', 10, 10, page.inner.w, (page.inner.w * el.scrollHeight) / el.offsetWidth);
+    }
+    // 13-Nov: the case label last, on a page of its own stock (as a label printer takes it).
+    if (label) {
+      const st = LABEL_STOCK[label.stock];
+      const img = await toJpeg(label.el, { pixelRatio: 3, quality: 0.95, backgroundColor: '#ffffff', skipFonts: true });
+      pdf.addPage([st.page.w, st.page.h], 'p');
+      pdf.addImage(img, 'JPEG', (st.page.w - st.w) / 2, (st.page.h - st.h) / 2, st.w, st.h);
+    }
     pdf.save(`Order-Form-${id}.pdf`);
   } finally {
-    if (holder) holder.style.visibility = was;
+    holders.forEach((h, i) => { if (h) h.style.visibility = was[i]; });
   }
 }
 
@@ -397,14 +411,17 @@ async function savePdf(el: HTMLElement, id: string, paper: PaperSize) {
  */
 export function OrderFormPdfJob({ model, onDone }: { model: OrderFormModel; onDone: (ok: boolean) => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  const ref2 = useRef<HTMLDivElement>(null);
+  const labelRef = useRef<HTMLDivElement>(null);
   const s = useOrderFormSettings();
   const fit = usePageFit(ref, s.paper);
+  const fit2 = usePageFit(ref2, s.paper, s.fullStatementOn);
   const PAGE_W = pageBox(s.paper).w;
   useEffect(() => {
     // The fit and the chart's own measuring settle within a frame or two of mounting.
     const t = setTimeout(() => {
       if (!ref.current) return;
-      savePdf(ref.current, model.id, s.paper).then(() => onDone(true), () => onDone(false));
+      savePdf([ref.current, ...(ref2.current ? [ref2.current] : [])], model.id, s.paper, labelRef.current ? { el: labelRef.current, stock: s.labelStock } : null).then(() => onDone(true), () => onDone(false));
     }, 400);
     return () => clearTimeout(t);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -413,6 +430,12 @@ export function OrderFormPdfJob({ model, onDone }: { model: OrderFormModel; onDo
       <div ref={ref} style={{ width: PAGE_W / fit, transform: `scale(${fit})`, transformOrigin: 'top left' }}>
         <OrderFormSheet model={model} roomy settings={s} />
       </div>
+      {s.fullStatementOn && (
+        <div ref={ref2} style={{ width: PAGE_W / fit2, transform: `scale(${fit2})`, transformOrigin: 'top left' }}>
+          <FullStatementPage model={model} s={s} />
+        </div>
+      )}
+      {s.labelOn && <div ref={labelRef} style={{ width: 'fit-content' }}><CaseLabel model={model} s={s} /></div>}
     </div>,
     document.body,
   );
@@ -424,12 +447,20 @@ export function OrderFormPdfJob({ model, onDone }: { model: OrderFormModel; onDo
  * copy, as the label preview does, always on one page. The copy is laid out off screen at the page's width;
  * when it's taller than the page it's laid out wider and scaled down to fit, so it never runs onto a second.
  */
-export function OrderFormFullView({ model, onClose, autoPrint, settings }: { model: OrderFormModel; onClose: () => void; autoPrint?: boolean; settings?: OrderFormSettings }) {
+/** What a print sends: everything (true), or one part only (13-Nov: the split Print's menu). */
+export type OrderFormPrintPart = 'form' | 'full' | 'label';
+
+export function OrderFormFullView({ model, onClose, autoPrint, settings }: { model: OrderFormModel; onClose: () => void; autoPrint?: boolean | OrderFormPrintPart; settings?: OrderFormSettings }) {
   const printRef = useRef<HTMLDivElement>(null);
   const saved = useOrderFormSettings();
   const s = settings ?? saved;
   const paper = PAPER[s.paper];
   const fit = usePageFit(printRef, s.paper);
+  // 13-Nov: page 2, the full statement, when the lab adds it.
+  const printRef2 = useRef<HTMLDivElement>(null);
+  const labelRef = useRef<HTMLDivElement>(null);
+  const two = s.fullStatementOn;
+  const fit2 = usePageFit(printRef2, s.paper, two);
   const PAGE_W = pageBox(s.paper).w;
   // The on-screen page: the whole sheet of paper, fitted to the window ('fit') or at its real size ('actual').
   const pageW = paper.w * MM, pageH = paper.h * MM;
@@ -457,12 +488,28 @@ export function OrderFormFullView({ model, onClose, autoPrint, settings }: { mod
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+  // 13-Nov: Print sends every page (the form, page 2, the label); a part alone is marked on <body> for the print
+  // rules below, then cleared. The label alone goes to its own stock (Case label view).
+  const [labelOpen, setLabelOpen] = useState<false | 'view' | 'print'>(false);
+  const printPart = (part?: OrderFormPrintPart) => {
+    if (part === 'label') { setLabelOpen('print'); return; }
+    if (part) document.body.dataset.ofOnly = part;
+    const done = () => { delete document.body.dataset.ofOnly; window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    window.print();
+    setTimeout(done, 1000);
+  };
+  const printOptions = [
+    { label: 'Order form only', sub: two ? 'Page 1' : 'The form, without the case label', onClick: () => printPart('form') },
+    ...(two ? [{ label: 'Full statement only', sub: 'Page 2', onClick: () => printPart('full') }] : []),
+    ...(s.labelOn ? [{ label: 'Case label only', sub: `On its own stock · ${LABEL_STOCK[s.labelStock].label}`, onClick: () => printPart('label') }] : []),
+  ];
   // After the print copy has laid out.
   useEffect(() => {
     if (!autoPrint) return;
-    const t = setTimeout(() => window.print(), 150);
+    const t = setTimeout(() => printPart(autoPrint === true ? undefined : autoPrint), 150);
     return () => clearTimeout(t);
-  }, [autoPrint]);
+  }, [autoPrint]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Download PDF: the print copy, saved as a file.
   const { toast } = useToast();
@@ -471,7 +518,7 @@ export function OrderFormFullView({ model, onClose, autoPrint, settings }: { mod
     if (!printRef.current) return;
     setSaving(true);
     try {
-      await savePdf(printRef.current, model.id, s.paper);
+      await savePdf([printRef.current, ...(printRef2.current ? [printRef2.current] : [])], model.id, s.paper, labelRef.current ? { el: labelRef.current, stock: s.labelStock } : null);
     } catch {
       toast.error('The PDF couldn’t be made. Use Print and choose “Save as PDF” instead.');
     } finally {
@@ -487,9 +534,15 @@ export function OrderFormFullView({ model, onClose, autoPrint, settings }: { mod
           @page { size: ${s.paper === 'Letter' ? 'letter' : 'A4'}; margin: 10mm; }
           body > *:not(.of-print-root) { display: none !important; }
           .of-print-root {
-            position: static !important; visibility: visible !important; width: ${paper.inner.w}mm; height: ${paper.inner.h}mm; overflow: hidden;
+            position: static !important; visibility: visible !important; width: ${paper.inner.w}mm;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
           }
+          .of-print-root > .of-page { height: ${paper.inner.h}mm; overflow: hidden; break-after: page; }
+          .of-print-root > .of-page:last-child { break-after: auto; }
+          .of-print-root > .of-page[data-part="label"] { display: flex; justify-content: center; align-items: flex-start; }
+          body[data-of-only="form"] .of-print-root > .of-page:not([data-part="form"]),
+          body[data-of-only="full"] .of-print-root > .of-page:not([data-part="full"]) { display: none !important; }
+          body[data-of-only] .of-print-root > .of-page { break-after: auto !important; }
         }
       `}</style>
       <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={`Order form ${model.id}`}>
@@ -505,19 +558,30 @@ export function OrderFormFullView({ model, onClose, autoPrint, settings }: { mod
             </button>
           </div>
           {/* 12-Nov: the page exactly as it prints (paper, margins, the fitted sheet), whole in the window or at 100%. */}
-          <div ref={stageRef} className={`flex-1 min-h-0 bg-[#E9E9EE] p-4 sm:p-6 ${zoomMode === 'actual' ? 'overflow-auto' : 'overflow-hidden flex items-start justify-center'}`}>
-            <div className="mx-auto" style={{ width: pageW * zoom, height: pageH * zoom }}>
-              <div
-                className="bg-white shadow-[0_2px_12px_rgba(0,0,0,0.15)]"
-                style={{ width: pageW, height: pageH, padding: 10 * MM, transform: `scale(${zoom})`, transformOrigin: 'top left' }}
-              >
-                <div style={{ width: PAGE_W, height: pageBox(s.paper).h, overflow: 'hidden' }}>
-                  <div style={{ width: PAGE_W / fit, transform: `scale(${fit})`, transformOrigin: 'top left' }}>
-                    <OrderFormSheet model={model} roomy settings={s} />
+          {/* 13-Nov: with the full statement on, page 2 follows (scroll down to it). */}
+          <div ref={stageRef} className={`flex-1 min-h-0 bg-[#E9E9EE] p-4 sm:p-6 ${zoomMode === 'actual' || two || s.labelOn ? 'overflow-auto' : 'overflow-hidden'}`}>
+            {[
+              { key: 'form', f: fit, node: <OrderFormSheet model={model} roomy settings={s} /> },
+              ...(two ? [{ key: 'full', f: fit2, node: <FullStatementPage model={model} s={s} /> }] : []),
+            ].map((p, i) => (
+              <div key={p.key} className={`mx-auto ${i ? 'mt-6' : ''}`} style={{ width: pageW * zoom, height: pageH * zoom }}>
+                <div
+                  className="bg-white shadow-[0_2px_12px_rgba(0,0,0,0.15)]"
+                  style={{ width: pageW, height: pageH, padding: 10 * MM, transform: `scale(${zoom})`, transformOrigin: 'top left' }}
+                >
+                  <div style={{ width: PAGE_W, height: pageBox(s.paper).h, overflow: 'hidden' }}>
+                    <div style={{ width: PAGE_W / p.f, transform: `scale(${p.f})`, transformOrigin: 'top left' }}>{p.node}</div>
                   </div>
                 </div>
               </div>
-            </div>
+            ))}
+            {/* 13-Nov: the case label after the pages, at its real size (it prints on its own stock, from Print label). */}
+            {s.labelOn && (
+              <div className="mt-6 flex flex-col items-center gap-2">
+                <p className="text-[11px] font-semibold text-[#717182]">Case label · {LABEL_STOCK[s.labelStock].label}</p>
+                <div className="shadow-[0_2px_12px_rgba(0,0,0,0.15)]"><CaseLabel model={model} s={s} /></div>
+              </div>
+            )}
           </div>
           {/* The header's × closes it, so the footer holds only the real actions. */}
           <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-[#F0EFF6]">
@@ -536,7 +600,7 @@ export function OrderFormFullView({ model, onClose, autoPrint, settings }: { mod
                 ))}
               </div>
               <p className="text-[11px] text-[#717182] truncate">
-                {paper.label}, one page{fit < 0.995 ? ` (content scaled to ${Math.round(fit * 100)}%)` : ''}
+                {paper.label}, {two ? '2 pages: the form and the full statement' : 'one page'}{s.labelOn ? ', and the case label' : ''}{fit < 0.995 ? ` (form scaled to ${Math.round(fit * 100)}%)` : ''}
               </p>
             </div>
             <div className="flex gap-2 flex-shrink-0">
@@ -548,23 +612,35 @@ export function OrderFormFullView({ model, onClose, autoPrint, settings }: { mod
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                 {saving ? 'Preparing PDF…' : 'Download PDF'}
               </button>
-              <button
-                onClick={() => window.print()}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-[#4D8EF7] to-[#A59DFF] hover:opacity-90 transition-opacity"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                Print
-              </button>
+              <SplitPrintButton onPrint={() => printPart()} options={printOptions} />
             </div>
           </div>
         </div>
       </div>
       {/* Print-only copy at body level: what the browser actually prints. */}
       <div className="of-print-root" aria-hidden>
-        <div ref={printRef} style={{ width: PAGE_W / fit, transform: `scale(${fit})`, transformOrigin: 'top left' }}>
-          <OrderFormSheet model={model} roomy settings={s} />
+        <div className="of-page" data-part="form">
+          <div ref={printRef} style={{ width: PAGE_W / fit, transform: `scale(${fit})`, transformOrigin: 'top left' }}>
+            <OrderFormSheet model={model} roomy settings={s} />
+          </div>
         </div>
+        {two && (
+          <div className="of-page" data-part="full">
+            <div ref={printRef2} style={{ width: PAGE_W / fit2, transform: `scale(${fit2})`, transformOrigin: 'top left' }}>
+              <FullStatementPage model={model} s={s} />
+            </div>
+          </div>
+        )}
+        {s.labelOn && <div className="of-page" data-part="label"><CaseLabel model={model} s={s} /></div>}
       </div>
+      {/* The label for the PDF's last page: off screen, captured only (it prints from Print label, on its own stock). */}
+      {s.labelOn && createPortal(
+        <div aria-hidden style={{ position: 'fixed', left: -100000, top: 0, visibility: 'hidden', pointerEvents: 'none' }}>
+          <div ref={labelRef} style={{ width: 'fit-content' }}><CaseLabel model={model} s={s} /></div>
+        </div>,
+        document.body,
+      )}
+      {labelOpen && <CaseLabelView model={model} settings={s} autoPrint={labelOpen === 'print'} onClose={() => setLabelOpen(false)} />}
     </ModalPortal>
   );
 }
