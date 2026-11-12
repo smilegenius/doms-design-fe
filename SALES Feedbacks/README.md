@@ -261,6 +261,28 @@ From the "CAD Integration (exocad & 3Shape)" spec. Every digital case becomes a 
 - **Settings → CAD & design:** the ten settings, the indication and material mapping table (catalog item → CAD indication and material for each CAD), connectors with health checks, and a guided connector setup.
 - **Engine:** `engine.ts` (order mapping, which CAD, approval rules, design diff), `cadStore.ts` (state in localStorage `salesFeedbacks.cad.v1`, actions, `syncCad`, `cad-` bell events), `seed.ts` (both CADs, one connector offline, about 14 orders across the statuses and edge cases, two partners).
 
+## Lab-branded order form, conformity statement and case label (`lab-documents/`)
+
+From the "Lab-branded order form & patient statement" spec (11 Nov 2026), as revised on review.
+
+- **Settings › Order form** (`?tab=order-form`, `&group=branding|statement|label` opens a group), with a live preview of the order form for any case:
+  - **Branding:** logo (PNG/SVG, 2 MB), MHRA and DAMAS numbers (optional), and field emphasis, which is on by default. The lab's name, address and phone come from Lab info (Settings › DSO Info, mirrored in `docsStore.ts` `LAB_INFO`; it has no email field yet).
+  - **Conformity statement:** off until switched on. When on, it prints at the bottom of every order form. There's one generic short statement for every product, with separate UK and EU cards: what each regime asks for, the wording (editable, with reset), and for the EU the manufacturing sites and the EU authorised representative. EU and "UK and EU" can't be chosen until those are filled in.
+  - **Signature:** the signatory's name and optional job title, shown as a typed signature in a handwriting font, or as a blank line to sign in ink. No image upload.
+  - **Case label:** optional and off by default; stock 62 × 100 or 102 × 152 mm. Paper size (A4 or US Letter) is under Branding.
+  - **Rules:** checked on save. Only owners and admins can edit, with a "view as a technician" demo switch.
+- **Why the statement can be short:** the law sets what it must say, not how long it is. With the order form above it (patient, prescriber and practice, device, teeth, materials, instructions), the sheet carries every required item. It ends with "a full statement is available from the lab on request". This is not legal advice; Graham to review.
+- **Order form** (`bulk-actions/printForms.tsx` `SgOrderFormPrint`):
+  - **Top band:** our mark, or the lab's logo and details with "Powered by Smile Genius" in the footer.
+  - **Case details:** highlighted fields.
+  - **Statement and sign-off:** at the bottom, when switched on.
+- **Where to print:**
+  - **Print preview:** `/growth/order-form/:caseId`, with a case search to switch to any case; `?view=label` shows the label.
+  - **On a case:** the order form panel's own Print button prints this form (`lab-documents/CaseOrderPrint.tsx` intercepts it inside Growth only). With case labels on, "Print case label" sits in the bottom-right of the order form.
+  - **Bulk Actions → Print:** prints the same page.
+- **Samples A to F** (`/growth/order-form/samples?config=A&case=…`): each set-up on any case, using a made-up lab ("Northgate Dental Lab").
+- **Prototype limits:** downloads are HTML (print them to PDF), and practice addresses are demo values.
+
 ## What's new (change log)
 A sidebar item above Settings, shown only inside Growth Team Feedback (`/growth/updates`). It lists every feature and change in high-level buckets (Cases & intake, Billing, Design & CAD, Design, Settings & notifications, Navigation), tagged **New** or **Changes the original design**.
 

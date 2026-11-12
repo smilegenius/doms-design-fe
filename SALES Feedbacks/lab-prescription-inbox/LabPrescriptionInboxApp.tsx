@@ -42,8 +42,10 @@ import BillingNavItem from '../lab-billing/BillingNavItem';
 import CaseBillingTab, { pendingBillingTab } from '../lab-billing/CaseBillingTab';
 import DesignApp from '../cad-integration/DesignApp';
 import OrderFormPreview from '../bulk-actions/OrderFormPreview';
+import DocumentSamples from '../lab-documents/DocumentSamples';
 import DesignNavItem from '../cad-integration/DesignNavItem';
 import CaseDesignTab, { pendingCadTab } from '../cad-integration/screens/CaseDesignTab';
+import CaseOrderPrint from '../lab-documents/CaseOrderPrint';
 import { syncCad, syncCadNotifications, useCad } from '../cad-integration/cadStore';
 
 // ─── Growth Team Feedback: Lab Portal shell (Sales Feedbacks copy, at /growth) ─
@@ -292,6 +294,7 @@ export default function LabPrescriptionInboxApp() {
           {caseInitialId && <CaseEmailTab caseId={caseInitialId} />}
           {caseInitialId && <CaseBillingTab caseId={caseInitialId} />}
           {caseInitialId && <CaseDesignTab caseId={caseInitialId} />}
+          {caseInitialId && <CaseOrderPrint caseId={caseInitialId} />}
           <CasesPage
             key={`${resetVersion}-${intake.resetVersion}-${casesVersion}`}
             portal="lab"
@@ -327,7 +330,8 @@ export default function LabPrescriptionInboxApp() {
       {activePage === 'updates' && <WhatsNewPage />}
       {activePage === 'billing' && <BillingApp />}
       {activePage === 'design' && <DesignApp />}
-      {activePage === 'order-form' && invoiceInitialId && <OrderFormPreview caseId={invoiceInitialId} />}
+      {activePage === 'order-form' && invoiceInitialId === 'samples' && <DocumentSamples />}
+      {activePage === 'order-form' && invoiceInitialId && invoiceInitialId !== 'samples' && <OrderFormPreview caseId={invoiceInitialId} />}
       <WhatsNewNavItem />
       <BillingNavItem />
       <DesignNavItem />
