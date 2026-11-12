@@ -271,7 +271,7 @@ export default function DocumentsSettings() {
           <Section id="label" locked={!canEdit} open={open.has('label')} onToggle={toggleGroup} icon={Tag} title="Case label" sub={draft.labelOn ? 'On · a label for the outgoing box' : 'Off · optional label for the outgoing box'}>
             <Toggle label="Use case labels" on={draft.labelOn} onChange={v => set('labelOn', v)}
               sub="Optional. When on, a “Print case label” button appears in the bottom-right corner of the order form on every case." />
-            <p className="text-xs text-[#5A5568]">Lab name and contact, case ID, patient, practice, the product and teeth, and the words “custom-made device”, which UK rules ask for on the packaging.</p>
+            <p className="text-xs text-[#5A5568]">A delivery label: the dentist, practice and full address first, then patient and product, your lab as sender, and “custom-made device”, which UK rules ask for on the packaging.</p>
             {draft.labelOn && (
               <>
                 <div className="grid sm:grid-cols-2 gap-3">

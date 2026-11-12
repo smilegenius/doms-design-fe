@@ -26,14 +26,27 @@ export function saveErrors(s: DocsSettings): string[] {
 
 export const jurisdictions = (j: Jurisdiction): ('UK' | 'EU')[] => (j === 'Both' ? ['UK', 'EU'] : [j]);
 
-// Demo practice addresses (the prototype's cases carry the practice name only).
-const PRACTICE_ADDRESS: Record<string, string> = {
-  'Smile Genius Manchester': '12 Deansgate, Manchester M3 2BW',
-  'Smile Genius Birmingham': '88 Colmore Row, Birmingham B3 2AB',
-  'Smile Genius London': '210 Marylebone Road, London NW1 5LS',
-  'Smile Genius Dublin': '14 Merrion Square, Dublin 2, D02 X285, Ireland',
+// Demo practice addresses: the prototype's cases carry the practice name only
+// (the case page shows "Ship to Address: —"). In the product these come from
+// the practice record. Lines: street, town, postcode.
+const PRACTICE_ADDRESS: Record<string, string[]> = {
+  'Smile Genius Manchester': ['12 Deansgate', 'Manchester', 'M3 2BW'],
+  'Smile Genius London Central': ['210 Marylebone Road', 'London', 'NW1 5LS'],
+  'Smile Genius London': ['210 Marylebone Road', 'London', 'NW1 5LS'],
+  'Smile Genius Leeds': ['3 Park Row', 'Leeds', 'LS1 5HN'],
+  'Smile Genius Glasgow': ['45 West George Street', 'Glasgow', 'G2 1BP'],
+  'Smile Genius Cardiff': ['18 Queen Street', 'Cardiff', 'CF10 2BU'],
+  'Smile Genius Birmingham': ['88 Colmore Row', 'Birmingham', 'B3 2AB'],
+  'Smile Genius Birmingham 1': ['88 Colmore Row', 'Birmingham', 'B3 2AB'],
+  'Smile Genius Birmingham 2': ['5 Broad Street', 'Birmingham', 'B1 2HF'],
+  'Smile Genius Belfast': ['27 Donegall Place', 'Belfast', 'BT1 5AB'],
+  'Smile Genius Sheffield': ['9 Leopold Street', 'Sheffield', 'S1 2GY'],
+  'Smile Genius Bristol': ['60 Queen Square', 'Bristol', 'BS1 4JZ'],
+  'Smile Genius Dublin': ['14 Merrion Square', 'Dublin 2', 'D02 X285', 'Ireland'],
+  'Harbour Dental Care': ['2 Quayside', 'Newcastle upon Tyne', 'NE1 3DX'],
 };
-export const practiceAddress = (practice: string) => PRACTICE_ADDRESS[practice];
+export const practiceAddressLines = (practice: string): string[] => PRACTICE_ADDRESS[practice] ?? [];
+export const practiceAddress = (practice: string) => (PRACTICE_ADDRESS[practice] ?? []).join(', ') || undefined;
 
 /** What stops a statement for this case (the order form still prints). */
 export function caseBlockers(c: Case, s: DocsSettings): string[] {
