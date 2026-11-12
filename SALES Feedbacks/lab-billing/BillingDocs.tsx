@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { accentFor, getIntakeConfig } from '../intake-form/intakeStore';
-import { LabLogo, sgMarkSrc } from '../bulk-actions/printForms';
+import { LabLogo, PoweredBy } from '../bulk-actions/printForms';
 import type { BillingAccount, BillingState, Invoice, Statement } from './types';
 import { credited, lineNet, lineVat, paid, totals } from './engine';
 import { fmtDate, fmtMonth, money } from './format';
@@ -32,7 +32,7 @@ function Footer({ left }: { left: ReactNode }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #F0EFF6', marginTop: 16, paddingTop: 8, fontSize: 10, color: '#A0A0B0' }}>
       <span>{left}</span>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9 }}><img src={sgMarkSrc} alt="" style={{ height: 9 }} /> Smile Genius</span>
+      <PoweredBy height={18} />
     </div>
   );
 }

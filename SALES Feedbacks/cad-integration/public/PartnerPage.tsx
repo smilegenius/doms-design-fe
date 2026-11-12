@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { CheckCircle2, Download, Loader2, PackageCheck, Truck, Upload } from 'lucide-react';
 import { accentFor, getIntakeConfig } from '../../intake-form/intakeStore';
-import { LabLogo } from '../../bulk-actions/printForms';
+import { LabLogo, PoweredBy } from '../../bulk-actions/printForms';
 import { buildZip, saveBlob, type ZipEntry } from '../../bulk-actions/zip';
 import { FileDropZone, FileList } from '../../design-studio/components/FileChips';
 import type { DesignFile } from '../../design-studio/data/designStudio';
@@ -118,7 +118,7 @@ function Shell({ lab, children }: { lab: ReturnType<typeof getIntakeConfig>; chi
           <p className="text-base font-semibold text-[#030213]">{lab.labName}</p>
         </div>
         {children}
-        <p className="text-center text-[10px] text-[#A0A0B0]">Secure link from {lab.labName} · Powered by Smile Genius · No account needed</p>
+        <div className="flex flex-col items-center gap-1 pt-1"><PoweredBy height={20} /><p className="text-center text-[11px] text-[#A0A0B0]">Secure link from {lab.labName} · No account needed</p></div>
       </div>
     </div>
   );

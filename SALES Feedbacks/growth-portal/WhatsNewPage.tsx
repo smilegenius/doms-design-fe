@@ -29,7 +29,7 @@ const areaAnchor = (b: string) => `wn-area-${b.toLowerCase().replace(/[^a-z0-9]+
 function resolveExample(ex: { label: string; to: string; newTab?: boolean }) {
   if (ex.to === '/intake/latest-draft') {
     const d = latestIntakeDraft();
-    return d ? { ...ex, to: `/growth/cases/quick-new/${encodeURIComponent(d.caseId)}`, label: `${ex.label} (${d.ref})` } : { ...ex, to: '/intake/smile-genius-lab', newTab: true, label: 'Send a test request first' };
+    return d ? { ...ex, to: `/growth/cases/quick-new/${encodeURIComponent(d.caseId)}`, label: `${ex.label} (${d.ref})` } : { ...ex, to: '/lablink/smile-genius-lab', newTab: true, label: 'Send a test request first' };
   }
   const qn = ex.to.match(/^\/growth\/cases\/quick-new\/(.+)$/);
   if (qn && !getCreatedCases().some(c => c.id === qn[1] && c.status === 'draft')) {

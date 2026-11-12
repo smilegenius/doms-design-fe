@@ -11,7 +11,10 @@ import {
   BulkDefaults, GROUPING_LABELS, INCLUDE_LABELS, IncludeKey, NAMING_LABELS, NO_ORIGINAL_LABELS, ORDER_LABELS,
   saveBulkDefaults, useBulkDefaults, WHICH_LABELS,
 } from './bulkDefaults';
-import { printPages, SgOrderFormPrint } from './printForms';
+import { printPages } from './printForms';
+import { casePrintPages } from '../lab-documents/casePages';
+import { paperPageCss } from '../lab-documents/DocumentPrint';
+import { getDocs } from '../lab-documents/docsStore';
 import { buildZip, saveBlob } from './zip';
 
 // ── Download and Print, for the ticked cases only ────────────────────────────
@@ -135,14 +138,15 @@ export function PrintDialog({ ids, user, onClose }: { ids: string[]; user: strin
     if (opts.order === 'practice') ordered.sort((a, b) => a.practice.localeCompare(b.practice));
     if (opts.order === 'delivery') ordered.sort((a, b) => (a.requestedDelivery ? parseCaseDate(a.requestedDelivery).getTime() : Infinity) - (b.requestedDelivery ? parseCaseDate(b.requestedDelivery).getTime() : Infinity));
     const pages = ordered.flatMap(c => {
-      const sg = { key: `${c.id}-sg`, node: <SgOrderFormPrint c={c} /> };
+      // The Smile Genius form with whatever Settings › Documents switches on (statement included).
+      const sg = casePrintPages(c);
       const originals = originalForms(c).map((o, i) => ({ key: `${c.id}-o${i}`, node: o.node }));
-      if (opts.which === 'sg') return [sg];
-      if (opts.which === 'both') return [sg, ...originals];
-      return originals.length ? originals : opts.noOriginal === 'sg-instead' ? [sg] : [];
+      if (opts.which === 'sg') return sg;
+      if (opts.which === 'both') return [...sg, ...originals];
+      return originals.length ? originals : opts.noOriginal === 'sg-instead' ? sg : [];
     });
     if (!pages.length) { toast.error('Nothing to print with these choices'); return; }
-    if (!printPages(pages, `Order forms · ${pl(cases.length, 'case')}`)) { toast.error('Allow pop-ups to print'); return; }
+    if (!printPages(pages, `Order forms · ${pl(cases.length, 'case')}`, paperPageCss(getDocs()))) { toast.error('Allow pop-ups to print'); return; }
     toast.success(`${pl(pages.length, 'page')} ready to print`);
     onClose();
   }
