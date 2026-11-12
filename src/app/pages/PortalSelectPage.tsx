@@ -173,7 +173,7 @@ export default function PortalSelectPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
+    <div className="min-h-screen bg-white bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
       {/* Top bar — stacks on mobile so the logo + auth row don't overlap */}
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-8 py-4 sm:py-5">
         <SmileGeniusLogo />
