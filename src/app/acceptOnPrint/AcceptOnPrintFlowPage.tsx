@@ -81,7 +81,7 @@ export default function AcceptOnPrintFlowPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
+    <div className="min-h-screen bg-white bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
       <header className="flex items-center justify-between px-4 sm:px-8 py-4 sm:py-5">
         <SmileGeniusWordmark gradientId="acceptprint_grad" />
         <button

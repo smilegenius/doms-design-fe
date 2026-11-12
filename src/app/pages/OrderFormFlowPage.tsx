@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Boxes, Crown, Download, FileText, Link2, Loader2, Smile } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Boxes, Crown, Download, FileSignature, FileText, Link2, Loader2, Settings2, Smile } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
@@ -102,7 +102,7 @@ export default function OrderFormFlowPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
+    <div className="min-h-screen bg-white bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
       {job && (
         <OrderFormPdfJob
           key={job.caseId}
@@ -181,6 +181,38 @@ export default function OrderFormFlowPage() {
                 </div>
               </section>
             ))}
+
+            {/* 12-Nov: the lab's Settings › Order Form (logo, statement, sections), with a live preview. */}
+            <section className="bg-white border border-[#E0E0E6] rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-4 sm:px-5 pt-4 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-[#EEF4FF] text-[#4D8EF7] flex items-center justify-center flex-shrink-0">
+                    <Settings2 className="w-3.5 h-3.5" />
+                  </span>
+                  <h2 className="text-sm font-bold text-[#030213] leading-snug">Lab settings</h2>
+                </div>
+                <p className="text-xs text-[#717182] leading-relaxed mt-1.5">
+                  The lab sets up its order form in Settings › Order Form: its logo and MHRA / DAMAS numbers, field emphasis and paper size, a short UK or EU statement for a custom-made device with who signs it, and the help sections at the foot. A live preview shows the form on any of the cases above, and Save applies it to every order form here.
+                </p>
+              </div>
+              <div className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-t border-[#F0EFF6]">
+                <span className="w-7 h-7 rounded-lg bg-[#F3F3F5] text-[#5A5568] flex items-center justify-center flex-shrink-0"><FileSignature className="w-4 h-4" /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-[#030213] leading-snug">Lab portal — Settings › Order Form</p>
+                  <p className="text-[11px] text-[#717182] leading-snug truncate">Branding · Conformity statement · Sections on the form</p>
+                </div>
+                <button
+                  onClick={() => {
+                    if (!user) login(DEMO_ACCOUNT_EMAIL, 'demo');
+                    navigate('/lab/settings?tab=order-form');
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#4D8EF7] border border-[#C8D8FC] hover:bg-[#EEF4FF] transition-colors flex-shrink-0"
+                >
+                  Open
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+            </section>
           </div>
         </div>
       </main>
