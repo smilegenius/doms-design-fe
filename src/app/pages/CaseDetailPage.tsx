@@ -42,6 +42,7 @@ import { recordEmail, recordInboundEmail, sendWhatsAppMessage, useCaseCommunicat
 import { dentistPhoneFor, dentistPrivateEmailFor, useDentistPrivateInfo } from '../data/dentistPrivateInfo';
 import PrivateInformationModal from '../components/PrivateInformationModal';
 import WhatsAppAutomationSimulator from '../components/WhatsAppAutomationSimulator';
+import { unmatchedAssignedTo, useUnmatchedWhatsApp } from '../data/whatsappUnmatched';
 import { WHATSAPP_DEMO_CASE_ID } from './CasesPage';
 import RelatedCasesCard, { RelationshipPill } from '../components/RelatedCasesCard';
 import RescanDecisionModal from '../components/RescanDecisionModal';
@@ -2070,6 +2071,8 @@ interface ConvMsg {
   urgent?: boolean;
   /** Sender badge override — e.g. "CareStack" for integration notifications. */
   tag?: string;
+  /** Small line under the bubble — e.g. where an inbox message came from. */
+  note?: string;
 }
 
 // First meaningful line of an email body — the quoted preview in replies.
@@ -2148,6 +2151,7 @@ function ChannelBubble({ msg, showChannel }: { msg: ConvMsg; showChannel?: boole
           )}
           <pre className="text-xs text-[#030213] whitespace-pre-wrap font-sans leading-relaxed">{msg.body}</pre>
         </div>
+        {msg.note && <p className="text-[10px] text-[#A0A0B0] mt-1">{msg.note}</p>}
       </div>
     </div>
   );
@@ -2266,7 +2270,24 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived,
     };
   });
 
-  if (!score.applicable && csMsgs.length === 0) {
+  // WhatsApp messages the lab assigned to this case from the WhatsApp inbox
+  // (they couldn't be matched on arrival). Read from the inbox store, so an
+  // unassign takes them straight back out of the thread.
+  const inboxAll = useUnmatchedWhatsApp();
+  const inboxMsgs: ConvMsg[] = unmatchedAssignedTo(caseData.id, inboxAll).map(m => {
+    const when = new Date(m.receivedAt);
+    const ok = !Number.isNaN(when.getTime());
+    const name = m.assignment!.dentist;
+    return {
+      id: m.id, channel: 'whatsapp', dir: 'in', name, initials: nameInitials(name),
+      date: ok ? when.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : m.receivedAt,
+      time: ok ? when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '',
+      body: m.body,
+      note: `From the WhatsApp inbox · assigned by ${m.assignment!.by}`,
+    };
+  });
+
+  if (!score.applicable && csMsgs.length === 0 && inboxMsgs.length === 0) {
     return (
       <div className="bg-white border border-[#E0E0E6] rounded-xl p-8 flex flex-col items-center text-center">
         <span className="w-10 h-10 rounded-full bg-[#F0FDF4] inline-flex items-center justify-center mb-3"><CheckCircle2 className="w-5 h-5 text-[#15803D]" /></span>
@@ -2276,7 +2297,7 @@ function ConversationPanel({ caseData, service, replied = false, onMarkReceived,
     );
   }
 
-  const allMsgs = csMsgs.length ? [...msgs, ...csMsgs] : msgs;
+  const allMsgs = csMsgs.length || inboxMsgs.length ? [...msgs, ...inboxMsgs, ...csMsgs] : msgs;
   const emailMsgs = allMsgs.filter(m => m.channel === 'email');
   const waMsgs = allMsgs.filter(m => m.channel === 'whatsapp');
   const shown = activeTab === 'email' ? emailMsgs : activeTab === 'whatsapp' ? waMsgs : allMsgs;

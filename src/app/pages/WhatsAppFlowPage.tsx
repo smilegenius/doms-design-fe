@@ -2,12 +2,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, MessageCircle, FlaskConical, Stethoscope, Cpu, RotateCcw, LogIn,
   Link2, Unlink, ToggleRight, FileText, PenLine, Play, AlertTriangle, ShieldAlert, ScrollText,
-  Sparkles, Smartphone, Send, UserCog,
+  Sparkles, Smartphone, Send, UserCog, Inbox, HelpCircle, Undo2, ListChecks, CheckCheck,
 } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
 import { removeWhatsAppCommunications } from '../data/caseCommunications';
+import { resetUnmatchedWhatsApp, UNMATCHED_REASON } from '../data/whatsappUnmatched';
 import {
   connectWhatsApp,
   disconnectWhatsApp,
@@ -60,6 +61,8 @@ const PERSONA: Record<Persona, { label: string; cls: string; icon: React.ReactNo
 // on WhatsApp. Every set-up step lands on this one screen.
 const WA_SETTINGS = '/lab/settings?tab=case-scoring&sub=case-emails&channel=whatsapp';
 const DEMO_CASE = '/lab/cases/CASE-WA-3001?conversation=1&channel=whatsapp';
+// Lab › WhatsApp Inbox — messages that couldn't be matched to a case.
+const WA_INBOX = '/lab/whatsapp';
 
 const STAGES: Stage[] = [
   {
@@ -212,6 +215,76 @@ const STAGES: Stage[] = [
       },
     ],
   },
+  {
+    label: 'Unmatched messages — WhatsApp Inbox',
+    blurb: 'Some messages can’t be matched to a case on arrival: the dentist started a new chat, wrote from a new number, has several open cases or answered on a closed one. They wait in Lab › WhatsApp Inbox until the lab assigns each one to a case.',
+    steps: [
+      {
+        title: 'Messages that need a case',
+        persona: 'lab',
+        icon: <Inbox className="w-4 h-4" />,
+        description: 'The inbox has two views, Action required and Resolved, with search and a dentist filter. Each message shows who sent it, the number, when it arrived, the body and why it wasn’t matched. The sidebar shows how many are waiting.',
+        shows: [UNMATCHED_REASON['not-a-reply'].label, UNMATCHED_REASON['unknown-number'].label, UNMATCHED_REASON['several-cases'].label, UNMATCHED_REASON['closed-case'].label],
+        tryIt: ['Open each message and read why it wasn’t matched', 'Switch to Resolved to see one already assigned'],
+        path: WA_INBOX,
+      },
+      {
+        title: 'Assign it to one of the dentist’s open cases',
+        persona: 'lab',
+        icon: <Link2 className="w-4 h-4" />,
+        description: 'Dr. Webb asks for a lighter shade on “Isabella’s crown”, but has 9 open cases and Isabella Hughes has two of them. The picker lists only that dentist’s open cases, with a search. Assigning moves the message to Resolved and adds it to that case’s thread.',
+        shows: ['Dr. Webb’s open cases', 'Search patient, case ID or service', 'Assign to CASE-RS-2002'],
+        tryIt: ['Search “Isabella”, pick CASE-RS-2002 and press Assign', 'The message moves to Resolved and the count goes down'],
+        path: `${WA_INBOX}?msg=wa-un-101`,
+        highlight: true,
+      },
+      {
+        title: 'Unknown number: pick the dentist first',
+        persona: 'lab',
+        icon: <HelpCircle className="w-4 h-4" />,
+        description: 'Dr. Evans wrote from a new phone, so the number isn’t on file and only the WhatsApp name is known. The lab picks the dentist, then one of their open cases.',
+        shows: ['WhatsApp name: Rhys Evans', 'Dentist → open cases'],
+        tryIt: ['Select Dr. Evans, pick CASE-054 (Harry Lewis) and assign'],
+        path: `${WA_INBOX}?msg=wa-un-103`,
+      },
+      {
+        title: 'Several messages, one case: bulk assign',
+        persona: 'lab',
+        icon: <ListChecks className="w-4 h-4" />,
+        description: 'Filter by dentist and each row gets a checkbox. Dr. Webb sent two messages about Isabella’s crown; select both and assign them to one case in a single step. Bulk needs a dentist picked, because the cases come from that dentist.',
+        shows: ['Dentist: Dr. Webb', '2 messages selected', 'Assign to a case · Mark as resolved'],
+        tryIt: ['Tick both Isabella messages → Assign to a case', 'Pick CASE-RS-2002 → both move to Resolved'],
+        path: `${WA_INBOX}?dentist=${encodeURIComponent('Dr. Webb')}`,
+      },
+      {
+        title: 'No case needed: Mark as resolved',
+        persona: 'lab',
+        icon: <CheckCheck className="w-4 h-4" />,
+        description: 'Some messages don’t belong on a case: a thank-you, or something already handled. Mark as resolved closes it without linking a case. In Resolved it shows “No case needed” and can be moved back or assigned later.',
+        shows: ['Mark as resolved', 'No case needed', 'Move back to Action required'],
+        tryIt: ['Open Dr. Reed’s message → Mark as resolved', 'Find it in Resolved, then move it back'],
+        path: `${WA_INBOX}?msg=wa-un-104`,
+      },
+      {
+        title: 'It shows in the case’s thread',
+        persona: 'system',
+        icon: <MessageCircle className="w-4 h-4" />,
+        description: 'An assigned message joins the case’s Conversation hub as a WhatsApp reply from the dentist, marked as coming from the inbox. It is stored, so a reload keeps it. CASE-053 already has one.',
+        shows: ['From the WhatsApp inbox · assigned by …', 'Latest and WhatsApp tabs'],
+        tryIt: ['Open the WhatsApp tab and find Dr. Evans’s message', 'Reload the page — it is still there'],
+        path: '/lab/cases/CASE-053?conversation=1&channel=whatsapp',
+      },
+      {
+        title: 'Undo: unassign or reassign',
+        persona: 'lab',
+        icon: <Undo2 className="w-4 h-4" />,
+        description: 'In Resolved, Unassign takes the message off the case and back to Action required. Reassign does the same and opens the picker straight away, marking the case it was on.',
+        shows: ['Open case thread', 'Reassign', 'Unassign', 'Was here'],
+        tryIt: ['Press Reassign and pick another case', 'Or press Unassign — it leaves the case thread too'],
+        path: `${WA_INBOX}?view=resolved&msg=wa-un-105`,
+      },
+    ],
+  },
 ];
 
 export default function WhatsAppFlowPage() {
@@ -232,7 +305,8 @@ export default function WhatsAppFlowPage() {
 
   const reset = () => {
     removeWhatsAppCommunications();
-    toast.success('WhatsApp demo data reset — every case starts from a clean thread');
+    resetUnmatchedWhatsApp();
+    toast.success('WhatsApp demo data reset — clean case threads and the inbox back to its demo messages');
   };
 
   let n = 0;
@@ -297,7 +371,7 @@ export default function WhatsAppFlowPage() {
               <button
                 onClick={reset}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] transition-colors"
-                title="Clears every WhatsApp record written against a case — sent, queued and failed"
+                title="Clears every WhatsApp record written against a case and puts the WhatsApp Inbox back to its demo messages"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Reset demo data

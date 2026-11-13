@@ -10,6 +10,7 @@ import InvoicesPage from './pages/InvoicesPage';
 import SettingsPage from './pages/SettingsPage';
 import MessagesPage from './pages/MessagesPage';
 import NotificationsPage from './pages/NotificationsPage';
+import WhatsAppInboxPage from './pages/WhatsAppInboxPage';
 
 // ─── Lab Portal Shell ────────────────────────────────────────────────────────
 // The manufacturing lab's workspace. Cases arrive from the lab's clients
@@ -23,7 +24,7 @@ import NotificationsPage from './pages/NotificationsPage';
 // Draft cases open the QuickCreate case screen pre-filled (in draft state) —
 // same as the clinic — rather than the read-only Case Detail page.
 
-type LabPage = 'overview' | 'cases' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications';
+type LabPage = 'overview' | 'cases' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications' | 'whatsapp';
 
 const PAGE_TO_PATH: Record<LabPage, string> = {
   overview: '',
@@ -35,6 +36,7 @@ const PAGE_TO_PATH: Record<LabPage, string> = {
   settings: 'settings',
   messages: 'messages',
   notifications: 'notifications',
+  whatsapp: 'whatsapp',
 };
 const PATH_TO_PAGE: Record<string, LabPage> = {
   '': 'overview',
@@ -46,6 +48,7 @@ const PATH_TO_PAGE: Record<string, LabPage> = {
   settings: 'settings',
   messages: 'messages',
   notifications: 'notifications',
+  whatsapp: 'whatsapp',
 };
 
 export default function LabApp() {
@@ -88,7 +91,7 @@ export default function LabApp() {
   };
 
   const handleNavigate = (page: string) => {
-    const valid: LabPage[] = ['overview', 'cases', 'invoices', 'analytics', 'configuration', 'settings', 'messages', 'notifications'];
+    const valid: LabPage[] = ['overview', 'cases', 'invoices', 'analytics', 'configuration', 'settings', 'messages', 'notifications', 'whatsapp'];
     if (valid.includes(page as LabPage)) {
       setInvoiceFilter(undefined);
       setActivePage(page as LabPage);
@@ -167,6 +170,7 @@ export default function LabApp() {
           }}
         />
       )}
+      {activePage === 'whatsapp' && <WhatsAppInboxPage />}
       {activePage === 'settings' && <SettingsPage portal="lab" />}
       {activePage === 'notifications' && (
         <NotificationsPage portal="lab" onOpenSettings={() => navigate('/lab/settings?tab=notifications')} />

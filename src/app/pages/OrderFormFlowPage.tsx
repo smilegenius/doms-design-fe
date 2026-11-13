@@ -137,7 +137,7 @@ export default function OrderFormFlowPage() {
               </div>
             </div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[#EEF4FF] border border-[#C8D8FC] text-[#1565C0] mb-3">
-              October 2026 · Walkthrough
+              Updated 13 Nov 2026 · Walkthrough
             </span>
             <h1 className="text-2xl sm:text-3xl font-bold text-[#030213] mb-2">Order form in Case Details</h1>
             <p className="text-sm text-[#717182] leading-relaxed max-w-xl mx-auto">

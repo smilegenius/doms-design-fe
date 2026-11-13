@@ -31,6 +31,34 @@ export interface FlowEntry {
 
 export const FLOWS: FlowEntry[] = [
   {
+    // WhatsApp communication epic — lab settings + the case Conversation hub.
+    // 13-Nov: updated (WhatsApp Inbox for unmatched messages), so it leads November.
+    title: 'WhatsApp communication',
+    description: 'Step-by-step walkthrough of the lab’s WhatsApp channel: connecting the Business account, automated messages on scoring outcomes, manual sends from the Conversation hub and the recorded audit trail. Updated 13 Nov: messages that can’t be matched to a case wait in the WhatsApp Inbox, where the lab assigns each one to one of the dentist’s open cases. It then shows in that case’s thread, and can be unassigned or reassigned.',
+    detail: 'Lab · Conversation hub · WhatsApp Inbox',
+    icon: <MessageCircle className="w-5 h-5 text-[#15803D]" />,
+    badge: 'Walkthrough',
+    accent: '#15803D',
+    accentSoft: '#F0FDF4',
+    path: '/flows/whatsapp',
+    date: '13 Nov 2026',
+    month: '2026-11',
+  },
+  {
+    // 13-Nov: updated (lab settings, full statement page 2, case label, split Print), so it leads November.
+    // The new Dental Order Form, on the New case flow's View Case only; the portal's form is unchanged.
+    title: 'Order form in Case Details',
+    description: 'The new Dental Order Form on a case: patient, dentist, practice, lab and ship-to address, the Tooth Chart, the service details and instructions. A full denture keeps its stage history, so each new stage adds a row with its dates and status and its own instruction card. An order with several cases gives each one its own colour on the chart. The form prints on one A4 page. Updated 13 Nov: the lab sets up its form in Settings › Order Form (logo, conformity statement and signature), can add the full statement as page 2 and a case label for the box, and Print prints everything or one part.',
+    detail: 'Clinic · Case Details',
+    icon: <FileText className="w-5 h-5 text-[#1565C0]" />,
+    badge: 'Walkthrough',
+    accent: '#1565C0',
+    accentSoft: '#EEF4FF',
+    path: '/flows/order-form',
+    date: '13 Nov 2026',
+    month: '2026-11',
+  },
+  {
     // Print on the order form asks the lab first, so labs start changing statuses.
     title: 'Accept case on print',
     description: 'Printing the Smile Genius order form asks the lab first. Not yet accepted: “Do you have everything needed to process this case?” → Accept & print, or Something missing to put it On Hold. Posted and not marked received: “Has the parcel arrived…?” → Mark received, accept & print. Already accepted: “Print the order form?” → Print form. On the Cases list and Case Details.',
@@ -54,19 +82,6 @@ export const FLOWS: FlowEntry[] = [
     accent: '#4D8EF7',
     accentSoft: '#EEF4FF',
     path: '/flows/dso-analytics',
-    date: '29 Oct 2026',
-    month: '2026-10',
-  },
-  {
-    // The new Dental Order Form, on the New case flow's View Case only; the portal's form is unchanged.
-    title: 'Order form in Case Details',
-    description: 'The new Dental Order Form on a case: patient, dentist, practice, lab and ship-to address, the Tooth Chart, the service details and instructions. A full denture keeps its stage history, so each new stage adds a row with its dates and status and its own instruction card. An order with several cases gives each one its own colour on the chart. The form prints on one A4 page.',
-    detail: 'Clinic · Case Details',
-    icon: <FileText className="w-5 h-5 text-[#1565C0]" />,
-    badge: 'Walkthrough',
-    accent: '#1565C0',
-    accentSoft: '#EEF4FF',
-    path: '/flows/order-form',
     date: '29 Oct 2026',
     month: '2026-10',
   },
@@ -151,18 +166,6 @@ export const FLOWS: FlowEntry[] = [
     accent: '#0F766E',
     accentSoft: '#ECFEFF',
     path: '/flows/carestack',
-    month: '2026-09',
-  },
-  {
-    // WhatsApp communication epic — lab settings + the case Conversation hub.
-    title: 'WhatsApp communication',
-    description: 'Step-by-step walkthrough of the lab’s WhatsApp channel — connecting the Business account, automated messages on scoring outcomes, manual sends from the Conversation hub and the recorded audit trail.',
-    detail: 'Lab · Conversation hub',
-    icon: <MessageCircle className="w-5 h-5 text-[#15803D]" />,
-    badge: 'Walkthrough',
-    accent: '#15803D',
-    accentSoft: '#F0FDF4',
-    path: '/flows/whatsapp',
     month: '2026-09',
   },
   {

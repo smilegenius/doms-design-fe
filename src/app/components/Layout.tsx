@@ -86,6 +86,8 @@ import {
   FilledPackage, FilledFileText, FilledBarChart,
   FilledSliders, FilledGear, FilledScroll,
 } from './icons/FilledNavIcons';
+import { isResolved, useUnmatchedWhatsApp } from '../data/whatsappUnmatched';
+import WhatsAppIcon from './icons/WhatsAppIcon';
 
 interface LayoutProps {
   children: ReactNode;
@@ -144,6 +146,8 @@ const labNavItems = [
 export default function Layout({ children, activePage = 'overview', onNavigate, portal = 'supplier', defaultCollapsed = false }: LayoutProps) {
   const mainNavItems = portal === 'clinic' ? clinicNavItems : portal === 'lab' ? labNavItems : supplierNavItems;
   const navigate = useNavigate();
+  // Unmatched WhatsApp messages still waiting for a case — badged on the nav.
+  const waActionCount = useUnmatchedWhatsApp().filter(m => !isResolved(m)).length;
   const { logout, user } = useAuth();
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -305,6 +309,23 @@ export default function Layout({ children, activePage = 'overview', onNavigate, 
           <div className="p-3 border-t border-[#D4CEE1] space-y-0.5">
 
             {/* Collapse toggle moved to a floating chevron on the sidebar edge — see <aside> above */}
+
+            {/* WhatsApp Inbox (lab) — inbound messages that couldn't be matched
+                to a case, counted until each is assigned. */}
+            {portal === 'lab' && (
+              <button
+                onClick={() => handleNav('whatsapp')}
+                title={collapsed ? `WhatsApp${waActionCount ? ` · ${waActionCount} need a case` : ''}` : undefined}
+                className={navBtn(activePage === 'whatsapp')}
+              >
+                {activePage === 'whatsapp' && <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#4D8EF7] to-[#A59DFF] rounded-r" />}
+                <WhatsAppIcon className="w-5 h-5 flex-shrink-0 text-[#25D366]" />
+                {!collapsed && <span className="text-sm font-medium">WhatsApp</span>}
+                {waActionCount > 0 && (collapsed
+                  ? <span className="absolute top-0.5 right-1 min-w-[16px] h-4 px-1 rounded-full ring-2 ring-white bg-[#25D366] text-white text-[10px] font-semibold leading-4 text-center tabular-nums">{waActionCount}</span>
+                  : <span className="ml-auto min-w-[20px] px-1.5 py-px rounded-full bg-[#25D366] text-white text-[11px] font-semibold text-center tabular-nums" title={`${waActionCount} need a case`}>{waActionCount}</span>)}
+              </button>
+            )}
 
             {/* Settings */}
             <button
