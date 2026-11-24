@@ -1,10 +1,10 @@
 import { useSyncExternalStore } from 'react';
 import type {
-  AccountLimit, BillingAccount, BillingState, CatalogItem, Currency, Invoice, LabBillingSettings, MondaySettings, OrderKind, PriceList, Promotion, Provider, SetupState, Templates, VolumeTier,
+  AccountLimit, BankPayment, BillingAccount, BillingState, CatalogItem, Currency, Invoice, LabBillingSettings, MondaySettings, OrderKind, PriceList, Promotion, Provider, SetupState, Templates, VolumeTier,
 } from './types';
-import { account, billingCases, buildStatement, caseById, dentistAccountId, flagsFor, isDispatched, linesFor, outstanding, practiceAccountId, pricesOn, totals } from './engine';
+import { covers, NEW_PRACTICE_FLAG, PROVIDER_NAME, statementRef, account, billingCases, buildStatement, caseById, dentistAccountId, flagsFor, isDispatched, linesFor, outstanding, practiceAccountId, pricesOn, totals } from './engine';
 import { lastWorkingDay, monthOf, round2, today } from './format';
-import { applyRemake, approve, checkHold, checkLimit, createInvoice, ensureCase, ensurePracticeAccount, log, pay, reassignCases, refreshInvoice, syncAll, uid } from './ops';
+import { addScanPractice, createLineInvoice, applyRemake, approve, checkHold, checkLimit, createInvoice, createMonthInvoice, ensureCase, ensurePracticeAccount, log, pay, reassignCases, refreshInvoice, syncAll, uid } from './ops';
 import { BILLING_VERSION, seedBilling } from './seed';
 
 // ── Billing store ────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ export function syncBilling() {
   const needs = billingCases().some(c => {
     const m = s.cases[c.id];
     if (!m) return true;
-    return isDispatched(s, c) && !m.billedElsewhere && !m.skipAuto && !m.held && !s.invoices.some(i => i.caseId === c.id && !i.stage && i.status !== 'void');
+    return isDispatched(s, c) && !m.billedElsewhere && !m.skipAuto && !m.held && account(s, m.accountId)?.invoiceMode !== 'month-end' && !s.invoices.some(i => covers(i, c.id) && !i.stage && i.status !== 'void');
   });
   if (needs || before === 0) update(x => syncAll(x));
 }
@@ -69,6 +69,13 @@ export function overrideLine(invId: string, lineId: string, price: number, reaso
   update(s => {
     const inv = s.invoices.find(i => i.id === invId);
     if (!inv) return;
+    // An Edit (void and reissue) keeps its own lines: change the line itself.
+    if (inv.keepIssuedAt || inv.cases?.length) {
+      const l = inv.lines.find(x => x.id === lineId); if (!l) return;
+      l.unitPrice = price; l.source = { kind: 'override', reason, by };
+      inv.timeline.push({ at: today(), text: `Price on a line typed by ${by}: ${price.toFixed(2)} (${reason})` });
+      if (!inv.cases?.length) return;
+    }
     const meta = s.cases[inv.caseId];
     if (meta) meta.lineOverrides = { ...meta.lineOverrides, [lineId]: { price, reason, by } };
     refreshInvoice(s, inv);
@@ -80,7 +87,7 @@ export function setCaseKind(caseId: string, kind: OrderKind) {
   update(s => {
     const m = s.cases[caseId]; if (!m) return;
     m.kindOverride = kind;
-    s.invoices.filter(i => i.caseId === caseId).forEach(i => refreshInvoice(s, i));
+    s.invoices.filter(i => covers(i, caseId)).forEach(i => refreshInvoice(s, i));
   });
 }
 
@@ -99,11 +106,11 @@ export function decideRemake(caseId: string, decision: 'no-charge' | 'charge') {
   update(s => {
     const m = s.cases[caseId]; if (!m || !c) return;
     applyRemake(s, c, m, decision);
-    s.invoices.filter(i => i.caseId === caseId).forEach(i => refreshInvoice(s, i));
+    s.invoices.filter(i => covers(i, caseId)).forEach(i => refreshInvoice(s, i));
   });
 }
 export function notRemake(caseId: string) {
-  update(s => { const m = s.cases[caseId]; if (m) { delete m.remakeOf; delete m.remakeDecision; } s.invoices.filter(i => i.caseId === caseId).forEach(i => refreshInvoice(s, i)); });
+  update(s => { const m = s.cases[caseId]; if (m) { delete m.remakeOf; delete m.remakeDecision; } s.invoices.filter(i => covers(i, caseId)).forEach(i => refreshInvoice(s, i)); });
 }
 
 /** Invoice a case now (dispatched with no invoice, or billed early on request). */
@@ -136,18 +143,18 @@ export function addPart(caseId: string, part: { itemId: string; manufacturer: st
   update(s => {
     const m = s.cases[caseId]; if (!m) return;
     m.parts = [...(m.parts ?? []), { id: uid('part'), ...part }];
-    s.invoices.filter(i => i.caseId === caseId).forEach(i => refreshInvoice(s, i));
+    s.invoices.filter(i => covers(i, caseId)).forEach(i => refreshInvoice(s, i));
   });
 }
 export function removePart(caseId: string, partId: string) {
-  update(s => { const m = s.cases[caseId]; if (!m) return; m.parts = (m.parts ?? []).filter(p => p.id !== partId); s.invoices.filter(i => i.caseId === caseId).forEach(i => refreshInvoice(s, i)); });
+  update(s => { const m = s.cases[caseId]; if (!m) return; m.parts = (m.parts ?? []).filter(p => p.id !== partId); s.invoices.filter(i => covers(i, caseId)).forEach(i => refreshInvoice(s, i)); });
 }
 
 export function creditNote(invId: string, amount: number, reason: string, full: boolean) {
   update(s => {
     const inv = s.invoices.find(i => i.id === invId); if (!inv) return;
     const amt = round2(full ? totals(inv).gross - inv.creditNotes.reduce((n, c) => n + c.amount, 0) : amount);
-    const cn = { id: uid('cn'), number: `CN-${s.nextNumber++}`, at: today(), amount: amt, reason, full };
+    const cn = { id: uid('cn'), number: creditNumber(s), at: today(), amount: amt, reason, full };
     inv.creditNotes.push(cn);
     if (outstanding(inv) <= 0.005 && inv.status !== 'paid') inv.status = 'paid';
     inv.timeline.push({ at: today(), text: `${full ? 'Full' : 'Partial'} credit note ${cn.number} for ${amt.toFixed(2)}: ${reason}. Posted to Xero` });
@@ -156,22 +163,204 @@ export function creditNote(invId: string, amount: number, reason: string, full: 
   });
 }
 
-export function voidAndReissue(invId: string, by = me()): string | null {
+/** Credit notes have their own series (CN-0001), so invoice numbers have no gaps. */
+function creditNumber(s: BillingState) { const n = s.nextCredit ?? 1; s.nextCredit = n + 1; return `CN-${String(n).padStart(4, '0')}`; }
+
+/**
+ * Edit a sent invoice (I5): a sent invoice never changes, so Edit voids it and
+ * reissues it at the original prices and issue date, ready to change a line
+ * and approve. Re-issue to another account does the same for a different
+ * bill-to account. Statements update because the void drops out of them.
+ */
+export function voidAndReissue(invId: string, by = me(), toAccountId?: string): string | null {
   return update(s => {
     const inv = s.invoices.find(i => i.id === invId); if (!inv || !inv.issuedAt) return null;
+    const to = toAccountId ? account(s, toAccountId) : account(s, inv.accountId);
+    if (!to) return null;
     inv.status = 'void';
-    inv.timeline.push({ at: today(), text: `Voided by ${by} in Smile Genius and in Xero` });
+    const tool = s.setup.provider ? ` and in ${PROVIDER_NAME[s.setup.provider]}` : '';
+    inv.timeline.push({ at: today(), text: toAccountId ? `Voided by ${by}${tool}: re-issued to ${to.name}` : `Voided by ${by}${tool} to edit it` });
     log(s, 'void', `${inv.number} voided`);
-    const c = caseById(inv.caseId);
-    const m = s.cases[inv.caseId];
-    if (!c || !m) return null;
-    const next = createInvoice(s, c, m, today(), inv.stage ? { itemId: inv.lines[0]?.itemId ?? '', stage: inv.stage } : undefined);
-    if (inv.stage && m.stagesBilled) m.stagesBilled = m.stagesBilled.filter((x, i, a) => a.indexOf(x) === i);
-    next.replaces = inv.number ?? undefined;
+    const next: Invoice = {
+      ...structuredClone(inv), id: uid('inv'), number: null, accountId: to.id, status: 'draft', flags: [], payments: [], creditNotes: [], xeroId: null,
+      issuedAt: null, dueAt: null, keepIssuedAt: inv.issuedAt, createdAt: today(), archived: false, replacedBy: undefined,
+      replaces: inv.number ?? undefined, currency: to.currency, emailedTo: undefined,
+      timeline: [{ at: today(), text: `${toAccountId ? `Re-issue of ${inv.number} to ${to.name}` : `Edit of ${inv.number}`}: original prices and issue date (${inv.issuedAt}) kept. Change a line, then approve` }],
+    };
+    if (toAccountId) {
+      // The cases now bill to the new account.
+      for (const id of inv.cases ?? [inv.caseId]) if (s.cases[id]) s.cases[id].accountId = to.id;
+    }
+    s.invoices.unshift(next);
     inv.replacedBy = next.id;
-    next.timeline.unshift({ at: today(), text: `Reissue of ${inv.number}` });
-    if (next.status === 'draft') next.timeline.push({ at: today(), text: 'Waiting for approval' });
     return next.id;
+  });
+}
+
+/** No accounting tool connected (P6): mark paid by hand, single or bulk. */
+export function markPaid(ids: string[]) {
+  return update(s => {
+    let n = 0;
+    for (const id of ids) { const inv = s.invoices.find(i => i.id === id); if (inv && outstanding(inv) > 0) { pay(s, inv, outstanding(inv), today(), 'Marked paid by hand'); n++; checkHold(s, inv.accountId); } }
+    return n;
+  });
+}
+/** Clear settled invoices from view (they stay in statements and reports). */
+export function archiveInvoices(ids: string[], archived = true) {
+  return update(s => { let n = 0; for (const id of ids) { const inv = s.invoices.find(i => i.id === id); if (inv) { inv.archived = archived; n++; } } return n; });
+}
+
+/**
+ * "To invoice" → invoices (I2). Month-end accounts get one invoice from all
+ * the ticked cases; any other account gets one invoice per ticked case.
+ */
+export function invoiceFromPot(accountId: string, caseIds: string[]) {
+  return update(s => {
+    const cs = caseIds.map(id => ({ c: caseById(id), meta: s.cases[id] })).filter((x): x is { c: NonNullable<ReturnType<typeof caseById>>; meta: NonNullable<typeof x.meta> } => !!x.c && !!x.meta);
+    cs.forEach(x => { x.meta.skipAuto = false; });
+    if (account(s, accountId)?.invoiceMode === 'month-end') { const inv = createMonthInvoice(s, accountId, cs); return inv ? [inv] : []; }
+    return cs.map(x => createInvoice(s, x.c, x.meta));
+  });
+}
+
+/** Per case on dispatch, or one invoice a month (an account setting). */
+export function setInvoiceMode(accountId: string, mode: 'per-case' | 'month-end') {
+  update(s => {
+    const acc = account(s, accountId); if (!acc) return;
+    acc.invoiceMode = mode;
+    log(s, 'read', `${acc.name}: ${mode === 'month-end' ? 'one invoice a month from To invoice' : 'one invoice per case on dispatch'}`);
+  });
+  if (mode === 'per-case') syncBilling();
+}
+
+export function addAccountNote(accountId: string, text: string, by = me()) {
+  update(s => { const acc = account(s, accountId); if (acc && text.trim()) acc.notes = [{ at: today(), by, text: text.trim() }, ...(acc.notes ?? [])]; });
+}
+export function setViewAs(v: 'admin' | 'accountant') { update(s => { s.viewAs = v; }); }
+
+// ── v2: payment reconciliation (simulated change notices from the accounting tool) ──
+
+/** Demo: something happens in Xero that needs a person (P5). */
+export function simulateToolEvent(kind: 'edited' | 'voided' | 'failed' | 'expired') {
+  return update(s => {
+    const tool = s.setup.provider ? PROVIDER_NAME[s.setup.provider] : 'Xero';
+    const open = s.invoices.filter(i => i.issuedAt && (i.status === 'sent' || i.status === 'part-paid') && !s.issues.some(x => x.invoiceId === i.id));
+    const pick = open[open.length > 3 ? 2 : 0];
+    if (kind === 'expired') { s.issues.unshift({ id: uid('is'), at: today(), kind: 'connection-expired' }); log(s, 'error', `${tool} connection expired: posting paused until reconnected`); return 'The connection expired'; }
+    if (!pick) return null;
+    if (kind === 'edited') {
+      const t = totals(pick).gross;
+      const theirs = round2(t - Math.max(5, Math.round(t * 0.1)));
+      s.issues.unshift({ id: uid('is'), at: today(), kind: 'edited-in-tool', invoiceId: pick.id, ours: `Total ${t.toFixed(2)}`, theirs: `Total ${theirs.toFixed(2)} (a line was changed in ${tool})`, theirsTotal: theirs });
+      log(s, 'read', `${pick.number} was edited in ${tool}`);
+      return `${pick.number} edited in ${tool}`;
+    }
+    if (kind === 'voided') {
+      pick.status = 'void';
+      pick.timeline.push({ at: today(), text: `Voided in ${tool}: its cases are back in To invoice` });
+      for (const id of pick.cases ?? [pick.caseId]) if (s.cases[id]) s.cases[id].skipAuto = true;
+      s.issues.unshift({ id: uid('is'), at: today(), kind: 'voided-in-tool', invoiceId: pick.id });
+      log(s, 'read', `${pick.number} voided in ${tool}`);
+      return `${pick.number} voided in ${tool}`;
+    }
+    s.issues.unshift({ id: uid('is'), at: today(), kind: 'sync-failed', invoiceId: pick.id, attempts: 3 });
+    log(s, 'error', `Posting ${pick.number} failed 3 times`);
+    return `Posting ${pick.number} failed`;
+  });
+}
+
+/** Resolve a sync issue: accept the tool's version, re-push ours, retry, reconnect, or note it. */
+export function resolveIssue(issueId: string, action: 'accept-theirs' | 'push-ours' | 'retry' | 'reconnect' | 'ok') {
+  update(s => {
+    const is = s.issues.find(x => x.id === issueId); if (!is) return;
+    const inv = is.invoiceId ? s.invoices.find(i => i.id === is.invoiceId) : undefined;
+    const tool = s.setup.provider ? PROVIDER_NAME[s.setup.provider] : 'Xero';
+    if (action === 'accept-theirs' && inv && is.theirsTotal != null) {
+      // Our invoice never changes: the difference becomes a credit note, so both sides agree.
+      const diff = round2(totals(inv).gross - is.theirsTotal);
+      if (diff > 0) {
+        inv.creditNotes.push({ id: uid('cn'), number: creditNumber(s), at: today(), amount: diff, reason: `Matched to the version edited in ${tool}`, full: false });
+        inv.timeline.push({ at: today(), text: `${tool}'s version accepted: credit note for ${diff.toFixed(2)}` });
+        if (outstanding(inv) <= 0.005) inv.status = 'paid';
+      }
+    }
+    if (action === 'push-ours' && inv) { inv.timeline.push({ at: today(), text: `Smile Genius version re-pushed to ${tool}` }); log(s, 'post', `${inv.number} re-pushed to ${tool}`); }
+    if (action === 'retry' && inv) { inv.xeroId = inv.xeroId ?? `xr-${inv.id.slice(-6)}`; log(s, 'post', `${inv.number} posted on retry`); }
+    if (action === 'reconnect') log(s, 'read', `${tool} reconnected: queued invoices posted`);
+    s.issues = s.issues.filter(x => x.id !== issueId);
+  });
+}
+
+// ── v2: bank connection (labs with no accounting tool) ──────────────────────
+
+export function connectBank(bank: 'revolut' | 'wise' | null) {
+  update(s => { s.bank = bank; log(s, 'read', bank ? `${bank === 'revolut' ? 'Revolut Business' : 'Wise Business'} connected: incoming payments are matched to invoices` : 'Bank disconnected'); });
+}
+
+/** Match a bank payment (K4): reference with an invoice or statement number → known payer + exact amount → ask a person. */
+function matchPayment(s: BillingState, bp: BankPayment): string[] | null {
+  const open = s.invoices.filter(i => outstanding(i) > 0).sort((a, b) => (a.issuedAt ?? '').localeCompare(b.issuedAt ?? ''));
+  const byRef = open.filter(i => i.number && bp.ref.toUpperCase().includes(i.number.toUpperCase()));
+  if (byRef.length) return byRef.map(i => i.id);
+  const st = s.statements.find(x => bp.ref.toUpperCase().includes(statementRef(x)));
+  if (st) return open.filter(i => i.accountId === st.accountId).map(i => i.id);
+  const known = s.payers[bp.payer];
+  if (known) {
+    const mine = open.filter(i => i.accountId === known);
+    const one = mine.find(i => Math.abs(outstanding(i) - bp.amount) < 0.01);
+    if (one) return [one.id];
+    const bal = round2(mine.reduce((n, i) => n + outstanding(i), 0));
+    if (Math.abs(bal - bp.amount) < 0.01) return mine.map(i => i.id);
+  }
+  return null;
+}
+function applyPayment(s: BillingState, bp: BankPayment, ids: string[]) {
+  let left = bp.amount;
+  for (const id of ids) { const inv = s.invoices.find(i => i.id === id); if (!inv || left <= 0) continue; const p = Math.min(left, outstanding(inv)); pay(s, inv, p, bp.at, `Bank: ${bp.ref}`); left = round2(left - p); }
+  bp.matched = ids;
+  bp.accountId = s.invoices.find(i => i.id === ids[0])?.accountId;
+  // Overpayments stay as credit on the account and reduce the next statement.
+  if (left > 0.005) bp.credit = left;
+  if (bp.accountId) checkHold(s, bp.accountId);
+}
+
+/** Demo: money arrives in the connected bank. */
+export function simulateBankPayment(kind: 'reference' | 'known' | 'unknown') {
+  return update(s => {
+    const open = s.invoices.filter(i => outstanding(i) > 0 && i.issuedAt).sort((a, b) => (a.issuedAt ?? '').localeCompare(b.issuedAt ?? ''));
+    const inv = open[0]; if (!inv) return null;
+    const acc = account(s, inv.accountId);
+    const bp: BankPayment = kind === 'reference'
+      ? { id: uid('bp'), at: today(), amount: outstanding(inv), ref: `${inv.number} ${acc?.name ?? ''}`.trim(), payer: (acc?.name ?? 'Practice').toUpperCase() }
+      : kind === 'known'
+        ? { id: uid('bp'), at: today(), amount: outstanding(inv), ref: 'LAB FEES', payer: Object.keys(s.payers).find(p => s.payers[p] === inv.accountId) ?? (acc?.name ?? 'Practice').toUpperCase() }
+        : { id: uid('bp'), at: today(), amount: outstanding(inv), ref: 'DENTAL LAB PAYMENT', payer: `${(acc?.name ?? 'Practice').replace(/^Smile Genius /, 'SG ').toUpperCase()} LTD` };
+    if (kind === 'known') s.payers[bp.payer] = inv.accountId;
+    s.bankPayments.unshift(bp);
+    const ids = matchPayment(s, bp);
+    if (ids) { applyPayment(s, bp, ids); return `${money2(bp.amount)} from ${bp.payer}: matched to ${ids.map(id => s.invoices.find(i => i.id === id)?.number).join(', ')}`; }
+    s.issues.unshift({ id: uid('is'), at: today(), kind: 'bank-unmatched', bankPaymentId: bp.id });
+    return `${money2(bp.amount)} from ${bp.payer}: needs you to confirm the match`;
+  });
+}
+const money2 = (n: number) => `£${n.toFixed(2)}`;
+
+/** Likeliest two matches for an unmatched bank payment. */
+export function likelyMatches(s: BillingState, bp: BankPayment) {
+  return s.invoices.filter(i => outstanding(i) > 0 && i.issuedAt)
+    .map(i => ({ inv: i, score: Math.abs(outstanding(i) - bp.amount) + (bp.payer.toLowerCase().includes((account(s, i.accountId)?.name ?? '').replace(/^Smile Genius /, '').toLowerCase()) ? -1000 : 0) }))
+    .sort((a, b) => a.score - b.score).slice(0, 2).map(x => x.inv);
+}
+/** Confirm an unmatched bank payment; the payer is remembered for next time. */
+export function confirmBankMatch(issueId: string, invoiceId: string) {
+  update(s => {
+    const is = s.issues.find(x => x.id === issueId); const bp = s.bankPayments.find(b => b.id === is?.bankPaymentId);
+    const inv = s.invoices.find(i => i.id === invoiceId);
+    if (!is || !bp || !inv) return;
+    applyPayment(s, bp, [inv.id]);
+    s.payers[bp.payer] = inv.accountId;
+    log(s, 'payment', `${bp.payer} remembered as ${account(s, inv.accountId)?.name}`);
+    s.issues = s.issues.filter(x => x.id !== issueId);
   });
 }
 
@@ -489,12 +678,12 @@ export function applyDesignToBilling(caseId: string, lines: { id: string; itemId
   update(s => {
     const m = c ? ensureCase(s, c) : s.cases[caseId]; if (!m) return;
     m.designOverride = { lines, diff, at: today() };
-    s.invoices.filter(i => i.caseId === caseId).forEach(i => refreshInvoice(s, i));
+    s.invoices.filter(i => covers(i, caseId)).forEach(i => refreshInvoice(s, i));
     if (diff.length) log(s, 'read', `${caseId}: design differs from the case (${diff.join('; ')}); invoice draft updated`);
   });
 }
 export function checkDesignDiff(caseId: string) {
-  update(s => { const m = s.cases[caseId]; if (m?.designOverride) { m.designOverride.checked = true; s.invoices.filter(i => i.caseId === caseId).forEach(i => refreshInvoice(s, i)); } });
+  update(s => { const m = s.cases[caseId]; if (m?.designOverride) { m.designOverride.checked = true; s.invoices.filter(i => covers(i, caseId)).forEach(i => refreshInvoice(s, i)); } });
 }
 
 // ── Accounting connection ────────────────────────────────────────────────────
@@ -503,15 +692,18 @@ export function updateSetup(patch: Partial<SetupState>) { update(s => { Object.a
 export function connectProvider(provider: Provider, org: string) {
   update(s => {
     Object.assign(s.setup, { provider, org });
-    log(s, 'read', `Connected to ${provider === 'xero' ? 'Xero' : 'QuickBooks'} organisation "${org}": contacts, account codes, tax rates and the last invoice number read`);
+    // One source of truth for "paid": a connected accounting tool switches the bank connection off.
+    if (s.bank) { s.bank = null; log(s, 'read', 'Bank connection switched off: payments now come from the accounting tool'); }
+    s.issues = s.issues.filter(x => x.kind !== 'connection-expired');
+    log(s, 'read', `Connected to ${PROVIDER_NAME[provider]} organisation "${org}": contacts matched by name and email, sales account and the VAT rate for exempt prostheses preselected, last invoice number read`);
     // Anything approved while disconnected posts now.
     const waiting = s.invoices.filter(i => i.issuedAt && !i.xeroId && i.status !== 'void');
-    for (const i of waiting) { i.xeroId = `xr-${i.id.slice(-6)}`; i.timeline.push({ at: today(), text: `Posted to ${provider === 'xero' ? 'Xero' : 'QuickBooks'} on reconnecting` }); }
+    for (const i of waiting) { i.xeroId = `xr-${i.id.slice(-6)}`; i.timeline.push({ at: today(), text: `Posted to ${PROVIDER_NAME[provider]} on reconnecting` }); }
     if (waiting.length) log(s, 'post', `${waiting.length} invoice${waiting.length === 1 ? '' : 's'} approved while disconnected posted`);
   });
 }
 export function disconnectProvider() {
-  update(s => { log(s, 'read', `Disconnected from ${s.setup.provider === 'quickbooks' ? 'QuickBooks' : 'Xero'}`); Object.assign(s.setup, { provider: null, org: null }); });
+  update(s => { log(s, 'read', `Disconnected from ${s.setup.provider ? PROVIDER_NAME[s.setup.provider] : 'the accounting tool'}`); Object.assign(s.setup, { provider: null, org: null }); s.issues = s.issues.filter(x => x.kind === 'bank-unmatched'); });
 }
 
 /** Lines a case would invoice with now (for the Billing tab before an invoice exists). */
@@ -520,4 +712,105 @@ export function previewLines(caseId: string) {
   if (!c || !m) return { lines: [], flags: [] };
   const lines = linesFor(s, c, m);
   return { lines, flags: flagsFor(s, c, m, { id: 'preview', lines, accountId: m.accountId }) };
+}
+
+// ── V1 (simpler Billing) ─────────────────────────────────────────────────────
+
+/**
+ * A practice that arrived with a scan: someone checks who to bill. Its waiting
+ * invoices lose the "new practice" flag and, if nothing else is wrong, go out.
+ */
+export function confirmPractice(accountId: string, patch: { emails: string[]; invoiceMode: 'per-case' | 'month-end'; termsDays: number | null; xero?: string | null }, sendNow = true) {
+  return update(s => {
+    const acc = account(s, accountId); if (!acc) return 0;
+    Object.assign(acc, { emails: patch.emails, invoiceMode: patch.invoiceMode, termsDays: patch.termsDays, confirmedAt: today() });
+    if (s.setup.provider && !acc.xeroContactId) ensureXeroContact(s, acc, patch.xero ?? undefined);
+    let sent = 0;
+    for (const inv of s.invoices.filter(i => i.accountId === accountId && (i.status === 'draft' || i.status === 'flagged'))) {
+      inv.flags = inv.flags.filter(f => f.message !== NEW_PRACTICE_FLAG(acc.name));
+      refreshInvoice(s, inv);
+      inv.status = inv.flags.length ? 'flagged' : 'draft';
+      inv.timeline.push({ at: today(), text: `${acc.name} confirmed by ${me()}` });
+      if (sendNow && !inv.flags.length) { approve(s, inv, today(), me()); sent++; }
+    }
+    log(s, 'contact', `${acc.name} confirmed: invoices to ${patch.emails.join(', ') || 'no address'}`);
+    return sent;
+  });
+}
+
+/** Send (or resend) one account's statement for a month: built fresh from the tool. */
+export function sendStatementFor(accountId: string, period = monthOf(today())) {
+  return update(s => {
+    const acc = account(s, accountId); if (!acc) return null;
+    s.statements = s.statements.filter(x => !(x.accountId === accountId && x.period === period && x.status === 'preview'));
+    const old = s.statements.find(x => x.accountId === accountId && x.period === period);
+    const st = old ?? buildStatement(s, accountId, period);
+    st.status = 'sent'; st.sentAt = today();
+    if (!old) s.statements.push(st);
+    s.emails.unshift({ id: uid('em'), at: today(), to: acc.emails, subject: `Statement for ${period}${old ? ' (resent)' : ''}`, what: 'statement', ref: st.id });
+    if (acc.bounced) acc.bounced = [];
+    log(s, 'post', `Statement for ${period} sent to ${acc.name}`);
+    return st.id;
+  });
+}
+
+/** Send chosen invoices again, to the account's billing email or another address. */
+export function sendInvoices(ids: string[], to?: string[]) {
+  return update(s => {
+    let n = 0;
+    for (const id of ids) {
+      const inv = s.invoices.find(i => i.id === id); if (!inv?.number) continue;
+      const acc = account(s, inv.accountId);
+      const addr = to?.length ? to : acc?.emails ?? [];
+      s.emails.unshift({ id: uid('em'), at: today(), to: addr, subject: `Invoice ${inv.number} (copy)`, what: 'invoice', ref: inv.id });
+      inv.timeline.push({ at: today(), text: `Copy sent to ${addr.join(', ')}` });
+      n++;
+    }
+    return n;
+  });
+}
+
+/** Account-based pricing: set (or clear) this account's own price for one item. */
+export function setAccountPrice(accountId: string, itemId: string, price: { nhs?: number; priv?: number } | null) {
+  update(s => {
+    const acc = account(s, accountId); if (!acc) return;
+    let pl = acc.priceListId ? s.priceLists.find(p => p.id === acc.priceListId) : undefined;
+    if (!pl) { pl = { id: uid('pl'), name: `${acc.name} prices`, prices: {} }; s.priceLists.push(pl); acc.priceListId = pl.id; }
+    if (price && (price.nhs != null || price.priv != null)) pl.prices[itemId] = price; else delete pl.prices[itemId];
+    s.invoices.filter(i => i.accountId === accountId).forEach(i => refreshInvoice(s, i));
+  });
+}
+
+/** Account-based pricing: a percentage off the standard price, on every item (rounded to 50p). */
+export function setAccountDiscount(accountId: string, pct: number) {
+  update(s => {
+    const acc = account(s, accountId); if (!acc) return;
+    let pl = acc.priceListId ? s.priceLists.find(p => p.id === acc.priceListId) : undefined;
+    if (!pl) { pl = { id: uid('pl'), name: `${acc.name} prices`, prices: {} }; s.priceLists.push(pl); acc.priceListId = pl.id; }
+    const r = (n: number | null) => (n == null ? undefined : Math.round(n * (1 - pct / 100) * 2) / 2);
+    for (const it of s.catalog.filter(i => !i.archived && !i.passThrough)) pl.prices[it.id] = { nhs: r(it.nhs), priv: r(it.priv) };
+    s.invoices.filter(i => i.accountId === accountId).forEach(i => refreshInvoice(s, i));
+  });
+}
+
+/** Use the lab's standard prices again (or another practice's list). */
+export function usePriceList(accountId: string, listId: string | null) {
+  update(s => { const acc = account(s, accountId); if (!acc) return; acc.priceListId = listId; s.invoices.filter(i => i.accountId === accountId).forEach(i => refreshInvoice(s, i)); });
+}
+
+/** Demo: a scan arrives from a practice the lab hasn't billed before. */
+export function simulateScanFromNewPractice() {
+  const names = ['Harbour View Dental', 'Oakfield Family Dentistry', 'The Smile Studio Bath'];
+  return update(s => { const name = names.find(n => !s.accounts.some(a => a.name === n)) ?? `New Practice ${s.accounts.length}`; addScanPractice(s, name, 'Dr. Mensah'); return name; });
+}
+
+/** V2 workflow: a service line was Delivered → its own invoice. Returns the invoice number (or "draft"). */
+export function invoiceServiceLine(caseId: string, siId: string): { id: string; number: string | null } | null {
+  const c = caseById(caseId);
+  if (!c) return null;
+  return update(s => {
+    const meta = ensureCase(s, c);
+    const inv = createLineInvoice(s, c, meta, siId);
+    return inv ? { id: inv.id, number: inv.number } : null;
+  });
 }

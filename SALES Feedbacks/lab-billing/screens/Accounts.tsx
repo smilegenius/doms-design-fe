@@ -5,9 +5,9 @@ import Modal from '../../../src/app/components/Modal';
 import { useToast } from '../../../src/app/context/ToastContext';
 import { printPages } from '../../bulk-actions/printForms';
 import type { AccountLimit, BillingAccount, BillingState, Currency, Statement } from '../types';
-import { account, billingCases, dentistAccountId, dentistWhere, exposure, isOverdue, limitForecast, limitStage, outstanding, practiceAccountId, totals } from '../engine';
+import { account, billingCases, dentistAccountId, dentistWhere, exposure, isOverdue, limitForecast, limitStage, outstanding, practiceAccountId, termsLabel, toolName, totals } from '../engine';
 import { daysBetween, fmtDate, fmtMonth, fmtShort, money, pl, today } from '../format';
-import { addAccount, linkDentist, resendAccountEmail, savePriceList, setDentistPractices, setPayer, simulateAccountPayment, unlinkDentist, updateAccount, useBilling } from '../billingStore';
+import { addAccount, addAccountNote, linkDentist, resendAccountEmail, savePriceList, setDentistPractices, setInvoiceMode, setPayer, simulateAccountPayment, unlinkDentist, updateAccount, useBilling } from '../billingStore';
 import { billingAccounts, payHabit } from '../insights';
 import { StatementDoc } from '../BillingDocs';
 import { Bar, btn, btnPrimary, Card, Empty, Field, input, InvoiceStatusPill, inputSm, Note, Pill, Seg, td, th, Toggle } from '../ui';
@@ -217,18 +217,19 @@ export function AccountPage({ id }: { id: string }) {
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-semibold text-[#030213]">{a.name}</h2>
             <Pill tone={a.kind === 'dentist' ? 'purple' : 'blue'}>{a.kind === 'dentist' ? 'Dentist' : 'Practice'}</Pill>
-            {STAGE_PILL[stage]}
+            {s.settings.limitsOn && STAGE_PILL[stage]}
+            {a.invoiceMode === 'month-end' && <Pill tone="blue">Invoiced monthly</Pill>}
           </div>
-          <p className="text-xs text-[#717182] mt-1">{a.kind === 'dentist' ? `${dentistWhere(a)} · ` : ''}{a.xeroContactId ? `Xero contact: ${a.xeroContactName ?? a.name}` : 'No Xero contact (billed through the practice)'} · {a.country} · {cur}</p>
+          <p className="text-xs text-[#717182] mt-1">{a.kind === 'dentist' ? `${dentistWhere(a)} · ` : ''}{a.xeroContactId ? `${toolName(s) ?? 'Accounting'} contact: ${a.xeroContactName ?? a.name}` : 'Billed through the practice'} · {a.country} · {cur} · terms {termsLabel(s, a).toLowerCase()}</p>
         </div>
-        {isPayer && (ex.unpaid + ex.xero) > 0 && <button className={btn} title="Mock: a payment for the oldest invoices arrives in Xero" onClick={() => { const amt = Math.round((ex.unpaid + ex.xero) * 0.6); const rel = simulateAccountPayment(a.id, amt); toast.success(`${money(amt, cur)} read back from Xero${rel.length ? `. Back under the limit: hold lifted, ${pl(rel.length, 'case')} moved into production` : ''}`); }}><CircleDollarSign className="w-3.5 h-3.5" /> Payment arrives in Xero</button>}
+        {isPayer && toolName(s) && (ex.unpaid + ex.xero) > 0 && <button className={btn} title={`Demo: a statement payment is reconciled in ${toolName(s)}`} onClick={() => { const amt = Math.round((ex.unpaid + ex.xero) * 0.6); const rel = simulateAccountPayment(a.id, amt); toast.success(`${money(amt, cur)} read back from ${toolName(s)}${rel.length ? `. Back under the limit: hold lifted, ${pl(rel.length, 'case')} moved into production` : ''}`); }}><CircleDollarSign className="w-3.5 h-3.5" /> Demo: statement paid in {toolName(s)}</button>}
       </div>
 
-      {a.paused && <Note tone="red">On hold: new cases from {a.name} wait in the On hold queue; cases already in progress carry on. A payment that brings the account under its limit lifts the hold automatically.{a.limit?.tellPractice ? ' The practice was told.' : ''}</Note>}
+      {a.paused && s.settings.limitsOn && <Note tone="red">On hold: new cases from {a.name} wait in the On hold queue; cases already in progress carry on. A payment that brings the account under its limit lifts the hold automatically.{a.limit?.tellPractice ? ' The practice was told.' : ''}</Note>}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="xl:col-span-2 space-y-4">
-          {isPayer && <LimitCard a={a} />}
+          {isPayer && s.settings.limitsOn && <LimitCard a={a} />}
           {isPayer && (
             <Card title="Balance and ageing" sub={`Includes ${money(ex.xero, cur)} still owed on invoices from the old system (kept in Xero).`}>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -247,7 +248,7 @@ export function AccountPage({ id }: { id: string }) {
                     {old.map(x => <tr key={x.number}><td className={`${td} font-mono`}>{x.number}</td><td className={td}>{fmtShort(x.date)}</td><td className={td}><span className="text-[#717182]">Old system (in Xero)</span></td><td className={td}>{x.amount - x.paid > 0 ? <Pill tone={x.due < t ? 'red' : 'purple'}>{x.due < t ? 'Overdue' : 'Open'}</Pill> : <Pill tone="green">Paid</Pill>}</td><td className={`${td} text-right`}>{money(x.amount, x.currency)}</td><td className={`${td} text-right`}>{x.amount - x.paid > 0 ? money(x.amount - x.paid, x.currency) : '—'}</td></tr>)}
                     {invoices.map(i => (
                       <tr key={i.id} onClick={() => navigate(`/growth/billing/invoices/${i.id}`)} className="cursor-pointer hover:bg-[#FAFAFD]">
-                        <td className={`${td} font-mono font-semibold whitespace-nowrap`}>{i.number ?? 'Draft'}</td><td className={td}>{fmtShort(i.issuedAt ?? i.createdAt)}</td><td className={td}><span className="font-mono">{i.caseId}</span> <span className="text-[#717182]">{i.patient}</span></td>
+                        <td className={`${td} font-mono font-semibold whitespace-nowrap`}>{i.number ?? 'Draft'}</td><td className={td}>{fmtShort(i.issuedAt ?? i.createdAt)}</td><td className={td}>{i.cases?.length ? <span>Month invoice <span className="text-[#717182]">· {pl(i.cases.length, 'case')}</span></span> : <><span className="font-mono">{i.caseId}</span> <span className="text-[#717182]">{i.patient}</span></>}</td>
                         <td className={td}><InvoiceStatusPill status={i.status} overdue={isOverdue(i)} /></td><td className={`${td} text-right whitespace-nowrap`}>{money(totals(i).gross, i.currency)}</td><td className={`${td} text-right whitespace-nowrap`}>{outstanding(i) ? money(outstanding(i), i.currency) : '—'}</td>
                       </tr>
                     ))}
@@ -276,10 +277,12 @@ export function AccountPage({ id }: { id: string }) {
         </div>
 
         <div className="space-y-4">
+          {isPayer && <InvoicingCard a={a} />}
           <WhoPaysCard a={a} dentistsHere={dentistsHere} />
           {isPayer && <PriceListCard a={a} />}
           {isPayer && <DetailsCard a={a} />}
           {isPayer && <StagedCard a={a} />}
+          <NotesCard a={a} />
         </div>
       </div>
       {stmt && (
@@ -457,9 +460,9 @@ function DetailsCard({ a }: { a: BillingAccount }) {
   const { toast } = useToast();
   const [emails, setEmails] = useState(a.emails.join(', '));
   return (
-    <Card title="Invoices, statements and currency">
+    <Card title="Contacts and currency">
       <div className="space-y-3">
-        <Field label="Invoice and statement email" hint="One or more addresses, comma-separated.">
+        <Field label="Billing email" hint="Invoices and statements go here only. One or more, comma-separated.">
           <div className="flex gap-1.5"><input className={input} value={emails} onChange={e => setEmails(e.target.value)} /><button className={btn} onClick={() => { updateAccount(a.id, { emails: emails.split(/[,;\s]+/).filter(Boolean) }); toast.success('Saved'); }}>Save</button></div>
         </Field>
         {a.bounced?.length ? (
@@ -468,11 +471,12 @@ function DetailsCard({ a }: { a: BillingAccount }) {
             <button className="mt-1 inline-flex items-center gap-1 font-semibold underline" onClick={() => { resendAccountEmail(a.id); toast.success(`Resent to ${a.emails.join(', ')}`); }}><Mail className="w-3 h-3" /> Resend</button>
           </Note>
         ) : null}
+        {a.kind === 'practice' && <ReceptionFields a={a} />}
         <div className="grid grid-cols-2 gap-2">
           <Field label="Currency"><select className={input} value={a.currency} onChange={e => { updateAccount(a.id, { currency: e.target.value as Currency }); toast.success(`Invoices and statements go out in ${e.target.value}`); }}>{['GBP', 'EUR', 'USD'].map(c => <option key={c}>{c}</option>)}</select></Field>
           <Field label="Country"><input className={input} value={a.country} onChange={e => updateAccount(a.id, { country: e.target.value })} /></Field>
         </div>
-        {a.currency !== 'GBP' && <Note tone={s.setup.plan === 'premium' ? 'blue' : 'amber'}>{s.setup.plan === 'premium' ? 'Xero handles the exchange rate and the GBP value.' : 'Multi-currency needs Xero Premium. Your organisation is on Standard: upgrade before sending, or invoices post in GBP.'} Overseas VAT treatment is a separate tax-rate mapping; confirm it with your accountant.</Note>}
+        {a.currency !== 'GBP' && <Note tone={s.setup.plan === 'premium' ? 'blue' : 'amber'}>{s.setup.plan === 'premium' ? `${toolName(s) ?? 'The accounting tool'} handles the exchange rate and the GBP value; prices convert at the day's rate.` : `Multi-currency needs ${toolName(s) ?? 'Xero'}'s premium plan: upgrade before sending, or invoices post in GBP.`} Overseas VAT treatment is a separate tax-rate mapping; confirm it with your accountant.</Note>}
         <Field label="Statement of manufacture">
           <Seg value={a.som} onChange={v => updateAccount(a.id, { som: v })} options={[{ value: 'inherit', label: `Inherit (${s.settings.som === 'all' ? 'on' : 'off'})` }, { value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />
         </Field>
@@ -504,3 +508,49 @@ function StagedCard({ a }: { a: BillingAccount }) {
 }
 
 export type { BillingState };
+
+/** v2: per case on dispatch (default) or one invoice a month; terms per account. */
+function InvoicingCard({ a }: { a: BillingAccount }) {
+  const s = useBilling();
+  const { toast } = useToast();
+  const [terms, setTerms] = useState(a.termsDays ? String(a.termsDays) : '');
+  return (
+    <Card title="Invoicing">
+      <div className="space-y-3">
+        <Field label="When to invoice" hint={a.invoiceMode === 'month-end' ? 'Shipped cases wait in Invoices › To invoice until you press Invoice month: one invoice a month.' : 'An invoice for each case when it ships.'}>
+          <Seg value={a.invoiceMode ?? 'per-case'} onChange={v => { setInvoiceMode(a.id, v); toast.success(v === 'month-end' ? 'One invoice a month from To invoice' : 'One invoice per case on Shipped'); }} options={[{ value: 'per-case', label: 'Per case' }, { value: 'month-end', label: 'Once a month' }]} />
+        </Field>
+        <Field label="Payment terms (days)" hint={`Empty uses the lab's terms (${termsLabel(s, undefined).toLowerCase()}).`}>
+          <div className="flex gap-1.5"><input className={input} type="number" min="0" value={terms} onChange={e => setTerms(e.target.value)} placeholder="Lab default" /><button className={btn} onClick={() => { updateAccount(a.id, { termsDays: terms ? Number(terms) : null }); toast.success('Terms saved: next invoices use them'); }}>Save</button></div>
+        </Field>
+      </div>
+    </Card>
+  );
+}
+
+/** v2: reception gets status updates; invoices go to billing only (Neil keeps them apart). */
+function ReceptionFields({ a }: { a: BillingAccount }) {
+  const { toast } = useToast();
+  const [email, setEmail] = useState(a.receptionEmail ?? '');
+  return (
+    <div className="space-y-2">
+      <Field label="Reception email" hint="Status updates only: received, accepted, delivered. Never invoices.">
+        <div className="flex gap-1.5"><input className={input} value={email} onChange={e => setEmail(e.target.value)} placeholder="reception@practice.co.uk" /><button className={btn} onClick={() => { updateAccount(a.id, { receptionEmail: email.trim() }); toast.success('Saved'); }}>Save</button></div>
+      </Field>
+      <label className="flex items-center gap-2 text-xs text-[#5A5568]"><input type="checkbox" checked={!!a.receptionUpdates} onChange={e => updateAccount(a.id, { receptionUpdates: e.target.checked })} /> Email reception when a case is received, accepted and delivered</label>
+    </div>
+  );
+}
+
+function NotesCard({ a }: { a: BillingAccount }) {
+  const { toast } = useToast();
+  const [text, setText] = useState('');
+  return (
+    <Card title="Notes" sub="From calls (Insights › Who to call) or typed here.">
+      <div className="space-y-2">
+        <div className="flex gap-1.5"><input className={input} value={text} onChange={e => setText(e.target.value)} placeholder="Add a note" aria-label="Add a note" /><button className={btn} disabled={!text.trim()} onClick={() => { addAccountNote(a.id, text); setText(''); toast.success('Note saved'); }}>Add</button></div>
+        {a.notes?.length ? <ul className="space-y-1">{a.notes.map((n, i) => <li key={i} className="text-xs"><span className="text-[#A0A0B0]">{fmtShort(n.at)} · {n.by}:</span> {n.text}</li>)}</ul> : <p className="text-xs text-[#A0A0B0]">No notes yet.</p>}
+      </div>
+    </Card>
+  );
+}

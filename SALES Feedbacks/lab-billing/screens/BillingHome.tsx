@@ -1,18 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCheck, Eye, Lock, PauseCircle, PlayCircle, Search, Send, Sparkles, X } from 'lucide-react';
-import Modal from '../../../src/app/components/Modal';
+import { AlertTriangle, ArrowRight, CalendarClock, Check, CheckCheck, CloudOff, Landmark, PauseCircle, PlayCircle, RefreshCw, Send, X } from 'lucide-react';
 import { useToast } from '../../../src/app/context/ToastContext';
-import { printPages } from '../../bulk-actions/printForms';
-import type { BillingState, Invoice } from '../types';
-import { account, exposure, isOverdue, outstanding, totals } from '../engine';
-import { daysBetween, fmtDate, fmtMonth, fmtShort, money, monthOf, pl, today } from '../format';
-import { approveInvoices, dismiss, previewStatements, releaseAccount, releaseCase, sendStatements, statementDay, useBilling } from '../billingStore';
+import type { BillingState, Invoice, SyncIssue } from '../types';
+import { account, exposure, toInvoice, toolName, totals } from '../engine';
+import { daysBetween, fmtDate, fmtShort, money, monthOf, pl, today } from '../format';
+import { approveInvoices, confirmBankMatch, dismiss, likelyMatches, releaseAccount, releaseCase, resolveIssue, statementDay, useBilling } from '../billingStore';
 import { assists, headline, heldCases, pendingInvoices } from '../insights';
-import { StatementDoc } from '../BillingDocs';
-import { btn, btnPrimary, Card, Empty, InvoiceStatusPill, Note, Pill, Stat, td, th } from '../ui';
+import { btn, btnPrimary, Card, Empty, Note, Pill, Stat, td, th } from '../ui';
 
-// ── 1. Billing home: the admin's daily inbox ─────────────────────────────────
+// ── Billing home: one list for everything that needs a person ────────────────
+// Requirements v2: after the first 30 days a normal month costs one extra
+// click ("Send statements"). Flag-free invoices send themselves; Needs you
+// holds the rest in one place: invoices waiting, sync and payment problems,
+// the smart-assist nudges and accounts on hold. Empty on a normal day.
 
 const TONE = { red: 'border-l-[#E53935]', amber: 'border-l-[#F59E0B]', blue: 'border-l-[#4D8EF7]' };
 
@@ -23,23 +24,24 @@ export default function BillingHome() {
   const h = headline(s);
   const pending = pendingInvoices(s);
   const [ticked, setTicked] = useState<string[]>([]);
-  const [filter, setFilter] = useState<'all' | 'sent' | 'overdue' | 'paid' | 'void'>(() => {
-    const f = new URLSearchParams(window.location.search).get('filter');
-    return f && ['sent', 'overdue', 'paid', 'void'].includes(f) ? (f as 'sent') : 'all';
-  });
-  // ?filter=pending (What's new, month-end check) jumps to the flagged and waiting invoices.
+  // ?filter=pending (What's new, month-end check) jumps to Needs you.
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('filter') !== 'pending') return;
     const t = window.setTimeout(() => document.getElementById('needs-you')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     return () => window.clearTimeout(t);
   }, []);
-  const [q, setQ] = useState('');
-  const [statements, setStatements] = useState(false);
-  const nudges = assists(s);
-  const held = heldCases(s);
+  // Flags on waiting invoices already show in their row: list each thing once.
+  const nudges = assists(s).filter(n => !/^(unusual-price|nhs-unclear|remake-inv|design-diff|review|new-order-type|type)-/.test(n.id));
+  const held = s.settings.limitsOn ? heldCases(s) : [];
   const sd = statementDay(s);
   const daysToSd = daysBetween(today(), sd);
+  const pot = toInvoice(s);
+  const potAccounts = new Set(pot.map(x => x.meta.accountId)).size;
+  const ym = monthOf(today());
+  const statementsSent = s.statements.filter(x => x.period === ym && x.status === 'sent').length;
   const blocked = (i: Invoice) => i.lines.some(l => l.source.kind === 'unmapped');
+  const tool = toolName(s);
+  const total = pending.length + s.issues.length + nudges.length + held.length;
 
   function approve(ids: string[]) {
     const ok = ids.filter(id => { const i = s.invoices.find(x => x.id === id); return i && !blocked(i); });
@@ -47,199 +49,221 @@ export default function BillingHome() {
     if (!ok.length) return;
     const n = approveInvoices(ok);
     setTicked([]);
-    toast.success(`${pl(n, 'invoice')} approved, posted to Xero and emailed`);
+    toast.success(`${pl(n, 'invoice')} approved${tool ? `, posted to ${tool}` : ''} and emailed`);
   }
 
-  const list = useMemo(() => {
-    const t = today();
-    return s.invoices.filter(i => i.issuedAt || i.status === 'void').filter(i =>
-      filter === 'all' ? true : filter === 'overdue' ? isOverdue(i, t) : filter === 'sent' ? (i.status === 'sent' || i.status === 'part-paid') && !isOverdue(i, t) : i.status === filter)
-      .filter(i => !q || `${i.number} ${i.caseId} ${i.patient} ${i.practice} ${i.dentist}`.toLowerCase().includes(q.toLowerCase()))
-      .sort((a, b) => (b.issuedAt ?? '').localeCompare(a.issuedAt ?? ''));
-  }, [s, filter, q]);
-
   const heldByAccount = [...held.reduce((m, c) => m.set(s.cases[c.id].accountId, [...(m.get(s.cases[c.id].accountId) ?? []), c]), new Map<string, typeof held>())];
-  const ym = monthOf(today());
-  const previews = s.statements.filter(x => x.period === ym && x.status === 'preview');
-  const sentThisMonth = s.statements.filter(x => x.period === ym && x.status === 'sent').length;
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat label="Invoiced this month" value={money(h.invoicedThisMonth, 'GBP', { round: true })} sub={`${s.invoices.filter(i => i.issuedAt && monthOf(i.issuedAt) === ym).length} invoices`} />
-        <Stat label="Paid this month" value={money(h.paidThisMonth, 'GBP', { round: true })} tone="green" sub="Read back from Xero" />
-        <Stat label="Pending" value={String(h.pending)} sub={`${money(h.pendingVal, 'GBP', { round: true })} waiting or flagged`} tone={h.pending ? 'amber' : undefined} onClick={() => document.getElementById('needs-you')?.scrollIntoView({ behavior: 'smooth' })} />
-        <Stat label="Owed to the lab" value={money(h.owed, 'GBP', { round: true })} sub={<span className="text-[#C62828]">{money(h.overdue, 'GBP', { round: true })} overdue</span>} onClick={() => setFilter('overdue')} />
+        <Stat label="Invoiced this month" value={money(h.invoicedThisMonth, 'GBP', { round: true })} sub={`${s.invoices.filter(i => i.issuedAt && monthOf(i.issuedAt) === ym).length} invoices`} onClick={() => navigate('/growth/billing/invoices?tab=sent')} />
+        <Stat label="Paid this month" value={money(h.paidThisMonth, 'GBP', { round: true })} tone="green" sub={tool ? `Read back from ${tool}` : 'Marked paid'} onClick={() => navigate('/growth/billing/invoices?tab=paid')} />
+        <Stat label="Needs you" value={String(total)} sub={total ? `${pl(pending.length, 'invoice')} waiting · ${pl(s.issues.length + nudges.length + held.length, 'other item')}` : 'Empty: nothing to do'} tone={total ? 'amber' : 'green'} onClick={() => document.getElementById('needs-you')?.scrollIntoView({ behavior: 'smooth' })} />
+        <Stat label="Owed to the lab" value={money(h.owed, 'GBP', { round: true })} sub={<span className="text-[#C62828]">{money(h.overdue, 'GBP', { round: true })} overdue</span>} onClick={() => navigate('/growth/billing/invoices?tab=sent&overdue=1')} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <div className="xl:col-span-2 space-y-5">
-          <div id="needs-you">
+        <div className="xl:col-span-2" id="needs-you">
           <Card
-            title={<span className="inline-flex items-center gap-2">Needs you <Pill tone={pending.length ? 'amber' : 'green'}>{pending.length}</Pill></span>}
-            sub={s.settings.approval === 'review-all' ? 'Every invoice waits for approval (Billing settings).' : 'Everything else went out on its own. These were flagged or are waiting for approval.'}
-            actions={pending.length > 0 && <>
-              <button className={btn} onClick={() => setTicked(ticked.length === pending.length ? [] : pending.map(i => i.id))}>{ticked.length === pending.length ? 'Clear' : 'Select all'}</button>
-              <button className={btnPrimary} disabled={!ticked.length} onClick={() => approve(ticked)}><CheckCheck className="w-3.5 h-3.5" /> Approve {ticked.length || ''}</button>
-            </>}
+            title={<span className="inline-flex items-center gap-2">Needs you <Pill tone={total ? 'amber' : 'green'}>{total}</Pill></span>}
+            sub={total ? 'Everything else went out on its own. Act on each item, or dismiss it.' : undefined}
             pad={false}
           >
-            {pending.length === 0 ? <Empty>Nothing waiting. Every invoice has gone out.</Empty> : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px]">
-                  <thead><tr><th className={th} /><th className={th}>Case</th><th className={th}>Account</th><th className={th}>Why</th><th className={`${th} text-right`}>Amount</th><th className={th} /></tr></thead>
-                  <tbody>
-                    {pending.map(i => {
-                      const acc = account(s, i.accountId);
-                      return (
-                        <tr key={i.id} className="hover:bg-[#FAFAFD]">
-                          <td className={td}><input type="checkbox" checked={ticked.includes(i.id)} onChange={() => setTicked(t => t.includes(i.id) ? t.filter(x => x !== i.id) : [...t, i.id])} /></td>
-                          <td className={td}><button onClick={() => navigate(`/growth/billing/invoices/${i.id}`)} className="text-left"><span className="font-mono font-semibold">{i.caseId}</span><span className="block text-[#717182]">{i.patient}{i.stage ? ` · ${i.stage}` : ''}</span></button></td>
-                          <td className={td}>{acc?.name}{acc?.paused && <Pill tone="red"><PauseCircle className="w-3 h-3" /> On hold</Pill>}</td>
-                          <td className={td}>
-                            {i.flags.length ? i.flags.map((f, k) => <p key={k} className="flex items-start gap-1 text-[#B45309]"><AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />{f.message}</p>) : <span className="text-[#717182]">Waiting for approval</span>}
-                          </td>
-                          <td className={`${td} text-right whitespace-nowrap font-semibold`}>{money(totals(i).gross, i.currency)}</td>
-                          <td className={`${td} text-right whitespace-nowrap`}>
-                            <button className={`${btn} mr-1.5`} onClick={() => navigate(`/growth/billing/invoices/${i.id}`)}>Open</button>
-                            <button className={btnPrimary} disabled={blocked(i)} title={blocked(i) ? 'Map the order type first' : undefined} onClick={() => approve([i.id])}><Check className="w-3.5 h-3.5" /> Approve</button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-          </div>
+            {total === 0 && <Empty>Nothing needs you. Invoices are going out and payments are coming back on their own.</Empty>}
 
-          <Card
-            title="Invoices"
-            sub="One per case, posted to Xero and emailed when approved. Payments are read back from Xero."
-            actions={<div className="relative"><Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-[#A0A0B0]" /><input value={q} onChange={e => setQ(e.target.value)} placeholder="Search number, case, patient…" className="pl-8 pr-3 py-1.5 rounded-lg border border-[#E0E0E6] text-xs w-56 focus:outline-none focus:border-[#4D8EF7]" /></div>}
-            pad={false}
-          >
-            <div className="flex flex-wrap gap-1 px-4 pt-3">
-              {(['all', 'sent', 'overdue', 'paid', 'void'] as const).map(f => (
-                <button key={f} onClick={() => setFilter(f)} className={`px-2.5 py-1 rounded-full text-[11px] font-medium border ${filter === f ? 'border-[#4D8EF7] bg-[#EEF4FF] text-[#1565C0]' : 'border-[#E0E0E6] text-[#5A5568] hover:bg-[#F8F9FC]'}`}>{{ all: 'All', sent: 'Sent', overdue: 'Overdue', paid: 'Paid', void: 'Void' }[f]}</button>
-              ))}
-            </div>
-            <div className="overflow-x-auto max-h-[520px] overflow-y-auto mt-2">
-              <table className="w-full min-w-[720px]">
-                <thead className="sticky top-0"><tr><th className={th}>Number</th><th className={th}>Date</th><th className={th}>Case</th><th className={th}>Account</th><th className={th}>Status</th><th className={`${th} text-right`}>Total</th><th className={`${th} text-right`}>Owed</th></tr></thead>
-                <tbody>
-                  {list.slice(0, 150).map(i => (
-                    <tr key={i.id} onClick={() => navigate(`/growth/billing/invoices/${i.id}`)} className="cursor-pointer hover:bg-[#FAFAFD]">
-                      <td className={`${td} font-mono font-semibold whitespace-nowrap`}>{i.number}</td>
-                      <td className={`${td} whitespace-nowrap`}>{fmtShort(i.issuedAt)}</td>
-                      <td className={td}><span className="font-mono">{i.caseId}</span> <span className="text-[#717182]">{i.patient}</span>{i.stage && <span className="text-[#717182]"> · {i.stage}</span>}</td>
-                      <td className={td}>{account(s, i.accountId)?.name}</td>
-                      <td className={td}><InvoiceStatusPill status={i.status} overdue={isOverdue(i)} /></td>
-                      <td className={`${td} text-right whitespace-nowrap`}>{money(totals(i).gross, i.currency)}</td>
-                      <td className={`${td} text-right whitespace-nowrap ${isOverdue(i) ? 'text-[#C62828] font-semibold' : ''}`}>{outstanding(i) ? money(outstanding(i), i.currency) : '—'}</td>
-                    </tr>
+            {pending.length > 0 && (
+              <Section
+                title={`Invoices waiting (${pending.length})`}
+                sub={s.settings.approval === 'review-all' ? 'Every invoice waits for approval (Settings).' : 'Flagged, or in the first 30 days after go-live.'}
+                actions={<>
+                  <button className={btn} onClick={() => setTicked(ticked.length === pending.length ? [] : pending.map(i => i.id))}>{ticked.length === pending.length ? 'Clear' : 'Select all'}</button>
+                  <button className={btnPrimary} disabled={!ticked.length} onClick={() => approve(ticked)}><CheckCheck className="w-3.5 h-3.5" /> Approve {ticked.length || ''}</button>
+                </>}
+              >
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px]">
+                    <thead><tr><th className={th} /><th className={th}>Invoice for</th><th className={th}>Account</th><th className={th}>Why it waits</th><th className={`${th} text-right`}>Amount</th><th className={th} /></tr></thead>
+                    <tbody>
+                      {pending.map(i => {
+                        const acc = account(s, i.accountId);
+                        return (
+                          <tr key={i.id} className="hover:bg-[#FAFAFD]">
+                            <td className={td}><input type="checkbox" checked={ticked.includes(i.id)} onChange={() => setTicked(t => t.includes(i.id) ? t.filter(x => x !== i.id) : [...t, i.id])} aria-label={`Select ${i.caseId}`} /></td>
+                            <td className={td}><button onClick={() => navigate(`/growth/billing/invoices/${i.id}`)} className="text-left">{i.cases?.length ? <><span className="font-semibold">Month invoice</span><span className="block text-[#717182]">{pl(i.cases.length, 'case')}</span></> : <><span className="font-mono font-semibold">{i.caseId}</span><span className="block text-[#717182]">{i.patient}{i.stage ? ` · ${i.stage}` : ''}</span></>}{i.keepIssuedAt && <span className="block text-[11px] text-[#7C3AED]">Edit of {i.replaces}</span>}</button></td>
+                            <td className={td}>{acc?.name}{acc?.paused && s.settings.limitsOn && <Pill tone="red"><PauseCircle className="w-3 h-3" /> On hold</Pill>}</td>
+                            <td className={td}>{i.flags.length ? i.flags.map((f, k) => <p key={k} className="flex items-start gap-1 text-[#B45309]"><AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />{f.message}</p>) : <span className="text-[#717182]">{i.keepIssuedAt ? 'Change a line if needed, then approve' : 'Waiting for approval'}</span>}</td>
+                            <td className={`${td} text-right whitespace-nowrap font-semibold`}>{money(totals(i).gross, i.currency)}</td>
+                            <td className={`${td} text-right whitespace-nowrap`}>
+                              <button className={`${btn} mr-1.5`} onClick={() => navigate(`/growth/billing/invoices/${i.id}`)}>Open</button>
+                              <button className={btnPrimary} disabled={blocked(i)} title={blocked(i) ? 'Map the order type first' : undefined} onClick={() => approve([i.id])}><Check className="w-3.5 h-3.5" /> Approve</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Section>
+            )}
+
+            {s.issues.length > 0 && (
+              <Section title={`Sync and payments (${s.issues.length})`} sub={tool ? `Things ${tool} changed, or that didn't sync.` : 'Bank payments that need a match.'}>
+                <ul className="divide-y divide-[#F0EFF6]">{s.issues.map(is => <IssueRow key={is.id} s={s} is={is} />)}</ul>
+              </Section>
+            )}
+
+            {nudges.length > 0 && (
+              <Section title={`To check (${nudges.length})`} sub="Spotted for you. Each links to the fix.">
+                <ul className="divide-y divide-[#F0EFF6]">
+                  {nudges.map(n => (
+                    <li key={n.id} className={`px-4 py-2.5 border-l-[3px] ${TONE[n.tone]} flex items-start gap-3`}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs"><span className="text-[10px] font-semibold uppercase tracking-wide text-[#717182] mr-1.5">{n.kind}</span><span className="font-semibold text-[#030213]">{n.title}</span></p>
+                        <p className="text-xs text-[#5A5568] mt-0.5">{n.message}</p>
+                      </div>
+                      <button onClick={() => navigate(n.link)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#4D8EF7] hover:underline flex-shrink-0">Fix it <ArrowRight className="w-3 h-3" /></button>
+                      <button onClick={() => dismiss(n.id)} title="Dismiss" aria-label="Dismiss" className="text-[#A0A0B0] hover:text-[#030213] flex-shrink-0"><X className="w-3.5 h-3.5" /></button>
+                    </li>
                   ))}
-                </tbody>
-              </table>
-              {!list.length && <Empty>No invoices match.</Empty>}
-            </div>
+                </ul>
+              </Section>
+            )}
+
+            {heldByAccount.length > 0 && (
+              <Section title={`On hold (${held.length})`} sub="New cases from accounts at their credit limit. Work already in progress carries on.">
+                {heldByAccount.map(([accId, cs]) => {
+                  const acc = account(s, accId)!;
+                  const ex = exposure(s, accId);
+                  return (
+                    <div key={accId} className="px-4 py-3 border-b border-[#F0EFF6] last:border-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <button onClick={() => navigate(`/growth/billing/accounts/${accId}`)} className="text-xs font-semibold text-[#030213] hover:underline">{acc.name}</button>
+                          <p className="text-[11px] text-[#717182]">{money(ex.total, acc.currency, { round: true })} against a {money(acc.limit?.amount ?? 0, acc.currency, { round: true })} limit. A payment releases them automatically.</p>
+                        </div>
+                        <button className={btn} onClick={() => { releaseAccount(accId); toast.success(`Hold lifted on ${acc.name}: ${pl(cs.length, 'case')} moved into production`); }}><PlayCircle className="w-3.5 h-3.5" /> Lift hold</button>
+                      </div>
+                      <ul className="mt-2 space-y-1">
+                        {cs.map(c => (
+                          <li key={c.id} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="min-w-0 truncate"><span className="font-mono font-semibold">{c.id}</span> <span className="text-[#717182]">{c.patientName} · {c.services.join(', ')}</span></span>
+                            <button className="text-[11px] font-semibold text-[#4D8EF7] hover:underline flex-shrink-0" onClick={() => { releaseCase(c.id); toast.success(`${c.id} released`); }}>Release this case</button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </Section>
+            )}
           </Card>
         </div>
 
         <div className="space-y-5">
-          <Card title={<span className="inline-flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-[#7C3AED]" /> Smart assists</span>} sub="Exceptions to look at. Each links to the fix." pad={false}>
-            {nudges.length === 0 ? <Empty>All clear.</Empty> : (
-              <ul className="divide-y divide-[#F0EFF6] max-h-[440px] overflow-y-auto">
-                {nudges.map(n => (
-                  <li key={n.id} className={`px-4 py-2.5 border-l-[3px] ${TONE[n.tone]}`}>
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#717182]">{n.kind}</p>
-                      <button onClick={() => dismiss(n.id)} title="Dismiss" className="text-[#A0A0B0] hover:text-[#030213]"><X className="w-3 h-3" /></button>
-                    </div>
-                    <p className="text-xs font-semibold text-[#030213]">{n.title}</p>
-                    <p className="text-xs text-[#5A5568] mt-0.5">{n.message}</p>
-                    <button onClick={() => navigate(n.link)} className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#4D8EF7] hover:underline">Fix it <ArrowRight className="w-3 h-3" /></button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <Card title={<span className="inline-flex items-center gap-1.5"><PauseCircle className="w-4 h-4 text-[#C62828]" /> On hold <Pill tone={held.length ? 'red' : 'gray'}>{held.length}</Pill></span>} sub="New cases from accounts at their limit. Work already in progress carries on." pad={false}>
-            {heldByAccount.length === 0 ? <Empty>No cases on hold.</Empty> : heldByAccount.map(([accId, cs]) => {
-              const acc = account(s, accId)!;
-              const ex = exposure(s, accId);
-              return (
-                <div key={accId} className="px-4 py-3 border-b border-[#F0EFF6] last:border-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <button onClick={() => navigate(`/growth/billing/accounts/${accId}`)} className="text-xs font-semibold text-[#030213] hover:underline">{acc.name}</button>
-                      <p className="text-[11px] text-[#717182]">{money(ex.total, acc.currency, { round: true })} against a {money(acc.limit?.amount ?? 0, acc.currency, { round: true })} limit</p>
-                    </div>
-                    <button className={btn} onClick={() => { releaseAccount(accId); toast.success(`Hold lifted on ${acc.name}: ${pl(cs.length, 'case')} moved into production`); }}><PlayCircle className="w-3.5 h-3.5" /> Lift hold</button>
-                  </div>
-                  <ul className="mt-2 space-y-1">
-                    {cs.map(c => (
-                      <li key={c.id} className="flex items-center justify-between gap-2 text-xs">
-                        <span className="min-w-0 truncate"><span className="font-mono font-semibold">{c.id}</span> <span className="text-[#717182]">{c.patientName} · {c.services.join(', ')}</span></span>
-                        <button className="text-[11px] font-semibold text-[#4D8EF7] hover:underline flex-shrink-0" onClick={() => { releaseCase(c.id); toast.success(`${c.id} released: it moves into production. The account stays on hold.`); }}>Release this case</button>
-                      </li>
-                    ))}
-                  </ul>
+          <Card title={<span className="inline-flex items-center gap-1.5"><CalendarClock className="w-4 h-4 text-[#4D8EF7]" /> This month</span>} sub={`Statement day: ${fmtDate(sd)}${daysToSd >= 0 ? ` (${daysToSd === 0 ? 'today' : `in ${pl(daysToSd, 'day')}`})` : ''}`}>
+            <ol className="space-y-3">
+              <li className="flex items-start gap-2.5">
+                <Step n={1} done={!pot.length} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-[#030213]">Invoice month</p>
+                  {pot.length
+                    ? <p className="text-[11px] text-[#5A5568]">{pl(pot.length, 'shipped case')} for {pl(potAccounts, 'month-end account')}, {money(pot.reduce((n, x) => n + x.value, 0), 'GBP', { round: true })}.</p>
+                    : <p className="text-[11px] text-[#717182]">Nothing waiting. Per-case accounts invoice on Shipped.</p>}
+                  {pot.length > 0 && <button className={`${btnPrimary} mt-1.5`} onClick={() => navigate('/growth/billing/invoices?tab=to-invoice')}>Open To invoice <ArrowRight className="w-3.5 h-3.5" /></button>}
                 </div>
-              );
-            })}
-          </Card>
-
-          <Card title={<span className="inline-flex items-center gap-1.5"><CalendarClock className="w-4 h-4 text-[#4D8EF7]" /> Month end</span>} sub={`Statement day: ${fmtDate(sd)}${daysToSd >= 0 ? ` (${daysToSd === 0 ? 'today' : `in ${pl(daysToSd, 'day')}`})` : ''}`}>
-            <div className="space-y-2.5">
-              {pending.length > 0 && <Note tone={daysToSd <= 2 ? 'red' : 'amber'}>{pl(pending.length, 'invoice')} still waiting. Approve {pending.length === 1 ? 'it' : 'them'} before {fmtShort(sd)} to make this month's statements.</Note>}
-              <p className="text-xs text-[#5A5568]">One statement per billing account, built from Xero so it includes old-system balances. {s.firstStatementPreviewed ? 'They go out automatically on the statement day.' : 'The first one is previewed by an admin before it goes.'}</p>
-              {sentThisMonth > 0 && <p className="text-xs text-[#2E7D32]">{pl(sentThisMonth, 'statement')} for {fmtMonth(ym)} sent.</p>}
-              <div className="flex flex-wrap gap-2">
-                <button className={btn} onClick={() => { const n = previewStatements(); setStatements(true); toast.success(`${pl(n, 'statement')} ready to preview`); }}><Eye className="w-3.5 h-3.5" /> Preview {fmtMonth(ym)} statements</button>
-                {previews.length > 0 && <button className={btnPrimary} onClick={() => setStatements(true)}><Send className="w-3.5 h-3.5" /> Review & send {previews.length}</button>}
-              </div>
-            </div>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <Step n={2} done={statementsSent > 0} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-[#030213]">Send statements</p>
+                  {pending.length > 0 && <Note tone={daysToSd <= 2 ? 'red' : 'amber'}>{pl(pending.length, 'invoice')} still waiting would miss them. Approve before {fmtShort(sd)}.</Note>}
+                  <p className="text-[11px] text-[#717182] mt-1">{statementsSent ? `${pl(statementsSent, 'statement')} sent this month.` : 'One per paying account; practices show each dentist.'}</p>
+                  <button className={`${btn} mt-1.5`} onClick={() => navigate('/growth/billing/statements')}><Send className="w-3.5 h-3.5" /> Statements</button>
+                </div>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <Step n={3} done />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-[#030213]">Payments</p>
+                  <p className="text-[11px] text-[#717182]">{tool ? `Reconciled in ${tool} by your accountant; marked paid here automatically.` : s.bank ? `Matched from ${s.bank === 'revolut' ? 'Revolut' : 'Wise'} automatically.` : 'No accounting tool yet: mark paid on the invoice, or in bulk on Invoices.'}</p>
+                </div>
+              </li>
+            </ol>
           </Card>
         </div>
       </div>
-
-      {statements && <StatementsModal s={s} onClose={() => setStatements(false)} />}
     </div>
   );
 }
 
-function StatementsModal({ s, onClose }: { s: BillingState; onClose: () => void }) {
-  const { toast } = useToast();
-  const ym = monthOf(today());
-  const list = s.statements.filter(x => x.period === ym);
-  const [open, setOpen] = useState(list[0]?.id);
-  const st = list.find(x => x.id === open);
+function Step({ n, done }: { n: number; done: boolean }) {
+  return <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${done ? 'bg-[#E8F5E9] text-[#2E7D32]' : 'bg-[#EEF4FF] text-[#1565C0]'}`}>{done ? <Check className="w-3 h-3" /> : n}</span>;
+}
+
+function Section({ title, sub, actions, children }: { title: string; sub?: string; actions?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <Modal isOpen onClose={onClose} size="xl" title={`Statements · ${fmtMonth(ym)}`} footer={
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs text-[#717182]"><Lock className="w-3 h-3 inline -mt-0.5" /> Dentists who pay directly get their own; their cases aren't on the practice's statement.</span>
-        <div className="flex gap-2">
-          {st && <button className={btn} onClick={() => printPages([{ key: st.id, node: <StatementDoc st={st} acc={account(s, st.accountId)} /> }], 'Statement')}>Print this one</button>}
-          <button className={btnPrimary} disabled={!list.some(x => x.status === 'preview')} onClick={() => { const n = sendStatements(); toast.success(`${pl(n, 'statement')} sent`); onClose(); }}><Send className="w-3.5 h-3.5" /> Send {list.filter(x => x.status === 'preview').length} statements</button>
+    <div className="border-t border-[#F0EFF6] first:border-t-0">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3 pb-2">
+        <div><p className="text-xs font-semibold text-[#030213]">{title}</p>{sub && <p className="text-[11px] text-[#717182]">{sub}</p>}</div>
+        {actions && <div className="flex gap-2">{actions}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** A sync or payment problem (Payment reconciliation, P5) with its one-click fix. */
+function IssueRow({ s, is }: { s: BillingState; is: SyncIssue }) {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const inv = is.invoiceId ? s.invoices.find(i => i.id === is.invoiceId) : undefined;
+  const tool = toolName(s) ?? 'Xero';
+  const open = inv ? <button className="font-mono font-semibold hover:underline" onClick={() => navigate(`/growth/billing/invoices/${inv.id}`)}>{inv.number}</button> : null;
+  const bp = is.bankPaymentId ? s.bankPayments.find(b => b.id === is.bankPaymentId) : undefined;
+  const act = (a: Parameters<typeof resolveIssue>[1], msg: string) => { resolveIssue(is.id, a); toast.success(msg); };
+  return (
+    <li className="px-4 py-2.5 border-l-[3px] border-l-[#E53935]">
+      {is.kind === 'edited-in-tool' && inv && (
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="flex-1 min-w-0 text-xs">
+            <p><span className="font-semibold">Edited in {tool}:</span> {open} · {account(s, inv.accountId)?.name}</p>
+            <p className="text-[#5A5568] mt-0.5">Ours: {is.ours}. {tool}: {is.theirs}.</p>
+          </div>
+          <button className={btn} onClick={() => act('accept-theirs', `${tool}'s version accepted (credit note for the difference)`)}>Accept {tool}'s</button>
+          <button className={btnPrimary} onClick={() => act('push-ours', `Our version re-pushed to ${tool}`)}>Re-push ours</button>
         </div>
-      </div>
-    }>
-      <div className="flex flex-col md:flex-row gap-4 min-h-[420px]">
-        <ul className="md:w-56 flex-shrink-0 space-y-1 max-h-[460px] overflow-y-auto">
-          {list.map(x => (
-            <li key={x.id}>
-              <button onClick={() => setOpen(x.id)} className={`w-full text-left px-2.5 py-2 rounded-lg text-xs ${open === x.id ? 'bg-[#EEF4FF]' : 'hover:bg-[#F8F9FC]'}`}>
-                <span className="block font-semibold text-[#030213] truncate">{account(s, x.accountId)?.name}</span>
-                <span className="text-[#717182]">{money(x.closing, x.currency)} · {x.status === 'sent' ? 'sent' : 'preview'}</span>
-              </button>
-            </li>
+      )}
+      {is.kind === 'voided-in-tool' && inv && (
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="flex-1 min-w-0 text-xs"><p><span className="font-semibold">Voided in {tool}:</span> {open} · {account(s, inv.accountId)?.name}</p><p className="text-[#5A5568] mt-0.5">It shows as Void here, and its cases are back in To invoice.</p></div>
+          <button className={btn} onClick={() => navigate('/growth/billing/invoices?tab=to-invoice')}>To invoice</button>
+          <button className={btnPrimary} onClick={() => act('ok', 'Noted')}>OK</button>
+        </div>
+      )}
+      {is.kind === 'sync-failed' && inv && (
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="flex-1 min-w-0 text-xs"><p><span className="font-semibold">Didn't reach {tool}:</span> {open}</p><p className="text-[#5A5568] mt-0.5">Posting failed {is.attempts ?? 3} times. The dentist still got it by email.</p></div>
+          <button className={btnPrimary} onClick={() => act('retry', `${inv.number} posted to ${tool}`)}><RefreshCw className="w-3.5 h-3.5" /> Retry</button>
+        </div>
+      )}
+      {is.kind === 'connection-expired' && (
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="flex-1 min-w-0 text-xs"><p className="font-semibold inline-flex items-center gap-1"><CloudOff className="w-3.5 h-3.5 text-[#C62828]" /> {tool} connection expired</p><p className="text-[#5A5568] mt-0.5">Invoices still go out by email; they post to {tool} when you reconnect.</p></div>
+          <button className={btnPrimary} onClick={() => act('reconnect', `${tool} reconnected`)}>Reconnect</button>
+        </div>
+      )}
+      {is.kind === 'bank-unmatched' && bp && (
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="flex-1 min-w-0 text-xs">
+            <p className="font-semibold inline-flex items-center gap-1"><Landmark className="w-3.5 h-3.5 text-[#4D8EF7]" /> {money(bp.amount)} from {bp.payer}</p>
+            <p className="text-[#5A5568] mt-0.5">Reference "{bp.ref}" didn't name an invoice. Pick the match; we'll remember this payer.</p>
+          </div>
+          {likelyMatches(s, bp).map(m => (
+            <button key={m.id} className={btn} onClick={() => { confirmBankMatch(is.id, m.id); toast.success(`Matched to ${m.number}; ${bp.payer} remembered`); }}>{m.number} · {account(s, m.accountId)?.name?.replace(/^Smile Genius /, '')} · {money(totals(m).gross, m.currency)}</button>
           ))}
-        </ul>
-        <div className="flex-1 min-w-0 border border-[#E0E0E6] rounded-xl p-5 overflow-y-auto max-h-[460px]">{st ? <StatementDoc st={st} acc={account(s, st.accountId)} /> : <Empty>No statements.</Empty>}</div>
-      </div>
-    </Modal>
+        </div>
+      )}
+    </li>
   );
 }
