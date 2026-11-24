@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavSlot } from '../growth-portal/navSlot';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PenTool } from 'lucide-react';
 import { useCad } from './cadStore';
@@ -21,28 +21,7 @@ export default function DesignNavItem() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const s = useCad();
-  const [host, setHost] = useState<HTMLElement | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    const sync = () => {
-      const cases = findCases();
-      if (!cases) { setHost(null); return; }
-      setCollapsed(!cases.textContent?.trim());
-      setHost(prev => {
-        if (prev && prev.isConnected && prev.previousElementSibling === cases) return prev;
-        prev?.remove();
-        const el = document.createElement('div');
-        el.dataset.sfDesignNav = '1';
-        cases.insertAdjacentElement('afterend', el);
-        return el;
-      });
-    };
-    const mo = new MutationObserver(sync);
-    mo.observe(document.body, { childList: true, subtree: true });
-    sync();
-    return () => { mo.disconnect(); setHost(h => { h?.remove(); return null; }); };
-  }, []);
+  const { host, collapsed } = useNavSlot(findCases, 'after', 1);
 
   if (!host) return null;
   const active = pathname.startsWith('/growth/design');
