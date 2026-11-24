@@ -6,11 +6,12 @@ import { saveBlob } from '../../bulk-actions/zip';
 import { addDays, fmtDate, money, startOfMonth, today } from '../format';
 import { billingCases } from '../engine';
 import { updateMonday, useBilling } from '../billingStore';
-import { billingAccounts, type Filters, mondayEmail, REPORTS, toCsv } from '../insights';
+import { billingAccounts, type Filters, REPORTS, toCsv } from '../insights';
 import { btn, btnPrimary, Card, Empty, Field, input, Note, Toggle, td, th } from '../ui';
 
-// ── 9. Reports: what Xero can't show ─────────────────────────────────────────
-// Six fixed reports, shared filters, CSV export, and the Monday email.
+// ── Insights › Reports: what Xero can't show ─────────────────────────────────
+// Unbilled work, Given away, Remakes and Cash forecast, with shared filters
+// and CSV export. The Monday email lives on Insights › Overview.
 
 const WHY: Record<string, string> = {
   unbilled: 'Xero has no record of a case until it\'s invoiced.',
@@ -23,6 +24,9 @@ const WHY: Record<string, string> = {
 
 type Range = 'month' | '30' | '90' | 'all';
 
+/** v2: Account trends became Insights › Dentists, and Product mix became Insights › Products. */
+const SHOWN = REPORTS.filter(r => r.id !== 'trends' && r.id !== 'mix');
+
 export default function Reports() {
   const s = useBilling();
   const navigate = useNavigate();
@@ -33,10 +37,9 @@ export default function Reports() {
   const [acc, setAcc] = useState('all');
   const t = today();
   const f: Filters = { from: range === 'month' ? startOfMonth(t) : range === '30' ? addDays(t, -30) : range === '90' ? addDays(t, -90) : '2000-01-01', to: t, department, account: acc };
-  const def = REPORTS.find(r => r.id === id) ?? REPORTS[0];
+  const def = SHOWN.find(r => r.id === id) ?? SHOWN[0];
   const report = useMemo(() => def.fn(s, f), [s, def, f.from, f.to, f.department, f.account]);
-  const all = useMemo(() => REPORTS.map(r => ({ id: r.id, r: r.fn(s, f) })), [s, f.from, f.to, f.department, f.account]);
-  const monday = mondayEmail(s);
+  const all = useMemo(() => SHOWN.map(r => ({ id: r.id, r: r.fn(s, f) })), [s, f.from, f.to, f.department, f.account]);
   const listIds = useMemo(() => new Set(billingCases().map(c => c.id)), [s]);
   const moneyCol = report.columns.findIndex(c => /value|amount|owed|total/i.test(c));
 
@@ -49,7 +52,6 @@ export default function Reports() {
             <p className="text-[11px] text-[#717182]">"{r.question}"</p>
           </button>
         ))}
-        <MondayCard monday={monday} />
       </div>
 
       <div className="xl:col-span-3 space-y-3">
@@ -102,16 +104,26 @@ export default function Reports() {
   );
 }
 
-function MondayCard({ monday }: { monday: { label: string; value: string; link: string }[] }) {
+export function MondayCard({ monday, relations }: { monday: { label: string; value: string; link: string }[]; relations: { label: string; value: string; link: string }[] }) {
   const s = useBilling();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [to, setTo] = useState(s.monday.to);
   return (
-    <Card title={<span className="inline-flex items-center gap-1.5"><Mail className="w-4 h-4 text-[#4D8EF7]" /> Monday email</span>} sub="Five numbers and the one that changed most, to the owner every Monday.">
+    <Card title={<span className="inline-flex items-center gap-1.5"><Mail className="w-4 h-4 text-[#4D8EF7]" /> Monday email</span>} sub="Money and relationships, every Monday. Nothing is sent if nothing changed.">
       <div className="space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-[#717182]">Money</p>
         <div className="rounded-lg border border-[#E0E0E6] divide-y divide-[#F0EFF6]">
-          {monday.map(m => (
+          {monday.filter(m => m.label !== 'Trending down most').map(m => (
+            <button key={m.label} onClick={() => navigate(m.link)} className="w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-[#FAFAFD]">
+              <span className="text-[11px] text-[#5A5568]">{m.label}</span>
+              <span className="text-xs font-semibold text-[#030213] inline-flex items-center gap-1 truncate">{m.value} <ArrowRight className="w-3 h-3 text-[#A0A0B0]" /></span>
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-[#717182] pt-1">Relationships</p>
+        <div className="rounded-lg border border-[#E0E0E6] divide-y divide-[#F0EFF6]">
+          {relations.map(m => (
             <button key={m.label} onClick={() => navigate(m.link)} className="w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-[#FAFAFD]">
               <span className="text-[11px] text-[#5A5568]">{m.label}</span>
               <span className="text-xs font-semibold text-[#030213] inline-flex items-center gap-1 truncate">{m.value} <ArrowRight className="w-3 h-3 text-[#A0A0B0]" /></span>

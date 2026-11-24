@@ -7,6 +7,7 @@ import { CAD_LABEL, COLUMNS, hoursSince, STATUS_LABEL, TECHNICIANS, waitingLabel
 import { assignTech, moveTo, useCad } from '../cadStore';
 import { Pill, inputSm } from '../../lab-billing/ui';
 import { billNow, getBilling } from '../../lab-billing/billingStore';
+import { covers } from '../../lab-billing/engine';
 
 // ── 1. Design board ──────────────────────────────────────────────────────────
 // Columns by design status. The connector and the dentist move the early
@@ -64,7 +65,7 @@ export default function DesignBoard() {
     }
     moveTo(id, target);
     // Dispatch starts the invoice in Billing, as it does from the case.
-    const inv = target === 'dispatched' && !getBilling().invoices.some(i => i.caseId === id && !i.stage && i.status !== 'void') ? billNow(id) : null;
+    const inv = target === 'dispatched' && !getBilling().invoices.some(i => covers(i, id) && !i.stage && i.status !== 'void') ? billNow(id) : null;
     toast.success(`${o.caseId} → ${STATUS_LABEL[target]}${inv ? `; invoice ${inv.number ?? 'draft'} started in Billing` : ''}`);
   };
   const dropOnTech = (t: string) => (e: DragEvent) => {

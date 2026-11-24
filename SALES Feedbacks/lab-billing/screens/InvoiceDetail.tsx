@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Ban, Check, CircleDollarSign, FileMinus, HelpCircle, Mail, Pencil, Printer, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowLeft, Check, CircleDollarSign, FileMinus, HelpCircle, Mail, Pencil, Printer, RefreshCw, Repeat } from 'lucide-react';
 import Modal from '../../../src/app/components/Modal';
 import { useToast } from '../../../src/app/context/ToastContext';
 import { printPages } from '../../bulk-actions/printForms';
 import type { Invoice, InvoiceLine } from '../types';
-import { account, caseById, credited, isOverdue, lineNet, outstanding, sourceShort, sourceText, totals } from '../engine';
+import { account, caseById, credited, isOverdue, lineNet, outstanding, sourceShort, sourceText, toolName, totals } from '../engine';
+import { useReadOnly } from '../BillingApp';
 import { fmtDate, money } from '../format';
 import {
-  approveInvoices, checkDesignDiff, creditNote, decideRemake, mapOrderType, notRemake, overrideLine, resendInvoice, setCaseKind, simulatePayment, useBilling, voidAndReissue,
+  approveInvoices, archiveInvoices, checkDesignDiff, creditNote, decideRemake, mapOrderType, markPaid, notRemake, overrideLine, resendInvoice, resolveIssue, setCaseKind, simulatePayment, useBilling, voidAndReissue,
 } from '../billingStore';
 import { InvoiceDoc, SomDoc } from '../BillingDocs';
 import { btn, btnDanger, btnPrimary, Card, Empty, Field, input, InvoiceStatusPill, Note, Pill, td, th } from '../ui';
@@ -23,7 +24,9 @@ export default function InvoiceDetail({ id }: { id: string }) {
   const [why, setWhy] = useState<string | null>(null);
   const [edit, setEdit] = useState<InvoiceLine | null>(null);
   const [credit, setCredit] = useState(false);
-  const [voiding, setVoiding] = useState(false);
+  const [voiding, setVoiding] = useState<false | 'edit' | 'reissue'>(false);
+  const [reissueTo, setReissueTo] = useState('');
+  const readOnly = useReadOnly();
   if (!inv) return <Card><Empty>Invoice not found. <button className="text-[#4D8EF7]" onClick={() => navigate('/growth/billing')}>Back to Billing</button></Empty></Card>;
   const acc = account(s, inv.accountId);
   const pending = inv.status === 'draft' || inv.status === 'flagged';
@@ -31,6 +34,8 @@ export default function InvoiceDetail({ id }: { id: string }) {
   const meta = s.cases[inv.caseId];
   const unmapped = inv.lines.find(l => l.source.kind === 'unmapped');
   const cur = inv.currency;
+  const tool = toolName(s);
+  const toolEdit = s.issues.find(x => x.invoiceId === inv.id && x.kind === 'edited-in-tool');
 
   const print = () => {
     const pages = [{ key: inv.id, node: <InvoiceDoc inv={inv} acc={acc} s={s} /> }, ...(inv.som ? [{ key: `${inv.id}-som`, node: <SomDoc inv={inv} /> }] : [])];
@@ -39,43 +44,60 @@ export default function InvoiceDetail({ id }: { id: string }) {
 
   return (
     <div className="space-y-4">
-      <button onClick={() => navigate('/growth/billing')} className="inline-flex items-center gap-1 text-xs text-[#717182] hover:text-[#030213]"><ArrowLeft className="w-3.5 h-3.5" /> Billing home</button>
+      <button onClick={() => navigate('/growth/billing/invoices')} className="inline-flex items-center gap-1 text-xs text-[#717182] hover:text-[#030213]"><ArrowLeft className="w-3.5 h-3.5" /> Invoices</button>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-semibold text-[#030213]">{inv.number ?? 'Draft invoice'}</h2>
             <InvoiceStatusPill status={inv.status} overdue={isOverdue(inv)} />
             {inv.replaces && <Pill tone="gray">Replaces {inv.replaces}</Pill>}
+            {inv.cases?.length && <Pill tone="blue">Month invoice · {inv.cases.length} cases</Pill>}
+            {inv.postedAsDraft && <Pill tone="gray">In {tool} as a draft</Pill>}
+            {inv.archived && <Pill tone="gray">Archived</Pill>}
             {inv.som && <Pill tone="blue">Statement of manufacture attached</Pill>}
           </div>
           <p className="text-xs text-[#717182] mt-1">
             <button className="hover:underline" onClick={() => navigate(`/growth/billing/accounts/${inv.accountId}`)}>{acc?.name}</button>
-            {' · '}{caseById(inv.caseId) ? <button className="font-mono hover:underline" onClick={() => navigate(`/growth/cases/${inv.caseId}?sf=billing`)}>{inv.caseId}</button> : <span className="font-mono" title="Completed case, no longer in the case list">{inv.caseId}</span>} · {inv.patient} · {inv.dentist}{inv.stage ? ` · stage ${inv.stage}` : ''}
+            {inv.cases?.length
+              ? <> · {inv.dentist} · shipped {inv.cases.length} cases, invoiced together</>
+              : <>{' · '}{caseById(inv.caseId) && !readOnly ? <button className="font-mono hover:underline" onClick={() => navigate(`/growth/cases/${inv.caseId}?sf=billing`)}>{inv.caseId}</button> : <span className="font-mono" title="Completed case, no longer in the case list">{inv.caseId}</span>} · {inv.patient} · {inv.dentist}{inv.stage ? ` · stage ${inv.stage}` : ''}</>}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {pending && <button className={btnPrimary} disabled={!!unmapped} onClick={() => { approveInvoices([inv.id]); toast.success('Approved, posted to Xero and emailed'); }}><Check className="w-3.5 h-3.5" /> Approve & send</button>}
+          {!readOnly && pending && <button className={btnPrimary} disabled={!!unmapped} onClick={() => { approveInvoices([inv.id]); toast.success(`Approved${tool ? `, posted to ${tool}` : ''} and emailed`); }}><Check className="w-3.5 h-3.5" /> Approve & send</button>}
           <button className={btn} onClick={print}><Printer className="w-3.5 h-3.5" /> Print / PDF</button>
-          {inv.issuedAt && inv.status !== 'void' && <>
+          {!readOnly && inv.issuedAt && inv.status !== 'void' && <>
+            {outstanding(inv) > 0 && (tool
+              ? <button className={btn} onClick={() => { const rel = simulatePayment(inv.id); toast.success(`Payment read from ${tool}${rel.length ? `; hold lifted, ${rel.length} case(s) released` : ''}`); }} title={`Demo: your accountant reconciles the payment in ${tool}`}><CircleDollarSign className="w-3.5 h-3.5" /> Demo: paid in {tool}</button>
+              : <button className={btn} onClick={() => { markPaid([inv.id]); toast.success('Marked paid'); }}><CircleDollarSign className="w-3.5 h-3.5" /> Mark paid</button>)}
+            <button className={btn} onClick={() => setCredit(true)}><FileMinus className="w-3.5 h-3.5" /> Credit</button>
+            <button className={btn} disabled={inv.payments.length > 0} title={inv.payments.length ? 'Has payments: use a credit instead' : 'Voids it and reissues it at the original prices and date'} onClick={() => setVoiding('edit')}><Pencil className="w-3.5 h-3.5" /> Edit</button>
+            <button className={btn} disabled={inv.payments.length > 0} title={inv.payments.length ? 'Has payments: use a credit instead' : 'Bill it to a different practice or dentist'} onClick={() => setVoiding('reissue')}><Repeat className="w-3.5 h-3.5" /> Re-issue to…</button>
             <button className={btn} onClick={() => { resendInvoice(inv.id); toast.success(`Resent to ${acc?.emails.join(', ')}`); }}><Mail className="w-3.5 h-3.5" /> Resend</button>
-            {outstanding(inv) > 0 && <button className={btn} onClick={() => { const rel = simulatePayment(inv.id); toast.success(`Payment read from Xero${rel.length ? `; hold lifted, ${rel.length} case(s) released` : ''}`); }} title="Mock: the practice pays in Xero"><CircleDollarSign className="w-3.5 h-3.5" /> Payment arrives in Xero</button>}
-            <button className={btn} onClick={() => setCredit(true)}><FileMinus className="w-3.5 h-3.5" /> Credit note</button>
-            <button className={btnDanger} disabled={inv.payments.length > 0} title={inv.payments.length ? 'Has payments in Xero: use a credit note instead' : undefined} onClick={() => setVoiding(true)}><Ban className="w-3.5 h-3.5" /> Void & reissue</button>
           </>}
+          {!readOnly && (inv.status === 'paid' || inv.status === 'void') && <button className={btn} onClick={() => { archiveInvoices([inv.id], !inv.archived); toast.success(inv.archived ? 'Back in the list' : 'Archived: still in statements and reports'); }}><Archive className="w-3.5 h-3.5" /> {inv.archived ? 'Unarchive' : 'Archive'}</button>}
         </div>
       </div>
 
+      {toolEdit && !readOnly && (
+        <Note tone="red">
+          <span className="font-semibold">Edited in {tool}.</span> Ours: {toolEdit.ours}. {tool}: {toolEdit.theirs}.{' '}
+          <button className="font-semibold underline" onClick={() => { resolveIssue(toolEdit.id, 'accept-theirs'); toast.success(`${tool}'s version accepted`); }}>Accept {tool}'s</button>{' · '}
+          <button className="font-semibold underline" onClick={() => { resolveIssue(toolEdit.id, 'push-ours'); toast.success('Our version re-pushed'); }}>Re-push ours</button>
+        </Note>
+      )}
+      {inv.keepIssuedAt && pending && <Note tone="blue">Edit of {inv.replaces}: the original prices and issue date ({fmtDate(inv.keepIssuedAt)}) are kept. Type a new price on any line, then approve.</Note>}
       {inv.replacedBy && <Note tone="amber">Voided and reissued as <button className="font-semibold underline" onClick={() => navigate(`/growth/billing/invoices/${inv.replacedBy}`)}>{s.invoices.find(i => i.id === inv.replacedBy)?.number ?? 'a new draft'}</button>.</Note>}
 
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
         <div className="xl:col-span-3 space-y-4">
-          <Card title="PDF preview" sub={inv.issuedAt ? 'As emailed and posted to Xero. Sent invoices never change: fixes are a credit note or void & reissue.' : 'Not numbered until approved.'}>
+          <Card title="PDF preview" sub={inv.issuedAt ? `As emailed${tool ? ` and posted to ${tool}` : ''}. Sent invoices never change: fixes are Credit, Edit or Re-issue.` : 'Not numbered until approved.'}>
             <div className="border border-[#F0EFF6] rounded-lg p-5 bg-white overflow-x-auto"><InvoiceDoc inv={inv} acc={acc} s={s} /></div>
             {inv.som && <div className="border border-[#F0EFF6] rounded-lg p-5 bg-white mt-3 overflow-x-auto"><SomDoc inv={inv} /></div>}
           </Card>
         </div>
         <div className="xl:col-span-2 space-y-4">
-          {pending && inv.flags.length > 0 && (
+          {!readOnly && pending && inv.flags.length > 0 && (
             <Card title={<span className="inline-flex items-center gap-1.5 text-[#B45309]"><AlertTriangle className="w-4 h-4" /> Flagged before sending</span>}>
               <div className="space-y-3">
                 {inv.flags.map((f, i) => (
@@ -116,7 +138,7 @@ export default function InvoiceDetail({ id }: { id: string }) {
                     </td>
                     <td className={td}>
                       <button onClick={() => setWhy(why === l.id ? null : l.id)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#4D8EF7] hover:underline"><HelpCircle className="w-3 h-3" /> {sourceShort(l.source)}</button>
-                      {pending && l.itemId && <button onClick={() => setEdit(l)} className="block mt-1 text-[11px] text-[#717182] hover:text-[#030213]"><Pencil className="w-3 h-3 inline -mt-0.5" /> Type a price</button>}
+                      {!readOnly && pending && (l.itemId || inv.keepIssuedAt) && <button onClick={() => setEdit(l)} className="block mt-1 text-[11px] text-[#717182] hover:text-[#030213]"><Pencil className="w-3 h-3 inline -mt-0.5" /> Type a price</button>}
                     </td>
                     <td className={`${td} text-right whitespace-nowrap`}>{money(lineNet(l), cur)}</td>
                   </tr>
@@ -126,7 +148,7 @@ export default function InvoiceDetail({ id }: { id: string }) {
             </table>
           </Card>
 
-          <Card title="Payments and credits" sub="Read back from Xero.">
+          <Card title="Payments and credits" sub={tool ? `Read back from ${tool}: your accountant reconciles there.` : 'Marked paid by hand (no accounting tool connected).'}>
             {inv.payments.length + inv.creditNotes.length === 0 ? <p className="text-xs text-[#A0A0B0]">{inv.issuedAt ? 'Nothing paid yet.' : 'Not sent yet.'}</p> : (
               <ul className="space-y-1.5 text-xs">
                 {inv.payments.map(p => <li key={p.id} className="flex justify-between"><span>{fmtDate(p.at)} · {p.ref}</span><span className="text-[#2E7D32] font-semibold">{money(p.amount, cur)}</span></li>)}
@@ -134,13 +156,14 @@ export default function InvoiceDetail({ id }: { id: string }) {
               </ul>
             )}
             {inv.issuedAt && <p className="text-xs mt-2 pt-2 border-t border-[#F0EFF6] flex justify-between"><span className="text-[#717182]">Still owed{inv.dueAt ? ` · due ${fmtDate(inv.dueAt)}` : ''}</span><span className={`font-semibold ${isOverdue(inv) ? 'text-[#C62828]' : ''}`}>{money(outstanding(inv), cur)}</span></p>}
+            {inv.number && <p className="text-[11px] text-[#717182] mt-1">Payment reference printed on the invoice: <span className="font-mono">{inv.number}</span></p>}
           </Card>
 
           <Card title="Timeline">
             <ol className="space-y-1.5">
               {[...inv.timeline].reverse().map((e, i) => <li key={i} className="text-xs flex gap-2"><span className="text-[#A0A0B0] w-20 flex-shrink-0">{fmtDate(e.at)}</span><span className="text-[#030213]">{e.text}</span></li>)}
             </ol>
-            {inv.xeroId && <p className="text-[11px] text-[#A0A0B0] mt-2">{s.setup.provider === 'quickbooks' ? 'QuickBooks' : 'Xero'} reference {inv.xeroId}{inv.emailedTo?.length ? ` · emailed to ${inv.emailedTo.join(', ')}` : ''}</p>}
+            {inv.xeroId && <p className="text-[11px] text-[#A0A0B0] mt-2">{tool ?? 'Accounting'} reference {inv.xeroId}{inv.emailedTo?.length ? ` · emailed to ${inv.emailedTo.join(', ')}` : ''}</p>}
           </Card>
         </div>
       </div>
@@ -148,10 +171,28 @@ export default function InvoiceDetail({ id }: { id: string }) {
       {edit && <OverrideModal inv={inv} line={edit} onClose={() => setEdit(null)} />}
       {credit && <CreditModal inv={inv} onClose={() => setCredit(false)} />}
       {voiding && (
-        <Modal isOpen onClose={() => setVoiding(false)} title={`Void ${inv.number} and reissue?`} footer={
-          <div className="flex justify-end gap-2"><button className={btn} onClick={() => setVoiding(false)}>Cancel</button><button className={btnDanger} onClick={() => { const next = voidAndReissue(inv.id); setVoiding(false); toast.success('Voided in Smile Genius and Xero; a new invoice is ready'); if (next) navigate(`/growth/billing/invoices/${next}`); }}><RefreshCw className="w-3.5 h-3.5" /> Void & reissue</button></div>
+        <Modal isOpen onClose={() => setVoiding(false)} title={voiding === 'edit' ? `Edit ${inv.number}` : `Re-issue ${inv.number} to another account`} footer={
+          <div className="flex justify-end gap-2">
+            <button className={btn} onClick={() => setVoiding(false)}>Cancel</button>
+            <button className={btnPrimary} disabled={voiding === 'reissue' && !reissueTo} onClick={() => {
+              const next = voidAndReissue(inv.id, undefined, voiding === 'reissue' ? reissueTo : undefined);
+              setVoiding(false);
+              toast.success(voiding === 'edit' ? 'Ready to edit: change a line, then approve' : `Re-issued to ${account(s, reissueTo)?.name}: approve to send`);
+              if (next) navigate(`/growth/billing/invoices/${next}`);
+            }}><RefreshCw className="w-3.5 h-3.5" /> {voiding === 'edit' ? 'Edit it' : 'Re-issue'}</button>
+          </div>
         }>
-          <p className="text-sm text-[#5A5568]">The invoice is voided here and in Xero, and a new one is created from the case as it is now, with a new number. Use this when the details were wrong; use a credit note to reduce what's owed.</p>
+          <div className="space-y-3 text-sm text-[#5A5568]">
+            <p>A sent invoice never changes, so {inv.number} is voided{tool ? ` here and in ${tool}` : ''} and a new invoice is created with the <b>same prices and issue date</b> ({fmtDate(inv.issuedAt)}). {voiding === 'edit' ? 'Change any line, then approve it.' : 'It goes to the account you pick; the cases move with it.'} Statements update on their own.</p>
+            {voiding === 'reissue' && (
+              <Field label="Bill to">
+                <select className={input} value={reissueTo} onChange={e => setReissueTo(e.target.value)}>
+                  <option value="">Pick an account…</option>
+                  {s.accounts.filter(a => a.id !== inv.accountId && (a.kind === 'practice' || a.payer === 'dentist')).map(a => <option key={a.id} value={a.id}>{a.name}{a.kind === 'dentist' ? ' (dentist)' : ''}</option>)}
+                </select>
+              </Field>
+            )}
+          </div>
         </Modal>
       )}
     </div>
@@ -183,7 +224,7 @@ function CreditModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
   const [reason, setReason] = useState('');
   return (
     <Modal isOpen onClose={onClose} title={`Credit note on ${inv.number}`} footer={
-      <div className="flex justify-end gap-2"><button className={btn} onClick={onClose}>Cancel</button><button className={btnPrimary} disabled={!reason.trim() || (!full && !(Number(amount) > 0 && Number(amount) <= max))} onClick={() => { creditNote(inv.id, Number(amount), reason.trim(), full); toast.success('Credit note posted to Xero and emailed'); onClose(); }}>Issue credit note</button></div>
+      <div className="flex justify-end gap-2"><button className={btn} onClick={onClose}>Cancel</button><button className={btnPrimary} disabled={!reason.trim() || (!full && !(Number(amount) > 0 && Number(amount) <= max))} onClick={() => { creditNote(inv.id, Number(amount), reason.trim(), full); toast.success('Credit note issued (its own CN series) and emailed'); onClose(); }}>Issue credit note</button></div>
     }>
       <div className="space-y-3">
         <div className="flex gap-2">
