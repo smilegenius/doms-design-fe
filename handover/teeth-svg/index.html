@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Teeth SVG Assets</title>
+<style>
+  body{margin:0;padding:24px 16px;font:14px/1.4 system-ui,sans-serif;background:#F7F8FA;color:#1F2430}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:16px;margin:32px 0 8px;text-transform:capitalize} h3{font-size:13px;margin:16px 0 6px;color:#5B6070;text-transform:capitalize}
+  .chart{background:#fff;border:1px solid #E4E6EB;border-radius:8px;padding:12px;max-width:100%}
+  .chart img{width:100%;max-width:820px;height:auto;display:block}
+  .row{display:flex;flex-wrap:wrap;gap:6px}
+  figure{margin:0;background:#fff;border:1px solid #E4E6EB;border-radius:6px;padding:6px;text-align:center;width:56px}
+  figure img{height:110px;width:auto;max-width:100%}
+  figcaption{font-size:11px;color:#5B6070}
+</style></head><body>
+<h1>Teeth SVG assets</h1>
+<p>FDI numbering. Files: <code>{style}/{state}/tooth-{FDI}.svg</code> and <code>{style}/chart-{state}.svg</code>.</p>
+<div id="out"></div>
+<script>
+const styles=['color','lineart'], states=['default','selected','missing','implant','pontic'];
+const ids=['18','17','16','15','14','13','12','11','21','22','23','24','25','26','27','28','48','47','46','45','44','43','42','41','31','32','33','34','35','36','37','38'];
+const out=document.getElementById('out');
+for(const s of styles){
+  let h=`<h2>${s==='lineart'?'Line art (order form)':'Colour (teeth chart)'}</h2>`;
+  for(const st of states){
+    h+=`<h3>${st}</h3><div class="chart"><img src="${s}/chart-${st}.svg" alt="${s} ${st} chart"></div><div class="row" style="margin-top:8px">`;
+    for(const id of ids) h+=`<figure><img src="${s}/${st}/tooth-${id}.svg" alt="${id}"><figcaption>${id}</figcaption></figure>`;
+    h+='</div>';
+  }
+  out.insertAdjacentHTML('beforeend',h);
+}
+</script></body></html>
