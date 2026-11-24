@@ -11,9 +11,9 @@ import { useSyncExternalStore } from 'react';
 
 export type PortalVersion = 'v0' | 'v1' | 'v2';
 export const VERSIONS: { id: PortalVersion; label: string; about: string }[] = [
-  { id: 'v0', label: 'V0', about: 'Foundation: everything as first built' },
-  { id: 'v1', label: 'V1', about: 'V0 + simpler Billing' },
-  { id: 'v2', label: 'V2', about: 'V0 + case handoff workflow' },
+  { id: 'v0', label: 'V0', about: 'Foundation' },
+  { id: 'v1', label: 'V1', about: 'V0 + simpler billing' },
+  { id: 'v2', label: 'V2', about: 'V0 + lab workflow' },
 ];
 
 const KEY = 'salesFeedbacks.version';

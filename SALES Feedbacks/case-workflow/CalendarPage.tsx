@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { Building2, ChevronLeft, ChevronRight, CircleDot, ExternalLink, EyeOff, Stethoscope, Users } from 'lucide-react';
 import { useToast } from '../../src/app/context/ToastContext';
 import { addDays, fmtShort, parse, iso } from '../lab-billing/format';
-import { btn, Pill } from '../lab-billing/ui';
+import { btn, Pill, Seg } from '../lab-billing/ui';
 import { type Line, type WorkflowState, STAFF, STATUS, isHidden, isOpen, isOverdue, reassign, routeOf, setRequested, stageOf, today, unreadFor, useWorkflow } from './workflowStore';
 import { caseUrl, LineActions, LinePill, useMe } from './shared';
+import { Avatar, PageHeader, ServiceIcon } from './ui';
 
 // ── V2 Delivery calendar ─────────────────────────────────────────────────────
 // One card per service line on its requested delivery date. Two fixed
@@ -60,38 +61,37 @@ export default function CalendarPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-semibold text-[#030213]">Delivery calendar</h1>
-          <p className="text-sm text-[#717182] mt-1">Every service line on the day it's due back to the practice. Overdue ones sit on today with a badge.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className={btn} onClick={() => go(addDays(anchor, mode === 'week' ? -7 : -28))} aria-label="Previous"><ChevronLeft className="w-3.5 h-3.5" /></button>
+      <PageHeader
+        title="Delivery calendar"
+        sub="Service lines by due date. Overdue lines sit on today."
+        actions={<>
+          <div className="inline-flex items-center rounded-lg border border-[#E0E0E6] bg-white">
+            <button className="p-2 text-[#717182] hover:text-[#030213]" onClick={() => go(addDays(anchor, mode === 'week' ? -7 : -28))} aria-label="Previous"><ChevronLeft className="w-4 h-4" /></button>
+            <span className="text-sm font-semibold text-[#030213] min-w-[150px] text-center">{label}</span>
+            <button className="p-2 text-[#717182] hover:text-[#030213]" onClick={() => go(addDays(anchor, mode === 'week' ? 7 : 31))} aria-label="Next"><ChevronRight className="w-4 h-4" /></button>
+          </div>
           <button className={btn} onClick={() => go(t)}>Today</button>
-          <button className={btn} onClick={() => go(addDays(anchor, mode === 'week' ? 7 : 31))} aria-label="Next"><ChevronRight className="w-3.5 h-3.5" /></button>
-          <span className="text-sm font-semibold text-[#030213] min-w-[140px] text-center">{label}</span>
-          <div className="inline-flex rounded-lg border border-[#E0E0E6] overflow-hidden">{(['week', 'month'] as const).map(m => <button key={m} onClick={() => { setMode(m); setParams({ day: anchor, ...(m === 'month' ? { view: 'month' } : {}) }, { replace: true }); }} className={`px-3 py-1.5 text-xs font-semibold ${mode === m ? 'bg-[#EEF4FF] text-[#1565C0]' : 'bg-white text-[#5A5568]'}`}>{m === 'week' ? 'Week' : 'Month'}</button>)}</div>
-        </div>
-      </div>
+          <Seg value={mode} options={[{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }]} onChange={m => { setMode(m); setParams({ day: anchor, ...(m === 'month' ? { view: 'month' } : {}) }, { replace: true }); }} />
+        </>}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Sel value={who} onChange={setWho} label="Assigned" options={[['everyone', 'Everyone'], ['me', `Me (${me.split(' ')[0]})`], ...STAFF.filter(p => p.name !== me).map(p => [p.name, p.name] as [string, string])]} />
-        <Sel value={service} onChange={setService} label="Service" options={[['all', 'All services'], ...services.map(x => [x, x] as [string, string])]} />
-        <Sel value={practice} onChange={setPractice} label="Practice" options={[['all', 'All practices'], ...practices.map(x => [x, x] as [string, string])]} />
-        <Sel value={status} onChange={setStatus} label="Status" options={[['all', 'All statuses'], ...(['received', 'in-queue', 'in-production', 'qc', 'on-hold-lab', 'on-hold-practice', 'shipped', 'delivered'] as const).map(x => [x, STATUS[x].label] as [string, string])]} />
+        <Sel icon={Users} value={who} onChange={setWho} options={[['everyone', 'Everyone'], ['me', `Me (${me.split(' ')[0]})`], ...STAFF.filter(p => p.name !== me).map(p => [p.name, p.name] as [string, string])]} />
+        <Sel icon={Stethoscope} value={service} onChange={setService} options={[['all', 'All services'], ...services.map(x => [x, x] as [string, string])]} />
+        <Sel icon={Building2} value={practice} onChange={setPractice} options={[['all', 'All practices'], ...practices.map(x => [x, x] as [string, string])]} />
+        <Sel icon={CircleDot} value={status} onChange={setStatus} options={[['all', 'All statuses'], ...(['received', 'in-queue', 'in-production', 'qc', 'on-hold-lab', 'on-hold-practice', 'shipped', 'delivered'] as const).map(x => [x, STATUS[x].label] as [string, string])]} />
+        {hidden.length > 0 && (
+          <button className="ml-auto inline-flex items-center gap-1.5 text-xs text-[#717182] hover:text-[#030213]" onClick={() => setShowHidden(x => !x)}>
+            <EyeOff className="w-3.5 h-3.5" /> {hidden.filter(l => l.status === 'not-approved').length} not approved · {hidden.filter(l => l.status === 'cancelled').length} cancelled
+            <span className="font-semibold text-[#4D8EF7]">{showHidden ? 'Hide' : 'Show'}</span>
+          </button>
+        )}
       </div>
-
-      {hidden.length > 0 && (
-        <div className="rounded-lg bg-[#F8F9FC] border border-[#E0E0E6] px-3 py-2 text-xs text-[#5A5568] flex items-center gap-2">
-          {hidden.filter(l => l.status === 'not-approved').length} not approved · {hidden.filter(l => l.status === 'cancelled').length} cancelled {mode === 'week' ? 'this week' : 'this month'}
-          <button className="font-semibold text-[#4D8EF7]" onClick={() => setShowHidden(x => !x)}>{showHidden ? 'Hide' : 'Show'}</button>
-          {showHidden && <span className="text-[#717182]">{hidden.map(l => `${l.service} · ${l.patient} (${STATUS[l.status].label})`).join(' · ')}</span>}
-        </div>
-      )}
+      {showHidden && hidden.length > 0 && <p className="rounded-lg bg-[#F8F9FC] border border-[#E0E0E6] px-3 py-2 text-xs text-[#717182]">{hidden.map(l => `${l.service} · ${l.patient} (${STATUS[l.status].label})`).join(' · ')}</p>}
 
       {mode === 'week' ? (
         <div className="grid gap-2 overflow-x-auto" style={{ gridTemplateColumns: 'repeat(7, minmax(170px, 1fr))' }}>
-          <Column title="No date set" sub={`${noDate.length}`} tone="gray">{noDate.map(l => <CalCard key={l.id} s={s} l={l} me={me} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} />)}</Column>
+          <Column title="No date" sub={`${noDate.length}`} tone="gray">{noDate.map(l => <CalCard key={l.id} s={s} l={l} me={me} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} />)}</Column>
           {days.map((d, i) => {
             const here = lines.filter(l => place(l) === d);
             return (
@@ -100,26 +100,32 @@ export default function CalendarPage() {
               </Column>
             );
           })}
-          <Column title="Completed" sub={`${completed.length}`} tone="green">{completed.map(l => <CalCard key={l.id} s={s} l={l} me={me} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} />)}</Column>
+          <Column title="Done" sub={`${completed.length}`} tone="green">{completed.map(l => <CalCard key={l.id} s={s} l={l} me={me} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} />)}</Column>
         </div>
       ) : (
         <MonthGrid anchor={anchor} lines={lines} place={place} onDay={d => { setMode('week'); setParams({ day: d }, { replace: true }); }} />
       )}
-      <p className="text-[11px] text-[#717182]">Click a card to open it in place; Open case goes to the full case. Shipped and delivered lines move to Completed. Weekend deliveries show on the Friday before.</p>
-      {open && !lines.some(l => l.id === open) && <p className="text-[11px] text-[#717182]">The line you opened is filtered out. <button className="text-[#4D8EF7]" onClick={() => navigate(caseUrl(open.split(':')[0]))}>Open its case</button></p>}
+      <p className="text-[11px] text-[#717182]">Click a card to act on it. Shipped lines move to Done; weekend dates show on Friday.</p>
+      {open && !lines.some(l => l.id === open) && <p className="text-[11px] text-[#717182]">The open line is filtered out. <button className="text-[#4D8EF7]" onClick={() => navigate(caseUrl(open.split(':')[0]))}>Open case</button></p>}
     </div>
   );
 }
 
-function Sel({ value, onChange, label, options }: { value: string; onChange: (v: string) => void; label: string; options: [string, string][] }) {
-  return <label className="inline-flex items-center gap-1.5 text-[11px] text-[#717182]">{label}<select value={value} onChange={e => onChange(e.target.value)} className="px-2 py-1 rounded-md border border-[#E0E0E6] text-xs bg-white text-[#030213] max-w-[180px]">{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>;
+function Sel({ icon: Icon, value, onChange, options }: { icon: typeof Users; value: string; onChange: (v: string) => void; options: [string, string][] }) {
+  const on = value !== options[0][0];
+  return (
+    <label className={`inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1.5 rounded-lg border bg-white text-xs ${on ? 'border-[#4D8EF7] text-[#1565C0]' : 'border-[#E0E0E6] text-[#030213]'}`}>
+      <Icon className="w-3.5 h-3.5 text-[#717182]" />
+      <select value={value} onChange={e => onChange(e.target.value)} className="bg-transparent font-medium focus:outline-none max-w-[170px]">{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+    </label>
+  );
 }
 
 function Column({ title, sub, tone, children }: { title: string; sub: string; tone: 'gray' | 'blue' | 'white' | 'green'; children: React.ReactNode }) {
   const bg = { gray: 'bg-[#F3F3F7]', blue: 'bg-[#EEF4FF]', white: 'bg-[#F8F9FC]', green: 'bg-[#EEF8EF]' }[tone];
   return (
-    <div className={`rounded-xl ${bg} p-2 min-h-[300px]`}>
-      <p className="text-[11px] font-semibold text-[#030213] px-1 mb-2 flex justify-between"><span>{title}</span><span className="text-[#717182]">{sub}</span></p>
+    <div className={`rounded-xl ${bg} p-2 min-h-[300px] ${tone === 'blue' ? 'ring-1 ring-[#C8D8FC]' : ''}`}>
+      <p className="text-xs font-semibold text-[#030213] px-1 mb-2 flex items-center justify-between"><span className={tone === 'blue' ? 'text-[#1565C0]' : ''}>{title}</span><span className="px-1.5 rounded-full bg-white text-[10px] text-[#717182]">{sub}</span></p>
       <div className="space-y-1.5">{children}</div>
     </div>
   );
@@ -133,16 +139,24 @@ function CalCard({ s, l, me, open, onToggle }: { s: WorkflowState; l: Line; me: 
   const stg = stageOf(s, l);
   return (
     <div className={`rounded-lg bg-white border ${od ? 'border-[#F5C2C2]' : 'border-[#E0E0E6]'} px-2.5 py-2 text-xs cursor-pointer hover:border-[#C7DAFF]`} onClick={onToggle}>
-      <p className="font-semibold text-[#030213] flex items-center gap-1.5">{unread > 0 && <span className="w-2 h-2 rounded-full bg-[#E53935] flex-shrink-0" title="Unread notes" />}<span className="truncate">{l.service}</span>{od && <Pill tone="red">Overdue</Pill>}</p>
-      <p className="text-[#717182] truncate">{l.practice}</p>
-      <p className="text-[#5A5568] truncate">{l.owner ?? 'Team queue'}{stg ? ` · ${stg.name}` : l.status === 'qc' ? ' · QC' : ''}</p>
+      <div className="flex items-start gap-2">
+        <ServiceIcon service={l.service} size="sm" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-[#030213] flex items-center gap-1.5"><span className="truncate">{l.service}</span>{unread > 0 && <span className="w-2 h-2 rounded-full bg-[#E53935] flex-shrink-0" title="Unread notes" />}</p>
+          <p className="text-[#717182] truncate">{l.practice}</p>
+        </div>
+      </div>
+      <div className="mt-1.5 flex items-center justify-between gap-1.5">
+        <span className="inline-flex items-center gap-1.5 min-w-0 text-[#5A5568]" title={l.owner ?? 'Team queue'}><Avatar name={l.owner} /><span className="truncate">{stg ? stg.name : l.status === 'qc' ? 'QC' : STATUS[l.status].label}</span></span>
+        {od && <Pill tone="red">Overdue</Pill>}
+      </div>
       {open && (
         <div className="mt-2 pt-2 border-t border-[#F0EFF6] space-y-1.5" onClick={e => e.stopPropagation()}>
           <p>{l.dentist} · patient {l.patient}</p>
           <LinePill s={s} l={l} />
-          <label className="flex items-center gap-1.5 text-[11px] text-[#717182]">Due back <input type="date" className="px-1.5 py-0.5 rounded border border-[#E0E0E6] text-[11px]" value={l.requested ?? ''} onChange={e => { setRequested([l.id], e.target.value || null, me); toast.success(e.target.value ? 'Date set' : 'Moved to No date set'); }} /></label>
+          <label className="flex items-center gap-1.5 text-[11px] text-[#717182]">Due back <input type="date" className="px-1.5 py-0.5 rounded border border-[#E0E0E6] text-[11px]" value={l.requested ?? ''} onChange={e => { setRequested([l.id], e.target.value || null, me); toast.success(e.target.value ? 'Date set' : 'Moved to No date'); }} /></label>
           {(l.status === 'in-queue' || l.status === 'in-production' || l.status === 'qc') && (
-            <label className="flex items-center gap-1.5 text-[11px] text-[#717182]">Assigned <select className="px-1.5 py-0.5 rounded border border-[#E0E0E6] text-[11px]" value={l.owner ?? ''} onChange={e => { reassign(l.id, e.target.value || null, me); toast.success('Reassigned'); }}><option value="">Team queue</option>{STAFF.map(p => <option key={p.name}>{p.name}</option>)}</select></label>
+            <label className="flex items-center gap-1.5 text-[11px] text-[#717182]">Owner <select className="px-1.5 py-0.5 rounded border border-[#E0E0E6] text-[11px]" value={l.owner ?? ''} onChange={e => { reassign(l.id, e.target.value || null, me); toast.success('Reassigned'); }}><option value="">Team queue</option>{STAFF.map(p => <option key={p.name}>{p.name}</option>)}</select></label>
           )}
           {unread > 0 && <p className="text-[11px] text-[#C62828]">{unread} unread note{unread === 1 ? '' : 's'}</p>}
           <p className="text-[10px] text-[#717182]">Route: {routeOf(s, l).name}</p>
