@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { accentFor, getIntakeConfig } from '../intake-form/intakeStore';
 import { LabLogo, PoweredBy } from '../bulk-actions/printForms';
 import type { BillingAccount, BillingState, Invoice, Statement } from './types';
-import { credited, lineNet, lineVat, paid, totals } from './engine';
+import { credited, lineNet, lineVat, paid, statementRef, termsLabel, totals } from './engine';
 import { fmtDate, fmtMonth, money } from './format';
 
 // ── The documents: invoice, statement, statement of manufacture ──────────────
@@ -40,8 +40,23 @@ function Footer({ left }: { left: ReactNode }) {
 const cell: React.CSSProperties = { padding: '6px 8px', borderBottom: '1px solid #F0EFF6', fontSize: 11, verticalAlign: 'top' };
 const head: React.CSSProperties = { ...cell, fontSize: 9, fontWeight: 700, color: '#717182', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left', background: '#F8F9FC' };
 
+/** Simple layout: one line per case (I4); detailed: one line per product. */
+function shownLines(inv: Invoice, simple: boolean) {
+  if (!simple) return inv.lines;
+  const groups = new Map<string, Invoice['lines']>();
+  for (const l of inv.lines) { const k = inv.cases?.length ? l.id.split(':')[0] : inv.caseId; groups.set(k, [...(groups.get(k) ?? []), l]); }
+  return [...groups].map(([caseId, ls]) => {
+    const parts = ls[0].description.split(' · ');
+    const who = inv.cases?.length ? `${caseId} · ${parts[1]}` : `${caseId} · ${inv.patient}`;
+    const what = ls.map(l => (inv.cases?.length ? l.description.split(' · ')[2] : l.description).split(' (')[0].split(' ·')[0]).filter((x, i, a) => a.indexOf(x) === i).join(', ');
+    const net = ls.reduce((n, l) => n + lineNet(l), 0);
+    return { ...ls[0], id: caseId, description: `${who} · ${what}`, qty: 1, unitPrice: net, vatPct: ls.every(l => l.vatPct === ls[0].vatPct) ? ls[0].vatPct : 0 };
+  });
+}
+
 export function InvoiceDoc({ inv, acc, s }: { inv: Invoice; acc?: BillingAccount; s: BillingState }) {
   const t = totals(inv);
+  const lines = shownLines(inv, s.settings.layout === 'simple');
   // Sent invoices keep how they went out; drafts follow the current settings.
   const vat = inv.issuedAt ? !!inv.vatNumber : s.settings.vatRegistered;
   const vatNo = inv.issuedAt ? inv.vatNumber : s.settings.vatNumber;
@@ -65,9 +80,9 @@ export function InvoiceDoc({ inv, acc, s }: { inv: Invoice; acc?: BillingAccount
         </div>
       </div>
       <div style={{ display: 'flex', gap: 24, fontSize: 11, padding: '8px 10px', background: '#F8F9FC', borderRadius: 6, marginBottom: 12 }}>
-        <span><b>Patient ref</b> {inv.patient}</span>
-        <span><b>Case</b> {inv.caseId}</span>
-        <span><b>Dentist</b> {inv.dentist}</span>
+        {inv.cases?.length
+          ? <><span><b>Month invoice</b> {inv.cases.length} cases shipped</span><span><b>Dentist</b> {inv.dentist}</span></>
+          : <><span><b>Patient ref</b> {inv.patient}</span><span><b>Case</b> {inv.caseId}</span><span><b>Dentist</b> {inv.dentist}</span></>}
         {inv.stage && <span><b>Stage</b> {inv.stage}</span>}
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -76,7 +91,7 @@ export function InvoiceDoc({ inv, acc, s }: { inv: Invoice; acc?: BillingAccount
           {vat && <th style={{ ...head, textAlign: 'right' }}>VAT</th>}<th style={{ ...head, textAlign: 'right' }}>Amount</th>
         </tr></thead>
         <tbody>
-          {inv.lines.map(l => (
+          {lines.map(l => (
             <tr key={l.id}>
               <td style={cell}>{l.description}{l.part && <div style={{ color: '#717182', fontSize: 10 }}>{l.part.manufacturer} · part {l.part.partNo}</div>}{l.source.kind === 'remake' && <div style={{ color: '#717182', fontSize: 10 }}>Remake under warranty</div>}</td>
               <td style={cell}>{l.kind}</td>
@@ -100,10 +115,10 @@ export function InvoiceDoc({ inv, acc, s }: { inv: Invoice; acc?: BillingAccount
         </table>
       </div>
       <p style={{ fontSize: 10, color: '#717182', marginTop: 14 }}>
-        Payment terms: {s.settings.terms === '30' ? '30 days' : s.settings.terms === 'eom-following' ? 'end of the following month' : `${s.settings.customTermsDays} days`}. {cur !== 'GBP' ? `Invoiced in ${cur}. ` : ''}Please quote {inv.number ?? 'the invoice number'} with your payment.
+        Payment terms: {termsLabel(s, acc).toLowerCase()}. {cur !== 'GBP' ? `Invoiced in ${cur}. ` : ''}<b style={{ color: '#030213' }}>Payment reference: {inv.number ?? 'the invoice number'}</b>.
         {!vat && ' Not VAT-registered: no VAT charged.'}
       </p>
-      <Footer left={`${inv.number ?? 'Draft'} · ${inv.caseId}`} />
+      <Footer left={`${inv.number ?? 'Draft'} · ${inv.cases?.length ? `${inv.cases.length} cases` : inv.caseId}`} />
     </div>
   );
 }
@@ -132,7 +147,7 @@ export function StatementDoc({ st, acc }: { st: Statement; acc?: BillingAccount 
   const overdue = st.ageing.d30 + st.ageing.d60 + st.ageing.d90;
   return (
     <div style={{ color: '#030213' }}>
-      <Header title="STATEMENT" right={<p style={{ margin: '4px 0 0' }}>{fmtMonth(st.period)}</p>} />
+      <Header title="STATEMENT" right={<><p style={{ margin: '4px 0 0' }}>{fmtMonth(st.period)}</p><p style={{ margin: 0 }}>Ref {statementRef(st)}</p></>} />
       <p style={{ fontSize: 11, margin: '0 0 10px' }}><b>{acc?.name}</b>{acc?.kind === 'dentist' ? ` (pays directly; ${acc.practices?.join(', ')})` : ''} · {acc?.emails.join(', ')}</p>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead><tr><th style={head}>Date</th><th style={head}>Details</th><th style={{ ...head, textAlign: 'right' }}>Charges</th><th style={{ ...head, textAlign: 'right' }}>Credits</th></tr></thead>
@@ -142,6 +157,17 @@ export function StatementDoc({ st, acc }: { st: Statement; acc?: BillingAccount 
           <tr><td style={cell} /><td style={{ ...cell, fontWeight: 700 }}>Closing balance</td><td style={{ ...cell, textAlign: 'right', fontWeight: 700 }}>{money(st.closing, cur)}</td><td style={cell} /></tr>
         </tbody>
       </table>
+      {st.byDentist && st.byDentist.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ fontSize: 9, fontWeight: 700, color: '#717182', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 4px' }}>This month by dentist</p>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              {st.byDentist.map(d => <tr key={d.dentist}><td style={cell}>{d.dentist}</td><td style={{ ...cell, color: '#717182' }}>{d.count} case{d.count === 1 ? '' : 's'}</td><td style={{ ...cell, textAlign: 'right' }}>{money(d.amount, cur)}</td></tr>)}
+              <tr><td style={{ ...cell, fontWeight: 700 }}>Practice total</td><td style={cell} /><td style={{ ...cell, textAlign: 'right', fontWeight: 700 }}>{money(st.byDentist.reduce((n, d) => n + d.amount, 0), cur)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
         {[['Current', st.ageing.current], ['1–30 days overdue', st.ageing.d30], ['31–60 days', st.ageing.d60], ['60+ days', st.ageing.d90]].map(([k, v]) => (
           <div key={k as string} style={{ flex: 1, border: '1px solid #E0E0E6', borderRadius: 6, padding: '6px 8px' }}>
@@ -150,7 +176,7 @@ export function StatementDoc({ st, acc }: { st: Statement; acc?: BillingAccount 
           </div>
         ))}
       </div>
-      <p style={{ fontSize: 10, color: '#717182', marginTop: 10 }}>{overdue > 0 ? `${money(overdue, cur)} is overdue. ` : ''}Built from Xero, so it includes invoices from the old system and any raised directly in Xero.</p>
+      <p style={{ fontSize: 10, color: '#717182', marginTop: 10 }}>{overdue > 0 ? `${money(overdue, cur)} is overdue. ` : ''}<b style={{ color: '#030213' }}>To pay the balance, use reference {statementRef(st)}.</b> Includes invoices from the old system held in the accounting tool.</p>
       <Footer left={`${acc?.name ?? ''} · ${fmtMonth(st.period)}`} />
     </div>
   );

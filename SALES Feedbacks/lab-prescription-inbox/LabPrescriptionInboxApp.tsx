@@ -47,6 +47,14 @@ import DesignNavItem from '../cad-integration/DesignNavItem';
 import CaseDesignTab, { pendingCadTab } from '../cad-integration/screens/CaseDesignTab';
 import CaseOrderPrint from '../lab-documents/CaseOrderPrint';
 import { syncCad, syncCadNotifications, useCad } from '../cad-integration/cadStore';
+import { setVersion, useVersion } from '../portalVersion';
+import VersionSwitch from '../growth-portal/VersionSwitch';
+import QueuePage from '../case-workflow/QueuePage';
+import CalendarPage from '../case-workflow/CalendarPage';
+import BenchPage from '../case-workflow/BenchPage';
+import DashboardBlocks from '../case-workflow/DashboardBlocks';
+import CaseWorkflowDrawer from '../case-workflow/CaseWorkflowDrawer';
+import WorkflowNavItems from '../case-workflow/NavItems';
 
 // ─── Growth Team Feedback: Lab Portal shell (Sales Feedbacks copy, at /growth) ─
 // Mirrors src/app/LabApp.tsx: same URL ↔ page mapping, same Layout, same
@@ -61,7 +69,7 @@ import { syncCad, syncCadNotifications, useCad } from '../cad-integration/cadSto
 //     website-form drafts a dock with the files the dentist attached.
 //   • Case page: "Design review" and "Request files" items (sandbox overlay).
 
-type LabPage = 'overview' | 'cases' | 'design-studio' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications' | 'updates' | 'email-triage' | 'billing' | 'design' | 'order-form';
+type LabPage = 'overview' | 'cases' | 'design-studio' | 'quick-create-case' | 'invoices' | 'analytics' | 'configuration' | 'settings' | 'messages' | 'notifications' | 'updates' | 'email-triage' | 'billing' | 'design' | 'order-form' | 'queue' | 'calendar' | 'bench';
 
 const PAGE_TO_PATH: Record<LabPage, string> = {
   overview: '',
@@ -79,6 +87,9 @@ const PAGE_TO_PATH: Record<LabPage, string> = {
   billing: 'billing',
   design: 'design',
   'order-form': 'order-form',
+  queue: 'queue',
+  calendar: 'calendar',
+  bench: 'bench',
 };
 const PATH_TO_PAGE: Record<string, LabPage> = {
   '': 'overview',
@@ -94,6 +105,9 @@ const PATH_TO_PAGE: Record<string, LabPage> = {
   billing: 'billing',
   design: 'design',
   'order-form': 'order-form',
+  queue: 'queue',
+  calendar: 'calendar',
+  bench: 'bench',
 };
 
 export default function LabPrescriptionInboxApp() {
@@ -104,6 +118,15 @@ export default function LabPrescriptionInboxApp() {
   const studio = useStudio();
   const { user } = useAuth();
   const meEmail = teamMemberFor(user?.email)?.email;
+  // V0 · V1 · V2 (portalVersion.ts). V2 adds the case handoff workflow on top of V0.
+  // A shared link can carry ?v=v0|v1|v2 (What's new links do), so it opens in that version.
+  const vParam = new URLSearchParams(location.search).get('v');
+  useState(() => { if (vParam === 'v0' || vParam === 'v1' || vParam === 'v2') setVersion(vParam); return 0; });
+  useEffect(() => { if (vParam === 'v0' || vParam === 'v1' || vParam === 'v2') setVersion(vParam); }, [vParam]);
+  const stored = useVersion();
+  // The link's ?v= wins straight away (the stored switch catches up in the effect above).
+  const version = vParam === 'v0' || vParam === 'v1' || vParam === 'v2' ? vParam : stored;
+  const v2 = version === 'v2';
   // Growth Team Feedback only: bring its cases into the shared list, and mirror
   // its bell entries before the first render (NotificationsPage reads the bell
   // once on mount). Leaving /growth takes both out again (growthIsolation.ts).
@@ -151,7 +174,7 @@ export default function LabPrescriptionInboxApp() {
     return {
       page,
       caseId:    page === 'cases'    && detailId ? decodeURIComponent(detailId) : undefined,
-      invoiceId: page === 'invoices' && detailId ? decodeURIComponent(detailId) : page === 'order-form' && detailId ? decodeURIComponent(detailId) : undefined,
+      invoiceId: page === 'invoices' && detailId ? decodeURIComponent(detailId) : (page === 'order-form' || page === 'bench') && detailId ? decodeURIComponent(detailId) : undefined,
       prefillDraftId: undefined,
     };
   }, [location.pathname]);
@@ -209,6 +232,15 @@ export default function LabPrescriptionInboxApp() {
       setActivePage(page as LabPage);
     }
   };
+
+  // V2 only: the workflow pages. Other versions land on the Overview.
+  if (!v2 && (activePage === 'queue' || activePage === 'calendar' || activePage === 'bench')) {
+    return <Navigate to="/growth" replace />;
+  }
+  // Bench mode (what a docket QR opens): full screen, made for a tablet or phone.
+  if (activePage === 'bench' && invoiceInitialId) {
+    return <BenchPage lineId={invoiceInitialId} />;
+  }
 
   if (activePage === 'email-triage') {
     return <EmailTriagePage />;
@@ -269,6 +301,7 @@ export default function LabPrescriptionInboxApp() {
 
   return (
     <Layout activePage={activePage === 'design-studio' ? 'cases' : activePage} onNavigate={handleNavigate} portal="lab">
+      {activePage === 'overview' && v2 && <DashboardBlocks />}
       {activePage === 'overview' && (
         <LabOverviewPage
           onOpenCases={() => setActivePage('cases')}
@@ -295,6 +328,7 @@ export default function LabPrescriptionInboxApp() {
           {caseInitialId && <CaseBillingTab caseId={caseInitialId} />}
           {caseInitialId && <CaseDesignTab caseId={caseInitialId} />}
           {caseInitialId && <CaseOrderPrint caseId={caseInitialId} />}
+          {caseInitialId && v2 && <CaseWorkflowDrawer key={caseInitialId} caseId={caseInitialId} />}
           <CasesPage
             key={`${resetVersion}-${intake.resetVersion}-${casesVersion}`}
             portal="lab"
@@ -332,6 +366,10 @@ export default function LabPrescriptionInboxApp() {
       {activePage === 'design' && <DesignApp />}
       {activePage === 'order-form' && invoiceInitialId === 'samples' && <DocumentSamples />}
       {activePage === 'order-form' && invoiceInitialId && invoiceInitialId !== 'samples' && <OrderFormPreview caseId={invoiceInitialId} />}
+      {activePage === 'queue' && <QueuePage />}
+      {activePage === 'calendar' && <CalendarPage />}
+      {v2 && <WorkflowNavItems />}
+      <VersionSwitch />
       <WhatsNewNavItem />
       <BillingNavItem />
       <DesignNavItem />

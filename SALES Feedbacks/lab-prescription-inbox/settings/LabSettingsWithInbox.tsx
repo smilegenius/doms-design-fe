@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { Bell, Building2, CheckCircle2, Circle, FileSignature, FileText, FlaskConical, Globe, Inbox, Layers, PenTool, Plug, Sliders, User, Users } from 'lucide-react';
+import { GitBranch, Bell, Building2, CheckCircle2, Circle, FileSignature, FileText, FlaskConical, Globe, Inbox, Layers, PenTool, Plug, Sliders, User, Users } from 'lucide-react';
 import SettingsPage from '../../../src/app/pages/SettingsPage';
 import PrescriptionInboxSettings from './PrescriptionInboxSettings';
 import RxInboxNotificationCategory from './RxInboxNotificationCategory';
@@ -8,6 +8,8 @@ import IntakeFormSettings from '../../intake-form/IntakeFormSettings';
 import BulkSettings from '../../bulk-actions/BulkSettings';
 import CadSettings from '../../cad-integration/screens/CadSettings';
 import OrderFormSettings from '../../lab-documents/DocumentsSettings';
+import WorkflowSettings from '../../case-workflow/WorkflowSettings';
+import { useVersion } from '../../portalVersion';
 
 // ─── Lab Settings + "Prescription Email Inbox" tab ───────────────────────────
 // SettingsPage's tab list is internal to it, so this page draws the same
@@ -17,10 +19,10 @@ import OrderFormSettings from '../../lab-documents/DocumentsSettings';
 // header and sidebar so only one of each shows. Notification Preferences
 // also get the "Prescription Email Inbox" category appended below the real ones.
 
-type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners' | 'rx-inbox' | 'intake-form' | 'bulk-actions' | 'cad' | 'order-form';
+type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners' | 'rx-inbox' | 'intake-form' | 'bulk-actions' | 'cad' | 'order-form' | 'workflow';
 
 // Same order, labels and icons as SettingsPage's LAB_TABS, plus the new tab.
-const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
+const ALL_TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'personal',             label: 'Personal Info',            description: 'Your account profile',          icon: User },
   { id: 'dso',                  label: 'DSO Info',                 description: 'Organization details',          icon: Building2 },
   { id: 'services',             label: 'Custom Services',          description: 'Your own catalogue items',      icon: FlaskConical },
@@ -34,12 +36,16 @@ const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'bulk-actions',         label: 'Bulk Actions',             description: 'Your download & print defaults', icon: Layers },
   { id: 'cad',                  label: 'CAD & design',             description: 'exocad, 3Shape, partners',       icon: PenTool },
   { id: 'order-form',           label: 'Order form',               description: 'Logo, statement, case label',    icon: FileSignature },
+  // V2 only: the case handoff workflow.
+  { id: 'workflow',             label: 'Workflow',                 description: 'Routes, handoffs, bench PIN',    icon: GitBranch },
 ];
 
 // Matches SettingsPage's CONFIGURED set, plus the inbox and intake form (both exist from day one).
 const CONFIGURED: TabId[] = ['personal', 'dso', 'prescription-builder', 'case-scoring', 'rx-inbox', 'intake-form', 'bulk-actions', 'cad'];
 
 export default function LabSettingsWithInbox() {
+  const v2 = useVersion() === 'v2';
+  const TABS = ALL_TABS.filter(t => t.id !== 'workflow' || v2);
   const [searchParams, setSearchParams] = useSearchParams();
   const configured = new Set<TabId>(CONFIGURED);
 
@@ -133,6 +139,8 @@ export default function LabSettingsWithInbox() {
             <CadSettings />
           ) : activeTab === 'order-form' ? (
             <OrderFormSettings />
+          ) : activeTab === 'workflow' ? (
+            <WorkflowSettings />
           ) : (
             <>
               <div className="sf-embedded-settings">

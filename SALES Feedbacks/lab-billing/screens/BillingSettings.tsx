@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { AlertCircle, ArrowDownLeft, ArrowUpRight, Ban, FileMinus, Loader2, Mail, Paperclip, Plug, RefreshCw, UserPlus } from 'lucide-react';
+import { AlertCircle, ArrowDownLeft, ArrowUpRight, Ban, FileMinus, Landmark, Loader2, Mail, Paperclip, Plug, RefreshCw, UserPlus, Zap } from 'lucide-react';
 import Modal from '../../../src/app/components/Modal';
 import { useToast } from '../../../src/app/context/ToastContext';
 import { accentFor, getIntakeConfig } from '../../intake-form/intakeStore';
 import { LabLogo } from '../../bulk-actions/printForms';
 import type { LabBillingSettings, Provider, Templates } from '../types';
 import { fmtDate, pl } from '../format';
-import { connectProvider, disconnectProvider, updateSettings, updateSetup, updateTemplates, useBilling } from '../billingStore';
+import { connectBank, connectProvider, disconnectProvider, simulateBankPayment, simulateToolEvent, updateSettings, updateSetup, updateTemplates, useBilling } from '../billingStore';
+import { PROVIDER_NAME, toolName } from '../engine';
 import { billingAccounts } from '../insights';
 import { btn, btnPrimary, Card, Field, input, Note, Pill, Seg, Toggle } from '../ui';
 
@@ -45,10 +46,23 @@ export default function BillingSettings() {
             </Row>
             <Row label="Attach statement of manufacture"><Seg value={st.som} onChange={v => set({ som: v })} options={[{ value: 'off', label: 'Off' }, { value: 'all', label: 'On for all' }, { value: 'per-account', label: 'Per practice' }]} /></Row>
             <Row label="Remakes under warranty"><Seg value={st.warrantyRemakes} onChange={v => set({ warrantyRemakes: v })} options={[{ value: 'none', label: 'No invoice' }, { value: 'zero', label: 'Zero-value invoice' }]} /></Row>
-            <Row label="Invoice numbering" hint={`Continues from Xero. Next: ${st.prefix}${s.nextNumber}`}>
+            <Row label="Send to the accounting tool as" hint="Approved by default: approval happens here, where the pricing is. Draft only if your accountant wants to sign off in the accounting tool.">
+              <Seg value={st.postAs} onChange={v => set({ postAs: v })} options={[{ value: 'approved', label: 'Approved' }, { value: 'draft', label: 'Draft for my accountant' }]} />
+            </Row>
+            <Row label="Invoice layout" hint="Detailed lists every product; simple shows one line per case.">
+              <Seg value={st.layout} onChange={v => set({ layout: v })} options={[{ value: 'detailed', label: 'Detailed' }, { value: 'simple', label: 'Simple' }]} />
+            </Row>
+            <Row label="Invoice numbering" hint={`Continues from ${toolName(s) ?? 'your accounting tool'}. Next: ${st.prefix}${s.nextNumber}. Credit notes have their own series (next CN-${String(s.nextCredit).padStart(4, '0')}).`}>
               <input className={`${input} w-28`} defaultValue={st.prefix} onBlur={e => set({ prefix: e.target.value }, 'Prefix saved')} />
             </Row>
             <Row label="Courier and pick-up charges" hint="Optional add-on item (still to validate with labs). Adds a courier line to every invoice."><Toggle on={st.courierAddOn} onChange={v => set({ courierAddOn: v })} label={st.courierAddOn ? 'On' : 'Off'} /></Row>
+          </div>
+        </Card>
+
+        <Card title="Off until you need them" sub="Most labs never switch these on.">
+          <div className="space-y-4">
+            <Row label="Promotions and volume tiers" hint="Adds a Promotions & tiers tab. Off: prices come from price lists and the catalog only."><Toggle on={st.promotionsOn} onChange={v => set({ promotionsOn: v }, v ? 'Promotions & tiers tab added' : 'Promotions & tiers off')} label={st.promotionsOn ? 'On' : 'Off'} /></Row>
+            <Row label="Credit limits and holds" hint="A limit per account that can pause new cases until a payment comes in."><Toggle on={st.limitsOn} onChange={v => set({ limitsOn: v }, v ? 'Credit limits on' : 'Credit limits off: no holds')} label={st.limitsOn ? 'On' : 'Off'} /></Row>
           </div>
         </Card>
 
@@ -139,30 +153,75 @@ function ConnectionCard() {
   const [busy, setBusy] = useState(false);
   const lab = getIntakeConfig().labName;
   const overseas = billingAccounts(s).some(a => a.currency !== 'GBP');
-  const name = s.setup.provider === 'quickbooks' ? 'QuickBooks' : 'Xero';
+  const name = toolName(s) ?? 'Xero';
+  const tools: { id: Provider; label: string; note: string }[] = [
+    { id: 'xero', label: 'Xero', note: 'Change notices + nightly catch-up' },
+    { id: 'quickbooks', label: 'QuickBooks Online', note: 'Change notices' },
+    { id: 'sage', label: 'Sage Accounting', note: 'Nightly check' },
+    { id: 'freeagent', label: 'FreeAgent', note: 'Nightly check' },
+  ];
   return (
-    <Card title="Accounting connection">
-      {s.setup.provider ? (
-        <div className="space-y-2 text-xs">
-          <p className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#43A047]" /> <b>{name}</b> · {s.setup.org}</p>
-          <p className="text-[#717182]">Plan: {s.setup.plan === 'premium' ? 'Premium (multi-currency)' : 'Standard'} · last sync just now{s.setup.liveAt ? ` · invoicing since ${fmtDate(s.setup.liveAt)}` : ''}</p>
-          <Note tone="green">{name}'s own invoice emails and reminders are off, so practices don't get two of everything.</Note>
-          {overseas && s.setup.plan !== 'premium' && <Note tone="amber">You have an account in another currency. Multi-currency needs {name} Premium. <button className="underline font-semibold" onClick={() => updateSetup({ plan: 'premium' })}>I've upgraded</button></Note>}
-          <button className={btn} onClick={() => { disconnectProvider(); toast.success(`Disconnected from ${name}. Invoices wait until you reconnect.`); }}>Disconnect</button>
+    <Card title="Connections" sub="One accounting tool, or one bank if you have no accounting tool, so only one thing ever marks an invoice paid.">
+      <div className="space-y-4 text-xs">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#717182] mb-1.5">Accounting</p>
+          {s.setup.provider ? (
+            <div className="space-y-2">
+              <p className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[#43A047]" /> <b>{name}</b> · {s.setup.org}</p>
+              <p className="text-[#717182]">Invoices and credit notes go to {name} {st(s)}; your accountant reconciles payments there and the paid status comes back on its own.{s.setup.liveAt ? ` Invoicing since ${fmtDate(s.setup.liveAt)}.` : ''}</p>
+              {overseas && s.setup.plan !== 'premium' && <Note tone="amber">You have an account in another currency. Multi-currency needs {name}'s premium plan. <button className="underline font-semibold" onClick={() => updateSetup({ plan: 'premium' })}>I've upgraded</button></Note>}
+              <div className="flex flex-wrap gap-2">
+                <button className={btn} onClick={() => { disconnectProvider(); toast.success(`Disconnected from ${name}`); }}>Disconnect</button>
+              </div>
+              <div className="rounded-lg border border-dashed border-[#D4CEE1] p-2.5 space-y-1.5">
+                <p className="text-[11px] font-semibold text-[#5A5568] inline-flex items-center gap-1"><Zap className="w-3 h-3" /> Demo: something happens in {name}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {([['edited', 'An invoice is edited'], ['voided', 'An invoice is voided'], ['failed', 'A post fails 3 times'], ['expired', 'The connection expires']] as const).map(([k, l]) => (
+                    <button key={k} className={btn} onClick={() => { const r = simulateToolEvent(k); toast.success(r ? `${r}: see Needs you on Billing home` : 'Nothing to change'); }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Note tone="amber">No accounting tool. Invoices are still created, approved and emailed; mark them paid by hand, or connect a bank below. Most labs get Xero set up with their bank feed during onboarding.</Note>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {tools.map(t => <button key={t.id} className="text-left px-3 py-2 rounded-lg border border-[#E0E0E6] hover:border-[#4D8EF7] bg-white" onClick={() => setPicking(t.id)}><span className="font-semibold inline-flex items-center gap-1"><Plug className="w-3.5 h-3.5" /> {t.label}</span><span className="block text-[11px] text-[#717182]">{t.note}</span></button>)}
+              </div>
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="space-y-2">
-          <Note tone="amber">Not connected. Invoices are still created, approved and emailed; they post to the accounts package when you connect, and payments can't be read back until then.</Note>
-          <div className="flex flex-wrap gap-2">
-            <button className={btnPrimary} onClick={() => setPicking('xero')}><Plug className="w-3.5 h-3.5" /> Connect Xero</button>
-            <button className={btn} onClick={() => setPicking('quickbooks')}><Plug className="w-3.5 h-3.5" /> Connect QuickBooks</button>
-          </div>
+
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#717182] mb-1.5">Bank</p>
+          {s.setup.provider ? <p className="text-[#717182]">Off: {name} is the one source of truth for what's paid.</p> : s.bank ? (
+            <div className="space-y-2">
+              <p className="flex items-center gap-2"><Landmark className="w-3.5 h-3.5 text-[#4D8EF7]" /> <b>{s.bank === 'revolut' ? 'Revolut Business' : 'Wise Business'}</b> · incoming payments matched to invoices</p>
+              <p className="text-[#717182]">Matched by the invoice or statement number in the reference, then by a payer we know paying an exact amount. Anything else asks you once, and we remember the payer.</p>
+              <div className="flex flex-wrap gap-1.5">
+                <button className={btn} onClick={() => { const r = simulateBankPayment('reference'); toast.success(r ?? 'No open invoices'); }}>Demo: payment quoting an invoice</button>
+                <button className={btn} onClick={() => { const r = simulateBankPayment('unknown'); toast.success(r ?? 'No open invoices'); }}>Demo: payment with no reference</button>
+                <button className={btn} onClick={() => { connectBank(null); toast.success('Bank disconnected'); }}>Disconnect</button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <button className={btn} onClick={() => { connectBank('revolut'); toast.success('Revolut Business connected'); }}><Landmark className="w-3.5 h-3.5" /> Connect Revolut Business</button>
+              <button className={btn} onClick={() => { connectBank('wise'); toast.success('Wise Business connected'); }}><Landmark className="w-3.5 h-3.5" /> Connect Wise Business</button>
+              <p className="w-full text-[11px] text-[#717182]">Other UK banks need a paid open-banking provider; until then, Mark paid on the invoice or in bulk.</p>
+            </div>
+          )}
         </div>
-      )}
+
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#717182] mb-1.5">Get paid</p>
+          <p className="text-[#717182]">Pay now links on invoices and statements (Stripe, GoCardless, Revolut). Later: card fees mean each lab chooses.</p>
+        </div>
+      </div>
       {picking && (
-        <Modal isOpen onClose={() => setPicking(null)} title={`Sign in to ${picking === 'xero' ? 'Xero' : 'QuickBooks'}`} footer={null}>
+        <Modal isOpen onClose={() => setPicking(null)} title={`Sign in to ${PROVIDER_NAME[picking]}`} footer={null}>
           <div className="space-y-3">
-            <Note>Demo: no real sign-in. In the product this opens {picking === 'xero' ? 'Xero' : 'Intuit'}'s own sign-in window; Smile Genius never sees the password.</Note>
+            <Note>Demo: no real sign-in. In the product this opens {PROVIDER_NAME[picking]}'s own sign-in window; Smile Genius never sees the password. Then one confirmation list: existing customers matched to practices and dentists, sales account and the VAT rate for exempt prostheses preselected.</Note>
             <p className="text-xs text-[#5A5568]">Pick the organisation to connect:</p>
             {[`${lab} Ltd`, `${lab} Holdings`].map(org => (
               <button key={org} disabled={busy} className="w-full text-left px-3 py-2.5 rounded-lg border border-[#E0E0E6] hover:border-[#4D8EF7] text-sm inline-flex items-center gap-2" onClick={() => {
@@ -176,3 +235,5 @@ function ConnectionCard() {
     </Card>
   );
 }
+
+const st = (s: ReturnType<typeof useBilling>) => (s.settings.postAs === 'draft' ? 'as drafts for your accountant' : 'as approved');

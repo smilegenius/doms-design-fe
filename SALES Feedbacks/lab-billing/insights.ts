@@ -1,5 +1,5 @@
 import type { BillingAccount, BillingState, Invoice } from './types';
-import {
+import { covers,
   account, billingCases, catalogPrice, credited, DISPATCHED, expectedValue, exposure, IN_PROGRESS, isOverdue, itemFor, limitForecast, limitStage, outstanding, stagesDone, stagedMode, totals,
 } from './engine';
 import { addDays, daysBetween, fmtShort, money, monthOf, prevMonth, RATES, round2, today } from './format';
@@ -31,7 +31,9 @@ export function unbilledDispatched(s: BillingState) {
   return billingCases().filter(c => {
     const m = s.cases[c.id];
     if (!m || m.billedElsewhere || !m.dispatchedAt) return false;
-    if (!DISPATCHED.includes(c.status) || s.invoices.some(i => i.caseId === c.id && !i.stage && i.status !== 'void')) return false;
+    // Month-end accounts collect shipped cases on purpose (Invoices › To invoice).
+    if (account(s, m.accountId)?.invoiceMode === 'month-end') return false;
+    if (!DISPATCHED.includes(c.status) || s.invoices.some(i => covers(i, c.id) && !i.stage && i.status !== 'void')) return false;
     return daysBetween(m.dispatchedAt, t) >= s.settings.notBilledDays;
   });
 }
@@ -87,7 +89,7 @@ export function assists(s: BillingState): Assist[] {
   }
   for (const c of billingCases()) {
     const m = s.cases[c.id];
-    if (m?.remakeOf && !m.remakeDecision && !s.invoices.some(i => i.caseId === c.id)) {
+    if (m?.remakeOf && !m.remakeDecision && !s.invoices.some(i => covers(i, c.id))) {
       out.push({ id: `remake-${c.id}`, kind: 'Possible remake', tone: 'amber', title: `${c.id} · ${c.patientName}`, link: `/growth/cases/${c.id}?sf=billing`,
         message: `Same patient and ${c.services[0]} as ${m.remakeOf} within ${s.settings.remakeDays} days. Is this a remake? It can go out at no charge.` });
     }
@@ -124,7 +126,7 @@ export function unbilledReport(s: BillingState, f: Filters): Report {
   for (const c of billingCases()) {
     const m = s.cases[c.id];
     if (!m || m.billedElsewhere || !accOk(f, m.accountId)) continue;
-    if (s.invoices.some(i => i.caseId === c.id && !i.stage && i.status !== 'void')) continue;
+    if (s.invoices.some(i => covers(i, c.id) && !i.stage && i.status !== 'void')) continue;
     const dispatched = DISPATCHED.includes(c.status);
     if (!dispatched && !IN_PROGRESS.includes(c.status)) continue;
     if (f.department !== 'all' && !(c.serviceItems ?? []).some(si => itemFor(s, si, m)?.department === f.department)) continue;
@@ -184,7 +186,7 @@ export function givenAwayReport(s: BillingState, f: Filters): Report {
   // Remakes under warranty with no invoice at all.
   for (const m of Object.values(s.cases)) {
     if (m.remakeDecision !== 'no-charge' || !m.remakeValue || !accOk(f, m.accountId) || !inRange(m.dispatchedAt ?? m.receivedAt, f)) continue;
-    if (s.invoices.some(i => i.caseId === m.caseId && i.status !== 'void')) continue;
+    if (s.invoices.some(i => covers(i, m.caseId) && i.status !== 'void')) continue;
     by['Free remakes'] += m.remakeValue;
     rows.push([m.caseId, m.dispatchedAt ?? m.receivedAt, name(s, m.accountId), '', 'Free remakes', `Remake of ${m.remakeOf} (no invoice)`, m.remakeValue]);
   }
@@ -205,7 +207,7 @@ export function remakesReport(s: BillingState, f: Filters): Report {
     if (!accOk(f, m.accountId) || !inRange(m.receivedAt, f)) continue;
     // Case details from the list, or from its invoice for completed cases no longer listed.
     const c = list.get(m.caseId);
-    const inv = s.invoices.find(i => i.caseId === m.caseId && i.status !== 'void');
+    const inv = s.invoices.find(i => covers(i, m.caseId) && i.status !== 'void');
     const hc = !c && !inv ? historyInfo.get(m.caseId) : undefined;
     if (!c && !inv && !hc) continue;
     const dentist = c?.dentist ?? inv?.dentist ?? hc!.dentist;
@@ -279,7 +281,7 @@ export function cashReport(s: BillingState, f: Filters): Report {
   for (const c of billingCases()) {
     const m = s.cases[c.id];
     if (!m || m.billedElsewhere || m.held || !accOk(f, m.accountId) || !['quality-check', 'in-production'].includes(c.status)) continue;
-    if (s.invoices.some(i => i.caseId === c.id && !i.stage)) continue;
+    if (s.invoices.some(i => covers(i, c.id) && !i.stage)) continue;
     const issue = addDays(t, c.status === 'quality-check' ? 2 : 7);
     const at = expectAt(account(s, m.accountId), issue, null);
     const w = weeks.find(w => at >= w.from && at <= w.to);

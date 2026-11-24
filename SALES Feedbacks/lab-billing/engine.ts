@@ -107,14 +107,14 @@ export function priceFor(s: BillingState, acc: BillingAccount, item: CatalogItem
   const custom = pl?.prices[item.id];
   const cp = custom ? (kind === 'NHS' ? custom.nhs ?? (item.nhs == null ? custom.priv : undefined) : custom.priv) : undefined;
   if (pl && cp != null) return { price: cp, list, source: { kind: 'price-list', list: pl.name } };
-  const promo = s.promotions.find(p => p.active && on >= p.from && on <= p.to && (
+  const promo = s.settings.promotionsOn && s.promotions.find(p => p.active && on >= p.from && on <= p.to && (
     p.scope.kind === 'all'
     || (p.scope.kind === 'items' && p.scope.ids.includes(item.id))
     || (p.scope.kind === 'departments' && p.scope.ids.includes(item.department))
     || (p.scope.kind === 'accounts' && p.scope.ids.includes(acc.id))));
   if (promo && list) return { price: round2(promo.type === 'percent' ? list * (1 - promo.value / 100) : promo.value), list, source: { kind: 'promotion', promo: promo.name } };
   const units = unitsLastMonth(s, acc.id, on);
-  const tier = [...s.tiers].filter(t => t.active && units >= t.minUnits).sort((a, b) => b.minUnits - a.minUnits)[0];
+  const tier = !s.settings.promotionsOn ? undefined : [...s.tiers].filter(t => t.active && units >= t.minUnits).sort((a, b) => b.minUnits - a.minUnits)[0];
   if (tier && list) return { price: round2(list * (1 - tier.percentOff / 100)), list, source: { kind: 'tier', tier: tier.name } };
   return { price: list, list, source: { kind: 'catalog', locked: cat.locked } };
 }
@@ -219,7 +219,7 @@ export function outstanding(inv: Invoice) {
 export const isOverdue = (inv: Invoice, on = today()) => outstanding(inv) > 0 && !!inv.dueAt && inv.dueAt < on;
 
 export function dueDate(s: BillingState, issued: string, acc?: BillingAccount) {
-  void acc;
+  if (acc?.termsDays) return addDays(issued, acc.termsDays);
   if (s.settings.terms === 'eom-following') return endOfMonth(addDays(endOfMonth(issued), 1));
   if (s.settings.terms === 'custom') return addDays(issued, s.settings.customTermsDays);
   return addDays(issued, 30);
@@ -248,14 +248,22 @@ export function nhsShare(s: BillingState, dentist: string) {
   return cs.filter(si => si.orderType === 'NHS').length / cs.length;
 }
 
+/** V1: invoices for a practice that arrived with a scan wait until someone confirms who to bill. */
+export const NEW_PRACTICE_FLAG = (name: string) => `New practice from a scan: confirm who to bill at ${name} before this goes out`;
+
 export function flagsFor(s: BillingState, c: Case, meta: CaseBilling, inv: Pick<Invoice, 'id' | 'lines' | 'accountId'>): Flag[] {
   const flags: Flag[] = [];
   for (const l of inv.lines) {
     if (l.source.kind === 'unmapped') flags.push({ kind: 'new-order-type', message: `"${l.description}" isn't mapped to a catalog item yet` });
     if (l.itemId && l.source.kind !== 'remake' && l.source.kind !== 'pass-through' && l.source.kind !== 'stage') {
       const usual = usualPrice(s, inv.accountId, l.itemId, l.kind, inv.id);
+      // Month-end lines read "CASE · patient · item"; per-case lines start with the item.
+      const name = (l.id.includes(':') ? l.description.split(' · ')[2] : l.description.split(' ·')[0]) ?? l.description;
       if (usual && Math.abs(l.unitPrice - usual) / usual > s.settings.unusualPricePct / 100) {
-        flags.push({ kind: 'unusual-price', message: `${l.description.split(' ·')[0]} at ${l.unitPrice.toFixed(2)} is ${Math.round(Math.abs(l.unitPrice - usual) / usual * 100)}% ${l.unitPrice > usual ? 'above' : 'below'} what this account usually pays (${usual.toFixed(2)})` });
+        flags.push({ kind: 'unusual-price', message: `${name} at ${l.unitPrice.toFixed(2)} is ${Math.round(Math.abs(l.unitPrice - usual) / usual * 100)}% ${l.unitPrice > usual ? 'above' : 'below'} what this account usually pays (${usual.toFixed(2)})` });
+      } else if (!usual && l.source.kind === 'override' && l.listPrice && Math.abs(l.unitPrice - l.listPrice) / l.listPrice > s.settings.unusualPricePct / 100) {
+        // A new account has no history: compare with the catalog price instead.
+        flags.push({ kind: 'unusual-price', message: `${name} at ${l.unitPrice.toFixed(2)} is ${Math.round(Math.abs(l.unitPrice - l.listPrice) / l.listPrice * 100)}% ${l.unitPrice > l.listPrice ? 'above' : 'below'} the catalog price (${l.listPrice.toFixed(2)}); this account has no history yet` });
       }
     }
   }
@@ -264,6 +272,8 @@ export function flagsFor(s: BillingState, c: Case, meta: CaseBilling, inv: Pick<
     flags.push({ kind: 'nhs-unclear', message: `The order doesn't say NHS or private${share != null ? `, and ${c.dentist} sends ${Math.round(share * 100)}% NHS` : ''}` });
   }
   if (meta.remakeOf && !meta.remakeDecision) flags.push({ kind: 'remake', message: `Is this a remake of ${meta.remakeOf}?` });
+  const acc = account(s, inv.accountId);
+  if (acc?.fromScan && !acc.confirmedAt) flags.push({ kind: 'review', message: NEW_PRACTICE_FLAG(acc.name) });
   if (meta.designOverride?.diff.length && !meta.designOverride.checked) flags.push({ kind: 'design-diff', message: `Design differs from the case: ${meta.designOverride.diff.join('; ')}` });
   return flags.filter((f, i) => flags.findIndex(g => g.message === f.message) === i);
 }
@@ -279,7 +289,7 @@ export function exposure(s: BillingState, accountId: string): Exposure {
   for (const c of billingCases()) {
     const m = s.cases[c.id];
     if (!m || m.accountId !== accountId || m.billedElsewhere) continue;
-    if (s.invoices.some(i => i.caseId === c.id && i.status !== 'void' && !i.stage)) continue;
+    if (s.invoices.some(i => covers(i, c.id) && i.status !== 'void' && !i.stage)) continue;
     if (!IN_PROGRESS.includes(c.status) && !(isDispatched(s, c))) continue;
     wip += expectedValue(s, c, m); wipCases++;
   }
@@ -293,7 +303,7 @@ export function exposure(s: BillingState, accountId: string): Exposure {
 export type LimitStage = 'none' | 'ok' | 'approaching' | 'at' | 'paused';
 
 export function limitStage(s: BillingState, acc: BillingAccount, ex = exposure(s, acc.id)): LimitStage {
-  if (!acc.limit) return 'none';
+  if (!acc.limit || !s.settings.limitsOn) return 'none';
   if (acc.paused) return 'paused';
   const over = (acc.limit.amount != null && ex.total >= acc.limit.amount) || (acc.limit.overdueDays != null && ex.overdueOldest > acc.limit.overdueDays);
   if (over) return 'at';
@@ -303,7 +313,7 @@ export function limitStage(s: BillingState, acc: BillingAccount, ex = exposure(s
 
 /** Days until the limit at the recent pace (new work received over the last 30 days, minus payments). */
 export function limitForecast(s: BillingState, acc: BillingAccount, ex = exposure(s, acc.id)): number | null {
-  if (!acc.limit?.amount) return null;
+  if (!acc.limit?.amount || !s.settings.limitsOn) return null;
   const from = addDays(today(), -30);
   let added = 0;
   for (const c of billingCases()) {
@@ -334,15 +344,26 @@ export function buildStatement(s: BillingState, accountId: string, period: strin
   }
   for (const x of s.xeroOnly.filter(x => x.accountId === accountId)) {
     if (x.date < start) opening += x.amount;
-    // Old-system payments are counted before the period (Xero holds the detail).
-    if (x.date < start) opening -= x.paid;
+    // Old-system payments count on the date they were paid (read from Xero).
+    if (x.paid && (x.paidAt ?? x.date) < start) opening -= x.paid;
   }
   const invoices = [
     ...inv.filter(i => i.issuedAt! >= start && i.issuedAt! <= end).map(i => ({ number: i.number ?? '—', date: i.issuedAt!, amount: totals(i).gross })),
     ...s.xeroOnly.filter(x => x.accountId === accountId && x.date >= start && x.date <= end).map(x => ({ number: x.number, date: x.date, amount: x.amount })),
   ];
   const credits = inv.flatMap(i => i.creditNotes.filter(c => c.at >= start && c.at <= end).map(c => ({ number: c.number, date: c.at, amount: c.amount })));
-  const payments = inv.flatMap(i => i.payments.filter(p => p.at >= start && p.at <= end).map(p => ({ ref: p.ref, date: p.at, amount: p.amount })));
+  const payments = [
+    ...inv.flatMap(i => i.payments.filter(p => p.at >= start && p.at <= end).map(p => ({ ref: p.ref, date: p.at, amount: p.amount }))),
+    ...s.xeroOnly.filter(x => x.accountId === accountId && x.paid && (x.paidAt ?? x.date) >= start && (x.paidAt ?? x.date) <= end).map(x => ({ ref: `Payment for ${x.number}`, date: x.paidAt ?? x.date, amount: x.paid })),
+  ];
+  // Practice statements subtotal by dentist (each dentist's share of the month).
+  const dmap = new Map<string, { amount: number; count: number }>();
+  for (const i of inv.filter(i => i.issuedAt! >= start && i.issuedAt! <= end)) {
+    const k = i.dentist || 'No dentist';
+    const e = dmap.get(k) ?? { amount: 0, count: 0 };
+    dmap.set(k, { amount: round2(e.amount + totals(i).gross), count: e.count + (i.cases?.length ?? 1) });
+  }
+  const byDentist = [...dmap].map(([dentist, v]) => ({ dentist, ...v })).sort((a, b) => b.amount - a.amount);
   const closing = round2(opening + invoices.reduce((n, x) => n + x.amount, 0) - credits.reduce((n, x) => n + x.amount, 0) - payments.reduce((n, x) => n + x.amount, 0));
   const ageing = { current: 0, d30: 0, d60: 0, d90: 0 };
   const bucket = (due: string, amt: number) => {
@@ -354,9 +375,12 @@ export function buildStatement(s: BillingState, accountId: string, period: strin
     const owed = totals(i).gross - i.creditNotes.filter(c => c.at <= end).reduce((n, c) => n + c.amount, 0) - i.payments.filter(p => p.at <= end).reduce((n, p) => n + p.amount, 0);
     if (owed > 0.005) bucket(i.dueAt!, owed);
   }
-  for (const x of s.xeroOnly.filter(x => x.accountId === accountId && x.date <= end)) if (x.amount - x.paid > 0) bucket(x.due, x.amount - x.paid);
+  for (const x of s.xeroOnly.filter(x => x.accountId === accountId && x.date <= end)) {
+    const owed = x.amount - (x.paid && (x.paidAt ?? x.date) <= end ? x.paid : 0);
+    if (owed > 0) bucket(x.due, owed);
+  }
   (Object.keys(ageing) as (keyof typeof ageing)[]).forEach(k => { ageing[k] = round2(ageing[k]); });
-  return { id: `st-${accountId}-${period}`, accountId, period, status: 'preview', createdAt: today(), opening: round2(opening), invoices, credits, payments, closing, ageing, currency: acc.currency };
+  return { id: `st-${accountId}-${period}`, accountId, period, status: 'preview', createdAt: today(), opening: round2(opening), invoices, credits, payments, closing, byDentist: acc.kind === 'practice' ? byDentist : undefined, ageing, currency: acc.currency };
 }
 
 export function sourceText(src: PriceSource, cur: Currency = 'GBP'): string {
@@ -379,3 +403,46 @@ export const caseLabel = (c: Pick<Case, 'id' | 'patientName'>) => `${c.id} · ${
 export const seedPick = <T,>(arr: T[], key: string) => arr[hash(key) % arr.length];
 export const shortDate = fmtShort;
 export { startOfMonth };
+
+// ── v2: month-end invoicing and lookups ──────────────────────────────────────
+
+/** Does this invoice cover the case (its own, or one of a month-end invoice's cases)? */
+export const covers = (i: Pick<Invoice, 'caseId' | 'cases'>, caseId: string) => i.caseId === caseId || !!i.cases?.includes(caseId);
+
+/** The case's invoice (not a stage invoice, not void), including month-end invoices that cover several cases. */
+export function invoiceForCase(s: BillingState, caseId: string): Invoice | undefined {
+  return s.invoices.find(i => i.status !== 'void' && !i.stage && (i.caseId === caseId || i.cases?.includes(caseId)));
+}
+export const invoicedCase = (s: BillingState, caseId: string) => !!invoiceForCase(s, caseId);
+
+/** Does this account bill once a month from "To invoice"? */
+export const monthEnd = (s: BillingState, accountId: string) => account(s, accountId)?.invoiceMode === 'month-end';
+
+/** Shipped, not yet invoiced cases of month-end accounts: the "To invoice" holding pot. */
+export function toInvoice(s: BillingState): { c: Case; meta: CaseBilling; value: number }[] {
+  return billingCases().flatMap(c => {
+    const meta = s.cases[c.id];
+    // Month-end accounts collect here; so do cases held back from auto-invoicing or whose invoice was voided in the accounting tool.
+    if (!meta || meta.billedElsewhere || meta.held || !(monthEnd(s, meta.accountId) || meta.skipAuto) || !isDispatched(s, c)) return [];
+    if (invoicedCase(s, c.id)) return [];
+    if (meta.remakeDecision === 'no-charge' && s.settings.warrantyRemakes === 'none') return [];
+    return [{ c, meta, value: totals({ lines: linesFor(s, c, meta) }).gross }];
+  });
+}
+
+/** Lines for a month-end invoice: each case's lines, prefixed with the case so the dentist sees what each was. */
+export function linesForCases(s: BillingState, cs: { c: Case; meta: CaseBilling }[]): InvoiceLine[] {
+  return cs.flatMap(({ c, meta }) => linesFor(s, c, meta).map(l => ({ ...l, id: `${c.id}:${l.id}`, description: `${c.id} · ${c.patientName} · ${l.description}` })));
+}
+
+/** Days of credit an account gets (its own terms, or the lab's). */
+export function termsLabel(s: BillingState, acc?: BillingAccount) {
+  if (acc?.termsDays) return `${acc.termsDays} days`;
+  return s.settings.terms === 'eom-following' ? 'End of following month' : s.settings.terms === 'custom' ? `${s.settings.customTermsDays} days` : '30 days';
+}
+
+export const PROVIDER_NAME: Record<string, string> = { xero: 'Xero', quickbooks: 'QuickBooks', sage: 'Sage', freeagent: 'FreeAgent' };
+export const toolName = (s: BillingState) => (s.setup.provider ? PROVIDER_NAME[s.setup.provider] : null);
+
+/** The reference printed on a statement for the dentist to pay with (K9: makes bank matching automatic). */
+export const statementRef = (st: Pick<Statement, 'accountId' | 'period'>) => `ST-${st.period.replace('-', '')}-${String(hash(st.accountId) % 1000).padStart(3, '0')}`;

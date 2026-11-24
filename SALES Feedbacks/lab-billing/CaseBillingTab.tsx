@@ -4,7 +4,7 @@ import { AlertTriangle, HelpCircle, PauseCircle, Plus, Receipt, Trash2 } from 'l
 import Modal from '../../src/app/components/Modal';
 import { useToast } from '../../src/app/context/ToastContext';
 import OrderPanelTab from '../intake-form/OrderPanelTab';
-import { account, caseById, DISPATCHED, itemFor, lineNet, sourceShort, sourceText, stagedMode, stagesDone, totals } from './engine';
+import { covers, isOverdue, account, caseById, DISPATCHED, itemFor, lineNet, sourceShort, sourceText, stagedMode, stagesDone, totals } from './engine';
 import { fmtDate, money } from './format';
 import { addPart, billNow, billStage, decideRemake, notRemake, previewLines, releaseCase, setCaseKind, stopCase, syncBilling, useBilling } from './billingStore';
 import { btn, btnPrimary, InvoiceStatusPill, inputSm, Note, Pill } from './ui';
@@ -52,10 +52,12 @@ function Body({ caseId }: { caseId: string }) {
   const meta = s.cases[caseId];
   const c = caseById(caseId)!;
   const acc = account(s, meta.accountId);
-  const invs = s.invoices.filter(i => i.caseId === caseId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const invs = s.invoices.filter(i => covers(i, caseId)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const main = invs.find(i => !i.stage && i.status !== 'void');
   const preview = previewLines(caseId);
-  const lines = main ? main.lines : preview.lines;
+  // A month invoice covers other cases too: show this case's lines.
+  const lines = main ? (main.cases?.length ? main.lines.filter(l => l.id.startsWith(`${caseId}:`)).map(l => ({ ...l, description: l.description.split(' · ').slice(2).join(' · ') })) : main.lines) : preview.lines;
+  const monthly = acc?.invoiceMode === 'month-end';
   const cur = acc?.currency ?? 'GBP';
   const kinds = [...new Set(c.serviceItems.map(si => meta.kindOverride ?? (si.orderType === 'NHS' ? 'NHS' : 'Private')))];
   const dispatched = DISPATCHED.includes(c.status);
@@ -71,7 +73,8 @@ function Body({ caseId }: { caseId: string }) {
           <button className="underline font-semibold" onClick={() => { releaseCase(caseId); toast.success(`${caseId} released into production; the account stays on hold`); }}>Release this case</button>
         </Note>
       )}
-      {meta.billedElsewhere && <Note>Billed by the old system before the switch-over. The balance, if any, is in Xero.</Note>}
+      {meta.billedElsewhere && <Note>Billed by the old system before the switch-over. The balance, if any, is in the accounting tool.</Note>}
+      {!main && monthly && !meta.billedElsewhere && <Note>{acc?.name} is invoiced once a month: {dispatched ? 'this case is in Invoices › To invoice and goes on the month invoice.' : 'when it ships, it joins Invoices › To invoice for the month invoice.'}</Note>}
       {meta.remakeOf && !meta.remakeDecision && (
         <Note tone="amber">
           Same patient and {c.services[0]} as <b>{meta.remakeOf}</b> within {s.settings.remakeDays} days. Is this a remake?
@@ -93,9 +96,10 @@ function Body({ caseId }: { caseId: string }) {
       {!meta.billedElsewhere && (
         <div className="rounded-lg border border-[#E0E0E6] overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 bg-[#F8F9FC] border-b border-[#F0EFF6]">
-            <span className="font-semibold text-[#030213]">{main ? (main.number ?? 'Draft invoice') : dispatched ? 'Not invoiced yet' : 'Expected when dispatched'}</span>
-            {main ? <span className="inline-flex items-center gap-2"><InvoiceStatusPill status={main.status} /><button className="text-[#4D8EF7] font-semibold hover:underline" onClick={() => navigate(`/growth/billing/invoices/${main.id}`)}>Open invoice</button></span>
-              : lines.length > 0 && <button className={dispatched ? btnPrimary : btn} onClick={() => { const inv = billNow(caseId); if (inv) toast.success(inv.status === 'sent' ? `Invoiced ${inv.number}` : 'Invoice created; it\'s waiting for approval'); }}>Bill now</button>}
+            <span className="font-semibold text-[#030213]">{main ? <>Invoice {main.number ?? '(draft)'}{main.cases?.length ? <span className="font-normal text-[#717182]"> · month invoice, {main.cases.length} cases</span> : null}</> : dispatched ? (monthly ? 'In To invoice' : 'Not invoiced yet') : 'Expected when shipped'}</span>
+            {main ? <span className="inline-flex items-center gap-2"><InvoiceStatusPill status={main.status} overdue={isOverdue(main)} /><button className="text-[#4D8EF7] font-semibold hover:underline" onClick={() => navigate(`/growth/billing/invoices/${main.id}`)}>Open invoice</button></span>
+              : monthly ? (dispatched && <button className={btn} onClick={() => navigate('/growth/billing/invoices?tab=to-invoice')}>To invoice</button>)
+                : lines.length > 0 && <button className={dispatched ? btnPrimary : btn} onClick={() => { const inv = billNow(caseId); if (inv) toast.success(inv.status === 'sent' ? `Invoiced ${inv.number}` : 'Invoice created; it\'s waiting for approval'); }}>Bill now</button>}
           </div>
           {lines.length === 0 ? <p className="px-3 py-3 text-[#717182]">{staged.length ? 'Everything on this case bills per stage (below).' : 'No billable lines.'}</p> : (
             <table className="w-full">

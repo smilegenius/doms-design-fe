@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smile Genius Lab Pricing</title>
+<meta name="description" content="Smile Genius pricing for dental labs: one monthly price with cases included, plus case blocks as you grow.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
+<style>
+/* Smile Genius lab pricing. Scoped under .sg-pricing so it can sit inside the website without clashing. */
+.sg-pricing{
+  --bg:#F6F7FB; --surface:#FFFFFF; --ink:#030213; --body:#3A3646; --muted:#5A5568; --line:#E0E0E6;
+  --blue:#4D8EF7; --blue-deep:#1565C0; --lav:#A59DFF; --violet:#5B4FD6;
+  --tint:#EEF4FF; --tint-line:#C8D8FC; --lav-tint:#F3F1FF; --good:#2E7D32; --good-tint:#F0FDF4; --best:#FFF8E1;
+  --grad:linear-gradient(90deg,#4D8EF7,#A59DFF); --grad-deep:linear-gradient(135deg,#1565C0,#5B4FD6);
+  font-family:'Poppins',system-ui,-apple-system,'Segoe UI',sans-serif;
+  background:var(--bg); color:var(--body); font-size:16px; line-height:1.6;
+  position:relative; overflow:hidden; padding:0 16px 80px;
+}
+.sg-pricing *{box-sizing:border-box}
+.sg-pricing .glow{position:absolute;border-radius:50%;filter:blur(90px);pointer-events:none;z-index:0}
+.sg-pricing .glow.a{width:620px;height:620px;right:-220px;top:-260px;background:linear-gradient(135deg,#A59DFF,#4D8EF7);opacity:.22}
+.sg-pricing .glow.b{width:480px;height:480px;left:-240px;top:900px;background:#A59DFF;opacity:.14}
+.sg-pricing .topbar{position:absolute;left:0;top:0;width:100%;height:6px;background:var(--grad);z-index:1}
+.sg-pricing main{position:relative;z-index:1;max-width:1000px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:56px}
+.sg-pricing h1,.sg-pricing h2,.sg-pricing h3{color:var(--ink);margin:0;letter-spacing:-0.01em;text-wrap:balance}
+.sg-pricing h1{font-size:clamp(30px,5vw,46px);line-height:1.12;font-weight:700}
+.sg-pricing h1 .grad{background:var(--grad-deep);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sg-pricing h2{font-size:24px;font-weight:700}
+.sg-pricing h3{font-size:16px;font-weight:600}
+.sg-pricing .brand{display:flex;align-items:center;gap:10px;margin-bottom:28px}
+.sg-pricing .brand img{width:36px;height:36px;border-radius:9px;display:block}
+.sg-pricing .brand span{font-size:19px;font-weight:700;color:var(--ink);letter-spacing:-0.3px}
+.sg-pricing .eyebrow{display:inline-block;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--blue-deep);font-weight:600;margin:0 0 14px;background:var(--tint);border:1px solid var(--tint-line);border-radius:999px;padding:4px 12px}
+.sg-pricing .lede{color:var(--muted);max-width:60ch;margin:16px 0 0;font-size:18px}
+.sg-pricing .hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
+.sg-pricing .btn{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:15px;font-weight:600;text-decoration:none;border-radius:999px;padding:12px 22px;cursor:pointer;border:0}
+.sg-pricing .btn.primary{background:var(--grad-deep);color:#fff;box-shadow:0 10px 30px rgba(77,142,247,.25)}
+.sg-pricing .btn.ghost{background:var(--surface);color:var(--blue-deep);border:1px solid var(--tint-line)}
+.sg-pricing .sub{color:var(--muted);margin:8px 0 22px;max-width:65ch}
+.sg-pricing .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 32px rgba(77,142,247,.06)}
+.sg-pricing table{border-collapse:collapse;width:100%;min-width:560px;font-variant-numeric:tabular-nums}
+.sg-pricing th,.sg-pricing td{padding:14px 18px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+.sg-pricing tr:last-child td,.sg-pricing tr:last-child th{border-bottom:0}
+.sg-pricing thead th{font-size:15px;font-weight:600;color:var(--ink);background:var(--surface);border-bottom:2px solid var(--tint-line)}
+.sg-pricing thead th small{display:block;font-weight:400;font-size:13px;color:var(--muted);margin-top:2px}
+.sg-pricing tbody th{font-weight:500;color:var(--muted);width:28%;font-size:14px}
+.sg-pricing td.early,.sg-pricing th.early{background:var(--tint)}
+.sg-pricing thead th.early{background:var(--tint);color:var(--blue-deep)}
+.sg-pricing td b{font-weight:600;color:var(--ink)}
+.sg-pricing .big{font-size:24px;font-weight:700;color:var(--ink);letter-spacing:-0.01em}
+.sg-pricing .big small{font-size:13px;font-weight:400;color:var(--muted)}
+.sg-pricing .num{text-align:right}
+.sg-pricing .custom{color:var(--violet);font-weight:600}
+.sg-pricing tr.best td,.sg-pricing tr.best th{background:var(--best)}
+.sg-pricing .tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:var(--grad-deep);color:#fff;border-radius:999px;padding:1px 9px;margin-left:6px;vertical-align:middle}
+.sg-pricing .plan-tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:var(--blue-deep);color:#fff;border-radius:999px;padding:1px 9px;margin-left:6px;vertical-align:middle}
+.sg-pricing .notes{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.sg-pricing .notes li{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px 16px 48px;position:relative;color:var(--body);font-size:15px}
+.sg-pricing .notes li::before{content:"";position:absolute;left:16px;top:18px;width:20px;height:20px;border-radius:50%;background:var(--grad)}
+.sg-pricing .notes li::after{content:"";position:absolute;left:23px;top:22px;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+
+/* calculator */
+.sg-pricing .calc{border:1px solid var(--line);background:var(--surface);border-radius:20px;padding:28px;display:flex;flex-direction:column;gap:28px;box-shadow:0 12px 40px rgba(77,142,247,.08)}
+.sg-pricing .controls{display:grid;grid-template-columns:2fr 1fr 1fr;gap:20px}
+.sg-pricing .field{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sg-pricing .field label{font-size:13px;font-weight:600;color:var(--muted)}
+.sg-pricing .field input[type=number],.sg-pricing .field select{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
+.sg-pricing .field input[type=range]{width:100%;accent-color:var(--blue)}
+.sg-pricing .cards{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.sg-pricing .card{border:1px solid var(--line);border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:10px;min-width:0;background:var(--surface)}
+.sg-pricing .card.early{background:var(--tint);border-color:var(--tint-line)}
+.sg-pricing .line{display:flex;justify-content:space-between;gap:12px;font-size:14px;font-variant-numeric:tabular-nums}
+.sg-pricing .line span:first-child{color:var(--muted)}
+.sg-pricing .line span:last-child{font-weight:500;text-align:right;color:var(--ink)}
+.sg-pricing .line.free span:last-child{color:var(--good)}
+.sg-pricing .total{display:flex;justify-content:space-between;align-items:baseline;gap:12px;border-top:2px solid var(--tint-line);padding-top:12px;margin-top:2px}
+.sg-pricing .total .big{font-size:30px;background:var(--grad-deep);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sg-pricing .total span:first-child{font-size:14px;font-weight:600;color:var(--ink)}
+.sg-pricing .per{font-size:13px;color:var(--muted);text-align:right}
+.sg-pricing .msg{border:1px dashed var(--tint-line);background:var(--tint);border-radius:14px;padding:18px 20px;color:var(--body)}
+.sg-pricing .msg b{color:var(--blue-deep)}
+.sg-pricing .sec h3{margin-bottom:10px}
+.sg-pricing .cta{background:#030213;border-radius:24px;padding:36px;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;position:relative;overflow:hidden}
+.sg-pricing .cta::before{content:"";position:absolute;right:-120px;top:-160px;width:420px;height:420px;border-radius:50%;background:linear-gradient(135deg,#A59DFF,#4D8EF7);opacity:.35;filter:blur(70px)}
+.sg-pricing .cta > *{position:relative}
+.sg-pricing .cta h2{color:#fff}
+.sg-pricing .cta p{color:#C9C5D9;margin:6px 0 0;max-width:48ch}
+.sg-pricing .cta .btn.primary{background:var(--blue);box-shadow:none}
+.sg-pricing :focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+@media (max-width:720px){.sg-pricing .controls,.sg-pricing .cards,.sg-pricing .notes{grid-template-columns:1fr}.sg-pricing .calc{padding:18px}.sg-pricing .cta{padding:26px}}
+@media (max-width:520px){.sg-pricing th,.sg-pricing td{padding:12px}.sg-pricing .big{font-size:20px}}
+</style>
+</head>
+<body style="margin:0">
+<div class="sg-pricing">
+  <div class="topbar" aria-hidden="true"></div>
+  <div class="glow a" aria-hidden="true"></div>
+  <div class="glow b" aria-hidden="true"></div>
+<main>
+  <header>
+    <div class="brand"><img src="data:image/jpeg;base64,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" alt="Smile Genius"><span>smile genius</span></div>
+    <p class="eyebrow">Pricing for labs</p>
+    <h1>One monthly price. <span class="grad">Add case blocks as you grow.</span></h1>
+    <p class="lede">Every lab gets a base subscription with cases included. When volume goes up, add a block of cases and pay a lower price per case.</p>
+    <div class="hero-cta">
+      <a class="btn primary" href="#calc">Work out your price</a>
+      <a class="btn ghost" href="https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ3k-PyF2YJAkLgWVnqrDzqRhWBRsu9L7cVzYrmsE68uuR_QhpA0E_wRUtjjDWJTwpCElsZ4cIYw" target="_blank" rel="noopener">Book a call &rarr;</a>
+    </div>
+  </header>
+
+  <section aria-labelledby="plans">
+    <h2 id="plans">Choose your plan</h2>
+    <p class="sub">Early Adopter starts lower for two years, then moves to the Standard price and stays locked. Standard Lab starts at £199 for the first year.</p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th scope="col"></th>
+            <th scope="col" class="early">Early Adopter <span class="plan-tag">Best value</span></th>
+            <th scope="col">Standard Lab</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Year 1</th><td class="early"><span class="big">£129<small> / month</small></span></td><td><span class="big">£199<small> / month</small></span></td></tr>
+          <tr><th scope="row">Year 2</th><td class="early"><span class="big">£129<small> / month</small></span></td><td><span class="big">£229<small> / month</small></span></td></tr>
+          <tr><th scope="row">Year 3</th><td class="early"><span class="big">£199<small> / month</small></span></td><td><span class="big">£229<small> / month</small></span></td></tr>
+          <tr><th scope="row">Year 4 onwards</th><td class="early"><span class="big">£229<small> / month</small></span><br><small>Price locked</small></td><td><span class="big">£229<small> / month</small></span></td></tr>
+          <tr><th scope="row">Cases included each month</th><td class="early"><b>350</b> auto-cases</td><td><b>350</b> auto-cases</td></tr>
+          <tr><th scope="row">Goodwill allowance</th><td class="early">Up to 5% over your cases, no charge</td><td>Up to 5% over your cases, no charge</td></tr>
+          <tr><th scope="row">Cases beyond the allowance</th><td class="early">£0.85 per case</td><td>£0.85 per case</td></tr>
+          <tr><th scope="row">Integrations</th><td class="early"><span class="custom">Custom pricing</span></td><td><span class="custom">Custom pricing</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="blocks">
+    <h2 id="blocks">Case blocks</h2>
+    <p class="sub">A block is a monthly subscription added on top of your base plan. The monthly price below is charged each month for that block.</p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th scope="col">Block<small>cases per month</small></th>
+            <th scope="col" class="early num">Early Adopter<small>per case</small></th>
+            <th scope="col" class="early num">Early Adopter<small>monthly price</small></th>
+            <th scope="col" class="num">Standard<small>per case</small></th>
+            <th scope="col" class="num">Standard<small>monthly price</small></th>
+            <th scope="col" class="num">Early Adopter saves<small>per month</small></th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">250</th><td class="early num">£0.40</td><td class="early num"><b>£100</b></td><td class="num">£0.50</td><td class="num"><b>£125</b></td><td class="num">£25</td></tr>
+          <tr><th scope="row">500</th><td class="early num">£0.40</td><td class="early num"><b>£200</b></td><td class="num">£0.50</td><td class="num"><b>£250</b></td><td class="num">£50</td></tr>
+          <tr><th scope="row">1,000</th><td class="early num">£0.38</td><td class="early num"><b>£380</b></td><td class="num">£0.48</td><td class="num"><b>£480</b></td><td class="num">£100</td></tr>
+          <tr><th scope="row">2,500</th><td class="early num">£0.35</td><td class="early num"><b>£875</b></td><td class="num">£0.45</td><td class="num"><b>£1,125</b></td><td class="num">£250</td></tr>
+          <tr><th scope="row">10,000</th><td class="early num">£0.32</td><td class="early num"><b>£3,200</b></td><td class="num">£0.42</td><td class="num"><b>£4,200</b></td><td class="num">£1,000</td></tr>
+          <tr><th scope="row">15,000</th><td class="early num">£0.30</td><td class="early num"><b>£4,500</b></td><td class="num">£0.40</td><td class="num"><b>£6,000</b></td><td class="num">£1,500</td></tr>
+          <tr><th scope="row">More than 15,000</th><td class="early num custom" colspan="2">Custom pricing</td><td class="num custom" colspan="2">Custom pricing</td><td class="num">Talk to us</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="calc" id="calc">
+    <h2>Price calculator</h2>
+    <p class="sub">Enter your monthly cases to see what each plan costs. Leave the block on automatic to see the lowest monthly price.</p>
+    <div class="calc">
+      <div class="controls">
+        <div class="field">
+          <label for="cases">Cases per month</label>
+          <input type="number" id="cases" min="0" max="20000" step="10" value="1200" inputmode="numeric">
+          <input type="range" id="casesRange" min="0" max="16000" step="50" value="1200" aria-label="Cases per month slider">
+        </div>
+        <div class="field">
+          <label for="block">Case block</label>
+          <select id="block">
+            <option value="auto" selected>Automatic (lowest price)</option>
+            <option value="0">No block</option>
+            <option value="250">250 cases</option>
+            <option value="500">500 cases</option>
+            <option value="1000">1,000 cases</option>
+            <option value="2500">2,500 cases</option>
+            <option value="10000">10,000 cases</option>
+            <option value="15000">15,000 cases</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="year">Year of subscription</label>
+          <select id="year">
+            <option value="1" selected>Year 1</option>
+            <option value="2">Year 2</option>
+            <option value="3">Year 3</option>
+            <option value="4">Year 4 onwards</option>
+          </select>
+        </div>
+      </div>
+      <div id="out" aria-live="polite" style="display:flex;flex-direction:column;gap:28px"></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes" style="margin-bottom:18px">Good to know</h2>
+    <ul class="notes">
+      <li>Prices are in pounds sterling, charged monthly as a subscription.</li>
+      <li>Your monthly allowance is the 350 cases included in your plan plus any case block you add.</li>
+      <li>Usage up to 5% above your allowance is a goodwill allowance and costs nothing. Cases beyond that are charged at £0.85 each.</li>
+      <li>Each block is its own monthly subscription. You can move to a larger block as your volume grows.</li>
+      <li>Integrations, such as scanner and CAD connections, are priced for each lab. Ask us for a quote.</li>
+      <li>Labs above 15,000 cases a month get custom pricing.</li>
+    </ul>
+  </section>
+
+  <section class="cta" aria-label="Talk to us">
+    <div>
+      <h2>Not sure which plan fits?</h2>
+      <p>Book 15 minutes with the Smile Genius team and we&rsquo;ll work it out with your real case numbers.</p>
+    </div>
+    <a class="btn primary" href="https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ3k-PyF2YJAkLgWVnqrDzqRhWBRsu9L7cVzYrmsE68uuR_QhpA0E_wRUtjjDWJTwpCElsZ4cIYw" target="_blank" rel="noopener">Book a call &rarr;</a>
+  </section>
+</main>
+</div>
+
+<script>
+(function(){
+  var BLOCKS=[250,500,1000,2500,10000,15000];
+  var RATE={250:[0.40,0.50],500:[0.40,0.50],1000:[0.38,0.48],2500:[0.35,0.45],10000:[0.32,0.42],15000:[0.30,0.40]}; // [early, standard]
+  var BASE={early:[129,129,199,229],standard:[199,229,229,229]};
+  var BASECASES={early:350,standard:350};
+  var FREE=0, GOODWILL=0.05, OVER=0.85, CAP=15000;
+  var NAMES={early:'Early Adopter',standard:'Standard Lab'};
+
+  function r2(n){return Math.round(n*100)/100;}
+  function gbp(n){n=r2(n);return '£'+n.toLocaleString('en-GB',{minimumFractionDigits:Number.isInteger(n)?0:2,maximumFractionDigits:2});}
+  function num(n){return Math.round(n).toLocaleString('en-GB');}
+
+  function blockPrice(p,b){return b?r2(b*RATE[b][p==='early'?0:1]):0;}
+  function cost(p,year,cases,b){
+    var base=BASE[p][year-1];
+    var bp=blockPrice(p,b);
+    var allowance=BASECASES[p]+FREE+b;
+    var goodwill=Math.floor(allowance*GOODWILL);
+    var threshold=allowance+goodwill;
+    var charged=Math.max(0,Math.ceil(cases-threshold-1e-9));
+    var over=r2(charged*OVER);
+    return {p:p,year:year,base:base,block:b,bp:bp,allowance:allowance,goodwill:goodwill,threshold:threshold,charged:charged,over:over,total:r2(base+bp+over)};
+  }
+  function cheapest(p,year,cases){
+    var best=null,opts=[0].concat(BLOCKS);
+    for(var i=0;i<opts.length;i++){var c=cost(p,year,cases,opts[i]);if(!best||c.total<best.total)best=c;}
+    return best;
+  }
+  function pick(p,year,cases,sel){return sel==='auto'?cheapest(p,year,cases):cost(p,year,cases,parseInt(sel,10));}
+
+  function card(c,sel){
+    var blockLabel=c.block?num(c.block)+' case block':'No block';
+    if(sel==='auto')blockLabel+=' (lowest price)';
+    var per=c.total/Math.max(1,state.cases);
+    var h='<div class="card '+(c.p==='early'?'early':'')+'"><h3>'+NAMES[c.p]+'</h3>';
+    h+='<div class="line"><span>Base plan, year '+(state.year===4?'4 onwards':state.year)+'</span><span>'+gbp(c.base)+'</span></div>';
+    h+='<div class="line"><span>'+blockLabel+'</span><span>'+gbp(c.bp)+'</span></div>';
+    h+='<div class="line"><span>Monthly allowance</span><span>'+num(c.allowance)+' cases</span></div>';
+    h+='<div class="line free"><span>Goodwill allowance, '+Math.round(GOODWILL*100)+'%</span><span>+'+num(c.goodwill)+' cases free</span></div>';
+    h+='<div class="line"><span>Cases charged at '+gbp(OVER)+'</span><span>'+num(c.charged)+' = '+gbp(c.over)+'</span></div>';
+    h+='<div class="total"><span>Total per month</span><span class="big">'+gbp(c.total)+'</span></div>';
+    h+='<div class="per">'+(state.cases>0?gbp(per)+' per case across '+num(state.cases)+' cases':'')+'</div></div>';
+    return h;
+  }
+
+  var state={cases:1200,year:1,block:'auto'};
+
+  function render(){
+    var out=document.getElementById('out');
+    var cases=state.cases,year=state.year,sel=state.block;
+    if(cases>CAP){
+      out.innerHTML='<div class="msg"><b>Custom pricing.</b> Labs above '+num(CAP)+' cases a month get a price built for them. Ask us for a quote.</div>';
+      return;
+    }
+    var e=pick('early',year,cases,sel), s=pick('standard',year,cases,sel);
+    var h='<div class="cards">'+card(e,sel)+card(s,sel)+'</div>';
+
+    h+='<div class="sec"><h3>Monthly cost by year</h3><div class="scroll"><table><thead><tr><th scope="col">Year</th><th scope="col" class="num">Early Adopter</th><th scope="col" class="num">Standard Lab</th><th scope="col" class="num">Early Adopter saves</th></tr></thead><tbody>';
+    var te=0,ts=0,labels=['Year 1','Year 2','Year 3','Year 4'];
+    for(var y=1;y<=4;y++){
+      var ey=pick('early',y,cases,sel), sy=pick('standard',y,cases,sel);
+      te+=ey.total*12; ts+=sy.total*12;
+      h+='<tr'+(y===year?' class="best"':'')+'><th scope="row">'+labels[y-1]+(y===4?' onwards':'')+(y===year?'<span class="tag">Selected</span>':'')+'</th><td class="num"><b>'+gbp(ey.total)+'</b></td><td class="num"><b>'+gbp(sy.total)+'</b></td><td class="num">'+gbp(sy.total-ey.total)+'</td></tr>';
+    }
+    h+='<tr><th scope="row">First 4 years in total</th><td class="num"><b>'+gbp(te)+'</b></td><td class="num"><b>'+gbp(ts)+'</b></td><td class="num">'+gbp(ts-te)+'</td></tr>';
+    h+='</tbody></table></div></div>';
+    out.innerHTML=h;
+  }
+
+  var $c=document.getElementById('cases'),$r=document.getElementById('casesRange'),$b=document.getElementById('block'),$y=document.getElementById('year');
+  function readCases(){var v=parseInt($c.value,10);if(isNaN(v)||v<0)v=0;if(v>20000)v=20000;return v;}
+  $c.addEventListener('input',function(){state.cases=readCases();$r.value=Math.min(state.cases,16000);render();});
+  $r.addEventListener('input',function(){state.cases=parseInt($r.value,10);$c.value=state.cases;render();});
+  $b.addEventListener('change',function(){state.block=$b.value;render();});
+  $y.addEventListener('change',function(){state.year=parseInt($y.value,10);render();});
+  render();
+})();
+</script>
+</body>
+</html>

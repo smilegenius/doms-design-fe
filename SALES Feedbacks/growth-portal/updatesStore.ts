@@ -28,7 +28,7 @@ export interface Update {
   custom?: boolean;
 }
 
-export const BUCKETS = ['Cases & intake', 'Billing', 'Design & CAD', 'Settings & notifications', 'Navigation'] as const;
+export const BUCKETS = ['Cases & intake', 'Case workflow (V2)', 'Billing', 'Design & CAD', 'Settings & notifications', 'Navigation'] as const;
 
 export const BUILT_IN: Update[] = [
   {
@@ -93,47 +93,99 @@ export const BUILT_IN: Update[] = [
     ],
   },
   {
-    id: 'billing-home', bucket: 'Billing', title: 'Billing: lab invoicing and Xero sync', tag: 'new',
-    note: 'A new Billing item in the sidebar. Every case is invoiced on dispatch, posted to Xero and emailed; payments are read back from Xero; one statement per account goes out at month end. Billing home is the admin\'s daily inbox: paid, pending and overdue totals, flagged invoices with bulk approve, the On hold queue, smart-assist nudges and the month-end countdown. Admins only. Xero and QuickBooks are simulated.',
+    id: 'v2-workflow', bucket: 'Case workflow (V2)', title: 'V2: case handoff workflow (on top of V0)', tag: 'new',
+    note: 'From the spec "Lab Case Handoff Workflow" (23 Nov). Switch versions with V0 · V1 · V2 at the bottom of every Growth page: V0 is the foundation, V1 adds the simpler Billing, V2 adds this workflow (with V0\'s Billing). After a case is Accepted, every service line (not the case) moves through its service\'s route of stages (Crown: Model → Design → Mill → Sinter → Ceramics → Quality Control), with one owner at a time. Done → next is one tap and the next person is assigned automatically (the stage\'s default person, or the same person continues; otherwise it waits In Queue for the team). Several lines can be pushed on at once. Block puts a line On Hold (Lab), with a reason, or On Hold (Practice), which notifies the practice; releasing returns it to where it was. Send back returns a line to an earlier stage with a reason (logged as rework); Skip passes a stage that isn\'t needed. The stage is a label on In Queue / In Production, so no new statuses; the clinic keeps seeing Submitted until Shipped.',
     examples: [
-      { label: 'Billing home', to: '/growth/billing' },
-      { label: 'Flagged invoices', to: '/growth/billing?filter=pending' },
-      { label: 'An invoice (PDF, payments, credit note, void)', to: '/growth/billing/invoices/INV-2418' },
+      { label: 'Dashboard: work in the lab today', to: '/growth?v=v2' },
+      { label: 'A case\'s workflow (lines, notes, timeline)', to: '/growth/cases/CASE-053?sf=workflow&v=v2' },
     ],
   },
   {
-    id: 'billing-case', bucket: 'Billing', title: 'Billing tab on the case', tag: 'new',
-    note: 'Next to Order form and Lab Documents: the lines with where each price came from (one click explains it), the NHS / private toggle, stages billed so far for staged work, bought-in parts priced by the item\'s rule, the invoice status, "Bill now", a possible-remake question and the on-hold banner.',
+    id: 'v2-queue', bucket: 'Case workflow (V2)', title: 'My queue, notes you must read, bench mode', tag: 'new',
+    note: 'My queue (sidebar) opens to what you\'re working on and what\'s coming to you, by due date, with a red dot for unread notes and overdue in red; the intake owner sees To accept first. "Viewing as" switches person for the demo. Notes are either internal (amber) or to the dentist (blue), for the whole case or one line, and can be pinned to a stage ("for Ceramics"). With note acknowledgement on (a lab setting, Simply C&B\'s tick-box), the new owner ticks unread notes before the line can move; a dentist reply that changes the prescription counts as unread. Each docket line has a QR (Scan, in the demo) that opens bench mode on a tablet or phone: pick your name, enter a 4-digit PIN (Maria\'s is 4444 in the demo), then big buttons: Pick up, Done, Block, Mark shipped. Picking up a line someone else holds asks first and logs a takeover.',
+    examples: [
+      { label: 'My queue', to: '/growth/queue?v=v2' },
+      { label: 'Overdue lines', to: '/growth/queue?filter=overdue&v=v2' },
+      { label: 'Bench mode (a docket QR)', to: '/growth/bench/CASE-053%3Arr-s1?v=v2' },
+    ],
+  },
+  {
+    id: 'v2-calendar', bucket: 'Case workflow (V2)', title: 'Delivery calendar and dashboard blocks', tag: 'new',
+    note: 'The delivery calendar (sidebar) shows one card per service line on its requested delivery date, week or month, with No date set on the left and Completed on the right; overdue lines roll forward to today with a badge; Not Approved and Cancelled are hidden behind a one-line banner. Filters: assigned (Me, a person, everyone), service, practice, status. Click a card to open it in place (date, reassign, the line\'s actions). On Overview, V2 adds the spec\'s blocks above the existing dashboard: Immediate Actions (overdue, due today + tomorrow, to accept with "on the way", on hold split Practice / Lab with the oldest hold, no delivery date), Work in the lab (In Queue / In Production per stage, plus Unassigned), This week (due per day) and Case processing (time to production, turnaround in days). Every number opens the lines behind it; all counts are service lines. The sandbox\'s Overview is a different screen from the one in the spec, so the blocks sit above it rather than inside it.',
+    examples: [
+      { label: 'Delivery calendar', to: '/growth/calendar?v=v2' },
+      { label: 'Month view', to: '/growth/calendar?view=month&v=v2' },
+      { label: 'Work in the lab: unassigned lines', to: '/growth/queue?filter=unassigned&v=v2' },
+    ],
+  },
+  {
+    id: 'v2-settings', bucket: 'Case workflow (V2)', title: 'Settings › Workflow, and invoicing per service line', tag: 'new',
+    note: 'Admins only: every service gets a simple default route, editable (rename, reorder, add or remove stages; Quality Control stays last) with a default person per stage, "same person continues" or "anyone". Route edits apply forward to lines already in flight. Also: which route each service follows, the intake owner, note acknowledgement, the due-date buffer (requested delivery minus N days), shipping lines one at a time, the bench PIN, and assignment notifications (in-app and email per person). Billing in V2 is V0\'s, with one change from the spec: an invoice per service line, raised when the clinic marks the line received (Delivered), instead of one per case on Shipped.',
+    examples: [
+      { label: 'Settings › Workflow', to: '/growth/settings?tab=workflow&v=v2' },
+    ],
+  },
+  {
+    id: 'billing-v1', bucket: 'Billing', title: 'Billing V1: the simpler design', tag: 'new',
+    note: 'Billing rebuilt around the lab\'s three jobs (get the bill out, get paid, know who\'s slipping) in four places: Home, Invoices, Practices, Settings. Same data and rules as before; nothing was removed, most of it now appears only when it matters. Find (⌘K, top of Billing) answers "how do I…" in the lab\'s own words and shows the path as well as going there, so labs find things without asking us. Demo-only controls (view as accountant, pretend Xero or bank events, a scan from a new practice, reset) moved into a Demo button, bottom left. The earlier design is V0: "Design: V1 · back to V0" in the Billing header switches back (and "try V1" returns).',
+    examples: [
+      { label: 'Billing (V1)', to: '/growth/billing?v=v1' },
+      { label: 'Find: try "refund", "own prices" or "Leeds"', to: '/growth/billing?v=v1' },
+    ],
+  },
+  {
+    id: 'billing-home', bucket: 'Billing', title: 'Home: the month in three steps, and Needs you', tag: 'changed',
+    note: 'Three numbers (owed, invoiced this month, paid this month), then the month in three steps: invoice the practices billed monthly, send statements (one check screen, then Send all), payments in. Below, one Needs you list with no sections: most money first, each item a sentence and a button (a practice new from a scan, something changed in Xero, invoices ready to send as one "Send all", an invoice to check, cases on hold, a bounced email, who\'s sending less). Empty means all clear. A "How do I…" strip links the common jobs.',
+    examples: [
+      { label: 'Home', to: '/growth/billing?v=v1' },
+    ],
+  },
+  {
+    id: 'billing-invoices', bucket: 'Billing', title: 'Invoices: one list, and Fix this invoice', tag: 'changed',
+    note: 'One list with chips: Waiting for you · Unpaid · Overdue · Paid · All, plus search and Download. Statuses are plain words (Ready to send, Needs a look, Sent, Overdue, Paid). Tick invoices and the actions appear: Approve & send, Send a copy (to the practice or any address), Mark paid (no accounting tool), Archive (paid or cancelled; Show archived brings them back). Practices billed monthly show as one banner ("3 shipped cases ready") instead of a tab. On an invoice, one button, Fix this invoice, asks what\'s wrong in plain words and does the right correction: a price or line is wrong (corrected copy, same date and prices), wrong practice (moves it), give money back (credit note, CN series), or they paid.',
+    examples: [
+      { label: 'Unpaid invoices', to: '/growth/billing/invoices?show=unpaid&v=v1' },
+      { label: 'Overdue', to: '/growth/billing/invoices?show=overdue&v=v1' },
+      { label: 'Ready to invoice (monthly practice)', to: '/growth/billing/invoices?show=to-invoice&v=v1' },
+      { label: 'Paid: tick and Archive', to: '/growth/billing/invoices?show=paid&v=v1' },
+    ],
+  },
+  {
+    id: 'billing-practices', bucket: 'Billing', title: 'Practices: accounts and insights in one place', tag: 'new',
+    note: 'Accounts and Insights merged. The list shows each practice\'s health (New, Growing, Steady, Slowing, Gone quiet, against its own history), this month vs usual, what it owes and how fast it pays, with filters (owe money, overdue, slowing, billed monthly), a Dentists view, and Download (the list, billing by practice and dentist with the NHS / private split, and the reports). "Worth a call" sits on top. Practices that arrived with a scan show apart as New from scans: the practice was created so the case isn\'t held up, and its invoices wait until someone answers three questions (billing email, per case or monthly, terms). Each practice has one page: Send statement (any of the last three months, preview first), Send invoices (pick which, to any address), Add a note; then Overview, Invoices & statements, Dentists (who pays), Prices and Setup. Each dentist has a page too: send their invoices, or their statement if they pay directly.',
+    examples: [
+      { label: 'Practices', to: '/growth/billing/practices?v=v1' },
+      { label: 'A practice that is slowing (Leeds)', to: '/growth/billing/practices/acc-p-smile-genius-leeds?v=v1' },
+      { label: 'Monthly practice (London Central)', to: '/growth/billing/practices/acc-p-smile-genius-london-central?v=v1' },
+      { label: 'Overseas, EUR, 45-day terms (Dublin)', to: '/growth/billing/practices/acc-p-smile-genius-dublin?tab=setup&v=v1' },
+      { label: 'Dentist who pays directly (Dr. Campbell)', to: '/growth/billing/dentists/Dr.%20Campbell?v=v1' },
+      { label: 'Dentists', to: '/growth/billing/practices?view=dentists&v=v1' },
+    ],
+  },
+  {
+    id: 'billing-pricing', bucket: 'Billing', title: 'Prices: per practice, standard, promotions', tag: 'changed',
+    note: 'Account-based pricing lives on the practice\'s page › Prices: start from a % off everything, copy another practice\'s prices, or type their price on a few items (empty = your standard price), with the difference shown per item and one click back to standard prices. Your standard prices (catalog, dated price changes, bulk changes, import) are in Settings › Prices, with a list of practices that have their own. Promotions and volume discounts sit under Settings › More options: off until switched on, then two quick starts (10% off this month, 5% off over 50 units) and the full editor.',
+    examples: [
+      { label: 'A practice\'s own prices (London Central)', to: '/growth/billing/practices/acc-p-smile-genius-london-central?tab=prices&v=v1' },
+      { label: 'Give Leeds its own prices', to: '/growth/billing/practices/acc-p-smile-genius-leeds?tab=prices&v=v1' },
+      { label: 'Standard prices', to: '/growth/billing/settings/prices?v=v1' },
+      { label: 'Promotions and volume discounts', to: '/growth/billing/settings/promotions?v=v1' },
+    ],
+  },
+  {
+    id: 'billing-case', bucket: 'Billing', title: 'Billing tab on the case', tag: 'changed',
+    note: 'Lines priced from the account\'s list with where each price came from, NHS or private, stages billed so far, bought-in parts, the invoice number and status once billed (or "In To invoice" for practices billed monthly), Bill now, a possible-remake question and the on-hold banner. Remakes, NHS-or-private-unclear and scanner order types are checked on every new case.',
     examples: [
       { label: 'Staged denture (billed each stage)', to: '/growth/cases/CASE-DN-3001?sf=billing' },
       { label: 'Possible remake', to: '/growth/cases/CASE-RS-2002?sf=billing' },
     ],
   },
   {
-    id: 'billing-accounts', bucket: 'Billing', title: 'Billing accounts, dentists, limits and holds', tag: 'new',
-    note: 'Add accounts in three shapes: a practice, a dentist at one practice who pays their own bills, or a dentist who floats across several practices. Map dentists to practices from either side (practice page: add a dentist, who pays; dentist page: practices); cases not yet invoiced move to whoever now pays, and dentists sending cases from a practice they aren\'t linked to show as "Unlinked". Each account has its price list, emails, Xero contact (matched or created), currency, statement of manufacture, balance and ageing, statements and old-system balances. Optional limits count unpaid invoices plus work in progress, warn early, and can pause new cases; a payment in Xero lifts the hold.',
+    id: 'billing-setup', bucket: 'Billing', title: 'Settings: three questions, then More options', tag: 'changed',
+    note: 'The basics are three questions: where do you keep your books (Xero, QuickBooks, Sage, FreeAgent, or none, then optionally Revolut or Wise), how do most practices pay (per case or monthly, with a confirm before it changes every practice), and when should they pay. Everything else has a default and one plain sentence under More options: check invoices before they\'re sent, let the accountant check them in Xero first, invoice layout, invoice on ship or completion, warranty remakes, statement of manufacture, statement day, promotions, credit limits, the Monday email and the thresholds that flag problems. "Where things live" points to the practice page for anything one practice does differently. Simulated: the tools, the bank and their notices.',
     examples: [
-      { label: 'Add an account', to: '/growth/billing/accounts' },
-      { label: 'Dentist across practices (Dr. Campbell)', to: '/growth/billing/accounts/acc-d-dr-campbell' },
-      { label: 'Practice with its dentists (Manchester)', to: '/growth/billing/accounts/acc-p-smile-genius-manchester' },
-      { label: 'Account on hold (Birmingham 2)', to: '/growth/billing/accounts/acc-p-smile-genius-birmingham-2' },
-      { label: 'Overseas practice in EUR', to: '/growth/billing/accounts/acc-p-smile-genius-dublin' },
-    ],
-  },
-  {
-    id: 'billing-pricing', bucket: 'Billing', title: 'Catalog, promotions and tiers', tag: 'new',
-    note: 'Add catalog items and edit them in full (code, department, unit, NHS and private prices, billing per stage, component pricing, VAT), archive items without touching old invoices, and change prices from a date: today, back-dated, or scheduled for later, with a price history per item. "Change prices" raises or lowers a department or the whole catalog by a percentage with rounding and a preview. Cases are always priced as of the day they were received. Plus CSV import, order types mapped once, and optional promotions and volume tiers.',
-    examples: [
-      { label: 'Catalog', to: '/growth/billing/catalog' },
-      { label: 'Promotions and tiers', to: '/growth/billing/pricing' },
-    ],
-  },
-  {
-    id: 'billing-setup', bucket: 'Billing', title: 'Billing settings and reports', tag: 'new',
-    note: 'The lab settings with their defaults, connecting or disconnecting Xero or QuickBooks, email templates with the lab logo, the sync and email logs, and six reports Xero can\'t give (unbilled work, account trends, given away, remakes, product mix, cash forecast) with CSV export and the Monday email.',
-    examples: [
-      { label: 'Billing settings', to: '/growth/billing/settings' },
-      { label: 'Reports', to: '/growth/billing/reports' },
+      { label: 'The basics', to: '/growth/billing/settings?v=v1' },
+      { label: 'More options', to: '/growth/billing/settings/more?v=v1' },
     ],
   },
   {
@@ -214,11 +266,17 @@ const SUMMARY: Record<string, string> = {
   'bulk-actions': 'Tick cases or drafts to accept, download or print them, with saved defaults.',
   'lab-documents': 'Lab logo on the order form, a short conformity statement and a case label.',
   'forwarded-emails': 'Forwarded emails become drafts: make a new case or add to an existing one.',
-  'billing-home': 'Every case invoiced on dispatch, posted to Xero, statements at month end.',
+  'v2-workflow': 'Service lines move through stages with one-tap handoffs; switch V0 · V1 · V2 at the bottom.',
+  'v2-queue': 'My queue, notes to tick before starting, and bench mode with a PIN.',
+  'v2-calendar': 'Delivery calendar by due date, and Work in the lab on the dashboard.',
+  'v2-settings': 'Routes and default people per stage; one invoice per service line on Delivered.',
+  'billing-v1': 'Billing in four places, ⌘K Find for "how do I…", and a switch back to V0.',
+  'billing-home': 'The month in three steps, and one Needs you list (most money first).',
+  'billing-invoices': 'One list with chips; Fix this invoice asks what\'s wrong in plain words.',
+  'billing-practices': 'Accounts + insights: send statements or invoices from any practice or dentist.',
   'billing-case': 'Prices, NHS/private, stages and parts on the case, with Bill now.',
-  'billing-accounts': 'Practices or dentists as accounts, who pays, limits and holds.',
-  'billing-pricing': 'Add and edit items, prices from a date, bulk changes, promotions and tiers.',
-  'billing-setup': 'Billing settings, Xero connection, email templates and six reports.',
+  'billing-pricing': 'Per-practice prices in a few clicks; promotions under More options.',
+  'billing-setup': 'Three questions to set up; everything else under More options.',
   'cad-board': 'Every digital case as a CAD order, tracked across a drag-and-drop board.',
   'cad-case': 'The CAD order on the case: bring the design back, send it for approval.',
   'cad-partners': 'Send a case to a design or milling partner through a no-login link.',

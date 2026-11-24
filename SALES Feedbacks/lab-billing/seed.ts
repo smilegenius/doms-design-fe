@@ -4,7 +4,7 @@ import { getIntakeConfig } from '../intake-form/intakeStore';
 import type { BillingState, CatalogItem, Department } from './types';
 import { billingCases, buildStatement, dentistAccountId, exposure, IN_PROGRESS, isDispatched, practiceAccountId } from './engine';
 import { addDays, endOfMonth, fmtMonth as fmtMonthName, hash, lastWorkingDay, monthOf, prevMonth, round2, startOfMonth, today } from './format';
-import { applyRemake, approve, createInvoice, ensureCase, ensurePracticeAccount, log, pay, skipsInvoice, syncAll } from './ops';
+import { addScanPractice, applyRemake, approve, createInvoice, createMonthInvoice, ensureCase, ensurePracticeAccount, log, pay, skipsInvoice, syncAll } from './ops';
 
 // ── The Billing demo ─────────────────────────────────────────────────────────
 // Built from the Growth case list. The lab went live on Smile Genius 75 days
@@ -13,7 +13,10 @@ import { applyRemake, approve, createInvoice, ensureCase, ensurePracticeAccount,
 // recent billing dates, and five months of completed cases (no longer in the
 // list) give the history. A few exceptions are left for the admin.
 
-export const BILLING_VERSION = 14;
+export const BILLING_VERSION = 18;
+
+/** The demo's month-end account (one invoice a month, like Digident wants). */
+export const MONTH_END_PRACTICE = 'Smile Genius London Central';
 
 /** The dentist in the demo who pays their own bills. */
 export const DIRECT_DENTIST = 'Dr. Campbell';
@@ -67,6 +70,8 @@ export function seedBilling(): BillingState {
       vatRegistered: false, vatNumber: 'GB 284 1937 62', invoiceOn: 'dispatched', approval: 'review-30', statementDay: 'last-working',
       terms: '30', customTermsDays: 45, som: 'per-account', warrantyRemakes: 'none', prefix: 'INV-',
       limitWarnPct: 80, unusualPricePct: 20, remakeDays: 30, notBilledDays: 2, passThroughMarkupPct: 25, courierAddOn: false,
+      // v2 defaults: post as approved, detailed layout; promotions and tiers off. This demo lab asked for credit limits.
+      postAs: 'approved', layout: 'detailed', promotionsOn: false, limitsOn: true,
     },
     setup: { provider: 'xero', org: `${lab} Ltd`, plan: 'standard', steps: { connect: true, import: true, match: true, date: true, wip: true, test: true }, switchOver: live, liveAt: live, testInvoiceId: null },
     accounts: [], catalog: CATALOG.map(i => ({ ...i })), departments: DEPARTMENTS.map(d => ({ ...d })),
@@ -78,7 +83,8 @@ export function seedBilling(): BillingState {
       limit: { subject: 'Your account with {lab}', body: 'Hello {account},\n\nYour account has reached its limit of {limit}, so new cases are on hold until a payment is received. Cases already in progress carry on as normal.\n\nPlease get in touch if you have any questions.\n{lab}' },
     },
     monday: { enabled: true, to: 'owner@brightsmilelab.co.uk', time: '07:30' },
-    nextNumber: 2418, firstStatementPreviewed: true, dismissed: [],
+    nextNumber: 2418, nextCredit: 1, firstStatementPreviewed: true, dismissed: [],
+    issues: [], bank: null, bankPayments: [], payers: {}, viewAs: 'admin',
   };
   log(s, 'read', `Connected to Xero organisation "${lab} Ltd": 214 contacts, 18 account codes, 6 tax rates; last invoice INV-2417`, addDays(live, -3));
 
@@ -114,12 +120,25 @@ export function seedBilling(): BillingState {
   Object.assign(s.accounts.find(a => a.id === practiceAccountId('Smile Genius London Central')) ?? {}, { priceListId: 'pl-london' });
   Object.assign(s.accounts.find(a => a.id === practiceAccountId('Smile Genius Manchester')) ?? {}, { som: 'on' });
   const leeds = s.accounts.find(a => a.id === practiceAccountId('Smile Genius Leeds'));
+  // Every practice the lab already bills has been checked; V1 shows one new one from a scan below.
+  s.accounts.forEach(a => { a.confirmedAt = live; delete a.fromScan; });
   log(s, 'contact', `Matched ${practices.length} practices and 1 dentist to Xero contacts; created "Smile Genius Dublin" (EUR)`, addDays(live, -2));
+
+  // v2: billing and reception contacts kept apart; one practice bills monthly; Dublin has 45-day terms.
+  for (const a of s.accounts.filter(a => a.kind === 'practice')) {
+    const dom = a.emails[0]?.split('@')[1] ?? 'practice.co.uk';
+    a.receptionEmail = `reception@${dom}`;
+    a.receptionUpdates = hash(a.id) % 3 !== 0;
+  }
+  const monthly = s.accounts.find(a => a.id === practiceAccountId(MONTH_END_PRACTICE));
+  if (monthly) monthly.invoiceMode = 'month-end';
+  const dublin = s.accounts.find(a => a.id === practiceAccountId('Smile Genius Dublin'));
+  if (dublin) dublin.termsDays = 45;
 
   // Billing records, in the order cases arrived.
   const sorted = [...cases].sort((a, b) => received(a).localeCompare(received(b)));
   for (const c of sorted) {
-    const m = ensureCase(s, c, received(c));
+    const m = ensureCase(s, c, received(c), false);
     m.receivedAt = received(c);
     if (c.source === 'scanner') {
       m.scannerOrderType = `${c.scanner} · ${c.serviceItems?.[0]?.name ?? c.services[0]}`;
@@ -128,6 +147,10 @@ export function seedBilling(): BillingState {
     }
     if (isDispatched(s, c)) m.dispatchedAt = [addDays(m.receivedAt, 7 + (hash(c.id) % 9)), addDays(t, -1)].sort()[0];
   }
+  // The month-end account's shipped cases this month wait in To invoice (Invoice month).
+  if (monthly) sorted.filter(c => s.cases[c.id].accountId === monthly.id && s.cases[c.id].dispatchedAt).forEach((c, i) => {
+    s.cases[c.id].dispatchedAt = [addDays(t, -(1 + i * 2)), startOfMonth(t)].sort()[1];
+  });
   // Possible remakes: same patient and item within the remake window.
   for (const c of sorted) {
     const m = s.cases[c.id];
@@ -174,6 +197,7 @@ export function seedBilling(): BillingState {
   // History: walk dispatches in date order through the same steps as live use.
   const dispatched = [...sorted, ...history].filter(c => s.cases[c.id].dispatchedAt).sort((a, b) => s.cases[a.id].dispatchedAt!.localeCompare(s.cases[b.id].dispatchedAt!));
   let oldNo = 2310;
+  const monthlyPot: Record<string, { c: Case; meta: (typeof s.cases)[string] }[]> = {};
   for (const c of dispatched) {
     const m = s.cases[c.id];
     const at = m.dispatchedAt!;
@@ -187,6 +211,12 @@ export function seedBilling(): BillingState {
       continue;
     }
     if (m.skipAuto) continue;
+    // Month-end account: past months become one invoice each (below); this month waits in To invoice.
+    if (monthly && m.accountId === monthly.id) {
+      if (monthOf(at) === monthOf(t)) continue;
+      (monthlyPot[monthOf(at)] ??= []).push({ c, meta: m });
+      continue;
+    }
     if (m.remakeOf) {
       applyRemake(s, c, m, hash(c.id) % 3 ? 'no-charge' : 'charge');
       if (skipsInvoice(s, m)) continue; // remake under warranty: no invoice
@@ -198,8 +228,15 @@ export function seedBilling(): BillingState {
       approve(s, inv, [addDays(at, 1), t].sort()[0], 'Sajid Mahmood');
     }
   }
+  // The month-end account's past months: one invoice each, on the last working day.
+  for (const ym of Object.keys(monthlyPot).sort()) {
+    const day = lastWorkingDay(ym);
+    const inv = createMonthInvoice(s, monthly!.id, monthlyPot[ym].filter(x => !(x.meta.remakeDecision === 'no-charge')), day);
+    if (inv && inv.status !== 'sent') { inv.flags = []; inv.status = 'draft'; approve(s, inv, day, 'Sajid Mahmood'); }
+  }
   // Staged items billed per stage (the partial denture's finished stages).
-  syncAll(s, t);
+  // The demo seed is the same in every version (V2's per-line invoicing applies from here on).
+  syncAll(s, t, false);
   for (const inv of s.invoices) if (inv.stage && inv.status === 'draft') approve(s, inv, inv.createdAt, 'Sajid Mahmood');
 
   // Payments read back from Xero, by each account's habit.
@@ -209,17 +246,22 @@ export function seedBilling(): BillingState {
     if (d == null) continue;
     const at = addDays(inv.issuedAt, d);
     if (at > t) continue;
-    if (hash(inv.id) % 11 === 0) pay(s, inv, round2(inv.lines.reduce((n, l) => n + l.qty * l.unitPrice, 0) / 2), at);
-    else pay(s, inv, 1e9, at);
+    if (hash(inv.id) % 11 === 0) {
+      // A part-payment, with the rest paid about three weeks later (if that's happened yet).
+      pay(s, inv, round2(inv.lines.reduce((n, l) => n + l.qty * l.unitPrice, 0) / 2), at);
+      if (addDays(at, 20) <= t) pay(s, inv, 1e9, addDays(at, 20));
+    } else pay(s, inv, 1e9, at);
   }
   // Older old-system balances: mostly paid in Xero since.
-  for (const x of s.xeroOnly) if (hash(x.number) % 2 && x.accountId !== practiceAccountId('Smile Genius Birmingham 2')) x.paid = x.amount;
+  // Old-system balances: paid in Xero since, except at the two slow payers (Birmingham 2 has stopped; Glasgow is slowing).
+  const slowIds = [practiceAccountId('Smile Genius Birmingham 2'), practiceAccountId('Smile Genius Glasgow')];
+  for (const x of s.xeroOnly) if (!slowIds.includes(x.accountId) || hash(x.number) % 2) { if (x.accountId === slowIds[0]) continue; x.paid = x.amount; x.paidAt = [addDays(x.date, 20 + (hash(x.number) % 25)), t].sort()[0]; }
 
   // A credit note on one paid invoice (a shade adjustment).
   const cnTarget = s.invoices.find(i => i.status === 'paid' && i.lines.length > 0 && i.issuedAt! < addDays(t, -20));
   if (cnTarget) {
     const amt = round2(cnTarget.lines[0].unitPrice * 0.25);
-    cnTarget.creditNotes.push({ id: 'cn-seed', number: `CN-${s.nextNumber++}`, at: addDays(cnTarget.issuedAt!, 9), amount: amt, reason: 'Shade adjustment agreed with the practice', full: false });
+    cnTarget.creditNotes.push({ id: 'cn-seed', number: `CN-${String(s.nextCredit++).padStart(4, '0')}`, at: addDays(cnTarget.issuedAt!, 9), amount: amt, reason: 'Shade adjustment agreed with the practice', full: false });
     cnTarget.timeline.push({ at: addDays(cnTarget.issuedAt!, 9), text: `Credit note for ${amt.toFixed(2)}: shade adjustment, posted to Xero` });
     log(s, 'credit', `Credit note on ${cnTarget.number} posted`, addDays(cnTarget.issuedAt!, 9));
   }
@@ -250,6 +292,15 @@ export function seedBilling(): BillingState {
     man.limit = { amount: Math.ceil(ex.total / 0.86 / 500) * 500, overdueDays: null, atLimit: 'notify', tellPractice: false, message: '' };
   }
 
+  // Payment reconciliation: one invoice was edited in Xero since it was posted (Needs you).
+  const edited = s.invoices.find(i => i.status === 'sent' && i.issuedAt && i.issuedAt >= addDays(t, -14) && !i.cases);
+  if (edited) {
+    const tot = round2(edited.lines.reduce((n, l) => n + l.qty * l.unitPrice * (1 + l.vatPct / 100), 0));
+    const theirs = round2(tot - Math.max(5, Math.round(tot * 0.1)));
+    s.issues.push({ id: 'is-seed-edit', at: addDays(t, -1), kind: 'edited-in-tool', invoiceId: edited.id, ours: `Total ${tot.toFixed(2)}`, theirs: `Total ${theirs.toFixed(2)} (a line was changed in Xero)`, theirsTotal: theirs });
+    log(s, 'read', `${edited.number} was edited in Xero`, addDays(t, -1));
+  }
+
   // Last month's statements went out on the statement day.
   const last = prevMonth(monthOf(t));
   for (const a of s.accounts.filter(a => a.kind === 'practice' || a.payer === 'dentist')) {
@@ -262,6 +313,8 @@ export function seedBilling(): BillingState {
   log(s, 'read', `Statements for ${last} built from Xero (including old-system balances) and sent`, lastWorkingDay(last));
   // Leeds' statement email bounced (its accounts address changed).
   if (leeds) leeds.bounced = [{ at: lastWorkingDay(last), email: leeds.emails[0], what: `Statement for ${fmtMonthName(last)}` }];
+  // V1: a scan came in yesterday from a practice the lab hasn't billed before.
+  addScanPractice(s, 'Riverside Dental Care', 'Dr. Okafor', addDays(t, -1));
   s.emails.sort((a, b) => b.at.localeCompare(a.at));
   s.sync.sort((a, b) => b.at.localeCompare(a.at));
   return s;

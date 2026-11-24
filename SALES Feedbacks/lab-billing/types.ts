@@ -3,7 +3,8 @@
 // account at month end, settings at three levels (lab → account → item).
 // Everything is mock data in this browser; Xero / QuickBooks are simulated.
 
-export type Provider = 'xero' | 'quickbooks';
+export type Provider = 'xero' | 'quickbooks' | 'sage' | 'freeagent';
+export type Bank = 'revolut' | 'wise';
 export type Currency = 'GBP' | 'EUR' | 'USD';
 export type OrderKind = 'NHS' | 'Private';
 export type Unit = 'per unit' | 'per arch' | 'per case' | 'per item';
@@ -28,6 +29,13 @@ export interface LabBillingSettings {
   notBilledDays: number;
   passThroughMarkupPct: number;
   courierAddOn: boolean;
+  /** v2: how approved invoices land in the accounting tool (draft only when the lab's accountant wants to sign off there). */
+  postAs: 'approved' | 'draft';
+  /** v2: invoice layout. Simple = one line per case; detailed = one line per product. */
+  layout: 'simple' | 'detailed';
+  /** v2: features most labs don't need stay off until a lab asks. */
+  promotionsOn: boolean;
+  limitsOn: boolean;
 }
 
 export interface AccountLimit {
@@ -60,6 +68,19 @@ export interface BillingAccount {
   som: 'inherit' | 'on' | 'off';
   stagedOverride?: Record<string, 'end' | 'each'>;
   bounced?: { at: string; email: string; what: string }[];
+  /** v2: per case on dispatch (default), or one invoice a month from "To invoice". */
+  invoiceMode?: 'per-case' | 'month-end';
+  /** v2: payment terms for this account (days); empty = the lab's terms. */
+  termsDays?: number | null;
+  /** v2: reception gets status updates (received, accepted, delivered); invoices go to `emails` only. */
+  receptionEmail?: string;
+  receptionUpdates?: boolean;
+  /** v2: notes from Insights' Who to call. */
+  notes?: { at: string; by: string; text: string }[];
+  /** V1: created automatically when a scan arrived from a practice we hadn't billed before. */
+  fromScan?: boolean;
+  /** V1: a person checked who to bill (email, who pays, rhythm). Until then its invoices wait. */
+  confirmedAt?: string;
 }
 
 export interface CatalogItem {
@@ -140,6 +161,16 @@ export interface CreditNote { id: string; number: string; at: string; amount: nu
 
 export interface Invoice {
   id: string;
+  /** v2: a month-end invoice covers several cases (caseId is the first). */
+  cases?: string[];
+  /** v2: settled and cleared from view (still in statements and reports). */
+  archived?: boolean;
+  /** v2: an Edit (void and reissue) keeps the original issue date. */
+  keepIssuedAt?: string;
+  /** V2 workflow: the service line (service item id) this invoice is for. */
+  lineOf?: string;
+  /** v2: posted to the accounting tool as a draft for the accountant. */
+  postedAsDraft?: boolean;
   /** Set on approval (numbering continues from Xero). */
   number: string | null;
   caseId: string;
@@ -170,7 +201,7 @@ export interface Invoice {
 }
 
 /** An invoice that lives in Xero but not in Smile Genius (from the old system, or raised in Xero). */
-export interface XeroOnlyInvoice { number: string; accountId: string; date: string; due: string; amount: number; paid: number; currency: Currency; from: 'old-system' | 'xero' }
+export interface XeroOnlyInvoice { number: string; accountId: string; date: string; due: string; amount: number; paid: number; currency: Currency; from: 'old-system' | 'xero'; /** v2: when it was paid (statements count it on its real date). */ paidAt?: string }
 
 export interface Statement {
   id: string;
@@ -184,6 +215,8 @@ export interface Statement {
   credits: { number: string; date: string; amount: number }[];
   payments: { ref: string; date: string; amount: number }[];
   closing: number;
+  /** v2: invoices in the month, subtotalled by dentist (practice statements). */
+  byDentist?: { dentist: string; amount: number; count: number }[];
   ageing: { current: number; d30: number; d60: number; d90: number };
   currency: Currency;
 }
@@ -245,6 +278,23 @@ export interface SetupState {
 
 export interface MondaySettings { enabled: boolean; to: string; time: string }
 
+/** v2: something the sync needs a person for (Payment reconciliation, P5). Empty on a normal day. */
+export interface SyncIssue {
+  id: string;
+  at: string;
+  kind: 'edited-in-tool' | 'voided-in-tool' | 'sync-failed' | 'connection-expired' | 'bank-unmatched';
+  invoiceId?: string;
+  /** edited-in-tool: what differs. */
+  ours?: string;
+  theirs?: string;
+  theirsTotal?: number;
+  /** bank-unmatched: the payment and the two likeliest matches. */
+  bankPaymentId?: string;
+  attempts?: number;
+}
+
+export interface BankPayment { id: string; at: string; amount: number; ref: string; payer: string; matched?: string[]; accountId?: string; credit?: number }
+
 export interface BillingState {
   version: number;
   settings: LabBillingSettings;
@@ -265,6 +315,16 @@ export interface BillingState {
   templates: Templates;
   monday: MondaySettings;
   nextNumber: number;
+  /** v2: credit notes have their own series (CN-0001) so invoice numbers have no gaps. */
+  nextCredit: number;
   firstStatementPreviewed: boolean;
   dismissed: string[];
+  /** v2: payment reconciliation. */
+  issues: SyncIssue[];
+  bank: Bank | null;
+  bankPayments: BankPayment[];
+  /** v2: payer name → account, learned from confirmed bank matches. */
+  payers: Record<string, string>;
+  /** v2: demo switch: who is looking (the accountant login is read-only). */
+  viewAs: 'admin' | 'accountant';
 }
