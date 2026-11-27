@@ -87,9 +87,9 @@ function CasesBody() {
   const events = store.events.filter(e => e.forUser === user.id);
 
   return (
-    <div className="p-8 max-w-[1440px]">
-      <div className="flex items-start gap-4 mb-6">
-        <div className="flex-1">
+    <div className="p-4 sm:p-8 max-w-[1440px]">
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-3 mb-6">
+        <div className="flex-1 min-w-[220px]">
           <h1 className="text-[28px] font-semibold text-[#030213] leading-tight">Lab Work</h1>
           <p className="text-sm text-[#4A4A5A] mt-1">New case flow demo · Elmfield Dental Practice, Leeds · today Thu 22 Oct 2026</p>
         </div>
@@ -177,8 +177,8 @@ function CasesBody() {
           )}
         </div>
       ) : (
-        <div className="bg-white border border-[#E0E0E6] rounded-2xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-white border border-[#E0E0E6] rounded-2xl overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
             <thead className="bg-[#F8F9FC] text-left">
               <tr className="text-[11px] uppercase tracking-wider text-[#4A4A5A]">
                 <th className="w-8 pl-4 pr-1 py-3">

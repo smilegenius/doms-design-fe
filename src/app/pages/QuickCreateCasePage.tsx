@@ -112,7 +112,7 @@ import {
   isDentureItem, isUpperTooth, isPastISO, caseDateToISO, archLabel, archOf, archTeeth, toggleArch, groupTeeth, findFollowUpMatch, addStageAppend, TODAY_ISO as TODAY_ISO_FOR_DATES,
   type FollowUpMatch,
 } from '../data/dentureStages';
-import { ArchPicker, StageDatePicker, StageDateList, StageStatusCell, stagesComplete } from '../components/DentureStages';
+import { ArchPicker, StageDatePicker, StageDateList, stagesComplete } from '../components/DentureStages';
 import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
 import { useCustomServices } from '../data/customServices';
 
@@ -2700,9 +2700,6 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                     <span><span className="font-semibold text-[#030213]">Tap any service card</span> below to add material, shade, and teeth.</span>
                   </div>
                 )}
-                {/* Denture follow-up — the prescription matches a case already
-                    on the platform, so its stages join that case. */}
-                {followUp && <FollowUpBanner match={followUp} />}
                 {/* Service cards — full-width rows so each service's details
                     read at a glance. Complete = green tint + summary chips;
                     incomplete = amber tint + "Add details" call-out. */}
@@ -2802,6 +2799,11 @@ export default function QuickCreateCasePage({ onCancel, onSubmitted, prefillDraf
                         </div>
                         {/* Denture — no service date: its stages are ticked
                             and dated right here on the card, one per row. */}
+                        {/* Denture follow-up — the prescription matches a case
+                            already on the platform: a slim strip on the card
+                            says so, and that case's stages sit locked above
+                            the new one in the same stage list. */}
+                        {isDentureItem(sel.itemId) && followUp && <FollowUpStrip match={followUp} />}
                         {isDentureItem(sel.itemId) && (
                           <div className="pl-[18px] pr-3 py-2 border-t border-[#F0EFF6] bg-[#FCFCFE]">
                             <div className="flex items-center gap-2 mb-1.5">
@@ -6644,46 +6646,29 @@ function FormField({ label, value, sub }: { label: string; value: string; sub?: 
 void ImageIcon;
 void Calendar;
 
-// ─── Denture follow-up banner ────────────────────────────────────────────────
-// Shown when the prescription is a follow-up for a denture case already on the
-// platform: what's on the case, what this prescription adds and anything that
-// is skipped because it was ordered before. Submitting appends a stage order to
-// that case — no new case is created.
-function FollowUpBanner({ match }: { match: FollowUpMatch }) {
+// ─── Denture follow-up strip ─────────────────────────────────────────────────
+// Sits inside the denture service card when the prescription is a follow-up for
+// a case already on the platform. The earlier stages themselves are listed,
+// locked, in the card's stage list. Submitting appends a stage order to that
+// case — no new case is created.
+function FollowUpStrip({ match }: { match: FollowUpMatch }) {
   return (
-    <div className="mb-3 rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] overflow-hidden">
-      <div className="flex items-start gap-2.5 px-3 py-2.5">
-        <span className="w-7 h-7 rounded-lg bg-white border border-[#BBF7D0] text-[#15803D] flex items-center justify-center flex-shrink-0">
-          <GitMerge className="w-3.5 h-3.5" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-bold text-[#14532D]">Matching case found — {match.case.id}</p>
-          <p className="text-[11px] text-[#166534] mt-0.5 leading-relaxed">
-            Same patient, practice, dentist and {match.serviceName}.{' '}
-            {match.toAdd.length > 0
-              ? <>This prescription adds <span className="font-semibold">{match.toAdd.join(', ')}</span> to that case as a new stage order. No new case is created.</>
-              : <>Every stage on this prescription is already on that case, so nothing new will be ordered.</>}
-          </p>
-        </div>
+    <div className="pl-[18px] pr-3 py-2 border-t border-[#DCFCE7] bg-[#F0FDF4]">
+      <div className="flex items-start gap-2">
+        <GitMerge className="w-3.5 h-3.5 text-[#15803D] flex-shrink-0 mt-px" />
+        <p className="text-[11px] text-[#166534] leading-relaxed min-w-0">
+          <span className="font-bold text-[#14532D]">Matching case found — {match.case.id}.</span>{' '}
+          {match.toAdd.length > 0
+            ? <>Adds <span className="font-semibold">{match.toAdd.join(', ')}</span> to it as a new stage order — no new case is created.</>
+            : <>Every stage is already on that case, so nothing new will be ordered.</>}
+        </p>
       </div>
-      <div className="bg-white/70 border-t border-[#DCFCE7] px-3 py-2">
-        <p className="text-[10px] font-bold text-[#A0A0B0] uppercase tracking-wider mb-1">Already ordered on {match.case.id}</p>
-        <div className="space-y-1">
-          {match.existing.map(r => (
-            <div key={r.stage} className="flex items-center gap-2 text-[11px]">
-              <span className="flex-1 min-w-0 truncate font-medium text-[#030213]">{r.stage}</span>
-              <span className="text-[#717182] whitespace-nowrap">{r.date ?? '—'}</span>
-              <StageStatusCell row={r} size="xs" />
-            </div>
-          ))}
-        </div>
-        {match.duplicates.length > 0 && (
-          <p className="mt-1.5 flex items-start gap-1 text-[11px] text-[#92400E]">
-            <Info className="w-3 h-3 flex-shrink-0 mt-0.5" />
-            {match.duplicates.join(', ')} {match.duplicates.length === 1 ? 'is' : 'are'} already on the case — skipped, no duplicate stage order.
-          </p>
-        )}
-      </div>
+      {match.duplicates.length > 0 && (
+        <p className="mt-1 ml-[22px] flex items-start gap-1 text-[11px] text-[#92400E]">
+          <Info className="w-3 h-3 flex-shrink-0 mt-0.5" />
+          {match.duplicates.join(', ')} {match.duplicates.length === 1 ? 'is' : 'are'} already on the case — skipped, no duplicate stage order.
+        </p>
+      )}
     </div>
   );
 }

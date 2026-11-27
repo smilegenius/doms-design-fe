@@ -22,7 +22,7 @@ import { KeyboardEvent, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { LOWER_ORDER, UPPER_ORDER, archTeethIds, jawOf, palmerOf, toothName, Notation, toothText, universalOf } from './rules';
 import type { Arch } from './data';
-import { CHART_W, HALF_W, MID_HALF, NARROWEST_SLOT, ToothDefs, ToothLook, ToothSvg, slotOf, toothX } from './ToothShapes';
+import { CHART_W, GAP, HALF_W, MID_HALF, NARROWEST_SLOT, TOOTH_HUES, ToothDefs, ToothLook, ToothSvg, slotOf, toothX } from './ToothShapes';
 import { FOCUS } from './ui';
 
 type Jaw = 'upper' | 'lower';
@@ -58,11 +58,37 @@ export interface ChartProps {
   label?: string;
   /** A thumbnail (MiniChart): no numbers and no quadrant labels, just the teeth. */
   thumb?: boolean;
+  /**
+   * Several treatments (the order form): each lights its teeth in its own colour (TOOTH_HUES, in this order;
+   * a tooth in two takes the first's) and gets a numbered line along each run of its teeth, above the upper
+   * row and below the lower one.
+   */
+  groups?: { teeth: string[]; n: number }[];
+  /** Teeth drawn at this share of their height, the width unchanged (the order form: 0.5, so the chart fills the width but stays short). */
+  toothHeight?: number;
+  /** Teeth drawn at this share of their width, centred in their place (the order form: 0.5); the chart keeps its width and the height stays. */
+  toothWidth?: number;
+  /** Black and grey only (the order form): the selected teeth grey with a dark outline, treatments told apart by their numbered lines. */
+  mono?: boolean;
+}
+
+/** A group's teeth in one row as runs of neighbours, each as its left and right edge (mm from the chart's left; `tw`: the drawn tooth width). */
+function runsOf(teeth: string[], jaw: Jaw, tw = 1): { from: number; to: number }[] {
+  const idx = ROWS[jaw].map((t, i) => (teeth.includes(t) ? i : -1)).filter(i => i >= 0);
+  const runs: number[][] = [];
+  for (const i of idx) {
+    const last = runs[runs.length - 1];
+    if (last && i === last[last.length - 1] + 1) last.push(i); else runs.push([i]);
+  }
+  return runs.map(r => {
+    const a = ROWS[jaw][r[0]], b = ROWS[jaw][r[r.length - 1]];
+    return { from: toothX(a) - ((slotOf(a) - GAP) * tw) / 2, to: toothX(b) + ((slotOf(b) - GAP) * tw) / 2 };
+  });
 }
 
 export default function TeethChart({
   selected, arch, pontics = [], missing = [], implants = [], otherTeeth = [], limitArch,
-  onTooth, onArch, onSetTeeth, archMode, width, readOnly, notation = 'fdi', label, thumb,
+  onTooth, onArch, onSetTeeth, archMode, width, readOnly, notation = 'fdi', label, thumb, groups, toothHeight = 1, toothWidth = 1, mono,
 }: ChartProps) {
   const uid = `nc-tc${safeId(useId())}`;
   const boxRef = useRef<HTMLDivElement>(null);
@@ -157,21 +183,26 @@ export default function TeethChart({
     const jaw = jawOf(id);
     const up = jaw === 'upper';
     const isLit = lit.includes(id);
+    const g = groups?.findIndex(x => x.teeth.includes(id)) ?? -1;
     const look: ToothLook = {
       lit: isLit,
       pontic: pontics.includes(id),
       missing: missing.includes(id),
       implant: implants.includes(id),
       other: otherTeeth.includes(id) && !isLit,
+      hue: g > 0 && !mono ? g : undefined,
+      mono,
     };
     const off = inert(id);
     // Hover washes the tooth teal (the whole row while "Select Arch" is pointed at, or in arch mode).
     const tint = !interactive || off || isLit ? 'off' : hoverJaw === jaw ? 'on' : archMode ? 'off' : 'hover';
     const text = notation === 'palmer' ? palmerOf(id) : notation === 'universal' ? String(universalOf(id)) : id;
     // Missing teeth keep the readable number: the dashed ghost tooth already says they're missing.
-    const tone = isLit ? 'text-[#0E5A73] font-semibold' : 'text-[#5A5A6A]';
+    const tone = isLit ? (mono ? 'text-[#030213] font-bold' : 'text-[#0E5A73] font-semibold') : 'text-[#5A5A6A]';
+    // Mono (the order form): a chosen tooth's number in a ring, as a scanner's Rx marks it.
+    const ring = mono && isLit ? 'mx-auto w-fit min-w-[18px] px-[3px] rounded-full ring-1 ring-[#030213]' : '';
     const number = (
-      <span aria-hidden className={`relative block text-center whitespace-nowrap ${fullLabels ? 'text-[10px] leading-[14px]' : 'text-[9px] leading-[12px]'} ${tone}`}>
+      <span aria-hidden className={`relative block text-center whitespace-nowrap ${fullLabels ? 'text-[10px] leading-[14px]' : 'text-[9px] leading-[12px]'} ${tone} ${ring}`}>
         {/* Universal numbers run 1–32, so the quadrant's 1–8 would mislead: they show as they are. */}
         {fullLabels || notation === 'universal' ? text : !interactive ? id[1] : (
           <>
@@ -187,7 +218,13 @@ export default function TeethChart({
         ? 'motion-safe:group-hover:translate-y-[2px] motion-safe:group-focus-visible:translate-y-[2px]'
         : 'motion-safe:group-hover:-translate-y-[2px] motion-safe:group-focus-visible:-translate-y-[2px]'}`
       : '';
-    const art = <span className={`block ${lift}`}><ToothSvg id={id} uid={uid} look={look} tint={tint} /></span>;
+    // A narrower tooth keeps its height: drawn at toothWidth of its place, its height share is over that width.
+    const squash = toothHeight / toothWidth;
+    const art = (
+      <span className={`block ${lift}`} style={toothWidth !== 1 ? { width: `${toothWidth * 100}%`, marginInline: 'auto' } : undefined}>
+        <ToothSvg id={id} uid={uid} look={look} tint={tint} squash={squash !== 1 ? squash : undefined} />
+      </span>
+    );
     const shown = thumb ? null : number;
     const body = up ? <>{art}{shown}</> : <>{shown}{art}</>;
     const cls = `relative flex-shrink-0 flex flex-col ${up ? 'justify-end' : 'justify-start'}`;
@@ -243,7 +280,7 @@ export default function TeethChart({
         onPointerLeave={() => setHoverJaw(null)}
         onFocus={() => setHoverJaw(jaw)}
         onBlur={() => setHoverJaw(null)}
-        className={`inline-flex items-center gap-1 h-6 px-2.5 rounded-full border text-[11px] font-semibold whitespace-nowrap transition-colors motion-reduce:transition-none ${FOCUS} ${
+        className={`inline-flex items-center gap-1 h-6 px-2.5 max-sm:h-8 max-sm:px-3 max-sm:text-xs rounded-full border text-[11px] font-semibold whitespace-nowrap transition-colors motion-reduce:transition-none ${FOCUS} ${
           on ? 'bg-[#E6F6FB] border-[#9ED7EA] text-[#0E5A73]' : 'bg-white border-[#D4D4DD] text-[#2F62D6]'
         } ${off ? 'opacity-40 cursor-default' : on ? 'hover:bg-[#D4EFF8]' : 'hover:border-[#3F6FE8] hover:bg-[#F8FAFF]'}`}
       >
@@ -253,12 +290,49 @@ export default function TeethChart({
     );
   };
 
+  /**
+   * Several treatments: one lane per treatment with teeth in this jaw, each run of its teeth a line in its
+   * colour with its number in the middle. The upper jaw's lanes stack outward from the roots (first one nearest).
+   */
+  const lanes = (jaw: Jaw) => {
+    if (!groups || groups.length < 2) return null;
+    const list = groups.map((x, i) => ({ ...x, hue: i % TOOTH_HUES.length, runs: runsOf(x.teeth, jaw, toothWidth) })).filter(x => x.runs.length > 0);
+    if (!list.length) return null;
+    const ordered = jaw === 'upper' ? [...list].reverse() : list;
+    const at = (mm: number) => `${(mm / CHART_W) * 100}%`;
+    return (
+      <div aria-hidden className={jaw === 'upper' ? 'pb-0.5' : 'pt-0.5'}>
+        {ordered.map(x => {
+          const color = mono ? '#3A3A44' : TOOTH_HUES[x.hue].line;
+          return (
+            <div key={x.n} className="relative h-3">
+              {x.runs.map((r, k) => (
+                <span key={k} className="absolute inset-y-0" style={{ left: at(r.from), width: at(r.to - r.from) }}>
+                  {/* A bracket: the line, and a tick at each end toward the teeth. */}
+                  <span className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full" style={{ background: color }} />
+                  <span className={`absolute left-0 w-[2px] h-1.5 rounded-full ${jaw === 'upper' ? 'top-1/2' : 'bottom-1/2'}`} style={{ background: color }} />
+                  <span className={`absolute right-0 w-[2px] h-1.5 rounded-full ${jaw === 'upper' ? 'top-1/2' : 'bottom-1/2'}`} style={{ background: color }} />
+                  <span
+                    className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 min-w-[12px] h-3 px-[3px] rounded-full bg-white border text-[8px] leading-[10px] font-bold text-center"
+                    style={{ borderColor: color, color }}
+                  >
+                    {x.n}
+                  </span>
+                </span>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const quad = 'pointer-events-none absolute text-[9px] leading-none font-semibold tracking-wider text-[#6B6B7B]';
   return (
     <div
       ref={boxRef}
       className="relative select-none"
-      style={{ width: width ?? '100%' }}
+      style={{ width: width ?? '100%', maxWidth: '100%' }}
       role={readOnly ? 'img' : 'group'}
       aria-label={readOnly ? label : 'Teeth chart'}
     >
@@ -266,6 +340,7 @@ export default function TeethChart({
       {showPills && (pillsTogether
         ? <div className="flex flex-wrap justify-center gap-x-2 gap-y-1 pb-2">{pill('upper')}{pill('lower')}</div>
         : <div className="flex justify-center pb-2">{pill('upper')}</div>)}
+      {lanes('upper')}
       <div className="relative">
         {!thumb && <>
           <span aria-hidden className={`${quad} left-0.5 top-0.5`}>UR</span>
@@ -279,6 +354,7 @@ export default function TeethChart({
         {row('lower')}
         <span aria-hidden className="pointer-events-none absolute inset-y-0 left-1/2 border-l border-dashed border-[#D4D4DD]" />
       </div>
+      {lanes('lower')}
       {showPills && !pillsTogether && <div className="flex justify-center pt-2">{pill('lower')}</div>}
     </div>
   );

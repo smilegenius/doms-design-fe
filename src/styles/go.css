@@ -114,17 +114,46 @@
 @keyframes go-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes go-toast-in { from { opacity: 0; transform: translateY(-12px) scale(.98); } to { opacity: 1; transform: none; } }
 @keyframes go-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* Manual create: the next page slides in from the right, going back from the left (pushed screens). */
+@keyframes go-push-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes go-pop-in { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
 @keyframes go-scan { 0% { top: 8%; } 50% { top: 88%; } 100% { top: 8%; } }
 @keyframes go-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .go-sheet-in { animation: go-sheet-in .28s cubic-bezier(.2,.8,.2,1); }
 .go-fade-in { animation: go-fade-in .2s ease-out; }
 .go-toast-in { animation: go-toast-in .25s cubic-bezier(.2,.8,.2,1); }
 .go-rise { animation: go-rise .35s cubic-bezier(.2,.8,.2,1) both; }
+.go-push-in { animation: go-push-in .32s cubic-bezier(.2,.8,.2,1) both; }
+.go-pop-in { animation: go-pop-in .32s cubic-bezier(.2,.8,.2,1) both; }
 .go-scanline { animation: go-scan 2.6s ease-in-out infinite; }
 .go-pulse { animation: go-pulse 1.4s ease-in-out infinite; }
 /* Camera shutter: a quick white flash over the viewfinder */
 @keyframes go-shot { from { opacity: .9; } to { opacity: 0; } }
 .go-shot { animation: go-shot .4s ease-out forwards; }
+
+/* Tooth chart tap hint: a thumb glides in, taps a tooth (twice), and a ripple shows the tap. The hand's
+   thumb's pad sits on the anchor point; the thumb leans in from the bottom right and fades out at its base. */
+@keyframes go-tap-hand {
+  0%   { opacity: 0; transform: translate(26px, 30px) scale(1); }
+  18%  { opacity: 1; }
+  38%  { transform: translate(0, 0) scale(1); }
+  48%  { transform: translate(0, 0) scale(.82); }
+  60%  { transform: translate(0, 0) scale(1); }
+  82%  { opacity: 1; transform: translate(0, 0) scale(1); }
+  100% { opacity: 0; transform: translate(10px, 14px) scale(1); }
+}
+@keyframes go-tap-ripple {
+  0%, 44% { opacity: 0; transform: scale(.3); }
+  50%     { opacity: 1; transform: scale(.5); }
+  80%     { opacity: 0; transform: scale(1.6); }
+  100%    { opacity: 0; transform: scale(1.6); }
+}
+.go-tap-hand { left: -12px; top: -3.6px; transform-origin: 12px 3.6px; opacity: 0;
+  animation: go-tap-hand 1.9s cubic-bezier(.4,0,.2,1) .6s 2 both; }
+.go-tap-thumb { display: block; transform: rotate(-24deg); transform-origin: 12px 3.6px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 95%); mask-image: linear-gradient(to bottom, #000 55%, transparent 95%); }
+.go-tap-ripple { opacity: 0; animation: go-tap-ripple 1.9s ease-out .6s 2 both; }
+@media (prefers-reduced-motion: reduce) { .go-tap-hint { display: none; } }
 
 /* Simulated keyboard open: the tab bar hides behind it like on iOS */
 .go-kb-open .go-tabbar { opacity: 0; pointer-events: none; transition: opacity .15s; }

@@ -238,7 +238,7 @@ function PriceModal({ inv, line, onClose }: { inv: Invoice; line: InvoiceLine; o
   const [reason, setReason] = useState('');
   return (
     <Modal isOpen onClose={onClose} title="Change this line's price" footer={
-      <div className="flex justify-end gap-2"><button className={btn} onClick={onClose}>Cancel</button><button className={btnPrimary} disabled={!reason.trim() || !(Number(price) >= 0)} onClick={() => { overrideLine(inv.id, line.id, Number(price), reason.trim()); toast.success('Price changed on this invoice only'); onClose(); }}>Save</button></div>
+      <div className="flex justify-end gap-2"><button className={btnPrimary} disabled={!reason.trim() || !(Number(price) >= 0)} onClick={() => { overrideLine(inv.id, line.id, Number(price), reason.trim()); toast.success('Price changed on this invoice only'); onClose(); }}>Save</button></div>
     }>
       <div className="space-y-3">
         <p className="text-xs text-[#717182]">{line.description} · now {money(line.unitPrice, inv.currency)}. This changes this invoice only; to change what a practice always pays, use its Prices tab.</p>

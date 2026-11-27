@@ -64,7 +64,7 @@ function Basics() {
   const termsVal = st.terms === 'custom' ? 'custom' : st.terms;
   return (
     <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-      <Card className="xl:col-span-2" title="Three questions, then Billing runs itself" sub="Change any answer whenever you like. Anything a single practice does differently is set on that practice's page.">
+      <Card className="xl:col-span-2" title="Three questions, then Billing runs itself" sub="Change any time. Per-practice exceptions live on the practice's page.">
         <ol className="space-y-5">
           <Q n={1} done title="Where do you keep your books?" sub={tool ? `Invoices post to ${tool} and payments come back from it, so "paid" is always right.` : 'Without an accounting tool you can connect your business bank, or mark invoices paid by hand.'}>
             <div className="flex flex-wrap gap-2">
@@ -173,7 +173,7 @@ function More({ openPromotions }: { openPromotions: boolean }) {
     <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
       <div className="xl:col-span-2 space-y-4">
         <Card title="How invoices go out">
-          <Opt title="Check invoices before they're sent" sub="Flagged invoices (an odd price, a possible remake…) always wait for you, whatever you pick.">
+          <Opt title="Check invoices before they're sent" sub="Flagged invoices (odd price, possible remake…) always wait for you.">
             <Seg value={st.approval} onChange={v => set({ approval: v })} options={[{ value: 'review-30', label: 'First 30 days' }, { value: 'review-all', label: 'Always' }, { value: 'auto', label: 'Never' }]} />
           </Opt>
           {tool && <Opt title={`Let your accountant check them in ${tool} first`} sub={`Invoices still email the practice, but land in ${tool} as drafts for your accountant to approve.`}>
@@ -198,7 +198,7 @@ function More({ openPromotions }: { openPromotions: boolean }) {
 
         <div id="sf-promotions" />
         <Card title={<span className="inline-flex items-center gap-2"><BadgePercent className="w-4 h-4 text-[#7C3AED]" /> Promotions and volume discounts {st.promotionsOn ? <Pill tone="green">On</Pill> : <Pill tone="gray">Off</Pill>}</span>}
-          sub="A % or fixed price for a while, or a discount for practices that send a lot. Off until you need it."
+          sub="Time-limited % or fixed prices, or volume discounts. Off by default."
           actions={<Toggle on={st.promotionsOn} onChange={v => { set({ promotionsOn: v }, v ? 'Promotions and volume discounts on' : 'Off: invoices use standard and practice prices only'); setPromoOpen(v); }} />}>
           {st.promotionsOn ? (
             <div className="space-y-3">

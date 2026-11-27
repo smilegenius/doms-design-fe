@@ -5,7 +5,13 @@ import { useToast } from '../../src/app/context/ToastContext';
 import { addDays, fmtShort, parse, iso } from '../lab-billing/format';
 import { btn, Pill } from '../lab-billing/ui';
 import { type Line, type WorkflowState, STAFF, STATUS, caseLines, isHidden, isOpen, isOverdue, reassign, routeOf, setRequested, stageOf, today, unreadFor, useWorkflow } from './workflowStore';
+import { Building2, ChevronLeft, ChevronRight, CircleDot, ExternalLink, EyeOff, Stethoscope, Users } from 'lucide-react';
+import { useToast } from '../../src/app/context/ToastContext';
+import { addDays, fmtShort, parse, iso } from '../lab-billing/format';
+import { btn, Pill, Seg } from '../lab-billing/ui';
+import { type Line, type WorkflowState, STAFF, STATUS, isHidden, isOpen, isOverdue, reassign, routeOf, setRequested, stageOf, today, unreadFor, useWorkflow } from './workflowStore';
 import { caseUrl, LineActions, LinePill, useMe } from './shared';
+import { Avatar, PageHeader, ServiceIcon } from './ui';
 
 // ── V2 Delivery calendar ─────────────────────────────────────────────────────
 // One card per service on the date it's due back to the practice. A case with
@@ -101,67 +107,60 @@ export default function CalendarPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-semibold text-[#030213]">Delivery calendar</h1>
-          <p className="text-sm text-[#717182] mt-1">Every service on the day it's due back to the practice. Drag a card to another day to change its delivery date.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className={btn} onClick={() => go(addDays(anchor, mode === 'week' ? -7 : -28))} aria-label="Previous"><ChevronLeft className="w-3.5 h-3.5" /></button>
+      <PageHeader
+        title="Delivery calendar"
+        sub="Service lines by due date. Overdue lines sit on today."
+        actions={<>
+          <div className="inline-flex items-center rounded-lg border border-[#E0E0E6] bg-white">
+            <button className="p-2 text-[#717182] hover:text-[#030213]" onClick={() => go(addDays(anchor, mode === 'week' ? -7 : -28))} aria-label="Previous"><ChevronLeft className="w-4 h-4" /></button>
+            <span className="text-sm font-semibold text-[#030213] min-w-[150px] text-center">{label}</span>
+            <button className="p-2 text-[#717182] hover:text-[#030213]" onClick={() => go(addDays(anchor, mode === 'week' ? 7 : 31))} aria-label="Next"><ChevronRight className="w-4 h-4" /></button>
+          </div>
           <button className={btn} onClick={() => go(t)}>Today</button>
-          <button className={btn} onClick={() => go(addDays(anchor, mode === 'week' ? 7 : 31))} aria-label="Next"><ChevronRight className="w-3.5 h-3.5" /></button>
-          <span className="text-sm font-semibold text-[#030213] min-w-[140px] text-center">{label}</span>
-          <div className="inline-flex rounded-lg border border-[#E0E0E6] overflow-hidden">{(['week', 'month'] as const).map(m => <button key={m} onClick={() => { setMode(m); setParams({ day: anchor, ...(m === 'month' ? { view: 'month' } : {}) }, { replace: true }); }} className={`px-3 py-1.5 text-xs font-semibold ${mode === m ? 'bg-[#EEF4FF] text-[#1565C0]' : 'bg-white text-[#5A5568]'}`}>{m === 'week' ? 'Week' : 'Month'}</button>)}</div>
-        </div>
-      </div>
+          <Seg value={mode} options={[{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }]} onChange={m => { setMode(m); setParams({ day: anchor, ...(m === 'month' ? { view: 'month' } : {}) }, { replace: true }); }} />
+        </>}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Sel value={who} onChange={setWho} label="Assigned" options={[['everyone', 'Everyone'], ['me', `Me (${me.split(' ')[0]})`], ...STAFF.filter(p => p.name !== me).map(p => [p.name, p.name] as [string, string])]} />
-        <Sel value={service} onChange={setService} label="Service" options={[['all', 'All services'], ...services.map(x => [x, x] as [string, string])]} />
-        <Sel value={practice} onChange={setPractice} label="Practice" options={[['all', 'All practices'], ...practices.map(x => [x, x] as [string, string])]} />
-        <Sel value={status} onChange={setStatus} label="Status" options={[['all', 'All statuses'], ...(['received', 'in-queue', 'in-production', 'qc', 'on-hold-lab', 'on-hold-practice', 'shipped', 'delivered'] as const).map(x => [x, STATUS[x].label] as [string, string])]} />
-        {mode === 'week' && (
-          <button className={`${btn} ml-auto`} onClick={() => setShowDone(!showDone)}>
-            {showDone ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />} {showDone ? 'Hide' : 'Show'} Shipped/Delivered{!showDone && finished.length ? ` (${finished.length})` : ''}
+        <Sel icon={Users} value={who} onChange={setWho} options={[['everyone', 'Everyone'], ['me', `Me (${me.split(' ')[0]})`], ...STAFF.filter(p => p.name !== me).map(p => [p.name, p.name] as [string, string])]} />
+        <Sel icon={Stethoscope} value={service} onChange={setService} options={[['all', 'All services'], ...services.map(x => [x, x] as [string, string])]} />
+        <Sel icon={Building2} value={practice} onChange={setPractice} options={[['all', 'All practices'], ...practices.map(x => [x, x] as [string, string])]} />
+        <Sel icon={CircleDot} value={status} onChange={setStatus} options={[['all', 'All statuses'], ...(['received', 'in-queue', 'in-production', 'qc', 'on-hold-lab', 'on-hold-practice', 'shipped', 'delivered'] as const).map(x => [x, STATUS[x].label] as [string, string])]} />
+        {hidden.length > 0 && (
+          <button className="ml-auto inline-flex items-center gap-1.5 text-xs text-[#717182] hover:text-[#030213]" onClick={() => setShowHidden(x => !x)}>
+            <EyeOff className="w-3.5 h-3.5" /> {hidden.filter(l => l.status === 'not-approved').length} not approved · {hidden.filter(l => l.status === 'cancelled').length} cancelled
+            <span className="font-semibold text-[#4D8EF7]">{showHidden ? 'Hide' : 'Show'}</span>
           </button>
         )}
       </div>
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#717182]">
-        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-white border border-[#E0E0E6]" /> One service</span>
-        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-[#F7F5FF] border border-[#DCD6FF] border-l-[3px] border-l-[#7C6BFF]" /> Part of a case with several services (hover to see the others)</span>
-      </div>
-
-      {hidden.length > 0 && (
-        <div className="rounded-lg bg-[#F8F9FC] border border-[#E0E0E6] px-3 py-2 text-xs text-[#5A5568] flex items-center gap-2">
-          {hidden.filter(l => l.status === 'not-approved').length} not approved · {hidden.filter(l => l.status === 'cancelled').length} cancelled {mode === 'week' ? 'this week' : 'this month'}
-          <button className="font-semibold text-[#4D8EF7]" onClick={() => setShowHidden(x => !x)}>{showHidden ? 'Hide' : 'Show'}</button>
-          {showHidden && <span className="text-[#717182]">{hidden.map(l => `${l.service} · ${l.patient} (${STATUS[l.status].label})`).join(' · ')}</span>}
-        </div>
-      )}
+      {showHidden && hidden.length > 0 && <p className="rounded-lg bg-[#F8F9FC] border border-[#E0E0E6] px-3 py-2 text-xs text-[#717182]">{hidden.map(l => `${l.service} · ${l.patient} (${STATUS[l.status].label})`).join(' · ')}</p>}
 
       {mode === 'week' ? (
-        <div className="grid gap-2 overflow-x-auto pb-1" style={{ gridTemplateColumns: `repeat(${showDone ? 7 : 6}, minmax(170px, 1fr))` }}>
-          <Column day="none" drag={drag} title="No date set" sub={`${noDate.length}`} tone="gray">{noDate.map(card)}</Column>
+        <div className="grid gap-2 overflow-x-auto" style={{ gridTemplateColumns: 'repeat(7, minmax(170px, 1fr))' }}>
+          <Column title="No date" sub={`${noDate.length}`} tone="gray">{noDate.map(l => <CalCard key={l.id} s={s} l={l} me={me} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} />)}</Column>
           {days.map((d, i) => {
             const here = shown.filter(l => place(l) === d);
             return <Column key={d} day={d} drag={drag} title={`${DOW[i]} ${fmtShort(d)}`} sub={`${here.length}`} tone={d === t ? 'blue' : 'white'}>{here.map(card)}</Column>;
           })}
-          {showDone && (
-            <Column title="Shipped/Delivered" sub={`${finished.length}`} tone="green" note="Newest first" onHide={() => setShowDone(false)}>{finished.map(card)}</Column>
-          )}
+          <Column title="Done" sub={`${completed.length}`} tone="green">{completed.map(l => <CalCard key={l.id} s={s} l={l} me={me} open={open === l.id} onToggle={() => setOpen(open === l.id ? null : l.id)} />)}</Column>
         </div>
       ) : (
         <MonthGrid s={s} anchor={anchor} lines={shown} place={place} drag={drag} onDay={d => { setMode('week'); setParams({ day: d }, { replace: true }); }} />
       )}
-      <p className="text-[11px] text-[#717182]">Click a card to open it in place. Drag it to change its delivery date; past days are locked. Shipped and delivered services move to Shipped/Delivered. Weekend deliveries show on the Friday before.</p>
-      {open && !shown.some(l => l.id === open) && <p className="text-[11px] text-[#717182]">The service you opened is filtered out. <button className="text-[#4D8EF7]" onClick={() => navigate(caseUrl(open.split(':')[0]))}>Open its case</button></p>}
+      <p className="text-[11px] text-[#717182]">Click a card to act on it. Shipped lines move to Done; weekend dates show on Friday.</p>
+      {open && !lines.some(l => l.id === open) && <p className="text-[11px] text-[#717182]">The open line is filtered out. <button className="text-[#4D8EF7]" onClick={() => navigate(caseUrl(open.split(':')[0]))}>Open case</button></p>}
     </div>
   );
 }
 
-function Sel({ value, onChange, label, options }: { value: string; onChange: (v: string) => void; label: string; options: [string, string][] }) {
-  return <label className="inline-flex items-center gap-1.5 text-[11px] text-[#717182]">{label}<select value={value} onChange={e => onChange(e.target.value)} className="px-2 py-1 rounded-md border border-[#E0E0E6] text-xs bg-white text-[#030213] max-w-[180px]">{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>;
+function Sel({ icon: Icon, value, onChange, options }: { icon: typeof Users; value: string; onChange: (v: string) => void; options: [string, string][] }) {
+  const on = value !== options[0][0];
+  return (
+    <label className={`inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1.5 rounded-lg border bg-white text-xs ${on ? 'border-[#4D8EF7] text-[#1565C0]' : 'border-[#E0E0E6] text-[#030213]'}`}>
+      <Icon className="w-3.5 h-3.5 text-[#717182]" />
+      <select value={value} onChange={e => onChange(e.target.value)} className="bg-transparent font-medium focus:outline-none max-w-[170px]">{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+    </label>
+  );
 }
 
 function Column({ title, sub, tone, children, day, drag, note, onHide }: { title: string; sub: string; tone: 'gray' | 'blue' | 'white' | 'green'; children: React.ReactNode; day?: string; drag?: Drag; note?: string; onHide?: () => void }) {
@@ -170,15 +169,8 @@ function Column({ title, sub, tone, children, day, drag, note, onHide }: { title
   const ok = dragging && drag!.can(day!);
   const hot = ok && drag!.over === day;
   return (
-    <div
-      className={`rounded-xl ${bg} p-2 min-h-[300px] transition-shadow ${hot ? 'ring-2 ring-[#4D8EF7] bg-[#E3EDFF]' : ok ? 'outline outline-1 outline-dashed outline-[#9DBBF5]' : ''} ${dragging && !ok ? 'opacity-50' : ''}`}
-      onDragOver={day && drag ? e => { if (drag.id && drag.can(day)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (drag.over !== day) drag.enter(day); } } : undefined}
-      onDrop={day && drag ? e => { e.preventDefault(); drag.drop(day); } : undefined}
-    >
-      <p className="text-[11px] font-semibold text-[#030213] px-1 mb-2 flex items-center justify-between gap-1">
-        <span>{title}</span>
-        <span className="inline-flex items-center gap-1.5 text-[#717182]">{note && <span className="font-normal">{note}</span>}{sub}{onHide && <button onClick={onHide} title="Hide this column" aria-label="Hide Shipped/Delivered" className="text-[#A0A0B0] hover:text-[#030213]"><EyeOff className="w-3 h-3" /></button>}</span>
-      </p>
+    <div className={`rounded-xl ${bg} p-2 min-h-[300px] ${tone === 'blue' ? 'ring-1 ring-[#C8D8FC]' : ''}`}>
+      <p className="text-xs font-semibold text-[#030213] px-1 mb-2 flex items-center justify-between"><span className={tone === 'blue' ? 'text-[#1565C0]' : ''}>{title}</span><span className="px-1.5 rounded-full bg-white text-[10px] text-[#717182]">{sub}</span></p>
       <div className="space-y-1.5">{children}</div>
       {hot && <p className="mt-1.5 rounded-lg border-2 border-dashed border-[#4D8EF7] py-2 text-center text-[10px] font-semibold text-[#1565C0]">{day === 'none' ? 'Clear the date' : `Due back ${dayName(day!)}`}</p>}
     </div>
@@ -202,43 +194,25 @@ function CalCard({ s, l, me, open, onToggle, drag, lit, onHover, place }: { s: W
     ? `bg-[#F7F5FF] border border-[#DCD6FF] border-l-[3px] border-l-[#7C6BFF] ${lit ? 'ring-2 ring-[#B9AEFF]' : ''}`
     : `bg-white border ${od ? 'border-[#F5C2C2]' : 'border-[#E0E0E6]'}`;
   return (
-    <div
-      draggable={movable}
-      onDragStart={movable ? e => { e.dataTransfer.setData('text/plain', l.id); e.dataTransfer.effectAllowed = 'move'; drag.start(l.id); } : undefined}
-      onDragEnd={drag.end}
-      onMouseEnter={multi ? () => onHover(true) : undefined}
-      onMouseLeave={multi ? () => onHover(false) : undefined}
-      className={`group relative rounded-lg ${frame} px-2.5 py-2 text-xs ${movable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:border-[#C7DAFF] ${drag.id === l.id ? 'opacity-40' : ''}`}
-      onClick={onToggle}
-      title={movable ? 'Drag to another day to change the delivery date' : undefined}
-    >
-      {movable && <GripVertical className="absolute top-2 right-1 w-3 h-3 text-[#C0C0CC] opacity-0 group-hover:opacity-100" />}
-      {multi && (
-        <p className="flex items-center gap-1 text-[10px] font-semibold text-[#6B5BEF] mb-0.5 pr-3">
-          <Layers className="w-3 h-3 flex-shrink-0" /> <span className="flex-shrink-0">{idx} of {siblings.length} services</span><span className="truncate font-normal text-[#9A90E8]">· {l.caseId}</span>
-        </p>
-      )}
-      <p className="font-semibold text-[#030213] flex items-center gap-1.5">
-        {unread > 0 && <span className="w-2 h-2 rounded-full bg-[#E53935] flex-shrink-0" title="Unread notes" />}
-        <span className="truncate">{l.service}</span>{od && <Pill tone="red">Overdue</Pill>}
-      </p>
-      <p className="text-[#717182] truncate">{l.patient} · {l.practice.replace(/^Smile Genius /, '')}</p>
-      {finished
-        ? <p className="text-[#2E7D32] truncate">{STATUS[l.status].label} {fmtShort(finishedOn(l))}</p>
-        : <p className="text-[#5A5568] truncate">{l.owner ?? 'Team queue'}{stg ? ` · ${stg.name}` : l.status === 'qc' ? ' · QC' : ''}</p>}
-      {multi && (
-        <div className="mt-1.5 pt-1.5 border-t border-[#E6E1FF] space-y-0.5">
-          {others.map(x => <p key={x.id} className="flex justify-between gap-2 text-[10px] text-[#5A5568]"><span className="truncate">{x.service}</span><span className="text-[#6B5BEF] flex-shrink-0">{where(x)}</span></p>)}
-          <button className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#6B5BEF] hover:underline mt-0.5" onClick={e => { e.stopPropagation(); navigate(caseUrl(l.caseId)); }}><ExternalLink className="w-3 h-3" /> Open full case</button>
+    <div className={`rounded-lg bg-white border ${od ? 'border-[#F5C2C2]' : 'border-[#E0E0E6]'} px-2.5 py-2 text-xs cursor-pointer hover:border-[#C7DAFF]`} onClick={onToggle}>
+      <div className="flex items-start gap-2">
+        <ServiceIcon service={l.service} size="sm" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-[#030213] flex items-center gap-1.5"><span className="truncate">{l.service}</span>{unread > 0 && <span className="w-2 h-2 rounded-full bg-[#E53935] flex-shrink-0" title="Unread notes" />}</p>
+          <p className="text-[#717182] truncate">{l.practice}</p>
         </div>
-      )}
+      </div>
+      <div className="mt-1.5 flex items-center justify-between gap-1.5">
+        <span className="inline-flex items-center gap-1.5 min-w-0 text-[#5A5568]" title={l.owner ?? 'Team queue'}><Avatar name={l.owner} /><span className="truncate">{stg ? stg.name : l.status === 'qc' ? 'QC' : STATUS[l.status].label}</span></span>
+        {od && <Pill tone="red">Overdue</Pill>}
+      </div>
       {open && (
         <div className="mt-2 pt-2 border-t border-[#F0EFF6] space-y-1.5 cursor-default" onClick={e => e.stopPropagation()}>
           <p>{l.dentist} · {l.caseId}</p>
           <LinePill s={s} l={l} />
-          {movable && <label className="flex items-center gap-1.5 text-[11px] text-[#717182]">Due back <input type="date" className="px-1.5 py-0.5 rounded border border-[#E0E0E6] text-[11px]" value={l.requested ?? ''} onChange={e => { if (setRequested([l.id], e.target.value || null, me, VIA)) toast.success(e.target.value ? 'Delivery date saved on the case' : 'Moved to No date set'); }} /></label>}
+          <label className="flex items-center gap-1.5 text-[11px] text-[#717182]">Due back <input type="date" className="px-1.5 py-0.5 rounded border border-[#E0E0E6] text-[11px]" value={l.requested ?? ''} onChange={e => { setRequested([l.id], e.target.value || null, me); toast.success(e.target.value ? 'Date set' : 'Moved to No date'); }} /></label>
           {(l.status === 'in-queue' || l.status === 'in-production' || l.status === 'qc') && (
-            <label className="flex items-center gap-1.5 text-[11px] text-[#717182]">Assigned <select className="px-1.5 py-0.5 rounded border border-[#E0E0E6] text-[11px]" value={l.owner ?? ''} onChange={e => { reassign(l.id, e.target.value || null, me); toast.success('Reassigned'); }}><option value="">Team queue</option>{STAFF.map(p => <option key={p.name}>{p.name}</option>)}</select></label>
+            <label className="flex items-center gap-1.5 text-[11px] text-[#717182]">Owner <select className="px-1.5 py-0.5 rounded border border-[#E0E0E6] text-[11px]" value={l.owner ?? ''} onChange={e => { reassign(l.id, e.target.value || null, me); toast.success('Reassigned'); }}><option value="">Team queue</option>{STAFF.map(p => <option key={p.name}>{p.name}</option>)}</select></label>
           )}
           {unread > 0 && <p className="text-[11px] text-[#C62828]">{unread} unread note{unread === 1 ? '' : 's'}</p>}
           <p className="text-[10px] text-[#717182]">Route: {routeOf(s, l).name}</p>

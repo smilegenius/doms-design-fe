@@ -194,6 +194,8 @@ export const PRODUCTS: Record<ProductId, { label: string; noun: string; group: P
   whitening:  { label: 'Whitening Trays',  noun: 'whitening trays',  group: 'Appliances', archItem: true, privateOnly: true, plural: true },
   other:      { label: 'Something Else',   noun: 'item',             group: 'Other' },
 };
+/** Upper, Lower or Both: every whole-arch service (night guard, retainer, aligners, whitening trays, full denture). */
+export const archAllowsBoth = (p: ProductId) => !!PRODUCTS[p].archItem;
 /** "a crown", "an implant crown", "aligners" (a plural name takes no article). `word`: the label instead of the noun. */
 export function aProduct(p: ProductId, word: string = PRODUCTS[p].noun): string {
   return PRODUCTS[p].plural ? word : `${/^[aeiou]/i.test(word) ? 'an' : 'a'} ${word}`;
@@ -1051,7 +1053,7 @@ export function priceKey(item: ServiceItem, ctx: Ctx): string | undefined {
 export function unitsOf(item: ServiceItem): number {
   if (item.product === 'crown' || item.product === 'veneer') return Math.max(1, item.teeth.length);
   if (item.product === 'bridge') return item.rbb ? 1 : Math.max(1, item.teeth.length);
-  if (item.product === 'retainer' || item.product === 'whitening' || item.product === 'aligner') return item.arch === 'both' ? 2 : 1;
+  if (item.product === 'nightguard' || item.product === 'retainer' || item.product === 'whitening' || item.product === 'aligner') return item.arch === 'both' ? 2 : 1;
   return 1;
 }
 export const fastTrackEligible = (item: ServiceItem, ctx: Ctx, lab: Lab = ctx.lab) => {

@@ -44,7 +44,7 @@ export function SecondaryButton({ children, onClick, disabled, className = '', t
 }
 export function LinkButton({ children, onClick, className = '', disabled }: { children: ReactNode; onClick?: () => void; className?: string; disabled?: boolean }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`text-xs font-semibold text-[#2F62D6] hover:text-[#1E40AF] hover:underline disabled:opacity-40 rounded ${FOCUS} ${className}`}>
+    <button type="button" onClick={onClick} disabled={disabled} className={`text-xs font-semibold text-[#2F62D6] hover:text-[#1E40AF] hover:underline disabled:opacity-40 rounded max-sm:py-2 max-sm:-my-2 ${FOCUS} ${className}`}>
       {children}
     </button>
   );
@@ -83,10 +83,11 @@ export function NextArrow({ onClick, disabled, label, next, hint, side = 'right'
         <Icon className={`relative ${compact ? 'w-4 h-4' : 'w-5 h-5'} transition-transform ${back ? 'motion-safe:group-hover:-translate-x-0.5' : 'motion-safe:group-hover:translate-x-0.5'}`} aria-hidden />
       </button>
       {disabled
-        ? hint && <span className={`min-w-0 text-[#5A5A6A] ${compact ? 'text-[11px] truncate' : 'text-xs line-clamp-2'}`} title={hint} aria-hidden>{hint}</span>
+        ? hint && <span className={`min-w-0 text-[#5A5A6A] ${compact ? 'text-[11px] truncate max-sm:hidden' : 'text-xs line-clamp-2'}`} title={hint} aria-hidden>{hint}</span>
         : next && (compact ? (
           // One small line: "Back · Prescriber".
-          <span className="min-w-0 truncate text-xs leading-4" title={next} aria-hidden>
+          // On a phone the corner arrows are just arrows: the title between them needs the room.
+          <span className="min-w-0 truncate text-xs leading-4 max-sm:hidden" title={next} aria-hidden>
             <span className="text-[#5A5A6A]">{back ? 'Back' : 'Next'} · </span>
             <span className="font-semibold text-[#030213]">{next}</span>
           </span>
@@ -290,8 +291,9 @@ export function Notice({ tone = 'note', children, onDismiss, actions, role }: {
         {children}
         {actions && <div className="mt-2.5 flex flex-wrap gap-2">{actions}</div>}
       </div>
+      {/* A thumb-sized hit area on phones, same look. */}
       {onDismiss && (
-        <button type="button" onClick={onDismiss} aria-label="Dismiss" className={`p-0.5 rounded text-[#6B6B7B] hover:text-[#030213] ${FOCUS}`}>
+        <button type="button" onClick={onDismiss} aria-label="Dismiss" className={`relative flex-shrink-0 p-0.5 rounded text-[#6B6B7B] hover:text-[#030213] max-sm:after:absolute max-sm:after:-inset-2.5 max-sm:after:content-[''] ${FOCUS}`}>
           <X className="w-3.5 h-3.5" />
         </button>
       )}
@@ -326,10 +328,11 @@ export function GapButton({ count, onClick, className = '' }: { count: number; o
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold bg-[#FFF8E1] text-[#8A4B08] border border-[#F5D98B] hover:bg-[#FFF1C7] transition-colors ${FOCUS} ${className}`}
+      aria-label={`${count} ${count === 1 ? 'thing' : 'things'} left`}
+      className={`inline-flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap bg-[#FFF8E1] text-[#8A4B08] border border-[#F5D98B] hover:bg-[#FFF1C7] transition-colors ${FOCUS} ${className}`}
     >
       <StateIcon state="gap" size="sm" ripple={false} />
-      {count} {count === 1 ? 'Thing Left' : 'Things Left'} →
+      {count}<span className="max-sm:hidden"> {count === 1 ? 'Thing Left' : 'Things Left'}</span><span className="sm:hidden"> Left</span> →
     </button>
   );
 }

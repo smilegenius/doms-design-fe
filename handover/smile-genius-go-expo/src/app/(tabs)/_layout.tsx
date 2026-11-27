@@ -1,4 +1,4 @@
-// Bottom tabs: Home · Lab work · (+ Create lab work) · Invoices · Account — our floating tab bar.
+// Bottom tabs: Home · Lab work · (+ Create lab work) · Invoices · Account — our tab bar, docked full width.
 import { Tabs } from 'expo-router';
 import { TabBar } from '../../components/ui';
 

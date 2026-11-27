@@ -6,7 +6,7 @@
 // Case). No page header and no right rail: the timeline shows every value.
 // The step card is frosted glass over soft brand-tinted light (new-case-guided.css).
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useCase } from '../CaseContext';
 import { useController } from '../controller';
 import { parseStep } from '../rules';
@@ -42,31 +42,53 @@ export function StepBody() {
   }
 }
 
+/** True from the given width up (the step timeline sits beside the card from 1024 px). */
+function useMinWidth(px: number) {
+  const query = `(min-width: ${px}px)`;
+  const [on, setOn] = useState(() => typeof window === 'undefined' || window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const sync = () => setOn(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, [query]);
+  return on;
+}
+
 export default function GuidedLayout() {
   const c = useController();
   const api = useCase();
   const [titleSlot, setTitleSlot] = useState<HTMLElement | null>(null);
+  // From 1024 px the timeline has its own column; under it, it folds above the card.
+  const besides = useMinWidth(1024);
   return (
     // The footer's arrow is the one way on: steps hand it their "that's it".
     // The step card is wide, so steps draw their fuller versions.
     <FooterArrowProvider value={true}>
       <RoomProvider value="wide">
         {/* .nc-guided: one notch smaller type, so a step fits a short window without scrolling. */}
-        <div className="nc-guided nc-guided-light min-w-[900px] min-h-[calc(100vh-56px)] flex flex-col">
-          <div className="flex-1 grid grid-cols-[210px_minmax(560px,1fr)] gap-5 px-6 pt-5 pb-6 items-start">
-            <div className="sticky top-4">
-              <CaseCorner />
-              <Timeline />
-            </div>
+        <div className="nc-guided nc-guided-light min-h-[calc(100vh-56px)] flex flex-col">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-[210px_minmax(0,1fr)] gap-3 lg:gap-5 px-3 sm:px-6 pt-3 sm:pt-5 pb-4 sm:pb-6 items-start content-start">
+            {besides ? (
+              <div className="sticky top-4">
+                <CaseCorner />
+                <Timeline />
+              </div>
+            ) : (
+              <div className="min-w-0">
+                <CaseCorner />
+              </div>
+            )}
             {/* The card takes the room beside the timeline (a 1500 px window left a strip empty at 960 px); capped only for very wide screens. */}
             <div className="min-w-0 w-full max-w-[1200px]">
               {/* While the case is being made, the Start page's tabs stay: this is Enter Manually. */}
               {c.view === 'edit' && !api.readOnly && <CreateTabs />}
               <CaseBanners className="mb-4 space-y-2" />
-              <main className="nc-glass rounded-2xl px-6 pt-5 pb-6">
+              <main className="nc-glass rounded-2xl px-3.5 sm:px-6 pt-4 sm:pt-5 pb-5 sm:pb-6">
                 {/* Read-only (sent, or waiting for approval): a step shows its answers, its controls can't be used. */}
                 {/* ← back and → next sit in the card's top corners; the footer only finishes the case. */}
-                <StepArrows onSlot={setTitleSlot} />
+                <StepArrows onSlot={setTitleSlot} folded={!besides} />
                 <fieldset disabled={api.readOnly && api.step !== 'review'} className="min-w-0 m-0 p-0 border-0">
                   {/* Each step's title sits small between the arrows, not above the step. */}
                   <HeadingSlotContext.Provider value={titleSlot}>

@@ -388,7 +388,7 @@ const AiStart = forwardRef<AiStartHandle, { onUnderstood?: (u: AiUnderstood) => 
 
       {/* A prescription dropped on either card is read. */}
       {/* Until the first read, the description has the page to itself; what was understood slides in once it is read. */}
-      <div className={`relative h-full grid gap-4 ${hasRead ? 'grid-cols-[minmax(0,58fr)_minmax(0,42fr)]' : 'grid-cols-1'}`} {...(busy ? {} : dropProps)}>
+      <div className={`relative h-full grid gap-4 ${hasRead ? 'grid-cols-1 lg:grid-cols-[minmax(0,58fr)_minmax(0,42fr)]' : 'grid-cols-1'}`} {...(busy ? {} : dropProps)}>
         {/* ── Left: the description ── */}
         <section aria-labelledby={`${uid}-title`} className={`${CARD} relative min-h-0 flex flex-col p-4`}>
           <div className="flex items-center gap-2">
@@ -445,7 +445,7 @@ const AiStart = forwardRef<AiStartHandle, { onUnderstood?: (u: AiUnderstood) => 
                     {dictation.interim && <span className="truncate text-[#3A3A4A]">“{dictation.interim}”</span>}
                   </span>
                 ) : (
-                  <span className="inline-flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap" aria-hidden>
+                  <span className="inline-flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap max-sm:hidden" aria-hidden>
                     {reading
                       ? <><Dots />Reading</>
                       : stale
@@ -477,7 +477,7 @@ const AiStart = forwardRef<AiStartHandle, { onUnderstood?: (u: AiUnderstood) => 
                   >
                     {reading ? <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden /> : <Sparkles className="w-3.5 h-3.5" strokeWidth={2} aria-hidden />}
                     {reading ? 'Reading…' : 'Read Description'}
-                    <span className="inline-flex items-center gap-0.5 opacity-75 font-medium" aria-hidden>{mod}<CornerDownLeft className="w-3 h-3" strokeWidth={2.25} /></span>
+                    <span className="inline-flex items-center gap-0.5 opacity-75 font-medium max-sm:hidden" aria-hidden>{mod}<CornerDownLeft className="w-3 h-3" strokeWidth={2.25} /></span>
                   </button>
                 </span>
               </div>

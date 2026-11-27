@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavSlot } from '../growth-portal/navSlot';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Receipt } from 'lucide-react';
 import { useBilling } from './billingStore';
@@ -21,28 +21,7 @@ export default function BillingNavItem() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const s = useBilling();
-  const [host, setHost] = useState<HTMLElement | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    const sync = () => {
-      const inv = findInvoices();
-      if (!inv) { setHost(null); return; }
-      setCollapsed(!inv.textContent?.trim());
-      setHost(prev => {
-        if (prev && prev.isConnected && prev.previousElementSibling === inv) return prev;
-        prev?.remove();
-        const el = document.createElement('div');
-        el.dataset.sfBillingNav = '1';
-        inv.insertAdjacentElement('afterend', el);
-        return el;
-      });
-    };
-    const mo = new MutationObserver(sync);
-    mo.observe(document.body, { childList: true, subtree: true });
-    sync();
-    return () => { mo.disconnect(); setHost(h => { h?.remove(); return null; }); };
-  }, []);
+  const { host, collapsed } = useNavSlot(findInvoices, 'after');
 
   if (!host) return null;
   const active = pathname.startsWith('/growth/billing');

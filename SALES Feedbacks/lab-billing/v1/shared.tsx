@@ -66,7 +66,6 @@ export function ConfirmPracticeModal({ a, onClose }: { a: BillingAccount; onClos
   return (
     <Modal isOpen onClose={onClose} title={`Who do we bill at ${a.name}?`} footer={
       <div className="flex justify-end gap-2">
-        <button className={btn} onClick={onClose}>Later</button>
         <button className={btnPrimary} disabled={!ok} onClick={() => {
           const n = confirmPractice(a.id, { emails: list, invoiceMode: mode, termsDays: terms ? Number(terms) : null });
           toast.success(`${a.name} confirmed${n ? `: ${pl(n, 'invoice')} sent` : ''}${tool ? `, added to ${tool}` : ''}`);
@@ -133,7 +132,6 @@ export function SendInvoicesModal({ invoices, to, title, onClose }: { invoices: 
   return (
     <Modal isOpen onClose={onClose} size="lg" title={title} footer={
       <div className="flex justify-end gap-2">
-        <button className={btn} onClick={onClose}>Cancel</button>
         <button className={btnPrimary} disabled={!picked.length || !list.length} onClick={() => { const n = sendInvoices(picked, list); toast.success(`${pl(n, 'invoice')} sent to ${list.join(', ')}`); onClose(); }}><Mail className="w-3.5 h-3.5" /> Send {picked.length ? pl(picked.length, 'invoice') : ''}</button>
       </div>
     }>

@@ -21,8 +21,8 @@ export default function CreateTabs() {
     state: { session: `ai-${Date.now()}`, aiText: describeDraft(draft, fullName(patient), lab.name), fromCase: draft.id },
   });
   return (
-    <div className="flex items-center gap-3 mb-3">
-      <nav aria-label="How to fill the case" className="inline-flex flex-shrink-0 p-1 rounded-xl bg-[#F0EFF6] border border-[#E0E0E6]">
+    <div className="flex items-center gap-3 mb-2 sm:mb-3">
+      <nav aria-label="How to fill the case" className="inline-flex flex-shrink-0 max-sm:w-full max-sm:[&>*]:flex-1 max-sm:[&>*]:justify-center p-1 rounded-xl bg-[#F0EFF6] border border-[#E0E0E6]">
         <button
           type="button"
           onClick={toAi}
@@ -34,7 +34,7 @@ export default function CreateTabs() {
           <PenLine className="w-4 h-4 text-[#2F62D6]" strokeWidth={2} aria-hidden />Enter Manually
         </span>
       </nav>
-      <p className="min-w-0 truncate text-xs text-[#5A5A6A]">Step by step, as the timeline shows. Describe with AI carries on from here.</p>
+      <p className="min-w-0 truncate text-xs text-[#5A5A6A] max-md:hidden">Step by step, as the timeline shows. Describe with AI carries on from here.</p>
     </div>
   );
 }

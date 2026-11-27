@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, CheckCheck, CloudOff, FileText, Landmark, MailWarning, PauseCircle, PhoneCall, RefreshCw, Search, Send, Sparkles, UserPlus, X } from 'lucide-react';
+import { ArrowRight, BadgeCheck, BellRing, CalendarCheck, Check, CheckCheck, CloudOff, FileText, HelpCircle, Landmark, MailWarning, PauseCircle, PhoneCall, RefreshCw, Search, Send, Sparkles, UserPlus, Wallet, X, type LucideIcon } from 'lucide-react';
 import Modal from '../../../src/app/components/Modal';
 import { useToast } from '../../../src/app/context/ToastContext';
 import type { Invoice } from '../types';
@@ -51,7 +51,7 @@ export default function HomeV1({ openFind }: { openFind: () => void }) {
     const n = s.invoices.filter(i => i.accountId === a.id && (i.status === 'draft' || i.status === 'flagged')).length;
     items.push({ key: `new-${a.id}`, tone: 'blue', weight: 900, icon: <UserPlus className="w-4 h-4 text-[#4D8EF7]" />,
       text: <>New practice from a scan: <b>{a.name}</b></>, sub: `Check who to bill there.${n ? ` ${pl(n, 'invoice')} waits until you do.` : ''}`,
-      actions: <button className={btnPrimary} onClick={() => setConfirming(a.id)}>Check and confirm</button> });
+      actions: <button className={btnPrimary} onClick={() => setConfirming(a.id)}>Confirm</button> });
   }
   for (const is of s.issues) {
     const inv = is.invoiceId ? s.invoices.find(i => i.id === is.invoiceId) : undefined;
@@ -79,16 +79,16 @@ export default function HomeV1({ openFind }: { openFind: () => void }) {
   }
   if (clean.length) items.push({ key: 'clean', tone: 'blue', weight: 700 + clean.reduce((n, i) => n + totals(i).gross, 0), icon: <CheckCheck className="w-4 h-4 text-[#4D8EF7]" />,
     text: <>{pl(clean.length, 'invoice')} ready to send, {money(clean.reduce((n, i) => n + totals(i).gross, 0), 'GBP', { round: true })}</>,
-    sub: s.settings.approval === 'review-all' ? 'You asked to approve every invoice (Settings › More options).' : 'Nothing wrong with them; they wait because you approve invoices in your first 30 days.',
-    actions: <><button className={btn} onClick={() => navigate('/growth/billing/invoices?show=waiting')}>Look first</button><button className={btnPrimary} onClick={() => { const n = approveInvoices(clean.map(i => i.id)); toast.success(`${pl(n, 'invoice')} sent`); }}><Send className="w-3.5 h-3.5" /> Send all</button></> });
+    sub: s.settings.approval === 'review-all' ? 'You approve every invoice (Settings › More options).' : 'All clean. You approve invoices in your first 30 days.',
+    actions: <><button className={btn} onClick={() => navigate('/growth/billing/invoices?show=waiting')}>Review</button><button className={btnPrimary} onClick={() => { const n = approveInvoices(clean.map(i => i.id)); toast.success(`${pl(n, 'invoice')} sent`); }}><Send className="w-3.5 h-3.5" /> Send all</button></> });
   for (const i of flagged) items.push({ key: i.id, tone: 'amber', weight: 600 + totals(i).gross, icon: <FileText className="w-4 h-4 text-[#B45309]" />,
     text: <>{i.cases?.length ? `Month invoice for ${account(s, i.accountId)?.name}` : `${i.patient} · ${account(s, i.accountId)?.name}`}: {i.flags[0].message.charAt(0).toLowerCase() + i.flags[0].message.slice(1)}</>,
     sub: i.flags.length > 1 ? `And ${pl(i.flags.length - 1, 'other thing')} to check.` : `${money(totals(i).gross, i.currency)}, waiting.`,
-    actions: <><button className={btnPrimary} onClick={() => navigate(invoiceUrl(i.id))}>Check it</button></> });
+    actions: <><button className={btnPrimary} onClick={() => navigate(invoiceUrl(i.id))}>Review</button></> });
   const nudges = assists(s).filter(n => !/^(unusual-price|nhs-unclear|remake-inv|design-diff|review|new-order-type|type|monthend)-/.test(n.id));
   for (const n of nudges) items.push({ key: n.id, tone: n.tone, weight: 400, icon: <Sparkles className="w-4 h-4 text-[#7C6BFF]" />,
     text: <>{n.kind}: <b>{n.title}</b></>, sub: n.message, dismiss: () => dismiss(n.id),
-    actions: <button className={btn} onClick={() => navigate(n.link)}>Fix it <ArrowRight className="w-3 h-3" /></button> });
+    actions: <button className={btn} onClick={() => navigate(n.link)}>Review <ArrowRight className="w-3 h-3" /></button> });
   for (const a of s.accounts.filter(a => a.bounced?.length)) items.push({ key: `bounce-${a.id}`, tone: 'amber', weight: 500, icon: <MailWarning className="w-4 h-4 text-[#B45309]" />,
     text: <>An email to {a.name} bounced</>, sub: `${a.bounced![0].what} to ${a.bounced![0].email}. Fix the address on their page, then send again.`,
     actions: <><button className={btn} onClick={() => navigate(`${practiceUrl(a.id)}?tab=setup`)}>Fix address</button><button className={btnPrimary} onClick={() => { resendAccountEmail(a.id); toast.success('Sent again'); }}>Send again</button></> });
@@ -116,28 +116,28 @@ export default function HomeV1({ openFind }: { openFind: () => void }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <Num label="Owed to you" value={money(h.owed, 'GBP', { round: true })} sub={h.overdue ? <span className="text-[#C62828]">{money(h.overdue, 'GBP', { round: true })} overdue</span> : 'Nothing overdue'} onClick={() => navigate('/growth/billing/invoices?show=unpaid')} />
-        <Num label={`Invoiced in ${fmtMonth(ym).split(' ')[0]}`} value={money(h.invoicedThisMonth, 'GBP', { round: true })} sub={`${pl(s.invoices.filter(i => i.issuedAt && monthOf(i.issuedAt) === ym && i.status !== 'void').length, 'invoice')}`} onClick={() => navigate('/growth/billing/invoices?show=all')} />
-        <Num label="Paid this month" value={money(h.paidThisMonth, 'GBP', { round: true })} sub={hasTool ? `Read back from ${tool}` : 'Marked paid by you'} onClick={() => navigate('/growth/billing/invoices?show=paid')} />
+        <Num icon={Wallet} tint="bg-[#EEF4FF] text-[#4D8EF7]" label="Owed to you" value={money(h.owed, 'GBP', { round: true })} sub={h.overdue ? <span className="text-[#C62828]">{money(h.overdue, 'GBP', { round: true })} overdue</span> : 'Nothing overdue'} onClick={() => navigate('/growth/billing/invoices?show=unpaid')} />
+        <Num icon={FileText} tint="bg-[#F5F3FF] text-[#7C3AED]" label={`Invoiced in ${fmtMonth(ym).split(' ')[0]}`} value={money(h.invoicedThisMonth, 'GBP', { round: true })} sub={`${pl(s.invoices.filter(i => i.issuedAt && monthOf(i.issuedAt) === ym && i.status !== 'void').length, 'invoice')}`} onClick={() => navigate('/growth/billing/invoices?show=all')} />
+        <Num icon={BadgeCheck} tint="bg-[#E8F5E9] text-[#2E7D32]" label="Paid this month" value={money(h.paidThisMonth, 'GBP', { round: true })} sub={hasTool ? `From ${tool}` : 'Marked by you'} onClick={() => navigate('/growth/billing/invoices?show=paid')} />
       </div>
 
-      <Card title="This month, in three steps" sub={`Everything else happens on its own when cases ship. Statement day: ${fmtShort(sd)}${daysBetween(t, sd) >= 0 ? ` (${daysBetween(t, sd) === 0 ? 'today' : `in ${pl(daysBetween(t, sd), 'day')}`})` : ''}.`}>
+      <Card title={<span className="inline-flex items-center gap-2"><CalendarCheck className="w-4 h-4 text-[#4D8EF7]" /> This month</span>} sub={`Statement day: ${fmtShort(sd)}${daysBetween(t, sd) >= 0 ? ` (${daysBetween(t, sd) === 0 ? 'today' : `in ${pl(daysBetween(t, sd), 'day')}`})` : ''}. The rest runs when cases ship.`}>
         <ol className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <Step n={1} done={!pot.length} title="Invoice monthly practices"
             body={pot.length ? `${pl(pot.length, 'shipped case')} ready, ${money(pot.reduce((n, x) => n + x.value, 0), 'GBP', { round: true })}.` : s.accounts.some(a => a.invoiceMode === 'month-end') ? 'Nothing waiting.' : 'No practice is billed monthly. Per-case practices are invoiced on Shipped.'}
             action={pot.length ? <button className={btnPrimary} onClick={() => navigate('/growth/billing/invoices?show=to-invoice')}>Review <ArrowRight className="w-3.5 h-3.5" /></button> : null} />
           <Step n={2} done={stDone} title={`Send ${fmtMonth(stPeriod).split(' ')[0]} statements`}
-            body={stDone ? `All ${stSent} sent. Send one again from any practice's page.` : `${stSent ? `${stSent} of ${stExpected} sent. ` : ''}${pending.length ? `${pl(pending.length, 'invoice')} still waiting would be left off.` : 'One per practice, with each dentist\'s share.'}`}
+            body={stDone ? `All ${stSent} sent. Resend from a practice's page.` : `${stSent ? `${stSent} of ${stExpected} sent. ` : ''}${pending.length ? `${pl(pending.length, 'waiting invoice')} won't be on them.` : 'One per practice, split by dentist.'}`}
             action={!stDone ? <button className={btn} onClick={() => setStatements(true)}><Send className="w-3.5 h-3.5" /> Send statements</button> : null} />
           <Step n={3} done title="Payments in"
-            body={hasTool ? `${tool} matches payments; they show here as paid.` : s.bank ? `Matched from ${s.bank === 'revolut' ? 'Revolut' : 'Wise'}; anything unclear appears below.` : 'Mark invoices paid as money arrives (tick them in Invoices).'}
+            body={hasTool ? `${tool} matches payments automatically.` : s.bank ? `Matched from ${s.bank === 'revolut' ? 'Revolut' : 'Wise'}; unclear ones appear below.` : 'Tick invoices paid in Invoices.'}
             action={null} />
         </ol>
       </Card>
 
-      <Card title={items.length ? `Needs you (${items.length})` : 'Needs you'} sub={items.length ? 'Most money first. Each one is a sentence and a button.' : undefined} pad={false}>
+      <Card title={<span className="inline-flex items-center gap-2"><BellRing className="w-4 h-4 text-[#B45309]" /> Needs you{items.length ? ` · ${items.length}` : ''}</span>} sub={items.length ? 'Biggest amounts first.' : undefined} pad={false}>
         {!items.length ? (
-          <div className="px-5 py-8 text-center"><Check className="w-6 h-6 text-[#43A047] mx-auto" /><p className="text-sm font-semibold text-[#030213] mt-2">All clear</p><p className="text-xs text-[#717182] mt-1">Invoices are going out and payments are coming back on their own.</p></div>
+          <div className="px-5 py-8 text-center"><Check className="w-6 h-6 text-[#43A047] mx-auto" /><p className="text-sm font-semibold text-[#030213] mt-2">All clear</p><p className="text-xs text-[#717182] mt-1">Invoices go out and payments come back on their own.</p></div>
         ) : (
           <ul className="divide-y divide-[#F0EFF6]">
             {items.map(it => (
@@ -152,7 +152,7 @@ export default function HomeV1({ openFind }: { openFind: () => void }) {
       </Card>
 
       <div className="rounded-xl border border-dashed border-[#DCD8EC] px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="text-xs font-semibold text-[#030213]">How do I…</span>
+        <span className="text-xs font-semibold text-[#030213] inline-flex items-center gap-1.5"><HelpCircle className="w-3.5 h-3.5 text-[#717182]" /> How do I…</span>
         {[
           ['Send a practice its statement', '/growth/billing/practices'],
           ['Give a practice its own prices', '/growth/billing/practices'],
@@ -160,9 +160,9 @@ export default function HomeV1({ openFind }: { openFind: () => void }) {
           ['Bill a practice once a month', '/growth/billing/practices'],
           ['Change my prices', '/growth/billing/settings/prices'],
         ].map(([label, to]) => <button key={label} onClick={() => navigate(to)} className="text-xs text-[#4D8EF7] hover:underline">{label}</button>)}
-        <button onClick={openFind} className="ml-auto inline-flex items-center gap-1 text-xs text-[#717182] hover:text-[#030213]"><Search className="w-3.5 h-3.5" /> Something else? Find it (⌘K)</button>
+        <button onClick={openFind} className="ml-auto inline-flex items-center gap-1 text-xs text-[#717182] hover:text-[#030213]"><Search className="w-3.5 h-3.5" /> Something else? Find (⌘K)</button>
       </div>
-      <Hint>Every practice and dentist has one page with their invoices, statements, prices and setup: Practices tab.</Hint>
+      <Hint>Each practice and dentist has one page for invoices, statements, prices and setup (Practices tab).</Hint>
 
       {a0 && <ConfirmPracticeModal a={a0} onClose={() => setConfirming(null)} />}
       {statements && <SendAllStatements period={stPeriod} onClose={() => setStatements(false)} />}
@@ -170,12 +170,15 @@ export default function HomeV1({ openFind }: { openFind: () => void }) {
   );
 }
 
-function Num({ label, value, sub, onClick }: { label: string; value: string; sub: ReactNode; onClick: () => void }) {
+function Num({ icon: Icon, tint, label, value, sub, onClick }: { icon: LucideIcon; tint: string; label: string; value: string; sub: ReactNode; onClick: () => void }) {
   return (
-    <button onClick={onClick} className="text-left bg-white border border-[#E0E0E6] rounded-xl px-4 py-3 hover:border-[#C7DAFF]">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-[#717182]">{label}</p>
-      <p className="text-2xl font-semibold text-[#030213] mt-0.5">{value}</p>
-      <p className="text-xs text-[#717182] mt-0.5">{sub}</p>
+    <button onClick={onClick} className="flex items-start gap-3 text-left bg-white border border-[#E0E0E6] rounded-xl px-4 py-3 hover:border-[#C7DAFF] transition-colors">
+      <span className={`w-9 h-9 rounded-lg flex-shrink-0 inline-flex items-center justify-center ${tint}`}><Icon className="w-4 h-4" /></span>
+      <span className="min-w-0">
+        <span className="block text-[11px] font-semibold text-[#717182]">{label}</span>
+        <span className="block text-2xl font-semibold text-[#030213] leading-tight">{value}</span>
+        <span className="block text-xs text-[#717182] mt-0.5">{sub}</span>
+      </span>
     </button>
   );
 }
@@ -205,13 +208,13 @@ function SendAllStatements({ period, onClose }: { period: string; onClose: () =>
   const overdueTotal = headline(s).overdue;
   return (
     <Modal isOpen onClose={onClose} title={`Send ${fmtMonth(period)} statements`} footer={
-      <div className="flex justify-end gap-2"><button className={btn} onClick={onClose}>Not yet</button><button className={btnPrimary} disabled={!sts.length} onClick={() => { const n = sendStatements(period); toast.success(`${pl(n, 'statement')} sent`); onClose(); }}><Send className="w-3.5 h-3.5" /> Send {pl(sts.length, 'statement')}</button></div>
+      <div className="flex justify-end gap-2"><button className={btnPrimary} disabled={!sts.length} onClick={() => { const n = sendStatements(period); toast.success(`${pl(n, 'statement')} sent`); onClose(); }}><Send className="w-3.5 h-3.5" /> Send {pl(sts.length, 'statement')}</button></div>
     }>
       <div className="space-y-3 text-sm text-[#5A5568]">
-        <p>{pl(built, 'practice')} with something to show get a statement: what they were invoiced, what they paid and what's still owed ({money(overdueTotal, 'GBP', { round: true })} overdue across everyone). Practices see each dentist's share.</p>
-        {waiting > 0 && <Note tone="amber">{pl(waiting, 'invoice')} still waiting for you won't be on them. Send those first from Needs you if they should be.</Note>}
-        {noEmail.length > 0 && <Note tone="amber">No billing email for {noEmail.map(x => account(s, x.accountId)?.name).join(', ')}: they'll be skipped by email. Print them from their page.</Note>}
-        <p className="text-xs text-[#717182]">To check one first, or send just one, open that practice and press Send statement.</p>
+        <p>{pl(built, 'practice')} get a statement: invoiced, paid and still owed ({money(overdueTotal, 'GBP', { round: true })} overdue in total), split by dentist.</p>
+        {waiting > 0 && <Note tone="amber">{pl(waiting, 'waiting invoice')} won't be on them. Send those first from Needs you.</Note>}
+        {noEmail.length > 0 && <Note tone="amber">No billing email for {noEmail.map(x => account(s, x.accountId)?.name).join(', ')}. Print theirs from their page.</Note>}
+        <p className="text-xs text-[#717182]">To send just one, open the practice and press Send statement.</p>
       </div>
     </Modal>
   );

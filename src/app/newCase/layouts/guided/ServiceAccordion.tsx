@@ -118,9 +118,9 @@ export default function ServiceAccordion({ item, slotId }: { item: ServiceItem; 
         className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left rounded-xl ${FOCUS}`}
       >
         <MessageSquareText className="w-4 h-4 text-[#2F62D6] flex-shrink-0" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-sm">
+        <span className="min-w-0 flex-1 truncate max-sm:whitespace-normal text-sm">
           <span className="font-medium text-[#030213]">Case Instructions ({label})</span>
-          <span className="text-[#5A5A6A]"> · {item.note?.trim() ? item.note.trim() : 'Optional'}</span>
+          <span className="text-[#5A5A6A] max-sm:block max-sm:truncate max-sm:text-xs max-sm:mt-0.5"><span className="max-sm:hidden"> · </span>{item.note?.trim() ? item.note.trim() : 'Optional'}</span>
         </span>
         <ChevronDown className={`w-4 h-4 text-[#5A5A6A] transition-transform motion-reduce:transition-none ${noteOpen ? 'rotate-180' : ''}`} aria-hidden />
       </button>
@@ -134,8 +134,9 @@ export default function ServiceAccordion({ item, slotId }: { item: ServiceItem; 
     <div ref={box}>
       {/* The card's title (between the arrows): the service itself, not one question. */}
       <StepHeading icon={PRODUCT_ICON[item.product]} kicker={kicker} title={itemTitle(item, n)} />
-      <div className="flex items-center gap-3 mb-3">
-        <p className="flex-1 min-w-0 text-xs text-[#5A5A6A]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
+        {/* The count keeps real room: a "Remove …?" confirm drops to its own line rather than crushing it. */}
+        <p className="flex-1 min-w-0 basis-36 text-xs text-[#5A5A6A]">
           {gaps ? `${needed.filter(s => s.answered).length} of ${needed.length} needed set · ${gaps} to go` : 'All needed set'}{optional ? ` · ${optional} optional` : ''}
         </p>
         <RemoveService item={item} />
@@ -194,16 +195,23 @@ function Section({ slot, open, disabled, question, headingRef, onToggle, childre
           className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left rounded-xl disabled:cursor-default ${FOCUS}`}
         >
           <StateIcon state={state} size="sm" ripple={open && state === 'gap'} />
-          <span className="min-w-0 flex-1 truncate text-sm">
+          {/* On a phone an answered item reads on two lines: its name, then its value and where it came from. */}
+          <span className="min-w-0 flex-1 truncate max-sm:whitespace-normal text-sm">
             {open
               ? <span className="font-semibold text-[#030213]">{question}</span>
               : <>
                 <span className={`font-medium ${disabled ? 'text-[#6B6B7B]' : 'text-[#030213]'}`}>{slot.label}</span>
-                {slot.answered && slot.value && <span className="text-[#5A5A6A]"> · {slot.value}</span>}
+                {slot.answered && slot.value && (
+                  <span className="text-[#5A5A6A] max-sm:mt-0.5 max-sm:flex max-sm:items-center max-sm:gap-1.5 max-sm:text-xs">
+                    <span className="max-sm:hidden"> · </span>
+                    <span className="max-sm:min-w-0 max-sm:truncate">{slot.value}</span>
+                    {slot.src && slot.src !== slot.value && <span className="sm:hidden flex-shrink-0"><SourceTag src={slot.src} /></span>}
+                  </span>
+                )}
                 {!slot.answered && <span className={state === 'gap' ? 'text-[#8A4B08]' : 'text-[#5A5A6A]'}> · {disabled ? 'after the ones above' : state === 'gap' ? 'needs you' : 'optional'}</span>}
               </>}
           </span>
-          {slot.answered && slot.src && slot.src !== slot.value && !open && <SourceTag src={slot.src} />}
+          {slot.answered && slot.src && slot.src !== slot.value && !open && <span className="max-sm:hidden flex-shrink-0"><SourceTag src={slot.src} /></span>}
           <ChevronDown className={`w-4 h-4 flex-shrink-0 text-[#5A5A6A] transition-transform motion-reduce:transition-none ${open ? 'rotate-180' : ''}`} aria-hidden />
         </button>
       </h3>

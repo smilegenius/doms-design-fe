@@ -26,6 +26,7 @@ import {
   Plug,
   Printer,
   Download,
+  FileSignature,
 } from 'lucide-react';
 import InviteUsersModal, { InviteUserRow } from '../components/InviteUsersModal';
 import CreateCustomServiceModal from '../components/CreateCustomServiceModal';
@@ -44,8 +45,10 @@ import FilterDrawer from '../components/FilterDrawer';
 import Pagination from '../components/Pagination';
 import Button from '../components/Button';
 import { PrintLabelsModal, DispatchLabelPage } from '../components/DispatchLabel';
+import OrderFormSettingsPanel from '../newCase/OrderFormSettingsPanel';
+import { DEFAULT_ORDER_FORM_SETTINGS, useOrderFormSettings } from '../newCase/orderFormSettings';
 
-type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners' | 'integrations' | 'dispatch-label';
+type TabId = 'personal' | 'dso' | 'services' | 'users' | 'notifications' | 'prescription-builder' | 'case-scoring' | 'scanners' | 'integrations' | 'dispatch-label' | 'order-form';
 
 const TABS: { id: TabId; label: string; description: string; icon: any }[] = [
   { id: 'personal',      label: 'Personal Info',   description: 'Your account profile',    icon: User },
@@ -75,6 +78,8 @@ const LAB_TABS: { id: TabId; label: string; description: string; icon: any }[] =
   { id: 'prescription-builder', label: 'Prescription Builder', description: 'Case form fields & services', icon: FileText },
   { id: 'case-scoring',         label: 'Case Scoring',         description: 'Weights, bands & auto-emails', icon: Sliders },
   { id: 'scanners',             label: 'Scanner Connections',  description: 'Tokens & expiry reminders',    icon: Plug },
+  // The new Dental Order Form's logo, statement and sections (12-Nov-2026), with a live preview.
+  { id: 'order-form',           label: 'Order Form',           description: 'Logo, statement & sections',  icon: FileSignature },
 ];
 
 // Mock configured-tabs set — wire to real persistence later. Case Scoring
@@ -149,11 +154,15 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
   const [blankLabelOpen, setBlankLabelOpen] = useState(false);
   // Integrations reads as configured once the group's CareStack flag is on.
   const csEnabled = useCareStackEnabled();
+  // Order Form reads as configured once the lab has saved anything other than the defaults.
+  const orderForm = useOrderFormSettings();
+  const orderFormSet = JSON.stringify(orderForm) !== JSON.stringify(DEFAULT_ORDER_FORM_SETTINGS);
   const configured = useMemo(() => {
     const s = new Set<TabId>(CONFIGURED);
     if (csEnabled) s.add('integrations');
+    if (orderFormSet) s.add('order-form');
     return s;
-  }, [csEnabled]);
+  }, [csEnabled, orderFormSet]);
   const tabParam = searchParams.get('tab');
   const subParam = searchParams.get('sub');
   // Legacy deep links from when Case Scoring Emails lived elsewhere — both now
@@ -938,6 +947,10 @@ export default function SettingsPage({ portal = 'clinic' }: { portal?: 'clinic' 
           from every expiry notification and from the lab-wide banner:
             ?tab=scanners */}
       {activeTab === 'scanners' && portal === 'lab' && <ScannerSettingsPage />}
+
+      {/* ─── Order Form (lab only) ────────────────────────────────────────── */}
+      {/* The new Dental Order Form's logo, statement and sections, with a live preview: ?tab=order-form&group=… */}
+      {activeTab === 'order-form' && portal === 'lab' && <OrderFormSettingsPanel />}
 
       {/* ─── Integrations (clinic + DSO) ──────────────────────────────────── */}
       {/* CareStack status, figures and Sync now — read-only; deep link

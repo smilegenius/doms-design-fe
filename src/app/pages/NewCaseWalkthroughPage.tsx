@@ -148,7 +148,7 @@ export default function NewCaseWalkthroughPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
+    <div className="min-h-screen bg-white bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
       <header className="flex items-center justify-between px-4 sm:px-8 py-4 sm:py-5">
         <SmileGeniusWordmark gradientId="newcaseflow_grad" />
         <button onClick={() => navigate('/flows')} className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#4D8EF7] hover:text-[#3578E5] transition-colors">
@@ -171,7 +171,7 @@ export default function NewCaseWalkthroughPage() {
             </span>
             <h1 className="text-2xl sm:text-3xl font-bold text-[#030213] mb-2">New case flow</h1>
             <p className="text-sm text-[#717182] leading-relaxed max-w-xl mx-auto">
-              From “Add new Case” to Ready for Dispatch in Guided steps: each service on one card with the Teeth Chart beside its questions and its own Delivery date, then Scan Source and Review. Desktop only (1280 px and up). Each flow opens a new case on its service’s card, with the patient and lab already chosen.
+              From “Add new Case” to Ready for Dispatch in Guided steps: each service on one card with the Teeth Chart beside its questions and its own Delivery date, then Scan Source and Review. Works on desktop, tablet and phone: under 1024 px the steps fold above the card. Each flow opens a new case on its service’s card, with the patient and lab already chosen.
             </p>
           </div>
 

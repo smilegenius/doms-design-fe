@@ -13,6 +13,7 @@
 // down, roots up) and mirrored for the patient's left.
 
 import { CSSProperties, memo } from 'react';
+import { LINE_ART } from './ToothLineArt';
 
 // ─── Dimensions ──────────────────────────────────────────────────────────────
 
@@ -84,6 +85,8 @@ interface Geo {
   w: number; hc: number; T: number;
   crown: string; crownOutline: string; cej: string;
   roots: string; rootOutline: string; backRoot?: string;
+  /** Roots behind (the line-art set's palatal roots), drawn first. */
+  backRoots?: string[];
   details: string[]; rootDetails: string[];
   screw: { body: string; abutment: string; threads: string };
 }
@@ -202,6 +205,16 @@ function build(s: Spec): Geo {
   };
 }
 
+/**
+ * The order form's (mono) teeth: the detailed line-art set (ToothLineArt.ts, 6-Nov-2026: drawn like a scanner's Rx
+ * diagram, more curves, separated roots) in the same frame, the implant parts kept from the plain shape.
+ */
+function lineArtGeometry(id: string): Geo {
+  const base = geometry(id);
+  const art = LINE_ART[`${isUpper(id) ? 'u' : 'l'}${id[1]}`];
+  return art ? { ...base, ...art, backRoot: undefined } : base;
+}
+
 function geometry(id: string): Geo {
   const key = `${isUpper(id) ? 'u' : 'l'}${id[1]}`;
   let g = GEO.get(key);
@@ -216,6 +229,18 @@ function geometry(id: string): Geo {
  * sheen, the selection teal, the grey of another service's crown, the metal of
  * an implant). Rendered once per chart, ids prefixed so charts never clash.
  */
+/**
+ * The selection colour, and the extra ones an order with several treatments gives each treatment
+ * (the order form's chart): hue 0 is the usual teal. `se` / `sr` are the crown / root fills, `line` the outline.
+ */
+export const TOOTH_HUES: { se: [string, string]; sr: [string, string]; line: string; detail: string }[] = [
+  { se: ['#D8F2FA', '#8DD4EC'], sr: ['#C8ECF7', '#A2DBEE'], line: '#3FA8CA', detail: '#7CC6DE' },
+  { se: ['#EEEBFF', '#C3B8FF'], sr: ['#E6E1FF', '#D3CBFF'], line: '#7B6CF0', detail: '#B2A6F7' },
+  { se: ['#FFF4D6', '#F9CF6E'], sr: ['#FDEFC9', '#F7DC9B'], line: '#D08A0C', detail: '#E9B95A' },
+  { se: ['#FDE8F2', '#F4A9CB'], sr: ['#FBE1EE', '#F6C3DB'], line: '#D1407F', detail: '#EC8FB8' },
+  { se: ['#DFF7E6', '#8EDCA6'], sr: ['#D5F3DE', '#B2E8C2'], line: '#2E9D55', detail: '#7BCB93' },
+];
+
 export function ToothDefs({ uid }: { uid: string }) {
   const v = (id: string, stops: [number, string, number?][]) => (
     <linearGradient id={`${uid}-${id}`} x1="0" y1="0" x2="0" y2="1">
@@ -233,10 +258,24 @@ export function ToothDefs({ uid }: { uid: string }) {
         {v('en', [[0, '#F2F6FA'], [0.14, '#FFFFFF'], [0.62, '#FBF7EE'], [1, '#F0E5CF']])}
         {v('rt', [[0, '#F3E9D5'], [1, '#E6D5B7']])}
         {h('sh', [[0, '#5A4A3A', 0.1], [0.42, '#FFFFFF', 0.55], [0.6, '#FFFFFF', 0.25], [1, '#5A4A3A', 0.12]])}
-        {v('se', [[0, '#D8F2FA'], [1, '#8DD4EC']])}
-        {v('sr', [[0, '#C8ECF7'], [1, '#A2DBEE']])}
+        {/* Hue 0 keeps the plain `se` / `sr` ids; the others are `se1`, `sr1`… */}
+        {TOOTH_HUES.map((h, i) => (
+          <g key={i}>
+            {v(`se${i || ''}`, [[0, h.se[0]], [1, h.se[1]]])}
+            {v(`sr${i || ''}`, [[0, h.sr[0]], [1, h.sr[1]]])}
+          </g>
+        ))}
         {v('gr', [[0, '#EEEEF2'], [1, '#CBCBD5']])}
         {h('mt', [[0, '#8A8E9A'], [0.35, '#E6E8EC'], [0.6, '#BBBEC7'], [1, '#7F838E']])}
+        {/* Mono (the order form, drawn as line art like a scanner's Rx, 6-Nov): white teeth, the selected ones a light grey. */}
+        {v('enm', [[0, '#FFFFFF'], [1, '#F7F9FB']])}
+        {v('rtm', [[0, '#FBFCFD'], [1, '#F2F5F8']])}
+        {v('sem', [[0, '#F1F2F5'], [1, '#D9DCE2']])}
+        {/* Mono's soft 3D (6-Nov, like a scanner's Rx diagram): a cool shade toward each side, a little at the neck, a highlight. */}
+        {h('shm', [[0, '#7F98AE', 0.42], [0.24, '#FFFFFF', 0], [0.66, '#FFFFFF', 0], [1, '#7F98AE', 0.5]])}
+        {v('svm', [[0, '#FFFFFF', 0], [0.7, '#FFFFFF', 0], [1, '#8FA6BA', 0.28]])}
+        {h('hlm', [[0.3, '#FFFFFF', 0], [0.42, '#FFFFFF', 0.9], [0.55, '#FFFFFF', 0]])}
+        {v('srm', [[0, '#F4F4F6'], [1, '#E6E6EA']])}
       </defs>
     </svg>
   );
@@ -253,11 +292,18 @@ export interface ToothLook {
   implant?: boolean;
   /** Used by another service: a grey crown. */
   other?: boolean;
+  /** Lit in another selection colour (TOOTH_HUES): a treatment of several on one order. */
+  hue?: number;
+  /** Black and grey only (the order form): white teeth, grey outlines, the selected ones grey with a dark outline. */
+  mono?: boolean;
 }
 
 const OUTLINE = '#B8B8C6';
 const TEAL_LINE = '#3FA8CA';
 const PONTIC_LINE = '#2A8DB0';
+const MONO_LINE = '#3A3A44';
+/** Mono's unselected outline: a thin, cool grey line drawing. */
+const MONO_OUTLINE = '#9FB2C3';
 const NS = { vectorEffect: 'non-scaling-stroke' } as const;
 
 /**
@@ -265,11 +311,13 @@ const NS = { vectorEffect: 'non-scaling-stroke' } as const;
  * scale). `tint`: the light teal wash shown on hover ('hover', via the parent
  * button's group), always ('on', a whole row previewed) or never. `crop: 'crown'`
  * frames the crown alone (a legend's pontic, which has no root to draw).
+ * `squash` draws the tooth at that share of its height, same width (the order
+ * form's chart: 0.5); the outlines keep their weight.
  */
-export const ToothSvg = memo(function ToothSvg({ id, uid, look, tint = 'off', crop, className, style }: {
-  id: string; uid: string; look: ToothLook; tint?: 'off' | 'hover' | 'on'; crop?: 'crown'; className?: string; style?: CSSProperties;
+export const ToothSvg = memo(function ToothSvg({ id, uid, look, tint = 'off', crop, squash = 1, className, style }: {
+  id: string; uid: string; look: ToothLook; tint?: 'off' | 'hover' | 'on'; crop?: 'crown'; squash?: number; className?: string; style?: CSSProperties;
 }) {
-  const g = geometry(id);
+  const g = look.mono ? lineArtGeometry(id) : geometry(id);
   const up = isUpper(id);
   const mirror = id[0] === '2' || id[0] === '3';
   const sx = mirror ? -1 : 1, sy = up ? -1 : 1;
@@ -284,9 +332,22 @@ export const ToothSvg = memo(function ToothSvg({ id, uid, look, tint = 'off', cr
   const ghost = look.missing && !pontic && !implant;
   const root = !pontic && !implant;
 
-  const crownFill = lit ? url('se') : other ? url('gr') : url('en');
-  const crownLine = lit ? TEAL_LINE : other ? '#9A9AAA' : OUTLINE;
-  const lineW = lit ? 1.5 : 1;
+  // The selection colour: teal, or the tooth's treatment's own; mono, grey on white teeth.
+  const mono = !!look.mono;
+  const hue = (look.hue ?? 0) % TOOTH_HUES.length;
+  const SE = mono ? 'sem' : `se${hue || ''}`, SR = mono ? 'srm' : `sr${hue || ''}`;
+  const EN = mono ? 'enm' : 'en', RT = mono ? 'rtm' : 'rt';
+  const litLine = mono ? MONO_LINE : hue ? TOOTH_HUES[hue].line : TEAL_LINE;
+  const litDetail = mono ? '#8E8E99' : TOOTH_HUES[hue].detail;
+  // The natural tooth's warm detail lines (grooves, CEJ), grey in mono.
+  const warm = (c: string) => (mono ? '#C9D6E0' : c);
+  const outline = mono ? MONO_OUTLINE : OUTLINE;
+  // Line art in mono: no shading over crown and root.
+  const shade = !mono;
+  const ponticLine = mono ? MONO_LINE : PONTIC_LINE;
+  const crownFill = lit ? url(SE) : other ? url('gr') : url(EN);
+  const crownLine = lit ? litLine : other ? '#9A9AAA' : outline;
+  const lineW = lit ? (mono ? 1.3 : 1.5) : 1;
   const tintCls = tint === 'on' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100';
 
   return (
@@ -294,13 +355,14 @@ export const ToothSvg = memo(function ToothSvg({ id, uid, look, tint = 'off', cr
       viewBox={`${n2(-GAP / 2)} ${n2(top - PAD)} ${n2(vw)} ${n2(vh)}`}
       aria-hidden
       focusable="false"
+      preserveAspectRatio={squash !== 1 ? 'none' : undefined}
       className={className}
-      style={{ display: 'block', width: '100%', height: 'auto', aspectRatio: `${n2(vw)} / ${n2(vh)}`, overflow: 'visible', ...style }}
+      style={{ display: 'block', width: '100%', height: 'auto', aspectRatio: `${n2(vw)} / ${n2(vh * squash)}`, overflow: 'visible', ...style }}
     >
       <g transform={transform}>
         {pontic ? (
           // Crown only: the pontic has no root of its own.
-          <path d={g.crown} fill={lit ? url('se') : other ? '#DCE8EE' : '#E3F4FA'} stroke={PONTIC_LINE} strokeWidth={1.3} strokeDasharray="3 2" strokeLinejoin="round" {...NS} />
+          <path d={g.crown} fill={lit ? url(SE) : other ? '#DCE8EE' : mono ? '#F1F1F4' : '#E3F4FA'} stroke={ponticLine} strokeWidth={1.3} strokeDasharray="3 2" strokeLinejoin="round" {...NS} />
         ) : ghost && !lit ? (
           // Recorded missing: the outline of where the tooth was, nothing filled.
           <g fill="none" stroke={OUTLINE} strokeWidth={1} strokeDasharray="2.5 2" strokeLinejoin="round" {...NS}>
@@ -319,20 +381,26 @@ export const ToothSvg = memo(function ToothSvg({ id, uid, look, tint = 'off', cr
             {root && !ghost && (
               <>
                 {/* The root behind (palatal): lighter, its outline softer. */}
-                {g.backRoot && <path d={g.backRoot} fill={lit ? url('sr') : url('rt')} opacity={0.72} stroke={lit ? TEAL_LINE : '#CFCFD9'} strokeWidth={1} {...NS} />}
-                <path d={g.roots} fill={lit ? url('sr') : url('rt')} />
-                <path d={g.roots} fill={url('sh')} />
+                {[g.backRoot, ...(g.backRoots ?? [])].filter(Boolean).map((d, i) => <path key={i} d={d} fill={lit ? url(SR) : url(RT)} opacity={0.72} stroke={lit ? litLine : mono ? MONO_OUTLINE : '#CFCFD9'} strokeWidth={1} {...NS} />)}
+                <path d={g.roots} fill={lit ? url(SR) : url(RT)} />
+                {shade ? <path d={g.roots} fill={url('sh')} /> : <path d={g.roots} fill={url('shm')} />}
                 {/* Fused roots (third molars): the faint groove where they meet. */}
-                {g.rootDetails.map((d, i) => <path key={i} d={d} fill="none" stroke={lit ? '#7CC6DE' : '#D2C3A6'} strokeWidth={0.8} strokeLinecap="round" {...NS} />)}
-                <path d={g.rootOutline} fill="none" stroke={lit ? TEAL_LINE : OUTLINE} strokeWidth={lineW} strokeLinejoin="round" {...NS} />
+                {g.rootDetails.map((d, i) => <path key={i} d={d} fill="none" stroke={lit ? litDetail : warm('#D2C3A6')} strokeWidth={0.8} strokeLinecap="round" {...NS} />)}
+                <path d={g.rootOutline} fill="none" stroke={lit ? litLine : outline} strokeWidth={lineW} strokeLinejoin="round" {...NS} />
               </>
             )}
             {/* Missing but selected (a denture tooth over a gap): the crown in teal, the root only as a ghost. */}
             {root && ghost && <path d={g.rootOutline} fill="none" stroke={OUTLINE} strokeWidth={1} strokeDasharray="2.5 2" {...NS} />}
             <path d={g.crown} fill={crownFill} />
-            <path d={g.crown} fill={url('sh')} />
-            {g.details.map((d, i) => <path key={i} d={d} fill="none" stroke={lit ? '#7CC6DE' : '#D9CEBB'} strokeWidth={0.8} strokeLinecap="round" opacity={0.85} {...NS} />)}
-            {root && !ghost && <path d={g.cej} fill="none" stroke={lit ? '#7CC6DE' : '#D5C8B0'} strokeWidth={0.8} {...NS} />}
+            {shade ? <path d={g.crown} fill={url('sh')} /> : (
+              <>
+                <path d={g.crown} fill={url('shm')} />
+                <path d={g.crown} fill={url('svm')} />
+                <path d={g.crown} fill={url('hlm')} opacity={0.8} />
+              </>
+            )}
+            {g.details.map((d, i) => <path key={i} d={d} fill="none" stroke={lit ? litDetail : warm('#D9CEBB')} strokeWidth={0.8} strokeLinecap="round" opacity={0.85} {...NS} />)}
+            {root && !ghost && <path d={g.cej} fill="none" stroke={lit ? litDetail : warm('#D5C8B0')} strokeWidth={0.8} {...NS} />}
             {/* With no root under it, the crown's cervical edge is part of its outline. */}
             <path d={root && !ghost ? g.crownOutline : g.crown} fill="none" stroke={crownLine} strokeWidth={lineW} strokeLinejoin="round" {...NS} />
           </>
@@ -350,6 +418,7 @@ export const ToothSvg = memo(function ToothSvg({ id, uid, look, tint = 'off', cr
       </g>
     </svg>
   );
-}, (p, q) => p.id === q.id && p.uid === q.uid && p.tint === q.tint && p.crop === q.crop && p.className === q.className && p.style === q.style
+}, (p, q) => p.id === q.id && p.uid === q.uid && p.tint === q.tint && p.crop === q.crop && p.squash === q.squash && p.className === q.className && p.style === q.style
   && !!p.look.lit === !!q.look.lit && !!p.look.pontic === !!q.look.pontic && !!p.look.missing === !!q.look.missing
-  && !!p.look.implant === !!q.look.implant && !!p.look.other === !!q.look.other);
+  && !!p.look.implant === !!q.look.implant && !!p.look.other === !!q.look.other && (p.look.hue ?? 0) === (q.look.hue ?? 0)
+  && !!p.look.mono === !!q.look.mono);

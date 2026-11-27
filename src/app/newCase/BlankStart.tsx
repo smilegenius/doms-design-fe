@@ -146,7 +146,7 @@ export default function BlankStart() {
   };
 
   const tabBar = (
-    <div role="tablist" aria-label="How to start the case" onKeyDown={onTabKey} className="inline-flex flex-shrink-0 p-1 rounded-xl bg-[#F0EFF6] border border-[#E0E0E6]">
+    <div role="tablist" aria-label="How to start the case" onKeyDown={onTabKey} className="inline-flex flex-shrink-0 max-sm:w-full max-sm:[&>*]:flex-1 max-sm:[&>*]:justify-center p-1 rounded-xl bg-[#F0EFF6] border border-[#E0E0E6]">
       {TABS.map(t => {
         const on = tab === t.id;
         const Icon = t.id === 'ai' ? Sparkles : PenLine;
@@ -212,11 +212,12 @@ export default function BlankStart() {
     </div>
   );
 
+  // From 1024 px the AI page fills the window (its panels scroll inside); on a phone or tablet the page just grows.
   return (
-    <div className={`min-w-[1100px] flex flex-col ${ai ? 'h-[calc(100vh-56px)] min-h-[560px]' : 'min-h-[calc(100vh-56px)]'}`}>
+    <div className={`flex flex-col min-h-[calc(100vh-56px)] ${ai ? 'lg:h-[calc(100vh-56px)] lg:min-h-[560px]' : ''}`}>
       <h1 className="sr-only">Create new Case</h1>
       {chat ? (
-        <div className={`flex-1 min-h-0 flex justify-center px-8 pt-6 ${ai ? 'pb-5' : 'pb-10'}`}>
+        <div className={`flex-1 min-h-0 flex justify-center px-3 sm:px-8 pt-4 sm:pt-6 ${ai ? 'pb-5' : 'pb-10'}`}>
           <div className={`w-full min-h-0 flex flex-col transition-[max-width] duration-300 ease-out motion-reduce:transition-none ${ai ? 'max-w-[1180px]' : 'max-w-[860px]'}`}>
             <div className="flex items-end justify-between gap-4">
               {corner('')}
@@ -226,10 +227,11 @@ export default function BlankStart() {
           </div>
         </div>
       ) : (
-        <div className={`flex-1 min-h-0 grid grid-cols-[220px_minmax(0,1fr)] gap-6 px-8 pt-6 ${ai ? 'pb-5 grid-rows-[minmax(0,1fr)]' : 'pb-10 items-start'}`}>
-          <div className="sticky top-4 self-start">
-            {corner('mb-5')}
-            {store.ux === 'canvas' ? (
+        <div className={`flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-3 lg:gap-6 px-3 sm:px-8 pt-3 sm:pt-6 ${ai ? 'pb-4 sm:pb-5 lg:grid-rows-[minmax(0,1fr)]' : 'pb-6 sm:pb-10 items-start'} max-lg:content-start`}>
+          {/* Under 1024 px only the corner stays; the steps preview needs the side column. */}
+          <div className="lg:sticky top-4 self-start">
+            {corner('lg:mb-5')}
+            <div className="max-lg:hidden">{store.ux === 'canvas' ? (
               // One page's navigator chrome: a card titled "Case sections".
               <div className="bg-white border border-[#E0E0E6] rounded-2xl">
                 <p className="px-4 pt-4 pb-2 text-[11px] font-bold uppercase tracking-widest text-[#4A4A5A]" aria-hidden>Case sections</p>
@@ -237,12 +239,12 @@ export default function BlankStart() {
               </div>
             ) : (
               <BlankSteps label="Case steps" onStep={onStep} understood={ai ? understood : null} />
-            )}
+            )}</div>
           </div>
           <div className="min-w-0 min-h-0 flex flex-col">
             <div className="flex items-center gap-3">
               {tabBar}
-              {ai && <p className="min-w-0 text-xs text-[#5A5A6A] truncate">Type it, paste it or drop a prescription. Smile Genius fills the case for you to check.</p>}
+              {ai && <p className="min-w-0 text-xs text-[#5A5A6A] truncate max-md:hidden">Type it, paste it or drop a prescription. Smile Genius fills the case for you to check.</p>}
             </div>
             {panels}
           </div>

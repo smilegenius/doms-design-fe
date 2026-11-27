@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavSlot } from '../growth-portal/navSlot';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { CalendarDays, ListChecks } from 'lucide-react';
 import { isOpen, unreadFor, useWorkflow } from './workflowStore';
@@ -20,40 +20,7 @@ export default function WorkflowNavItems() {
   const { pathname } = useLocation();
   const s = useWorkflow();
   const me = useMe();
-  const [host, setHost] = useState<HTMLElement | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
-  useEffect(() => {
-    const sync = () => {
-      const c = findCases();
-      if (!c) { setHost(null); return; }
-      setCollapsed(!c.textContent?.trim());
-      // Sits after Cases and after any item already added there (Design).
-      // Only ever moves when that's no longer true; never competes for the
-      // slot right after Cases, which DesignNavItem holds (two components
-      // both insisting on it would swap places forever and freeze the page).
-      const afterCases = (el: Element) => {
-        for (let x = el.previousElementSibling; x; x = x.previousElementSibling) {
-          if (x === c) return true;
-          if (!(x instanceof HTMLElement) || !Object.keys(x.dataset).some(k => k.startsWith('sf'))) return false;
-        }
-        return false;
-      };
-      setHost(prev => {
-        if (prev && prev.isConnected && afterCases(prev)) return prev;
-        prev?.remove();
-        const el = document.createElement('div');
-        el.dataset.sfWorkflowNav = '1';
-        let at: Element = c;
-        while (at.nextElementSibling instanceof HTMLElement && Object.keys(at.nextElementSibling.dataset).some(k => k.startsWith('sf'))) at = at.nextElementSibling;
-        at.insertAdjacentElement('afterend', el);
-        return el;
-      });
-    };
-    const mo = new MutationObserver(sync);
-    mo.observe(document.body, { childList: true, subtree: true });
-    sync();
-    return () => { mo.disconnect(); setHost(h => { h?.remove(); return null; }); };
-  }, []);
+  const { host, collapsed } = useNavSlot(findCases, 'after', 0);
   if (!host) return null;
   const mine = Object.values(s.lines).filter(l => isOpen(l) && l.owner === me && (l.status === 'in-production' || l.status === 'qc'));
   const unread = mine.some(l => unreadFor(s, l, me).length > 0);

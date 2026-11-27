@@ -1,88 +1,81 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Boxes, Crown, FileText, Moon, Smile } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Boxes, Crown, Download, FileSignature, FileText, Link2, Loader2, Settings2, Smile, Tag } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNT_EMAIL } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import SmileGeniusWordmark from '../components/SmileGeniusWordmark';
-import { setUserId, setUx } from '../newCase/store';
-import { MULTI_CASE_ID, ensureMultiCaseDemo } from '../newCase/orderFormDemo';
+import { BRIDGE_CASE_ID, MULTI_CASE_ID, ensureBridgeDemo, ensureMultiCaseDemo } from '../newCase/orderFormDemo';
+import { orderFormModelFor } from '../newCase/FlowCaseDetail';
+import { OrderFormPdfJob, type OrderFormModel } from '../newCase/OrderForm';
+import { saveOrderFormSettings, useOrderFormSettings } from '../newCase/orderFormSettings';
+import Toggle from '../components/Toggle';
 
 // ─── Order form in Case Details · Oct-2026 ───────────────────────────────────
 // The new Dental Order Form, shown on the New Case Flow's View Case (the
 // portal's own Case Details, fed from the flow): in the service's Order form
 // panel, in Full View and in the Order Form modal. The portal's Cases screens
 // keep their current form; only the flow sets the page's OrderFormSlot.
+// Four examples, as the user listed them (5-Nov-2026): a crown, a crown with a
+// full denture's every stage, a denture with two stages, and a bridge.
 
 interface Nav {
   title: string;
   note: string;
   icon: React.ReactNode;
-  path: string;
-  /** Opens a new flow case (Guided, as Dr Khan), not an existing one. */
-  newCase?: boolean;
+  /** The flow case it opens (View Case) or downloads the order form of. */
+  caseId: string;
   /** Puts the demo case in the flow's Lab Work first, when it isn't there. */
   before?: () => void;
 }
 
 const STEPS: { label: string; blurb: string; navs: Nav[] }[] = [
   {
-    label: 'A full denture with two stages made',
-    blurb: 'Edward Thomas’s upper denture: Pennine made the Special Tray and the Bite Registration on CAS-2026-117. Open Order form beside the 3D viewer, or Full View for the whole sheet: patient, dentist, practice, lab, ship-to address and case type, the Tooth Chart in the user’s tooth system, the Denture Stage History with each stage’s dates and status, the service details, one instruction card per stage, and the scan and attachment files.',
-    navs: [
-      {
-        title: 'View Case — CAS-2026-117',
-        note: 'Special Tray · Bite Registration · Done',
-        icon: <Smile className="w-4 h-4" />,
-        path: '/flows/new-case/view/CAS-2026-117',
-      },
-    ],
-  },
-  {
-    label: 'The next stage adds to the same history',
-    blurb: 'Order Edward’s next stage: the case opens with the earlier stages done and Try In ordered (tick Finish too if you like), then press Ready for Dispatch and View Case. Its order form keeps Special Tray and Bite Registration as Done, with CAS-2026-117’s dates and instructions, and adds Try In (and Finish) with this case’s dates, status and instructions.',
-    navs: [
-      {
-        title: 'New case — Edward Thomas, next stage',
-        note: 'Pennine Denture Lab · Try In ordered · then View Case',
-        icon: <Smile className="w-4 h-4" />,
-        path: '/flows/new-case/case/new?patient=P-2025-009&lab=pennine&start=next',
-        newCase: true,
-      },
-    ],
-  },
-  {
-    label: 'A multi-case order',
-    blurb: 'Margaret Hill’s order at Pennine has three cases in one parcel: her upper full denture’s Finish, a lower cobalt-chrome partial at Framework Try-In, and a repair of her current upper denture. The form lists the cases on the order with each one’s delivery and status, then gives each case its own section: its details, its stage history (the denture’s Special Tray, Bite Registration and Try In were each made on a case of their own), its instructions and its files. The scan files and the case instructions are the whole order’s. Any case you make with several services gets the same form.',
-    navs: [
-      {
-        title: `View Case — ${MULTI_CASE_ID}`,
-        note: 'Margaret Hill · Full denture + Partial denture + Repair · In production',
-        icon: <Boxes className="w-4 h-4" />,
-        path: `/flows/new-case/view/${MULTI_CASE_ID}`,
-        before: ensureMultiCaseDemo,
-      },
-      {
-        title: 'New case — Amelia Clarke, several services',
-        note: 'Northfield · Crown, then Add Another Service for a bridge and a night guard · then View Case',
-        icon: <Crown className="w-4 h-4" />,
-        path: '/flows/new-case/case/new?patient=P-2025-031&lab=northfield&service=crown',
-        newCase: true,
-      },
-    ],
-  },
-  {
-    label: 'Any other case',
-    blurb: 'Every finished case in the flow’s Lab Work opens with the same form. A one-service case without a denture has no stage history: the Service Details table gives its teeth, material, shade and delivery date, and its instructions get their own card. A case made from a scan lists its scan files; impressions by post say they come in the parcel.',
+    label: 'Crown',
+    blurb: 'William Grant’s crown on 46 at Northfield. Open Order form beside the 3D viewer, or Full View for the whole sheet, which prints on one A4 page (or Download PDF): the patient at the top with the QR and the Smile Genius logo, then dentist, practice, lab, ship-to address, received via and treatments in two rows, the Tooth Chart in the user’s tooth system, the service details and the instruction. With the switches above, the full statement follows as page 2 and the case label after it, in the Order form tab, Full View and the PDF.',
     navs: [
       {
         title: 'View Case — CAS-2026-098',
-        note: 'William Grant · Crown 46 · Delivered',
+        note: 'William Grant · Crown 46 · Monolithic zirconia · Delivered',
         icon: <Crown className="w-4 h-4" />,
-        path: '/flows/new-case/view/CAS-2026-098',
+        caseId: 'CAS-2026-098',
       },
+    ],
+  },
+  {
+    label: 'Crown + full denture, all stages',
+    blurb: 'Margaret Hill’s order at Northfield: a crown on 45 and a new upper full denture with all five stages ordered at once, each with its own day. Each treatment has a number and a colour, on the chart and in Treatments. The Denture Stage History lists the five stages, and one instruction covers them all, as the New case flow takes it.',
+    navs: [
       {
-        title: 'View Case — CAS-2026-131',
-        note: 'Ben Ortiz · Night guard, upper · In production',
-        icon: <Moon className="w-4 h-4" />,
-        path: '/flows/new-case/view/CAS-2026-131',
+        title: `View Case — ${MULTI_CASE_ID}`,
+        note: 'Margaret Hill · Crown 45 + Full denture (upper), 5 stages · In production',
+        icon: <Boxes className="w-4 h-4" />,
+        caseId: MULTI_CASE_ID,
+        before: ensureMultiCaseDemo,
+      },
+    ],
+  },
+  {
+    label: 'Full denture, 2 stages',
+    blurb: 'Edward Thomas’s upper denture: Pennine made the Special Tray and the Bite Registration on CAS-2026-117. The Denture Stage History has those two stages with their dates and status (the other three not ordered), and one instruction covers both.',
+    navs: [
+      {
+        title: 'View Case — CAS-2026-117',
+        note: 'Edward Thomas · Special Tray · Bite Registration · Done',
+        icon: <Smile className="w-4 h-4" />,
+        caseId: 'CAS-2026-117',
+      },
+    ],
+  },
+  {
+    label: 'Bridge',
+    blurb: 'Ben Ortiz’s three-unit bridge 35–37 at Northfield, over his missing 36, from a Medit scan. The chart shows the span with 36 as the pontic, and the service details give the units, material, shade and delivery date.',
+    navs: [
+      {
+        title: `View Case — ${BRIDGE_CASE_ID}`,
+        note: 'Ben Ortiz · Bridge 35–37 (36 pontic) · In production',
+        icon: <Link2 className="w-4 h-4" />,
+        caseId: BRIDGE_CASE_ID,
+        before: ensureBridgeDemo,
       },
     ],
   },
@@ -92,19 +85,37 @@ export default function OrderFormFlowPage() {
   const navigate = useNavigate();
   const { user, login } = useAuth();
 
+  const { toast } = useToast();
+  const formSettings = useOrderFormSettings();
+  // The order form being saved as a PDF, straight from here (no View Case on the way).
+  const [job, setJob] = useState<{ caseId: string; model: OrderFormModel } | null>(null);
+
   const open = (nav: Nav) => {
     // Walkthroughs never stop at the login page: sign in with the demo account.
     if (!user) login(DEMO_ACCOUNT_EMAIL, 'demo');
     nav.before?.();
-    if (!nav.newCase) { navigate(nav.path); return; }
-    // As the New case walkthrough launches a flow: Guided, signed in as Dr Khan.
-    setUx('guided');
-    setUserId('khan');
-    navigate(nav.path, { state: { session: `wt-${Date.now()}` } });
+    navigate(`/flows/new-case/view/${nav.caseId}`);
+  };
+  const download = (nav: Nav) => {
+    if (job) return;
+    nav.before?.();
+    const model = orderFormModelFor(nav.caseId);
+    if (!model) { toast.error(`${nav.caseId} isn’t in the demo data. Reset the demo data on the New case flow, then try again.`); return; }
+    setJob({ caseId: nav.caseId, model });
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
+    <div className="min-h-screen bg-white bg-gradient-to-br from-[#F7E2F8]/30 to-[#AEE3E6]/30 flex flex-col">
+      {job && (
+        <OrderFormPdfJob
+          key={job.caseId}
+          model={job.model}
+          onDone={ok => {
+            if (!ok) toast.error('The PDF couldn’t be made. Open the case and use Print, choosing “Save as PDF”.');
+            setJob(null);
+          }}
+        />
+      )}
       <header className="flex items-center justify-between px-4 sm:px-8 py-4 sm:py-5">
         <SmileGeniusWordmark gradientId="orderform_grad" />
         <button
@@ -126,13 +137,46 @@ export default function OrderFormFlowPage() {
               </div>
             </div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[#EEF4FF] border border-[#C8D8FC] text-[#1565C0] mb-3">
-              October 2026 · Walkthrough
+              Updated 13 Nov 2026 · Walkthrough
             </span>
             <h1 className="text-2xl sm:text-3xl font-bold text-[#030213] mb-2">Order form in Case Details</h1>
             <p className="text-sm text-[#717182] leading-relaxed max-w-xl mx-auto">
               The new Dental Order Form on the New case flow’s View Case. The portal’s Cases screens keep their current form until this is approved.
             </p>
           </div>
+
+          {/* 13-Nov: what the samples carry with the form — the same switches as Settings › Order Form, so View Case,
+              Full View, Print and Download PDF all follow them. */}
+          <section className="bg-white border border-[#E0E0E6] rounded-2xl shadow-sm overflow-hidden mb-4">
+            <div className="px-4 sm:px-5 pt-4 pb-2">
+              <h2 className="text-sm font-bold text-[#030213]">What the samples include</h2>
+              <p className="text-xs text-[#717182] leading-relaxed mt-1">
+                Every case below opens and downloads with these. They are the lab’s own settings, so they stay until switched back.
+              </p>
+            </div>
+            <div className="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-[#F0EFF6] border-t border-[#F0EFF6]">
+              {([
+                ['fullStatementOn', 'Full statement', 'Page 2: the full statement for a custom-made device, filled in from the case.', FileSignature],
+                ['labelOn', 'Case label', 'A label for the outgoing box, under the form and as the PDF’s last page.', Tag],
+              ] as const).map(([key, title, sub, Icon]) => (
+                <div key={key} className="flex items-start gap-3 px-4 sm:px-5 py-3">
+                  <Icon className="w-4 h-4 text-[#717182] mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-[#030213]">{title}</p>
+                    <p className="text-[11px] text-[#717182] leading-snug">{sub}</p>
+                  </div>
+                  <Toggle
+                    on={formSettings[key]}
+                    title={title}
+                    onChange={() => {
+                      saveOrderFormSettings({ ...formSettings, [key]: !formSettings[key] });
+                      toast.success(`${title} ${formSettings[key] ? 'taken off' : 'added to'} the samples.`);
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
 
           <div className="space-y-4">
             {STEPS.map((sc, i) => (
@@ -153,6 +197,15 @@ export default function OrderFormFlowPage() {
                         <p className="text-[11px] text-[#717182] leading-snug truncate">{nav.note}</p>
                       </div>
                       <button
+                        onClick={() => download(nav)}
+                        disabled={!!job}
+                        aria-label={`Download the order form of ${nav.caseId} as a PDF`}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#5A5568] border border-[#E0E0E6] hover:bg-[#F8F9FC] disabled:opacity-60 disabled:cursor-wait transition-colors flex-shrink-0"
+                      >
+                        {job?.caseId === nav.caseId ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                        {job?.caseId === nav.caseId ? 'Preparing…' : 'Download PDF'}
+                      </button>
+                      <button
                         onClick={() => open(nav)}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#4D8EF7] border border-[#C8D8FC] hover:bg-[#EEF4FF] transition-colors flex-shrink-0"
                       >
@@ -164,6 +217,38 @@ export default function OrderFormFlowPage() {
                 </div>
               </section>
             ))}
+
+            {/* 12-Nov: the lab's Settings › Order Form (logo, statement, sections), with a live preview. */}
+            <section className="bg-white border border-[#E0E0E6] rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-4 sm:px-5 pt-4 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-[#EEF4FF] text-[#4D8EF7] flex items-center justify-center flex-shrink-0">
+                    <Settings2 className="w-3.5 h-3.5" />
+                  </span>
+                  <h2 className="text-sm font-bold text-[#030213] leading-snug">Lab settings</h2>
+                </div>
+                <p className="text-xs text-[#717182] leading-relaxed mt-1.5">
+                  The lab sets up its order form in Settings › Order Form: its logo and MHRA / DAMAS numbers, field emphasis and paper size, a short UK or EU statement for a custom-made device with who signs it, the help sections at the foot, and a case label for the outgoing box (the Label tab beside the order form on View Case, on unless the lab turns it off). A live preview shows the form on any of the cases above, and Save applies it to every order form here.
+                </p>
+              </div>
+              <div className="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-t border-[#F0EFF6]">
+                <span className="w-7 h-7 rounded-lg bg-[#F3F3F5] text-[#5A5568] flex items-center justify-center flex-shrink-0"><FileSignature className="w-4 h-4" /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-[#030213] leading-snug">Lab portal — Settings › Order Form</p>
+                  <p className="text-[11px] text-[#717182] leading-snug truncate">Branding · Conformity statement · Sections on the form · Case label</p>
+                </div>
+                <button
+                  onClick={() => {
+                    if (!user) login(DEMO_ACCOUNT_EMAIL, 'demo');
+                    navigate('/lab/settings?tab=order-form');
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#4D8EF7] border border-[#C8D8FC] hover:bg-[#EEF4FF] transition-colors flex-shrink-0"
+                >
+                  Open
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+            </section>
           </div>
         </div>
       </main>

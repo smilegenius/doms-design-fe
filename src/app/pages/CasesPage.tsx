@@ -1335,7 +1335,7 @@ function isOverdue(dateStr: string | null): boolean {
   return parseDate(dateStr) < today;
 }
 
-function StatusBadge({ status, compact }: { status: CaseStatus; compact?: boolean }) {
+export function StatusBadge({ status, compact }: { status: CaseStatus; compact?: boolean }) {
   const s = STATUS_STYLE[status];
   const Icon = s.icon;
   return (

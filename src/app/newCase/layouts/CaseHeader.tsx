@@ -161,12 +161,12 @@ export function CaseCorner() {
   const c = useController();
   const { draft, patient } = useCase();
   return (
-    <div className="mb-5 px-1">
+    <div className="mb-3 lg:mb-5 px-1">
       <h1 className="sr-only">{c.view === 'edit' ? 'Create new Case' : 'Case'} for {patient.first} {patient.last}</h1>
       <button type="button" onClick={() => c.saveAndClose(false)} className={`inline-flex items-center gap-1.5 text-xs text-[#717182] hover:text-[#030213] transition-colors rounded ${FOCUS}`}>
         <ArrowLeft className="w-3.5 h-3.5" aria-hidden />Back to Lab Work
       </button>
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-1.5 lg:mt-3 flex items-center gap-2">
         <div className="flex-1 min-w-0">
           {draft.id ? <CaseIdBadge /> : <span className="text-sm font-semibold text-[#030213]">New case</span>}
         </div>

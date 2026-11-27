@@ -93,8 +93,8 @@ export const BUILT_IN: Update[] = [
     ],
   },
   {
-    id: 'v2-workflow', bucket: 'Case workflow (V2)', title: 'V2: case handoff workflow (on top of V1)', tag: 'new',
-    note: 'From the spec "Lab Case Handoff Workflow" (23 Nov). Switch versions with V1 · V2 at the bottom of every Growth page: V1 is the current design (the first designs plus the simpler Billing), V2 adds this workflow on top while we keep working on it. After a case is Accepted, every service in it (not the case as a whole) moves through its service\'s route of stages (Crown: Model → Design → Mill → Sinter → Ceramics → Quality Control), with one owner at a time. Done → next is one tap and the next person is assigned automatically (the stage\'s default person, or the same person continues; otherwise it waits In Queue for the team). Several services can be pushed on at once. Block puts a service On Hold (Lab), with a reason, or On Hold (Practice), which notifies the practice; releasing returns it to where it was. Send back returns a service to an earlier stage with a reason (logged as rework); Skip passes a stage that isn\'t needed. The stage is a label on In Queue / In Production, so no new statuses; the clinic keeps seeing Submitted until Shipped.',
+    id: 'v2-workflow', bucket: 'Case workflow (V2)', title: 'V2: case handoff workflow (on top of V0)', tag: 'new',
+    note: 'From the spec "Lab Case Handoff Workflow" (23 Nov). Switch versions with V0 · V1 · V2 at the bottom of every Growth page: V0 is the foundation, V1 adds the simpler Billing, V2 adds this workflow (with V0\'s Billing). After a case is Accepted, every service line (not the case) moves through its service\'s route of stages (Crown: Model → Design → Mill → Sinter → Ceramics → Quality Control), with one owner at a time. Done → next is one tap and the next person is assigned automatically (the stage\'s default person, or the same person continues; otherwise it waits In Queue for the team). Several lines can be pushed on at once. Hold puts a line On Hold (Lab), with a reason, or On Hold (Practice), which notifies the practice; releasing returns it to where it was. Send back returns a line to an earlier stage with a reason (logged as rework); Skip passes a stage that isn\'t needed. The stage is a label on In Queue / In Production, so no new statuses; the clinic keeps seeing Submitted until Shipped.',
     examples: [
       { label: 'Dashboard: work in the lab today', to: '/growth?v=v2' },
       { label: 'A case\'s workflow (services, notes, timeline)', to: '/growth/cases/CASE-053?sf=workflow&v=v2' },
@@ -102,7 +102,7 @@ export const BUILT_IN: Update[] = [
   },
   {
     id: 'v2-queue', bucket: 'Case workflow (V2)', title: 'My queue, notes you must read, bench mode', tag: 'new',
-    note: 'My queue (sidebar) opens to what you\'re working on and what\'s coming to you, by due date, with a red dot for unread notes and overdue in red; the intake owner sees To accept first. "Viewing as" switches person for the demo. Notes are either internal (amber) or to the dentist (blue), for the whole case or one service, and can be pinned to a stage ("for Ceramics"). With note acknowledgement on (a lab setting, Simply C&B\'s tick-box), the new owner ticks unread notes before the service can move; a dentist reply that changes the prescription counts as unread. Each service on the docket has a QR (Scan, in the demo) that opens bench mode on a tablet or phone: pick your name, enter a 4-digit PIN (Maria\'s is 4444 in the demo), then big buttons: Pick up, Done, Block, Mark shipped. Picking up a service someone else holds asks first and logs a takeover.',
+    note: 'My queue (sidebar) opens to what you\'re working on and what\'s coming to you, by due date, with a red dot for unread notes and overdue in red; the intake owner sees To accept first. The name picker switches person for the demo. Notes are either internal (amber) or to the dentist (blue), for the whole case or one line, and can be pinned to a stage ("for Ceramics"). With note acknowledgement on (a lab setting, Simply C&B\'s tick-box), the new owner ticks unread notes before the line can move; a dentist reply that changes the prescription counts as unread. Each docket line has a QR (the QR icon, in the demo) that opens bench mode on a tablet or phone: pick your name, enter a 4-digit PIN (Maria\'s is 4444 in the demo), then big buttons: Pick up, Done, Hold, Ship. Picking up a line someone else holds asks first and logs a takeover.',
     examples: [
       { label: 'My queue', to: '/growth/queue?v=v2' },
       { label: 'Overdue services', to: '/growth/queue?filter=overdue&v=v2' },
@@ -111,11 +111,11 @@ export const BUILT_IN: Update[] = [
   },
   {
     id: 'v2-calendar', bucket: 'Case workflow (V2)', title: 'Delivery calendar and dashboard blocks', tag: 'new',
-    note: 'The delivery calendar (sidebar) shows one card per service on the date it\'s due back, week or month, with No date set on the left and Shipped/Delivered on the right (newest first; hide it with the eye button); overdue services roll forward to today with a badge; Not Approved and Cancelled are hidden behind a one-line banner. Filters: assigned (Me, a person, everyone), service, practice, status. Drag a card to another day (or to No date set) to change that service\'s delivery date: the case page shows the new date and the change is recorded on the case timeline (Lab workflow) and in the Workflow drawer. A case with several services shows a card per service (each can have its own date); those cards have a violet edge and "1 of 3 services", list the other services with their dates, open the full case, and hovering one lights up the rest. Click a card to open it in place (date, reassign, the service\'s actions). On Overview, V2 adds the spec\'s blocks above the existing dashboard: Immediate Actions (overdue, due today + tomorrow, to accept with "on the way", on hold split Practice / Lab with the oldest hold, no delivery date), Work in the lab (In Queue / In Production per stage, plus Unassigned), This week (due per day) and Case processing (time to production, turnaround in days). Every number opens the services behind it; all counts are services, not cases. The sandbox\'s Overview is a different screen from the one in the spec, so the blocks sit above it rather than inside it.',
+    note: 'The delivery calendar (sidebar) shows one card per service line on its requested delivery date, week or month, with No date on the left and Done on the right; overdue lines roll forward to today with a badge; Not Approved and Cancelled are hidden behind a one-line banner. Filters: assigned (Me, a person, everyone), service, practice, status. Click a card to open it in place (date, reassign, the line\'s actions). On Overview, V2 adds the spec\'s blocks above the existing dashboard: Today in the lab: tiles (overdue, due soon, to accept with "on the way", on hold split Practice / Lab, no date), By stage (In Queue / In Production per stage, plus Unassigned), This week (due per day) and Turnaround (to production, average, in days). Every number opens the lines behind it; all counts are service lines. The sandbox\'s Overview is a different screen from the one in the spec, so the blocks sit above it rather than inside it.',
     examples: [
       { label: 'Delivery calendar', to: '/growth/calendar?v=v2' },
       { label: 'Month view', to: '/growth/calendar?view=month&v=v2' },
-      { label: 'Work in the lab: unassigned services', to: '/growth/queue?filter=unassigned&v=v2' },
+      { label: 'Unassigned lines', to: '/growth/queue?filter=unassigned&v=v2' },
     ],
   },
   {
@@ -268,9 +268,9 @@ const SUMMARY: Record<string, string> = {
   'forwarded-emails': 'Forwarded emails become drafts: make a new case or add to an existing one.',
   'v2-workflow': 'Services move through stages with one-tap handoffs; switch V1 · V2 at the bottom.',
   'v2-queue': 'My queue, notes to tick before starting, and bench mode with a PIN.',
-  'v2-calendar': 'Delivery calendar: drag a service to a new day; the case and its timeline follow.',
-  'v2-settings': 'Routes and default people per stage; one invoice per service on Delivered.',
-  'billing-v1': 'Billing in four places, and ⌘K Find for "how do I…".',
+  'v2-calendar': 'Delivery calendar by due date, and Today in the lab on the dashboard.',
+  'v2-settings': 'Routes and default people per stage; one invoice per service line on Delivered.',
+  'billing-v1': 'Billing in four places, ⌘K Find for "how do I…", and a switch back to V0.',
   'billing-home': 'The month in three steps, and one Needs you list (most money first).',
   'billing-invoices': 'One list with chips; Fix this invoice asks what\'s wrong in plain words.',
   'billing-practices': 'Accounts + insights: send statements or invoices from any practice or dentist.',

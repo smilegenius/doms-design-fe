@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavSlot } from './navSlot';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 import { useUpdates } from './updatesStore';
@@ -21,27 +21,7 @@ export default function WhatsNewNavItem() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { unseen } = useUpdates();
-  const [host, setHost] = useState<HTMLElement | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    const sync = () => {
-      const settings = findSettings();
-      if (!settings) { setHost(null); return; }
-      setCollapsed(!settings.textContent?.trim());
-      setHost(prev => {
-        if (prev && prev.isConnected && prev.nextElementSibling === settings) return prev;
-        prev?.remove();
-        const el = document.createElement('div');
-        settings.parentElement!.insertBefore(el, settings);
-        return el;
-      });
-    };
-    const mo = new MutationObserver(sync);
-    mo.observe(document.body, { childList: true, subtree: true });
-    sync();
-    return () => { mo.disconnect(); setHost(h => { h?.remove(); return null; }); };
-  }, []);
+  const { host, collapsed } = useNavSlot(findSettings, 'before');
 
   if (!host) return null;
   const active = pathname.startsWith('/growth/updates');

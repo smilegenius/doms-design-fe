@@ -75,7 +75,7 @@ export function PracticesList() {
   return (
     <div className="space-y-4">
       {!readOnly && fresh.length > 0 && (
-        <Card title={<span className="inline-flex items-center gap-2"><UserPlus className="w-4 h-4 text-[#4D8EF7]" /> New from scans <Pill tone="blue">{fresh.length}</Pill></span>} sub="A dentist at a practice you haven't billed before sent a scan. We added the practice so the case isn't held up; check who to bill and its invoices go out.">
+        <Card title={<span className="inline-flex items-center gap-2"><UserPlus className="w-4 h-4 text-[#4D8EF7]" /> New from scans <Pill tone="blue">{fresh.length}</Pill></span>} sub="Added from a scan so the case isn't held up. Confirm who to bill and its invoices go out.">
           <ul className="divide-y divide-[#F0EFF6]">
             {fresh.map(a => {
               const waiting = s.invoices.filter(i => i.accountId === a.id && (i.status === 'draft' || i.status === 'flagged'));
@@ -278,7 +278,7 @@ function NoteModal({ a, onClose }: { a: BillingAccount; onClose: () => void }) {
   const { toast } = useToast();
   const [text, setText] = useState('');
   return (
-    <Modal isOpen onClose={onClose} title={`Note on ${a.name}`} footer={<div className="flex justify-end gap-2"><button className={btn} onClick={onClose}>Cancel</button><button className={btnPrimary} disabled={!text.trim()} onClick={() => { addAccountNote(a.id, text); toast.success('Note saved'); onClose(); }}>Save note</button></div>}>
+    <Modal isOpen onClose={onClose} title={`Note on ${a.name}`} footer={<div className="flex justify-end gap-2"><button className={btnPrimary} disabled={!text.trim()} onClick={() => { addAccountNote(a.id, text); toast.success('Note saved'); onClose(); }}>Save</button></div>}>
       <textarea className={input} rows={4} autoFocus value={text} onChange={e => setText(e.target.value)} placeholder="e.g. Called Sarah: new associate starting in March, expect more crowns" />
     </Modal>
   );
@@ -395,7 +395,7 @@ function DentistsHere({ a }: { a: BillingAccount }) {
   const linked = s.accounts.filter(x => x.kind === 'dentist' && (x.practices ?? []).includes(a.name));
   const names = [...new Set([...d.dentists.map(x => x.dentist), ...linked.map(x => x.name)])];
   return (
-    <Card title="Dentists here" sub="The practice pays for its dentists' cases, unless a dentist pays directly. Each dentist has their own status, so one who's dropped off shows even when the practice looks fine." pad={false}>
+    <Card title="Dentists here" sub="The practice pays unless a dentist pays directly. Each dentist has their own status." pad={false}>
       <table className="w-full">
         <thead><tr><th className={th}>Dentist</th><th className={th}>How it's going</th><th className={`${th} text-right`}>Usual a month</th><th className={th}>Last case</th><th className={th}>Who pays</th><th className={th} /></tr></thead>
         <tbody>

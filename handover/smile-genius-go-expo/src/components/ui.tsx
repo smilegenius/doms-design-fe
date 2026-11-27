@@ -177,18 +177,20 @@ const TABS = [
   { to: '/account', label: 'Account', icon: User },
 ] as const;
 
-/** Floating tab bar with the centre + (Create lab work). Used as the Tabs navigator's tabBar. */
+/**
+ * Tab bar docked to the bottom edge, full width (designer, 4 Nov 2026), with the centre + (Create lab work).
+ * Its surface runs down under the home indicator; the tabs sit above the safe area. Used as the Tabs navigator's tabBar.
+ */
 export function TabBar() {
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
-  const shadow = useCardShadow();
   const { invoices } = useScoped();
   const [newOpen, setNewOpen] = useState(false);
   const finCount = FEATURES.invoices ? invoices.filter(i => invoiceNeedsAction(i.status)).length : 0;
   return (
     <>
-      <View pointerEvents="box-none" className="absolute bottom-0 left-0 right-0 px-3 pt-2" style={{ paddingBottom: insets.bottom + 10 }}>
-        <View className="flex-row items-center justify-around h-16 rounded-[26px] bg-go-surface/95 border border-go-line" style={shadow}>
+      <View className="absolute bottom-0 left-0 right-0 bg-go-surface/95 border-t border-go-line" style={{ paddingBottom: Math.max(insets.bottom, 14) }}>
+        <View className="flex-row items-center justify-around h-16">
           {TABS.map((t, i) => {
             if (!t) {
               return (

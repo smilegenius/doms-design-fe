@@ -1,0 +1,337 @@
+{
+  "unitsNote": "mm; SVG viewBox units are millimetres",
+  "pxPerMm": 8,
+  "styles": [
+    "color",
+    "lineart"
+  ],
+  "states": [
+    "default",
+    "selected",
+    "missing",
+    "implant",
+    "pontic"
+  ],
+  "teeth": [
+    {
+      "fdi": "11",
+      "universal": 8,
+      "name": "Upper right central incisor",
+      "arch": "upper",
+      "side": "right",
+      "widthMm": 9.9,
+      "heightMm": 24.53,
+      "centerXmm": 70.15
+    },
+    {
+      "fdi": "12",
+      "universal": 7,
+      "name": "Upper right lateral incisor",
+      "arch": "upper",
+      "side": "right",
+      "widthMm": 7.9,
+      "heightMm": 21.98,
+      "centerXmm": 61.25
+    },
+    {
+      "fdi": "13",
+      "universal": 6,
+      "name": "Upper right canine",
+      "arch": "upper",
+      "side": "right",
+      "widthMm": 8.9,
+      "heightMm": 26.65,
+      "centerXmm": 52.85
+    },
+    {
+      "fdi": "14",
+      "universal": 5,
+      "name": "Upper right first premolar",
+      "arch": "upper",
+      "side": "right",
+      "widthMm": 8.4,
+      "heightMm": 22,
+      "centerXmm": 44.2
+    },
+    {
+      "fdi": "15",
+      "universal": 4,
+      "name": "Upper right second premolar",
+      "arch": "upper",
+      "side": "right",
+      "widthMm": 7.9,
+      "heightMm": 21.5,
+      "centerXmm": 36.05
+    },
+    {
+      "fdi": "16",
+      "universal": 3,
+      "name": "Upper right first molar",
+      "arch": "upper",
+      "side": "right",
+      "widthMm": 11.4,
+      "heightMm": 20.48,
+      "centerXmm": 26.4
+    },
+    {
+      "fdi": "17",
+      "universal": 2,
+      "name": "Upper right second molar",
+      "arch": "upper",
+      "side": "right",
+      "widthMm": 10.4,
+      "heightMm": 19.45,
+      "centerXmm": 15.5
+    },
+    {
+      "fdi": "18",
+      "universal": 1,
+      "name": "Upper right third molar",
+      "arch": "upper",
+      "side": "right",
+      "widthMm": 9.9,
+      "heightMm": 17.38,
+      "centerXmm": 5.35
+    },
+    {
+      "fdi": "21",
+      "universal": 9,
+      "name": "Upper left central incisor",
+      "arch": "upper",
+      "side": "left",
+      "widthMm": 9.9,
+      "heightMm": 24.53,
+      "centerXmm": 82.25
+    },
+    {
+      "fdi": "22",
+      "universal": 10,
+      "name": "Upper left lateral incisor",
+      "arch": "upper",
+      "side": "left",
+      "widthMm": 7.9,
+      "heightMm": 21.98,
+      "centerXmm": 91.15
+    },
+    {
+      "fdi": "23",
+      "universal": 11,
+      "name": "Upper left canine",
+      "arch": "upper",
+      "side": "left",
+      "widthMm": 8.9,
+      "heightMm": 26.65,
+      "centerXmm": 99.55
+    },
+    {
+      "fdi": "24",
+      "universal": 12,
+      "name": "Upper left first premolar",
+      "arch": "upper",
+      "side": "left",
+      "widthMm": 8.4,
+      "heightMm": 22,
+      "centerXmm": 108.2
+    },
+    {
+      "fdi": "25",
+      "universal": 13,
+      "name": "Upper left second premolar",
+      "arch": "upper",
+      "side": "left",
+      "widthMm": 7.9,
+      "heightMm": 21.5,
+      "centerXmm": 116.35
+    },
+    {
+      "fdi": "26",
+      "universal": 14,
+      "name": "Upper left first molar",
+      "arch": "upper",
+      "side": "left",
+      "widthMm": 11.4,
+      "heightMm": 20.48,
+      "centerXmm": 126
+    },
+    {
+      "fdi": "27",
+      "universal": 15,
+      "name": "Upper left second molar",
+      "arch": "upper",
+      "side": "left",
+      "widthMm": 10.4,
+      "heightMm": 19.45,
+      "centerXmm": 136.9
+    },
+    {
+      "fdi": "28",
+      "universal": 16,
+      "name": "Upper left third molar",
+      "arch": "upper",
+      "side": "left",
+      "widthMm": 9.9,
+      "heightMm": 17.38,
+      "centerXmm": 147.05
+    },
+    {
+      "fdi": "31",
+      "universal": 24,
+      "name": "Lower left central incisor",
+      "arch": "lower",
+      "side": "left",
+      "widthMm": 6.4,
+      "heightMm": 21.98,
+      "centerXmm": 80.5
+    },
+    {
+      "fdi": "32",
+      "universal": 23,
+      "name": "Lower left lateral incisor",
+      "arch": "lower",
+      "side": "left",
+      "widthMm": 6.9,
+      "heightMm": 23,
+      "centerXmm": 87.15
+    },
+    {
+      "fdi": "33",
+      "universal": 22,
+      "name": "Lower left canine",
+      "arch": "lower",
+      "side": "left",
+      "widthMm": 8.4,
+      "heightMm": 27.13,
+      "centerXmm": 94.8
+    },
+    {
+      "fdi": "34",
+      "universal": 21,
+      "name": "Lower left first premolar",
+      "arch": "lower",
+      "side": "left",
+      "widthMm": 8.4,
+      "heightMm": 22.53,
+      "centerXmm": 103.2
+    },
+    {
+      "fdi": "35",
+      "universal": 20,
+      "name": "Lower left second premolar",
+      "arch": "lower",
+      "side": "left",
+      "widthMm": 8.4,
+      "heightMm": 22.55,
+      "centerXmm": 111.6
+    },
+    {
+      "fdi": "36",
+      "universal": 19,
+      "name": "Lower left first molar",
+      "arch": "lower",
+      "side": "left",
+      "widthMm": 12.4,
+      "heightMm": 21.53,
+      "centerXmm": 122
+    },
+    {
+      "fdi": "37",
+      "universal": 18,
+      "name": "Lower left second molar",
+      "arch": "lower",
+      "side": "left",
+      "widthMm": 11.9,
+      "heightMm": 20.5,
+      "centerXmm": 134.15
+    },
+    {
+      "fdi": "38",
+      "universal": 17,
+      "name": "Lower left third molar",
+      "arch": "lower",
+      "side": "left",
+      "widthMm": 11.4,
+      "heightMm": 18.4,
+      "centerXmm": 145.8
+    },
+    {
+      "fdi": "41",
+      "universal": 25,
+      "name": "Lower right central incisor",
+      "arch": "lower",
+      "side": "right",
+      "widthMm": 6.4,
+      "heightMm": 21.98,
+      "centerXmm": 71.9
+    },
+    {
+      "fdi": "42",
+      "universal": 26,
+      "name": "Lower right lateral incisor",
+      "arch": "lower",
+      "side": "right",
+      "widthMm": 6.9,
+      "heightMm": 23,
+      "centerXmm": 65.25
+    },
+    {
+      "fdi": "43",
+      "universal": 27,
+      "name": "Lower right canine",
+      "arch": "lower",
+      "side": "right",
+      "widthMm": 8.4,
+      "heightMm": 27.13,
+      "centerXmm": 57.6
+    },
+    {
+      "fdi": "44",
+      "universal": 28,
+      "name": "Lower right first premolar",
+      "arch": "lower",
+      "side": "right",
+      "widthMm": 8.4,
+      "heightMm": 22.53,
+      "centerXmm": 49.2
+    },
+    {
+      "fdi": "45",
+      "universal": 29,
+      "name": "Lower right second premolar",
+      "arch": "lower",
+      "side": "right",
+      "widthMm": 8.4,
+      "heightMm": 22.55,
+      "centerXmm": 40.8
+    },
+    {
+      "fdi": "46",
+      "universal": 30,
+      "name": "Lower right first molar",
+      "arch": "lower",
+      "side": "right",
+      "widthMm": 12.4,
+      "heightMm": 21.53,
+      "centerXmm": 30.4
+    },
+    {
+      "fdi": "47",
+      "universal": 31,
+      "name": "Lower right second molar",
+      "arch": "lower",
+      "side": "right",
+      "widthMm": 11.9,
+      "heightMm": 20.5,
+      "centerXmm": 18.25
+    },
+    {
+      "fdi": "48",
+      "universal": 32,
+      "name": "Lower right third molar",
+      "arch": "lower",
+      "side": "right",
+      "widthMm": 11.4,
+      "heightMm": 18.4,
+      "centerXmm": 6.6
+    }
+  ]
+}
