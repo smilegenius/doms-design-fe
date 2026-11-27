@@ -1,33 +1,32 @@
 import { useSyncExternalStore } from 'react';
 
 // ── Growth Team Feedback: which design version is showing ────────────────────
-// V0 is the foundation: every feature as first built (Billing as Requirements v2).
-// V1 = V0 + the simpler Billing design (lab-billing/v1).
-// V2 = V0 + the Lab Case Handoff Workflow (case-workflow/): service lines,
-//      stages and handoffs, My queue, the delivery calendar, dashboard blocks,
-//      bench mode, and one invoice per service line on Delivered.
-// V1 and V2 are both built on V0, not on each other. All three read the same
-// demo data, so switching never loses anything.
+// V1 is the foundation: every feature as built, with the simpler Billing
+// (lab-billing/v1). The first designs (old "V0") were folded into V1 and the
+// simpler Billing replaced V0's Billing everywhere.
+// V2 = V1 + the Lab Case Handoff Workflow (case-workflow/): services moving
+//      through stages with handoffs, My queue, the delivery calendar, dashboard
+//      blocks, bench mode, and one invoice per service on Delivered. Still in
+//      progress, so it stays behind the switch.
+// Both read the same demo data, so switching never loses anything.
 
-export type PortalVersion = 'v0' | 'v1' | 'v2';
+export type PortalVersion = 'v1' | 'v2';
 export const VERSIONS: { id: PortalVersion; label: string; about: string }[] = [
-  { id: 'v0', label: 'V0', about: 'Foundation: everything as first built' },
-  { id: 'v1', label: 'V1', about: 'V0 + simpler Billing' },
-  { id: 'v2', label: 'V2', about: 'V0 + case handoff workflow' },
+  { id: 'v1', label: 'V1', about: 'Current design (with the simpler Billing)' },
+  { id: 'v2', label: 'V2', about: 'V1 + case handoff workflow (in progress)' },
 ];
 
 const KEY = 'salesFeedbacks.version';
-const OLD_BILLING_KEY = 'salesFeedbacks.billing.ui';
 const listeners = new Set<() => void>();
 
+/** Any stored or linked value, as a version. The old V0 is now part of V1. */
+export function asVersion(v: string | null | undefined): PortalVersion | null {
+  if (v === 'v2') return 'v2';
+  if (v === 'v1' || v === 'v0') return 'v1';
+  return null;
+}
 export function getVersion(): PortalVersion {
-  try {
-    const v = localStorage.getItem(KEY);
-    if (v === 'v0' || v === 'v1' || v === 'v2') return v;
-    // Before V2 the only switch was Billing's (v0 / v1).
-    if (localStorage.getItem(OLD_BILLING_KEY) === 'v0') return 'v0';
-  } catch { /* storage blocked */ }
-  return 'v2';
+  try { return asVersion(localStorage.getItem(KEY)) ?? 'v2'; } catch { return 'v2'; }
 }
 export function setVersion(v: PortalVersion) {
   try { localStorage.setItem(KEY, v); } catch { /* memory only */ }

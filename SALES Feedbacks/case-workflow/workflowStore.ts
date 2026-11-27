@@ -321,7 +321,7 @@ export function markDelivered(lineIds: string[], by: string) {
   });
 }
 export function markInvoiced(lineId: string, number: string | null) {
-  update(s => { const l = s.lines[lineId]; if (!l) return; l.invoiced = true; log(s, l, 'Billing', 'status', `${l.service}: invoice ${number ?? 'drafted'} for this line`); });
+  update(s => { const l = s.lines[lineId]; if (!l) return; l.invoiced = true; log(s, l, 'Billing', 'status', `${l.service}: invoice ${number ?? 'drafted'} for this service`); });
 }
 
 export function addNote(caseId: string, lineIds: string[], kind: 'internal' | 'dentist', text: string, by: string, stage?: string) {
@@ -337,8 +337,25 @@ export function ackNotes(noteIds: string[], person: string, lineId?: string) {
     if (noteIds.length) log(s, lineId ? s.lines[lineId] ?? { caseId: s.notes.find(n => n.id === noteIds[0])!.caseId } : { caseId: s.notes.find(n => n.id === noteIds[0])!.caseId }, person, 'ack', `${person} read ${noteIds.length} note${noteIds.length === 1 ? '' : 's'}`);
   });
 }
-export function setRequested(lineIds: string[], date: string | null, by: string) {
-  update(s => { for (const id of lineIds) { const l = s.lines[id]; if (!l) continue; l.requested = date; log(s, l, by, 'date', `${l.service}: requested delivery ${date ?? 'cleared'}`); } });
+const dayLabel = (d: string | null | undefined) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : 'no date');
+/**
+ * Move a service's delivery date (the date it goes back to the practice).
+ * Logged on the case's timeline with the old and new date, and where it was
+ * changed (the calendar, the case page…). Returns how many services moved.
+ */
+export function setRequested(lineIds: string[], date: string | null, by: string, via?: string) {
+  let n = 0;
+  update(s => {
+    for (const id of lineIds) {
+      const l = s.lines[id];
+      if (!l || l.requested === date) continue;
+      const was = l.requested;
+      l.requested = date;
+      n++;
+      log(s, l, by, 'date', `${l.service}: delivery date ${date ? `moved from ${dayLabel(was)} to ${dayLabel(date)}` : `cleared (was ${dayLabel(was)})`}${via ? ` ${via}` : ''}`);
+    }
+  });
+  return n;
 }
 
 // ── Settings (admin only) ─────────────────────────────────────────────────────

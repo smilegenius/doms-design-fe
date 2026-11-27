@@ -53,10 +53,10 @@ export function LineActions({ l, me, size = 'sm', onAck }: { l: Line; me: string
   const b = (cls: string) => `${cls} ${big}`;
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${size === 'lg' ? 'gap-2' : ''}`} onClick={e => e.stopPropagation()}>
-      {(l.status === 'received' || l.status === 'under-review') && <button className={b(btnPrimary)} onClick={() => { const n = acceptCase(l.caseId, me); toast.success(`Accepted: ${n} line${n === 1 ? '' : 's'} into production. Practice notified`); }}><PlayCircle className="w-3.5 h-3.5" /> Accept case</button>}
+      {(l.status === 'received' || l.status === 'under-review') && <button className={b(btnPrimary)} onClick={() => { const n = acceptCase(l.caseId, me); toast.success(`Accepted: ${n} service${n === 1 ? '' : 's'} into production. Practice notified`); }}><PlayCircle className="w-3.5 h-3.5" /> Accept case</button>}
       {l.hold && <button className={b(btnPrimary)} onClick={() => { releaseHold(l.id, me); toast.success('Hold released'); }}><PlayCircle className="w-3.5 h-3.5" /> Release hold</button>}
       {l.status === 'in-queue' && <button className={b(btnPrimary)} onClick={() => { pickUp(l.id, me); toast.success(`Picked up: ${l.service}`); }}><Hand className="w-3.5 h-3.5" /> Pick up</button>}
-      {(l.status === 'in-production' || (l.status === 'qc' && !l.qcPassed)) && !mine && l.owner && <button className={b(btn)} onClick={() => { if (window.confirm(`${l.owner} has this line. Take it over? It's logged on the case.`)) { pickUp(l.id, me); toast.success('Taken over (logged)'); } }}><Hand className="w-3.5 h-3.5" /> Take over</button>}
+      {(l.status === 'in-production' || (l.status === 'qc' && !l.qcPassed)) && !mine && l.owner && <button className={b(btn)} onClick={() => { if (window.confirm(`${l.owner} has this service. Take it over? It's logged on the case.`)) { pickUp(l.id, me); toast.success('Taken over (logged)'); } }}><Hand className="w-3.5 h-3.5" /> Take over</button>}
       {(l.status === 'qc' && !l.qcPassed && !l.owner) && <button className={b(btn)} onClick={() => pickUp(l.id, me)}><Hand className="w-3.5 h-3.5" /> Pick up</button>}
       {ack && <button className={b(btnPrimary)} onClick={() => (onAck ? onAck() : setModal('ack'))}><CheckSquare className="w-3.5 h-3.5" /> Read {unreadFor(s, l, me).length} note{unreadFor(s, l, me).length === 1 ? '' : 's'} first</button>}
       {!ack && mine && (l.status === 'in-production' || (l.status === 'qc' && !l.qcPassed)) && (
@@ -65,7 +65,7 @@ export function LineActions({ l, me, size = 'sm', onAck }: { l: Line; me: string
         </button>
       )}
       {l.status === 'qc' && l.qcPassed && <button className={b(btnPrimary)} onClick={() => { markShipped([l.id], me); toast.success('Shipped: practice notified'); }}><Truck className="w-3.5 h-3.5" /> Mark shipped</button>}
-      {l.status === 'shipped' && <button className={b(btn)} title="Demo: what happens when the clinic marks it received" onClick={() => { const inv = deliver([l.id], 'Clinic'); toast.success(`Delivered: ${inv[0] ?? 'invoice'} raised for this line`); }}><PackageCheck className="w-3.5 h-3.5" /> Demo: clinic received it</button>}
+      {l.status === 'shipped' && <button className={b(btn)} title="Demo: what happens when the clinic marks it received" onClick={() => { const inv = deliver([l.id], 'Clinic'); toast.success(`Delivered: ${inv[0] ?? 'invoice'} raised for this service`); }}><PackageCheck className="w-3.5 h-3.5" /> Demo: clinic received it</button>}
       {['in-queue', 'in-production', 'qc', 'received', 'under-review'].includes(l.status) && !l.hold && !l.qcPassed && <button className={b(btn)} onClick={() => setModal('hold')}><PauseCircle className="w-3.5 h-3.5" /> Block</button>}
       {mine && l.status === 'in-production' && !ack && !route.stages[l.stage].qc && <button className={b(btn)} title={`Not needed for this one (e.g. no model): skip ${route.stages[l.stage].name}`} onClick={() => { skipStage(l.id, me); toast.success(`Skipped ${route.stages[l.stage].name}`); }}><SkipForward className="w-3.5 h-3.5" /> Skip</button>}
       {(l.status === 'in-production' || l.status === 'qc') && l.stage > 0 && <button className={b(btn)} onClick={() => setModal('back')}><Undo2 className="w-3.5 h-3.5" /> Send back</button>}
@@ -84,7 +84,7 @@ export function HoldModal({ lines, me, onClose }: { lines: Line[]; me: string; o
   const [detail, setDetail] = useState('');
   const text = kind === 'practice' ? detail.trim() : `${reason}${detail.trim() ? `: ${detail.trim()}` : ''}`;
   return (
-    <Modal isOpen onClose={onClose} title={lines.length > 1 ? `Block ${lines.length} lines` : `Block ${lines[0].service}`} footer={
+    <Modal isOpen onClose={onClose} title={lines.length > 1 ? `Block ${lines.length} services` : `Block ${lines[0].service}`} footer={
       <div className="flex justify-end gap-2"><button className={btn} onClick={onClose}>Cancel</button><button className={btnPrimary} disabled={!text} onClick={() => { holdLine(lines.map(l => l.id), kind, text, me); toast.success(kind === 'practice' ? 'On hold (Practice): practice notified' : 'On hold (Lab)'); onClose(); }}><PauseCircle className="w-3.5 h-3.5" /> Put on hold</button></div>
     }>
       <div className="space-y-3">
@@ -150,7 +150,7 @@ export function AckModal({ l, me, onClose }: { l: Line; me: string; onClose: () 
 export function DocketQr({ lineId }: { lineId: string }) {
   const navigate = useNavigate();
   return (
-    <button onClick={() => navigate(benchUrl(lineId))} title="Docket QR (demo): opens bench mode for this line" className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#4D8EF7] hover:underline"><QrCode className="w-3.5 h-3.5" /> Scan</button>
+    <button onClick={() => navigate(benchUrl(lineId))} title="Docket QR (demo): opens bench mode for this service" className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#4D8EF7] hover:underline"><QrCode className="w-3.5 h-3.5" /> Scan</button>
   );
 }
 

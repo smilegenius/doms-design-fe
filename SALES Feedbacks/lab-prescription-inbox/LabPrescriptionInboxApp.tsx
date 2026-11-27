@@ -47,13 +47,14 @@ import DesignNavItem from '../cad-integration/DesignNavItem';
 import CaseDesignTab, { pendingCadTab } from '../cad-integration/screens/CaseDesignTab';
 import CaseOrderPrint from '../lab-documents/CaseOrderPrint';
 import { syncCad, syncCadNotifications, useCad } from '../cad-integration/cadStore';
-import { setVersion, useVersion } from '../portalVersion';
+import { asVersion, setVersion, useVersion } from '../portalVersion';
 import VersionSwitch from '../growth-portal/VersionSwitch';
 import QueuePage from '../case-workflow/QueuePage';
 import CalendarPage from '../case-workflow/CalendarPage';
 import BenchPage from '../case-workflow/BenchPage';
 import DashboardBlocks from '../case-workflow/DashboardBlocks';
 import CaseWorkflowDrawer from '../case-workflow/CaseWorkflowDrawer';
+import CaseDeliveryDates from '../case-workflow/CaseDeliveryDates';
 import WorkflowNavItems from '../case-workflow/NavItems';
 
 // ─── Growth Team Feedback: Lab Portal shell (Sales Feedbacks copy, at /growth) ─
@@ -118,14 +119,22 @@ export default function LabPrescriptionInboxApp() {
   const studio = useStudio();
   const { user } = useAuth();
   const meEmail = teamMemberFor(user?.email)?.email;
-  // V0 · V1 · V2 (portalVersion.ts). V2 adds the case handoff workflow on top of V0.
-  // A shared link can carry ?v=v0|v1|v2 (What's new links do), so it opens in that version.
-  const vParam = new URLSearchParams(location.search).get('v');
-  useState(() => { if (vParam === 'v0' || vParam === 'v1' || vParam === 'v2') setVersion(vParam); return 0; });
-  useEffect(() => { if (vParam === 'v0' || vParam === 'v1' || vParam === 'v2') setVersion(vParam); }, [vParam]);
+  // V1 · V2 (portalVersion.ts). V2 adds the case handoff workflow on top of V1.
+  // A shared link can carry ?v=v1|v2 (What's new links do), so it opens in that version (old ?v=v0 → V1).
+  const vParam = asVersion(new URLSearchParams(location.search).get('v'));
+  // The link sets the version once, then ?v= is taken off the address so the
+  // switch at the bottom works again (left on, it would pin the version).
+  useEffect(() => {
+    if (!vParam) return;
+    setVersion(vParam);
+    const p = new URLSearchParams(location.search);
+    p.delete('v');
+    const q = p.toString();
+    navigate({ pathname: location.pathname, search: q ? `?${q}` : '', hash: location.hash }, { replace: true });
+  }, [vParam]); // eslint-disable-line react-hooks/exhaustive-deps
   const stored = useVersion();
-  // The link's ?v= wins straight away (the stored switch catches up in the effect above).
-  const version = vParam === 'v0' || vParam === 'v1' || vParam === 'v2' ? vParam : stored;
+  // On the first render the link's ?v= wins (the effect above stores it).
+  const version = vParam ?? stored;
   const v2 = version === 'v2';
   // Growth Team Feedback only: bring its cases into the shared list, and mirror
   // its bell entries before the first render (NotificationsPage reads the bell
@@ -329,6 +338,7 @@ export default function LabPrescriptionInboxApp() {
           {caseInitialId && <CaseDesignTab caseId={caseInitialId} />}
           {caseInitialId && <CaseOrderPrint caseId={caseInitialId} />}
           {caseInitialId && v2 && <CaseWorkflowDrawer key={caseInitialId} caseId={caseInitialId} />}
+          {caseInitialId && v2 && <CaseDeliveryDates key={`dd-${caseInitialId}`} caseId={caseInitialId} />}
           <CasesPage
             key={`${resetVersion}-${intake.resetVersion}-${casesVersion}`}
             portal="lab"

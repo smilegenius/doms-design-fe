@@ -27,12 +27,25 @@ export default function WorkflowNavItems() {
       const c = findCases();
       if (!c) { setHost(null); return; }
       setCollapsed(!c.textContent?.trim());
+      // Sits after Cases and after any item already added there (Design).
+      // Only ever moves when that's no longer true; never competes for the
+      // slot right after Cases, which DesignNavItem holds (two components
+      // both insisting on it would swap places forever and freeze the page).
+      const afterCases = (el: Element) => {
+        for (let x = el.previousElementSibling; x; x = x.previousElementSibling) {
+          if (x === c) return true;
+          if (!(x instanceof HTMLElement) || !Object.keys(x.dataset).some(k => k.startsWith('sf'))) return false;
+        }
+        return false;
+      };
       setHost(prev => {
-        if (prev && prev.isConnected && prev.previousElementSibling === c) return prev;
+        if (prev && prev.isConnected && afterCases(prev)) return prev;
         prev?.remove();
         const el = document.createElement('div');
         el.dataset.sfWorkflowNav = '1';
-        c.insertAdjacentElement('afterend', el);
+        let at: Element = c;
+        while (at.nextElementSibling instanceof HTMLElement && Object.keys(at.nextElementSibling.dataset).some(k => k.startsWith('sf'))) at = at.nextElementSibling;
+        at.insertAdjacentElement('afterend', el);
         return el;
       });
     };

@@ -31,7 +31,7 @@ export function linesFor(s: WorkflowState, filter: string, me: string): { title:
     const [, name, kind] = filter.split(':');
     return { title: `${name}: ${kind === 'queue' ? 'In Queue' : 'In Production'}`, lines: open.filter(l => IN_LAB.includes(l.status) && routeOf(s, l).stages[l.stage]?.name === name && (kind === 'queue' ? l.status === 'in-queue' || (l.status === 'qc' && !l.owner) : l.status !== 'in-queue' && !!l.owner)).sort(byDue) };
   }
-  return { title: 'Lines', lines: open.filter(l => l.owner === me).sort(byDue) };
+  return { title: 'Services', lines: open.filter(l => l.owner === me).sort(byDue) };
 }
 
 export default function QueuePage() {
@@ -63,7 +63,7 @@ export default function QueuePage() {
     return (
       <div className="p-4 sm:p-6 lg:p-8 space-y-4">
         <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1 text-xs text-[#717182] hover:text-[#030213]"><ArrowLeft className="w-3.5 h-3.5" /> Back</button>
-        <div><h1 className="text-2xl font-semibold text-[#030213]">{title}</h1><p className="text-sm text-[#717182] mt-1">{pl(lines.length, 'service line')}. Counts are service lines, not cases.</p></div>
+        <div><h1 className="text-2xl font-semibold text-[#030213]">{title}</h1><p className="text-sm text-[#717182] mt-1">{pl(lines.length, 'service')}. Counts are services, not cases: a case with three services counts three.</p></div>
         <LineTable s={s} lines={lines} me={me} ticked={ticked} setTicked={setTicked} showOwner />
       </div>
     );
@@ -88,18 +88,18 @@ export default function QueuePage() {
       {ticked.length > 0 && (
         <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 bg-[#030213] text-white rounded-xl px-4 py-2.5 shadow-lg">
           <span className="text-xs font-semibold mr-2">{ticked.length} selected</span>
-          <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-[#030213]" onClick={() => { const ids = selected.filter(l => l.owner === me).map(l => l.id); const n = doneNext(ids, me); toast.success(n ? `${pl(n, 'line')} pushed on` : 'Read their notes first'); setTicked([]); }}>Done <ArrowRight className="w-3.5 h-3.5" /> next stage</button>
+          <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-[#030213]" onClick={() => { const ids = selected.filter(l => l.owner === me).map(l => l.id); const n = doneNext(ids, me); toast.success(n ? `${pl(n, 'service')} pushed on` : 'Read their notes first'); setTicked([]); }}>Done <ArrowRight className="w-3.5 h-3.5" /> next stage</button>
           <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-white/30" onClick={() => setHold(true)}><PauseCircle className="w-3.5 h-3.5" /> Block</button>
           <button className="ml-auto text-[11px] text-white/70" onClick={() => setTicked([])}>Clear</button>
         </div>
       )}
 
       {toAccept.length > 0 && (
-        <Card title={<span className="inline-flex items-center gap-2"><Inbox className="w-4 h-4 text-[#4D8EF7]" /> To accept ({toAccept.length})</span>} sub="You're the intake owner: check the prescription, then accept. Every line of the case enters the first stage of its route." pad={false}>
+        <Card title={<span className="inline-flex items-center gap-2"><Inbox className="w-4 h-4 text-[#4D8EF7]" /> To accept ({toAccept.length})</span>} sub="You're the intake owner: check the prescription, then accept. Every service in the case enters the first stage of its route." pad={false}>
           <LineTable s={s} lines={toAccept} me={me} ticked={ticked} setTicked={setTicked} />
         </Card>
       )}
-      <Card title={<span className="inline-flex items-center gap-2"><Clock className="w-4 h-4 text-[#7C3AED]" /> Working on ({mine.length})</span>} sub="Lines you own. Done hands each one to the next stage; the next person is assigned for you." pad={false}>
+      <Card title={<span className="inline-flex items-center gap-2"><Clock className="w-4 h-4 text-[#7C3AED]" /> Working on ({mine.length})</span>} sub="Services you own. Done hands each one to the next stage; the next person is assigned for you." pad={false}>
         {mine.length ? <LineTable s={s} lines={mine} me={me} ticked={ticked} setTicked={setTicked} /> : <Empty>Nothing in your hands. Pick something up from Incoming.</Empty>}
       </Card>
       <Card title={<span className="inline-flex items-center gap-2"><Inbox className="w-4 h-4 text-[#4D8EF7]" /> Incoming ({incoming.length})</span>} sub="Waiting in the queue for a stage you work (or anyone's). Pick one up to start." pad={false}>
@@ -117,7 +117,7 @@ export default function QueuePage() {
 
 export function LineTable({ s, lines, me, ticked, setTicked, showOwner }: { s: WorkflowState; lines: Line[]; me: string; ticked: string[]; setTicked: (f: (t: string[]) => string[]) => void; showOwner?: boolean }) {
   const navigate = useNavigate();
-  if (!lines.length) return <Card><Empty>No service lines here.</Empty></Card>;
+  if (!lines.length) return <Card><Empty>No services here.</Empty></Card>;
   return (
     <div className="overflow-x-auto bg-white rounded-xl">
       <table className="w-full min-w-[860px]">

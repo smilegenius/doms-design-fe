@@ -71,7 +71,7 @@ export default function DashboardBlocks() {
       {d.hidden.length > 0 && <button onClick={() => open('hidden')} className="w-full text-left rounded-lg bg-[#F8F9FC] border border-[#E0E0E6] px-3 py-2 text-xs text-[#5A5568]">Left out of every count: {d.hidden.filter(l => l.status === 'not-approved').length} not approved · {d.hidden.filter(l => l.status === 'cancelled').length} cancelled. <span className="font-semibold text-[#4D8EF7]">Show</span></button>}
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
-        <Tile icon={<AlertTriangle className="w-4 h-4 text-[#C62828]" />} label="Overdue" value={d.overdue} sub="Open lines, oldest first" tone={d.overdue ? 'red' : undefined} onClick={() => open('overdue')} />
+        <Tile icon={<AlertTriangle className="w-4 h-4 text-[#C62828]" />} label="Overdue" value={d.overdue} sub="Open services, oldest first" tone={d.overdue ? 'red' : undefined} onClick={() => open('overdue')} />
         <Tile icon={<Clock className="w-4 h-4 text-[#B45309]" />} label="Due today + tomorrow" value={d.soon} sub="Due back to the practice" onClick={() => open('due-soon')} />
         <Tile icon={<Inbox className="w-4 h-4 text-[#4D8EF7]" />} label="To accept" value={d.toAccept} sub={`${d.onTheWay} on the way`} onClick={() => open('to-accept')} />
         <Tile icon={<PauseCircle className="w-4 h-4 text-[#B45309]" />} label="On hold" value={d.holdP.length + d.holdL.length} sub={<><button className="underline" onClick={e => { e.stopPropagation(); open('hold-practice'); }}>Practice {d.holdP.length}</button> · <button className="underline" onClick={e => { e.stopPropagation(); open('hold-lab'); }}>Lab {d.holdL.length}</button>{d.holdP.length + d.holdL.length ? ` · oldest ${pl(d.oldest([...d.holdP, ...d.holdL]), 'day')}` : ''}</>} onClick={() => open('hold-lab')} />
@@ -79,7 +79,7 @@ export default function DashboardBlocks() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <Card title={<span className="inline-flex items-center gap-2"><Factory className="w-4 h-4 text-[#7C3AED]" /> Work in the lab</span>} sub="Service lines at each stage. Click a number to see them." className="xl:col-span-2" pad={false}>
+        <Card title={<span className="inline-flex items-center gap-2"><Factory className="w-4 h-4 text-[#7C3AED]" /> Work in the lab</span>} sub="Services at each stage. Click a number to see them." className="xl:col-span-2" pad={false}>
           <table className="w-full">
             <thead><tr><th className="text-left text-[10px] font-semibold uppercase tracking-wide text-[#717182] px-4 py-2">Stage</th><th className="text-right text-[10px] font-semibold uppercase tracking-wide text-[#717182] px-4 py-2">In Queue</th><th className="text-right text-[10px] font-semibold uppercase tracking-wide text-[#717182] px-4 py-2">In Production</th></tr></thead>
             <tbody>
@@ -95,7 +95,7 @@ export default function DashboardBlocks() {
           </table>
         </Card>
         <div className="space-y-4">
-          <Card title={<span className="inline-flex items-center gap-2"><CalendarClock className="w-4 h-4 text-[#4D8EF7]" /> This week</span>} sub="Lines due each day. Click a day for the calendar.">
+          <Card title={<span className="inline-flex items-center gap-2"><CalendarClock className="w-4 h-4 text-[#4D8EF7]" /> This week</span>} sub="Services due each day. Click a day for the calendar.">
             <div className="grid grid-cols-5 gap-1.5">
               {d.week.map(w => (
                 <button key={w.day} onClick={() => navigate(`/growth/calendar?day=${w.day}`)} className={`rounded-lg px-1 py-2 text-center border ${w.day === t ? 'border-[#4D8EF7] bg-[#EEF4FF]' : 'border-[#F0EFF6] hover:border-[#C7DAFF]'}`}>

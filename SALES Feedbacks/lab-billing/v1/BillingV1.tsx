@@ -11,6 +11,7 @@ import { Card, Pill } from '../ui';
 import { unconfirmed } from './shared';
 import Find from './Find';
 import DemoPanel from './DemoPanel';
+import { useVersion } from '../../portalVersion';
 import HomeV1 from './HomeV1';
 import InvoicesV1 from './InvoicesV1';
 import InvoiceV1 from './InvoiceV1';
@@ -32,6 +33,8 @@ import SettingsV1 from './SettingsV1';
 const ADMIN_ROLES = ['Super Admin', 'Admin'];
 
 export default function BillingV1() {
+  // V2 (case handoff workflow): one invoice per service, raised on Delivered.
+  const perService = useVersion() === 'v2';
   const s = useBilling();
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -83,7 +86,7 @@ export default function BillingV1() {
           <div className="min-w-0">
             <h1 className="text-2xl sm:text-3xl font-semibold text-[#030213]">Billing</h1>
             <p className="text-sm text-[#717182] mt-1">
-              {accountant ? 'Accountant view: invoices and statements. Read-only.' : <>Invoices go out when a case ships.{' '}
+              {accountant ? 'Accountant view: invoices and statements. Read-only.' : <>{perService ? 'Each service is invoiced when the clinic marks it received.' : 'Invoices go out when a case ships.'}{' '}
                 <button className="inline-flex items-center gap-1.5 hover:text-[#030213]" onClick={() => navigate('/growth/billing/settings')}>
                   <span className={`w-2 h-2 rounded-full ${!tool ? 'bg-[#F59E0B]' : expired ? 'bg-[#E53935]' : 'bg-[#43A047]'}`} />
                   {tool ? (expired ? `${tool} needs reconnecting` : `Payments come back from ${tool}`) : s.bank ? `Payments matched from ${s.bank === 'revolut' ? 'Revolut' : 'Wise'}` : 'No accounting tool: mark invoices paid by hand'}

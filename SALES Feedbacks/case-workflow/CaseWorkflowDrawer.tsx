@@ -28,7 +28,7 @@ export default function CaseWorkflowDrawer({ caseId }: { caseId: string }) {
     return createPortal(
       <button onClick={() => setOpen(true)} className="fixed right-0 top-1/3 z-40 flex flex-col items-center gap-1 px-2 py-3 rounded-l-xl bg-[#030213] text-white shadow-lg" title="Open the case workflow">
         <GitBranch className="w-4 h-4" />
-        <span className="text-[10px] font-semibold [writing-mode:vertical-rl] rotate-180">Workflow · {pl(lines.length, 'line')}</span>
+        <span className="text-[10px] font-semibold [writing-mode:vertical-rl] rotate-180">Workflow · {pl(lines.length, 'service')}</span>
         {unread > 0 && <span className="w-2 h-2 rounded-full bg-[#E53935]" />}
       </button>,
       document.body,
@@ -41,12 +41,12 @@ export default function CaseWorkflowDrawer({ caseId }: { caseId: string }) {
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wide text-[#717182]">Case workflow</p>
           <h2 className="text-lg font-semibold text-[#030213]">{first.patient} <span className="font-mono text-sm text-[#717182]">{caseId}</span></h2>
-          <p className="text-xs text-[#717182]">{first.practice} · {first.dentist} · {pl(lines.length, 'service line')}, each with its own status. The clinic sees {STATUS[first.status].clinic}.</p>
+          <p className="text-xs text-[#717182]">{first.practice} · {first.dentist} · {pl(lines.length, 'service')}, each with its own status. The clinic sees {STATUS[first.status].clinic}.</p>
         </div>
         <button onClick={() => setOpen(false)} aria-label="Close"><X className="w-5 h-5 text-[#717182]" /></button>
       </div>
       <nav className="flex gap-1 px-5 border-b border-[#F0EFF6]">
-        {([['lines', 'Service lines'], ['notes', `Notes${caseUnread.length ? ` (${caseUnread.length} unread)` : ''}`], ['timeline', 'Timeline']] as const).map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`px-3 py-2.5 text-xs font-semibold border-b-2 ${tab === id ? 'border-[#4D8EF7] text-[#4D8EF7]' : 'border-transparent text-[#717182]'}`}>{label}</button>)}
+        {([['lines', 'Services'], ['notes', `Notes${caseUnread.length ? ` (${caseUnread.length} unread)` : ''}`], ['timeline', 'Timeline']] as const).map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`px-3 py-2.5 text-xs font-semibold border-b-2 ${tab === id ? 'border-[#4D8EF7] text-[#4D8EF7]' : 'border-transparent text-[#717182]'}`}>{label}</button>)}
       </nav>
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
         {tab === 'lines' && (
@@ -54,11 +54,11 @@ export default function CaseWorkflowDrawer({ caseId }: { caseId: string }) {
             {lines.length > 1 && (
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <button className="text-[#4D8EF7] font-semibold" onClick={() => setTicked(ticked.length === lines.length ? [] : lines.map(l => l.id))}>{ticked.length === lines.length ? 'Clear' : 'Select all'}</button>
-                {ticked.length > 0 && <button className={btnPrimary} onClick={() => { const n = doneNext(ticked, me); toast.success(n ? `${pl(n, 'line')} pushed on${n < ticked.length ? `; ${ticked.length - n} need their notes read or aren't yours` : ''}` : 'Nothing moved: read the notes first, or pick them up'); setTicked([]); }}>Done <ArrowRight className="w-3.5 h-3.5" /> next stage ({ticked.length})</button>}
+                {ticked.length > 0 && <button className={btnPrimary} onClick={() => { const n = doneNext(ticked, me); toast.success(n ? `${pl(n, 'service')} pushed on${n < ticked.length ? `; ${ticked.length - n} need their notes read or aren't yours` : ''}` : 'Nothing moved: read the notes first, or pick them up'); setTicked([]); }}>Done <ArrowRight className="w-3.5 h-3.5" /> next stage ({ticked.length})</button>}
               </div>
             )}
             {lines.map(l => <LineCard key={l.id} l={l} me={me} ticked={ticked.includes(l.id)} onTick={() => setTicked(t => t.includes(l.id) ? t.filter(x => x !== l.id) : [...t, l.id])} multi={lines.length > 1} />)}
-            <p className="text-[11px] text-[#717182]">Lines move independently. The case ships when every line passes Quality Control{s.settings.shipPartial ? ', or one at a time (partial shipping is on)' : ''}. Each line is invoiced on its own when the clinic marks it received.</p>
+            <p className="text-[11px] text-[#717182]">Services move independently. The case ships when every service passes Quality Control{s.settings.shipPartial ? ', or one at a time (partial shipping is on)' : ''}. Each service is invoiced on its own when the clinic marks it received.</p>
           </>
         )}
         {tab === 'notes' && <Notes caseId={caseId} lines={lines} me={me} />}
@@ -136,7 +136,7 @@ function Notes({ caseId, lines, me }: { caseId: string; lines: Line[]; me: strin
           {kind === 'internal' && <select className="px-2 py-1 rounded-md border border-[#E0E0E6]" value={stage} onChange={e => setStage(e.target.value)}><option value="">Any stage</option>{stages.map(x => <option key={x} value={x}>For {x}</option>)}</select>}
           <button className={`${btnPrimary} ml-auto`} disabled={!text.trim()} onClick={() => { addNote(caseId, line ? [line] : [], kind, text, me, kind === 'internal' ? stage : undefined); setText(''); toast.success(kind === 'internal' ? 'Internal note added' : 'Comment sent to the dentist'); }}>Add</button>
         </div>
-        {kind === 'internal' && stage && <p className="text-[11px] text-[#717182]">Pinned to {stage}: whoever has the line when it reaches {stage} sees it{s.settings.ackRequired ? ' and ticks it before starting' : ''}.</p>}
+        {kind === 'internal' && stage && <p className="text-[11px] text-[#717182]">Pinned to {stage}: whoever has the service when it reaches {stage} sees it{s.settings.ackRequired ? ' and ticks it before starting' : ''}.</p>}
       </div>
       {notes.map(n => {
         const unread = n.by !== me && !n.readBy.includes(me);
