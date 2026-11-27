@@ -34,9 +34,8 @@ export const ReadOnly = createContext(false);
 export const useReadOnly = () => useContext(ReadOnly);
 
 export default function BillingApp() {
-  // V1 (the simpler design) is the default; V0 stays exactly as it was, one click away.
-  const ui = useBillingUi();
-  if (ui === 'v1') return <BillingV1 />;
+  // The simpler design (V1) replaced the first one; BillingV0 is kept for reference only.
+  if (useBillingUi() === 'v1') return <BillingV1 />;
   return <BillingV0 />;
 }
 

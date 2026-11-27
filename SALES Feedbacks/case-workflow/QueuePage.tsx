@@ -32,7 +32,7 @@ export function linesFor(s: WorkflowState, filter: string, me: string): { title:
     const [, name, kind] = filter.split(':');
     return { title: `${name}: ${kind === 'queue' ? 'In Queue' : 'In Production'}`, lines: open.filter(l => IN_LAB.includes(l.status) && routeOf(s, l).stages[l.stage]?.name === name && (kind === 'queue' ? l.status === 'in-queue' || (l.status === 'qc' && !l.owner) : l.status !== 'in-queue' && !!l.owner)).sort(byDue) };
   }
-  return { title: 'Lines', lines: open.filter(l => l.owner === me).sort(byDue) };
+  return { title: 'Services', lines: open.filter(l => l.owner === me).sort(byDue) };
 }
 
 export default function QueuePage() {

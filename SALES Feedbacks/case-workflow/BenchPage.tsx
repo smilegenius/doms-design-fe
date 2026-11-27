@@ -38,7 +38,7 @@ export default function BenchPage({ lineId }: { lineId: string }) {
     </div>
   );
 
-  if (!l) return shell(<div className="bg-white rounded-2xl p-6 text-sm">This QR doesn't match a service line. Ask the office to reprint the docket.</div>);
+  if (!l) return shell(<div className="bg-white rounded-2xl p-6 text-sm">This QR doesn't match a service. Ask the office to reprint the docket.</div>);
 
   if (!who) {
     const person = STAFF.find(p => p.name === pick);

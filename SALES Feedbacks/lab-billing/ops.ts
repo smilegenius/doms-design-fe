@@ -308,7 +308,7 @@ export function createLineInvoice(s: BillingState, c: Case, meta: CaseBilling, s
   const inv: Invoice = {
     id: uid('inv'), number: null, caseId: c.id, accountId: meta.accountId, patient: c.patientName, dentist: c.dentist, practice: c.practice,
     createdAt: at, issuedAt: null, dueAt: null, currency: acc.currency, lines, status: 'draft', flags: [], payments: [], creditNotes: [], xeroId: null, som: somFor(s, acc),
-    lineOf: siId, timeline: [{ at, text: `Created: ${si?.name ?? 'service line'} delivered (one invoice per service line)` }],
+    lineOf: siId, timeline: [{ at, text: `Created: ${si?.name ?? 'service'} delivered (one invoice per service)` }],
   };
   inv.flags = flagsFor(s, c, meta, inv);
   s.invoices.unshift(inv);

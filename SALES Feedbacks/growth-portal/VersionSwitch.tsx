@@ -3,9 +3,9 @@ import { createPortal } from 'react-dom';
 import { Layers } from 'lucide-react';
 import { setVersion, useVersion, VERSIONS } from '../portalVersion';
 
-// ── The design-version switch (V0 · V1 · V2), on every Growth page ───────────
-// V0 is the foundation; V1 and V2 are each built on V0. Same demo data in all
-// three, so switching back and forth is safe.
+// ── The design-version switch (V1 · V2), on every Growth page ────────────────
+// V1 is the foundation; V2 adds the case handoff workflow on top. Same demo
+// data in both, so switching back and forth is safe.
 
 export default function VersionSwitch() {
   const v = useVersion();
